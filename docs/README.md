@@ -3,7 +3,7 @@
 > 状态：草案（随 P0 决策冻结） / 范围：云端多租户 SaaS + Web 先行、后 Electron 套壳的全部文档索引 / 不包含：任何实现代码、外部产物原文、密钥与 DSN / 阶段：P0–P5
 
 本文档体系对标 QuantAgent 文档细度：细到 API 路由表、表字段、状态机、错误码为止，不写实现代码。
-`docs/design/` 为真源（design 为真源、prd 跟随），`docs/prd/` 为产品需求与验收口径。
+`docs/design/` 为真源（design 为真源、prd 跟随），`docs/prd/` 为产品需求与验收口径。治理入口：[CONTRIBUTING](../CONTRIBUTING.md)（人类贡献唯一入口）、[ADR 决策记录](adr/README.md)（冻结决策可追溯）。
 
 ## 一、PRD（产品需求，5 篇）
 
@@ -81,13 +81,15 @@
 | 1 | [CangjieMagic 能力参考](references/cangjiemagic-capabilities.md) | 已知/未验证项→design/11 |
 | 2 | [旧蓝图对账](references/blueprint-reconciliation.md) | B00–B06 逐篇 verdict、8 冲突裁决、06 不变量 |
 | 3 | [术语表](references/glossary.md) | 术语、R/C→Task/Approval 旧称映射 |
-## 八、OpenSpec 行为契约
+## 八、OpenSpec 行为契约与 ADR
 
-- [OpenSpec 说明](../openspec/README.md)：`openspec/specs/` 为可验收行为契约真源（SHALL + Scenario），`docs/design/` 为设计真源；spec 只写行为并引用 design 章节，不复制字段/路由表；冲突时 design 优先。
+- [OpenSpec 说明](../openspec/README.md)：`openspec/specs/` 为可验收行为契约真源（SHALL + Scenario），`docs/design/` 为设计真源；spec 只写行为并引用 design 章节，不复制字段/路由表。
+- [ADR 决策记录](adr/README.md)：0000 模板 + 0001–0005 种子 ADR；冻结决策（Accepted）不可改口径，改口径另起新 ADR。
+- 冲突矩阵：行为/验收以 spec 为准，字段/路由以 design/api/schema 为准，why 以 ADR 为准。
 
 ## 维护约定
 
-- 先更新 `docs/design/`（真源），再同步 `docs/prd/`、本索引与 `openspec/` 行为契约；设计约束优先于旧 PRD 表述，也优先于 OpenSpec spec。
+- 冲突矩阵：行为/验收以 spec 为准，字段/路由以 design/api/schema 为准，why 以 ADR 为准；先改真源 → 同步跟随（改 `docs/design/` 的 PR 同步 `docs/prd/`、本索引与 `openspec/` 行为契约）。
 - 每篇头部固定四行：状态 / 范围 / 不包含 / 阶段标签；节内用 Observed / Required / Proposed / Deferred 标注断言级别。
 - 未确认事项只出现在 `prd/04-acceptance-open-questions.md` 的 Deferred 清单，不写入 design 真源层。
 - 不复制外部产物原文、token、DSN；引用蓝图一律用 B00–B06 / AF 代号。
