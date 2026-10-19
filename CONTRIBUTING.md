@@ -46,13 +46,18 @@
 
 ## 5. PR 要求（正文中文，用模板）
 
-- PR 正文必须用 `.github/PULL_REQUEST_TEMPLATE.md` 原字段填写，不要自创格式：
+- PR 正文必须用 `.github/PULL_REQUEST_TEMPLATE.md` 原字段填写，不要自创格式，字段与模板一一对应：
   - `关联`：`Refs #N` 或 `Closes #N`。一个 issue 可对应多个 PR，**只有收口 PR 写 `Closes #N`**（收口含 `openspec archive`），其余一律 `Refs #N`。
+  - `Before / After`：行为变化一句话 + 前后对比。
   - `Spec`：必填，`<路径> §章节`（如 `docs/design/03-v0-vertical-slice.md §2`），或 `openspec/changes/<name>/proposal.md`。
+  - `Compatibility & Migration`：坏了什么、迁移/回滚路径；无则写"无"。
+  - `Verification`：跑了什么（命令+结果）与未跑项+原因，未跑项必填。
   - `验收证据`：CI 链接 / 测试输出 / 变红测试 PR 链接。
+  - `Reviewer focus`：请 reviewer 重点看的风险点/不确定处。
   - `未触碰的 Deferred 声明`：明确列出没动的 Deferred（如鉴权/LLM/市场/推送/计费）。
-  - `OpenSpec change`：`openspec/changes/<name>` 路径，或写「无 + 原因」。
-  - 收口 PR 勾选 `tasks.md 已勾选对应项` 与 `已 archive`；非收口 PR 不勾 archive。
+  - `AI assistance`：用则写工具名+人工复核了什么，没用写"无"。
+  - `OpenSpec change`：`openspec/changes/<name>` 路径，或写「无 + 原因」（纯文档/脚手架/CI 类按 config.yaml 可不建 change）。
+  - `Checklist`：逐项勾选；收口 PR 勾选 `tasks.md 已勾选对应项` 与 `已 archive`，非收口 PR 不勾 archive。
 - 改 `docs/design/` 的 PR 必须同步 `docs/prd/` 与 `docs/README.md` 索引。
 - 引用外部蓝图一律用 B00–B06 / AF 代号，不复制外部产物原文。
 
@@ -68,7 +73,8 @@
 - 使用 AI 辅助（代码/文档/测试）须在 PR 正文 `验收证据` 或 `Deferred 声明` 附近加一行声明，例如：`AI 声明：本 PR 由 <工具名> 辅助起草，已人工复核 design 引用与测试证据。`
 - AI 生成内容同样受 S0 冻结与 D1–D10 约束；不确定的服务端行为标 `[INFERENCE]`，不猜字段/路由。
 
-## 8. Review 证据要求
+## 8. Review 证据与合并门
 
 - PR 必须附：① CI 全绿链接；② 关键测试输出（粘贴或 CI 日志链接）；③ 若触及 D1–D10，每条附变红测试链接或变异证明。
 - Reviewer 只看证据合入：无验收证据、无 Deferred 声明、无 Spec 引用的 PR 直接打回，不进入代码细节评审。
+- Required checks（8 个，任一红即合并不通过）：gate-manifest、lint、depcruise、unit、migration-scan、scheduler-fault、contracts-dual、compose-smoke。含义见 `docs/design/13-p0-bootstrap-and-ci-rules.md §3–§4`。
