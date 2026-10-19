@@ -1,6 +1,8 @@
 ---
 name: 通用任务
 description: spec-driven + issue-driven 通用模板
+title: "[Task] "
+labels: ["task"]
 ---
 
 ## 背景
@@ -13,7 +15,7 @@ description: spec-driven + issue-driven 通用模板
 
 - Spec:（design 路径 §章节；有行为契约再加 openspec 路径）
 
-- OpenSpec change:（预期 change 名如 add-time-core-normalize，或 无 + 原因）
+- OpenSpec change:（预期 change 名如 add-time-core-normalize；纯文档/脚手架/CI 类写 无 + 原因，按 config.yaml 不建 change）
 
 ## 范围
 
@@ -29,9 +31,9 @@ description: spec-driven + issue-driven 通用模板
 
 ## 验收
 
-<!-- 勾选框，映射 D1-D10、A1-A4 -->
+<!-- 可观察行为勾选框，映射 D1-D10、A1-A4；纯治理类写可观察的文档/流程行为 -->
 
-- [ ]
+- [ ]（证据边界：跑什么命令/看什么文件/输出什么即算过）
 
 ## 优先级与里程碑
 
