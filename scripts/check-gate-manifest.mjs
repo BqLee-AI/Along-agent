@@ -40,6 +40,19 @@ const d8 = manifest.gates?.D8;
 if (d8?.status !== 'partial') failures.push(`D8: expected partial, got ${JSON.stringify(d8)}`);
 const d10 = manifest.gates?.D10;
 if (d10?.status !== 'enforced') failures.push(`D10: expected enforced, got ${JSON.stringify(d10)}`);
+for (const [gate, entry] of Object.entries(manifest.gates ?? {})) {
+  if (entry?.status !== 'enforced') continue;
+  if (typeof entry?.enforced_by?.job !== 'string' || entry.enforced_by.job.length === 0) {
+    failures.push(
+      `${gate}: expected enforced_by.job non-empty, got ${JSON.stringify(entry?.enforced_by)}`,
+    );
+  }
+  if (!Array.isArray(entry?.enforced_by?.evidence) || entry.enforced_by.evidence.length === 0) {
+    failures.push(
+      `${gate}: expected enforced_by.evidence non-empty array, got ${JSON.stringify(entry?.enforced_by)}`,
+    );
+  }
+}
 
 if (failures.length > 0) {
   console.error(failures.join('\n'));

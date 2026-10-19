@@ -24,6 +24,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
       - run: node scripts/check-gate-manifest.mjs
+      - run: node scripts/check-gates-executable.mjs
       - run: node scripts/check-frozen-names.mjs
       - run: node scripts/scan-copy-claims.mjs
 

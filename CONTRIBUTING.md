@@ -81,3 +81,4 @@
 - PR 必须附：① CI 全绿链接；② 关键测试输出（粘贴或 CI 日志链接）；③ 若触及 D1–D10，每条附变红测试链接或变异证明。
 - Reviewer 只看证据合入：无验收证据、无 Deferred 声明、无 Spec 引用的 PR 直接打回，不进入代码细节评审。
 - Required checks（8 个，任一红即合并不通过）：gate-manifest、lint、depcruise、unit、migration-scan、scheduler-fault、contracts-dual、compose-smoke。含义见 `docs/design/13-p0-bootstrap-and-ci-rules.md §3–§4`。
+- `scripts/check-gates-executable.mjs` 断言每条 enforced 门在 `ci/gates.json` 的 `enforced_by`（CI job 名 + evidence 文件）真实存在，跑在 gate-manifest job 内与本地 verify 的 gate-manifest 步之后。
