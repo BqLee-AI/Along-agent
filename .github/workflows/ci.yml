@@ -82,7 +82,7 @@ jobs:
           if [ -z "$entries" ]; then
             echo "no active changes under openspec/changes, skipping"
           else
-            npx openspec validate --all --strict
+            pnpm exec openspec validate --all --strict
           fi
 
   format:

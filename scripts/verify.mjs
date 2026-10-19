@@ -28,7 +28,7 @@ const STEPS = [
   { name: 'frozen-names', run: 'node scripts/check-frozen-names.mjs' },
   { name: 'copy-claims', run: 'node scripts/scan-copy-claims.mjs' },
   { name: 'unit', run: 'pnpm test:unit' },
-  { name: 'openspec', run: 'npx openspec validate --all --strict' },
+  { name: 'openspec', run: 'pnpm exec openspec validate --all --strict' },
   { name: 'format:check', run: 'pnpm format:check' },
 ];
 
@@ -51,7 +51,7 @@ for (const step of STEPS) {
   }
   if (step.name === 'openspec' && !hasActiveChanges()) {
     console.log(
-      '\n[verify] 跳过：openspec（openspec/changes 下无 active change；有 change 时再跑 `npx openspec validate --all --strict`）',
+      '\n[verify] 跳过：openspec（openspec/changes 下无 active change；有 change 时再跑 `pnpm exec openspec validate --all --strict`）',
     );
     continue;
   }
