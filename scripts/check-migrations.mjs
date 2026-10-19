@@ -1,0 +1,58 @@
+#!/usr/bin/env node
+// Migration scan (D3/D4/D5): file naming + append-only static rules + S0 frozen names.
+// Zero npm dependencies: node stdlib only.
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+
+const root = process.argv[2] ?? process.cwd();
+const dir = join(root, "infra/migrations");
+
+const failures = [];
+
+// 1. File naming: <seq>_<group>_*.sql; groups own disjoint sequence ranges
+// (identity 0001, conversation 0002, commitments 0003+). Other groups with
+// 0011 lands in the conversation group: conversation [2,11], commitments
+// [3,9998] unchanged (0011 reuses 0002 tables, per the #9 reuse contract).
+const groupRanges = { identity: [1, 1], conversation: [2, 11], commitments: [3, 9998] };
+const files = readdirSync(dir).filter((f) => f.endsWith(".sql")).sort();
+if (files.length === 0) failures.push("infra/migrations: no .sql files");
+for (const f of files) {
+  const m = /^(\d{4})_([a-z0-9_]+)_.+\.sql$/.exec(f);
+  if (!m) {
+    failures.push(`${f}: expected <seq>_<group>_*.sql (e.g. 0003_commitments_tasks.sql)`);
+    continue;
+  }
+  const [, seq, group] = m;
+  const range = groupRanges[group];
+  if (range && (+seq < range[0] || +seq > range[1])) {
+    failures.push(`${f}: ${group} sequence ${seq} outside ${String(range[0]).padStart(4, "0")}+`);
+  }
+}
+
+// 2. Append-only static rule: no migration may run DML against task_events.
+// Trigger DDL (BEFORE UPDATE OR DELETE ON task_events) is allowed; only
+// UPDATE task_events / DELETE FROM task_events statements are forbidden.
+for (const f of files) {
+  const text = readFileSync(join(dir, f), "utf8");
+  for (const line of text.split("\n")) {
+    const t = line.trim();
+    if (t.startsWith("--")) continue;
+    if (/\bUPDATE\s+task_events\b/i.test(t) || /\bDELETE\s+FROM\s+task_events\b/i.test(t)) {
+      failures.push(`${f}: task_events UPDATE/DELETE is forbidden (append-only)`);
+    }
+  }
+}
+
+// 3. S0 frozen aliases must not appear in shipped migrations.
+for (const word of ["outbox_events", "schedule_confirmed", "SERVICE_NOT_READY", "C-XXXX"]) {
+  for (const f of files) {
+    const text = readFileSync(join(dir, f), "utf8");
+    if (text.includes(word)) failures.push(`${f}: banned S0 name ${word}`);
+  }
+}
+
+if (failures.length > 0) {
+  console.error(failures.join("\n"));
+  process.exit(1);
+}
+console.log("migrations scan ok");

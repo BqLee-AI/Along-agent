@@ -1,0 +1,14 @@
+{
+  "name": "@along/scripts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:unit": "vitest run",
+    "lint": "echo ok"
+  },
+  "devDependencies": {
+    "vitest": "3.2.7"
+  }
+}

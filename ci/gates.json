@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "gates": {
+    "D1": {
+      "status": "enforced",
+      "scope": "time-core zero outgoing deps; reverse-clock fixture; /readyz TZDB_UNAVAILABLE without TZDB_VERSION",
+      "owner": "#3"
+    },
+    "D2": {
+      "status": "enforced",
+      "scope": "apps/web display layer: only frozen fields (fire_at_local/echo_text); no new Date/Date.now (ESLint) and fire_at_utc mutation leaves rendered output unchanged (apps/web/test/presentation.test.ts)",
+      "owner": "#10"
+    },
+    "D3": { "status": "enforced", "scope": "UNIQUE(id, fire_at_utc) on tasks (Contract UNIQUE(task_id, fire_at) mapping); pg_constraint definition assertion + two-session concurrent dual-write 23505 (scripts/db/d3-concurrent.test.sh)", "owner": "#7" },
+    "D4": { "status": "enforced", "scope": "UNIQUE(recreated_from_task_id) on tasks (one successor per old task); second-successor dual-write 23505", "owner": "#7" },
+    "D5": { "status": "enforced", "scope": "task_events append-only: BEFORE UPDATE OR DELETE trigger rejects; seven-word closed type set", "owner": "#7" },
+    "D6": { "status": "enforced", "scope": "agent_revisions/prompt_versions immutability + run_checkpoints append-only; BEFORE UPDATE OR DELETE triggers reject with P0001; tool_calls audit table owned by ToolGateway (#9) must reuse the same trigger when it lands", "owner": "#7" },
+    "D7": { "status": "enforced", "scope": "compose smoke on fresh volume" },
+    "D8": {
+      "status": "partial",
+      "scope": "minimal contract dual-run: same healthz suite in-process and over HTTP"
+    },
+    "D9": { "status": "enforced", "scope": "scheduler fault injection: cancel-after-commit firing-window trigger count = 0 + security_events cancel_breach ledger (apps/api/test/integration/scheduler-fault.test.ts)", "owner": "#8" },
+    "D10": { "status": "enforced", "scope": "copy-claim scan gate" }
+  }
+}

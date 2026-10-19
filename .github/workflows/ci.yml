@@ -1,0 +1,156 @@
+name: ci
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  gate-manifest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: node scripts/check-gate-manifest.mjs
+      - run: node scripts/check-frozen-names.mjs
+      - run: node scripts/scan-copy-claims.mjs
+
+  lint:
+    runs-on: ubuntu-latest
+    needs: gate-manifest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+
+  depcruise:
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm depcruise
+
+  unit:
+    runs-on: ubuntu-latest
+    needs: depcruise
+    env:
+      TZ: Pacific/Kiritimati
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test:unit
+
+  migration-scan:
+    runs-on: ubuntu-latest
+    needs: unit
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: along
+          POSTGRES_PASSWORD: along
+          POSTGRES_DB: along
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U along -d along"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://along:along@localhost:5432/along
+      BETTER_AUTH_SECRET: ci-only-secret-for-identity-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: sh scripts/db/apply.sh
+      - run: node scripts/check-migrations.mjs
+      - run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/db/verify-constraints.sql
+      - run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/db/verify-conversation.sql
+      - run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/db/d3-d5.test.sql
+      - run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/db/conversation.test.sql
+      - run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/db/verify-agent-support.sql
+      - run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/db/agent-support.test.sql
+      - run: sh scripts/db/d3-concurrent.test.sh
+      - run: pnpm build
+      - run: pnpm --filter @along/api exec tsc -p tsconfig.json
+      - run: pnpm --filter @along/api test:integration
+
+  scheduler-fault:
+    runs-on: ubuntu-latest
+    needs: migration-scan
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: along
+          POSTGRES_PASSWORD: along
+          POSTGRES_DB: along
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U along -d along"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://along:along@localhost:5432/along
+      BETTER_AUTH_SECRET: ci-only-secret-for-identity-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: sh scripts/db/apply.sh
+      - run: pnpm build
+      - run: pnpm --filter @along/api exec vitest run --config vitest.integration.config.ts test/integration/scheduler-fault.test.ts test/integration/scheduler-schedule.test.ts test/integration/tasks-cancel.test.ts
+
+  contracts-dual:
+    runs-on: ubuntu-latest
+    needs: migration-scan
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:contracts
+
+  compose-smoke:
+    runs-on: ubuntu-latest
+    needs: contracts-dual
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh scripts/compose-smoke.sh

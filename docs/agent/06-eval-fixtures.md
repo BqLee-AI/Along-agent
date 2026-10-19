@@ -1,0 +1,62 @@
+# 06 评测集
+
+| 状态 | 范围 | 不包含 | 阶段标签 |
+| --- | --- | --- | --- |
+| Proposed | 50 条时间表达集、200 卡片集版本化、指标口径 | 具体 250 条全文（fixture 文件，P0 落）、自动化评测管线实现 | v0：先通 4 基准+喝水验收；本集为 P1 起回归门 |
+
+## 50 条时间表达集（time-expressions-v1）
+
+[Required] 覆盖 B06 §3 全部分类；每条字段：`{ expr_id, text, anchor_received_at_utc, confirmed_tz, expect }`，`expect ∈ { normalize_ok, clarify, reject }`：
+
+| 类别 | 条数 | 示例 | 期望 |
+| --- | --- | --- | --- |
+| 可直接归一 | 10 | "9:20"→09:20；"晚上9点"→21:00；"中午12点"→12:00；"10月16日24:00"→次日00:00 | normalize_ok（秒补 `:00`） |
+| 缺年份 | 6 | "10月17日 9:20"无年 | clarify（问年份，不默认） |
+| 缺时区 | 6 | "明天 9:20"无已确认时区 | clarify（问时区，不猜） |
+| 缺时段 | 6 | "9点提醒我"；"12点开会"；"0点" | clarify（09:00/21:00、午夜/中午、开头/进次日三问） |
+| 模糊词挡回 | 8 | "12点左右"；"尽快"；"有空时"；"晚点" | reject+固定话术（B06 §3.4） |
+| "明天"锚 | 6 | 23:50 说"明天"、跨午夜确认、延迟 2min 到达 | 冻锚正确（首次接收+已确认时区；跨午夜重问） |
+| 夏令时两天 | 4 | 不存在 02:30；重复 01:30 未选/选 second | NONEXISTENT / AMBIGUOUS 带两候选 / fold=1 快照 |
+| 别名 | 4 | "北京时间 9:20"；"纽约时间" | 别名表版本化查完再递规范值；查不到→UNKNOWN_TIMEZONE |
+
+- [Required] 基准 4 测例为子集（B06 §4：顺的/不存在/没选/选了的），先让路通再钉墙；fixture 冻 `ruleset` 内容（`ruleset_id=FIXTURE_V1`）。
+- [Required] 指标：解析正确率 = `normalize_ok` 中 `fire_at_utc` 全对 / 50；追问率 = clarify+reject 条中一次问准率（v0 只问一次，问偏即错）；目标起步值待校准，P1 定基线。
+
+## 200 卡片集版本化（brief-cards-v1）
+
+[Required] 覆盖 03 三种 `kind` × 正常/降级/边界；每条字段：`{ card_id, kind, input_snapshot_ref, presentation_version, expect }`，`expect ∈ { pass, drop_card, degraded_brief }`：
+
+| 类别 | 条数 | 期望 |
+| --- | --- | --- |
+| reminder_summary 正常（已排期复述） | 60 | pass（只陈述已记录步骤） |
+| overdue_followup（含重约口） | 40 | pass（"已错过+重约口"，不补发） |
+| day_preview（含 notify_only 喝水卡） | 40 | pass |
+| 编造事项/引用快照外 id | 20 | drop_card（剔除该卡记 `CARD_DROPPED_UNKNOWN_REF`） |
+| 超字数/超 10 卡 | 20 | 截断+`truncated=true` |
+| 承诺性措辞（"一定响/已送达/已读"） | 20 | pass→改写为诚实口径才算过（口径检查器，见下） |
+
+- [Required] 版本化：集版本 `brief-cards-v1` + 每卡 `presentation_version` 双冻；模板升级出 v2，旧 C/旧卡用旧模板直到过期（B06 §5）。
+- [Required] 卡片 zod 通过率 = pass / 200；目标：≥ TS 基线−2pt（与 Spike S3 对照：MCP 经网关+zod 通过率口径一致）。
+- [Required] 口径检查器（规则版，无 LLM 裁判）：禁词表（"一定响/保证送达/已读/已看见"）出现即 fail；"已记录/未观察到/原因不明"为诚实词，不扣分。
+
+## 指标口径（一级指标+回归门）
+
+[Required]
+
+| 指标 | 口径 | 门 |
+| --- | --- | --- |
+| 取消后触发数 | 取消已提交后仍发出的触发请求数（数调接口那一下；分不清先后按违规计，但明说≠认定确在取消后发出） | =0（一级指标，破 0 记 `security_events` 一年） |
+| 时间解析正确率 | 50 条集中 normalize_ok 全对率 | P1 定基线（起步值待校准） |
+| 一次问准率 | clarify/reject 条中一次问准 / 应问条数 | 同上 |
+| 卡片 zod 通过率 | 200 卡集中 pass / 200 | ≥ TS 基线−2pt |
+| 首 token 延迟（P2 Spike S1） | 100 并发下首 token | ≤150ms |
+| cancel 收敛（S1） | 取消提交到门禁拦截生效 | 2s 内 |
+| resume 恰好一次（S2） | kill -9 后 resume 副作用计数 | =1 |
+
+- [Required] 所有指标以自家可测为准；B06 的 24h/15min/1min/30s/3退避/06:30 均为待校准实验起步值，不当验收硬门（除取消=0 与 missed 不补发）。
+- [Deferred] LLM 裁判评分、线上 A/B、用户满意度均不在 v0–P1 评测集内。
+
+## 与 design/04/09 的一致性
+
+- 时间集断言对象是 time-core 纯函数输出（design/09），不是 LLM 文本相似度。
+- 卡片集断言对象是 zod+口径检查器（design/04 网关/运行时校验），LLM 只产候选，不当裁判。

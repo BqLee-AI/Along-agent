@@ -1,0 +1,33 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: along
+      POSTGRES_PASSWORD: along
+      POSTGRES_DB: along
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U along -d along"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    ports:
+      - "${DB_PORT:-55432}:5432"
+  api:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile
+    environment:
+      ROLE: all
+      PORT: "3000"
+      TZDB_VERSION: ${TZDB_VERSION:-}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://along:along@postgres:5432/along}
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:

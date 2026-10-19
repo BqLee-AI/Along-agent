@@ -1,0 +1,215 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://along.example/schemas/thread-stream.schema.json",
+  "title": "thread-stream",
+  "description": "SSE thread-event envelope contract (issue #9). Envelope carries protocol_version v1, positive-int seq, one of seven frozen types, a strict payload, and request_id. Mirrors ThreadEventSchema in packages/stream-protocol/src/thread-events.ts (S0 #14 frozen vocabulary).",
+  "type": "object",
+  "oneOf": [
+    { "$ref": "#/definitions/thread.started" },
+    { "$ref": "#/definitions/message.delta" },
+    { "$ref": "#/definitions/card.proposed" },
+    { "$ref": "#/definitions/approval_required" },
+    { "$ref": "#/definitions/thread.completed" },
+    { "$ref": "#/definitions/thread.failed" },
+    { "$ref": "#/definitions/thread.cancelled" }
+  ],
+  "definitions": {
+    "envelope": {
+      "type": "object",
+      "required": ["protocol_version", "seq", "type", "payload", "request_id"],
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": { "const": "v1" },
+        "seq": { "type": "integer", "minimum": 1 },
+        "type": {
+          "enum": [
+            "thread.started",
+            "message.delta",
+            "card.proposed",
+            "approval_required",
+            "thread.completed",
+            "thread.failed",
+            "thread.cancelled"
+          ]
+        },
+        "payload": { "type": "object" },
+        "request_id": { "type": "string", "minLength": 1, "maxLength": 200 }
+      }
+    },
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "thread.started": {
+      "allOf": [
+        { "$ref": "#/definitions/envelope" },
+        {
+          "type": "object",
+          "required": ["payload"],
+          "properties": {
+            "type": { "const": "thread.started" },
+            "payload": {
+              "type": "object",
+              "required": ["conversation_id", "run_id", "stream_protocol_version", "ruleset_id", "tzdb_version"],
+              "additionalProperties": false,
+              "properties": {
+                "conversation_id": { "$ref": "#/definitions/uuid" },
+                "run_id": { "$ref": "#/definitions/uuid" },
+                "stream_protocol_version": { "const": "v1" },
+                "ruleset_id": { "type": "string", "minLength": 1, "maxLength": 200 },
+                "tzdb_version": { "type": "string", "minLength": 1, "maxLength": 100 }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "message.delta": {
+      "allOf": [
+        { "$ref": "#/definitions/envelope" },
+        {
+          "type": "object",
+          "required": ["payload"],
+          "properties": {
+            "type": { "const": "message.delta" },
+            "payload": {
+              "type": "object",
+              "required": ["conversation_id", "run_id", "delta"],
+              "additionalProperties": false,
+              "properties": {
+                "conversation_id": { "$ref": "#/definitions/uuid" },
+                "run_id": { "$ref": "#/definitions/uuid" },
+                "delta": { "type": "string", "minLength": 1, "maxLength": 4000 }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "card.proposed": {
+      "allOf": [
+        { "$ref": "#/definitions/envelope" },
+        {
+          "type": "object",
+          "required": ["payload"],
+          "properties": {
+            "type": { "const": "card.proposed" },
+            "payload": {
+              "type": "object",
+              "required": ["conversation_id", "run_id", "card_id", "schema_version", "wall_time", "timezone_id", "original_text"],
+              "additionalProperties": false,
+              "properties": {
+                "conversation_id": { "$ref": "#/definitions/uuid" },
+                "run_id": { "$ref": "#/definitions/uuid" },
+                "card_id": { "type": "string", "minLength": 1, "maxLength": 200 },
+                "schema_version": { "const": "v1" },
+                "wall_time": { "type": "string", "minLength": 1, "maxLength": 100 },
+                "timezone_id": { "type": "string", "minLength": 1, "maxLength": 100 },
+                "original_text": { "type": "string", "minLength": 1, "maxLength": 1000 }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "approval_required": {
+      "allOf": [
+        { "$ref": "#/definitions/envelope" },
+        {
+          "type": "object",
+          "required": ["payload"],
+          "properties": {
+            "type": { "const": "approval_required" },
+            "payload": {
+              "type": "object",
+              "required": ["conversation_id", "run_id", "approval_id", "card_id", "presentation_hash"],
+              "additionalProperties": false,
+              "properties": {
+                "conversation_id": { "$ref": "#/definitions/uuid" },
+                "run_id": { "$ref": "#/definitions/uuid" },
+                "approval_id": { "$ref": "#/definitions/uuid" },
+                "card_id": { "type": "string", "minLength": 1, "maxLength": 200 },
+                "presentation_hash": { "type": "string", "minLength": 1, "maxLength": 200 }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "thread.completed": {
+      "allOf": [
+        { "$ref": "#/definitions/envelope" },
+        {
+          "type": "object",
+          "required": ["payload"],
+          "properties": {
+            "type": { "const": "thread.completed" },
+            "payload": {
+              "type": "object",
+              "required": ["conversation_id", "run_id", "approval_id"],
+              "additionalProperties": false,
+              "properties": {
+                "conversation_id": { "$ref": "#/definitions/uuid" },
+                "run_id": { "$ref": "#/definitions/uuid" },
+                "approval_id": { "anyOf": [{ "$ref": "#/definitions/uuid" }, { "type": "null" }] }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "thread.failed": {
+      "allOf": [
+        { "$ref": "#/definitions/envelope" },
+        {
+          "type": "object",
+          "required": ["payload"],
+          "properties": {
+            "type": { "const": "thread.failed" },
+            "payload": {
+              "type": "object",
+              "required": ["conversation_id", "run_id", "error"],
+              "additionalProperties": false,
+              "properties": {
+                "conversation_id": { "$ref": "#/definitions/uuid" },
+                "run_id": { "$ref": "#/definitions/uuid" },
+                "error": {
+                  "type": "object",
+                  "required": ["code", "message", "http_status"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": { "type": "string", "minLength": 1, "maxLength": 100 },
+                    "message": { "type": "string", "minLength": 1, "maxLength": 1000 },
+                    "http_status": { "type": "integer", "minimum": 400, "maximum": 599 },
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "thread.cancelled": {
+      "allOf": [
+        { "$ref": "#/definitions/envelope" },
+        {
+          "type": "object",
+          "required": ["payload"],
+          "properties": {
+            "type": { "const": "thread.cancelled" },
+            "payload": {
+              "type": "object",
+              "required": ["conversation_id", "run_id"],
+              "additionalProperties": false,
+              "properties": {
+                "conversation_id": { "$ref": "#/definitions/uuid" },
+                "reason": { "type": "string", "minLength": 1, "maxLength": 200 }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

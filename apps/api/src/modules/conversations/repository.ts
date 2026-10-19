@@ -1,0 +1,300 @@
+// Conversation/runs repository (issue #9). Owns conversations, messages,
+// agent_runs, run_attempts, run_checkpoints and the idempotency ledger.
+// No tasks/outbox/approval writes here.
+import type { Pool, PoolClient } from "pg";
+import {
+  THREAD_PROTOCOL_VERSION,
+  ThreadEventSchema,
+  type ThreadEvent,
+} from "@along/stream-protocol";
+
+export interface ConversationRow {
+  id: string;
+  owner_id: string;
+  status: string;
+  confirmed_timezone_id: string | null;
+  anchor_received_at_utc: Date | null;
+}
+
+export async function getConversation(
+  client: Pick<Pool | PoolClient, "query">,
+  conversationId: string,
+): Promise<ConversationRow | null> {
+  const { rows } = await client.query<ConversationRow>(
+    `SELECT id, owner_id, status, confirmed_timezone_id, anchor_received_at_utc
+     FROM conversations WHERE id = $1`,
+    [conversationId],
+  );
+  return rows[0] ?? null;
+}
+
+export async function createConversation(
+  client: Pick<Pool | PoolClient, "query">,
+  args: { ownerId: string; anchorIso: string; title: string },
+): Promise<ConversationRow> {
+  const { rows } = await client.query<ConversationRow>(
+    `INSERT INTO conversations (id, owner_id, title, anchor_received_at_utc)
+     VALUES (gen_random_uuid(), $1, $2, $3)
+     RETURNING id, owner_id, status, confirmed_timezone_id, anchor_received_at_utc`,
+    [args.ownerId, args.title, args.anchorIso],
+  );
+  const row = rows[0];
+  if (!row) throw new Error("conversation insert returned no row");
+  return row;
+}
+
+// First confirmed timezone wins and freezes for the conversation; later
+// messages cannot move the anchor's clock.
+export async function freezeConversationTimezone(
+  client: Pick<Pool | PoolClient, "query">,
+  conversationId: string,
+  timezoneId: string,
+): Promise<void> {
+  await client.query(
+    `UPDATE conversations SET confirmed_timezone_id = $2, updated_at = now()
+     WHERE id = $1 AND confirmed_timezone_id IS NULL`,
+    [conversationId, timezoneId],
+  );
+}
+
+export async function insertMessage(
+  client: Pick<Pool | PoolClient, "query">,
+  args: {
+    ownerId: string;
+    conversationId: string;
+    role: "user" | "assistant" | "system";
+    content: string;
+    requestId: string | null;
+  },
+): Promise<string> {
+  const { rows } = await client.query<{ id: string }>(
+    `INSERT INTO messages (id, owner_id, conversation_id, role, content, request_id)
+     VALUES (gen_random_uuid(), $1, $2, $3, $4, $5) RETURNING id`,
+    [args.ownerId, args.conversationId, args.role, args.content, args.requestId],
+  );
+  const id = rows[0]?.id;
+  if (!id) throw new Error("message insert returned no row");
+  return id;
+}
+
+export async function insertRun(
+  client: Pick<Pool | PoolClient, "query">,
+  args: {
+    runId: string;
+    ownerId: string;
+    conversationId: string;
+    agentRevision: string;
+    mode: "chat" | "task";
+    maxIterations: number;
+    maxTokens: number;
+  },
+): Promise<void> {
+  await client.query(
+    `INSERT INTO agent_runs (id, owner_id, conversation_id, agent_revision,
+       mode, status, budget_max_iterations, budget_max_tokens)
+     VALUES ($1,$2,$3,$4,$5,'running',$6,$7)`,
+    [
+      args.runId,
+      args.ownerId,
+      args.conversationId,
+      args.agentRevision,
+      args.mode,
+      args.maxIterations,
+      args.maxTokens,
+    ],
+  );
+}
+
+export async function insertAttempt(
+  client: Pick<Pool | PoolClient, "query">,
+  args: { attemptId: string; ownerId: string; runId: string; attemptNo: number },
+): Promise<void> {
+  await client.query(
+    `INSERT INTO run_attempts (id, owner_id, run_id, attempt_no, status)
+     VALUES ($1,$2,$3,$4,'running')`,
+    [args.attemptId, args.ownerId, args.runId, args.attemptNo],
+  );
+}
+
+// Appends one thread event and returns its global stream id (event_seq).
+// The checkpoint is append-only; replay and GET after_seq both read it.
+export async function appendCheckpoint(
+  client: Pick<Pool | PoolClient, "query">,
+  args: {
+    ownerId: string;
+    attemptId: string;
+    seq: number;
+    type: string;
+    payload: unknown;
+    requestId: string;
+  },
+): Promise<number> {
+  const { rows } = await client.query<{ event_seq: string }>(
+    `INSERT INTO run_checkpoints (id, owner_id, attempt_id, seq, kind,
+       payload, stream_protocol_version)
+     VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6)
+     RETURNING event_seq`,
+    [
+      args.ownerId,
+      args.attemptId,
+      args.seq,
+      args.type,
+      JSON.stringify({ type: args.type, payload: args.payload, request_id: args.requestId }),
+      THREAD_PROTOCOL_VERSION,
+    ],
+  );
+  const seq = rows[0]?.event_seq;
+  if (seq === undefined) throw new Error("checkpoint insert returned no row");
+  return Number(seq);
+}
+
+export interface IdempotencyRow {
+  request_hash: string;
+  conversation_id: string;
+  run_id: string;
+}
+
+export async function findIdempotency(
+  client: Pick<Pool | PoolClient, "query">,
+  ownerId: string,
+  idempotencyKey: string,
+): Promise<IdempotencyRow | null> {
+  const { rows } = await client.query<IdempotencyRow>(
+    `SELECT request_hash, conversation_id, run_id
+     FROM conversation_idempotency
+     WHERE owner_id = $1 AND idempotency_key = $2 AND expires_at > now()`,
+    [ownerId, idempotencyKey],
+  );
+  return rows[0] ?? null;
+}
+
+// Expired keys are deleted before re-insert so a 24h-later retry with the
+// same key starts a fresh run instead of colliding with the stale PK.
+export async function deleteExpiredIdempotency(
+  client: Pick<Pool | PoolClient, "query">,
+  ownerId: string,
+  idempotencyKey: string,
+): Promise<void> {
+  await client.query(
+    `DELETE FROM conversation_idempotency
+     WHERE owner_id = $1 AND idempotency_key = $2 AND expires_at <= now()`,
+    [ownerId, idempotencyKey],
+  );
+}
+
+// Plain insert: a concurrent duplicate raises 23505, which the caller turns
+// into a replay of the winning run (first writer wins, no overwrite).
+export async function insertIdempotency(
+  client: Pick<Pool | PoolClient, "query">,
+  args: {
+    ownerId: string;
+    idempotencyKey: string;
+    requestHash: string;
+    conversationId: string;
+    runId: string;
+    userMessageId: string;
+  },
+): Promise<void> {
+  await client.query(
+    `INSERT INTO conversation_idempotency (owner_id, idempotency_key,
+       request_hash, conversation_id, run_id, user_message_id, expires_at)
+     VALUES ($1,$2,$3,$4,$5,$6, now() + interval '24 hours')`,
+    [
+      args.ownerId,
+      args.idempotencyKey,
+      args.requestHash,
+      args.conversationId,
+      args.runId,
+      args.userMessageId,
+    ],
+  );
+}
+
+interface CheckpointRow {
+  event_seq: string;
+  payload: { type: string; payload: unknown; request_id: string };
+}
+
+function envelopeOf(row: CheckpointRow): ThreadEvent {
+  return ThreadEventSchema.parse({
+    protocol_version: THREAD_PROTOCOL_VERSION,
+    seq: Number(row.event_seq),
+    type: row.payload.type,
+    payload: row.payload.payload,
+    request_id: row.payload.request_id,
+  });
+}
+
+export async function listRunEvents(
+  client: Pick<Pool | PoolClient, "query">,
+  ownerId: string,
+  runId: string,
+): Promise<ThreadEvent[]> {
+  const { rows } = await client.query<CheckpointRow>(
+    `SELECT c.event_seq, c.payload
+     FROM run_checkpoints c
+     JOIN run_attempts a ON a.id = c.attempt_id
+     JOIN agent_runs r ON r.id = a.run_id
+     WHERE r.owner_id = $1 AND r.id = $2
+     ORDER BY c.event_seq ASC`,
+    [ownerId, runId],
+  );
+  return rows.map(envelopeOf);
+}
+
+export async function listConversationEvents(
+  client: Pick<Pool | PoolClient, "query">,
+  args: {
+    ownerId: string;
+    conversationId: string;
+    afterSeq: number | null;
+    limit: number;
+  },
+): Promise<ThreadEvent[]> {
+  const { rows } = await client.query<CheckpointRow>(
+    `SELECT c.event_seq, c.payload
+     FROM run_checkpoints c
+     JOIN run_attempts a ON a.id = c.attempt_id
+     JOIN agent_runs r ON r.id = a.run_id
+     WHERE r.owner_id = $1 AND r.conversation_id = $2
+       AND ($3::bigint IS NULL OR c.event_seq > $3::bigint)
+     ORDER BY c.event_seq ASC
+     LIMIT $4`,
+    [args.ownerId, args.conversationId, args.afterSeq, args.limit],
+  );
+  return rows.map(envelopeOf);
+}
+
+export async function getRunStatus(
+  client: Pick<Pool | PoolClient, "query">,
+  ownerId: string,
+  runId: string,
+): Promise<string | null> {
+  const { rows } = await client.query<{ status: string }>(
+    "SELECT status FROM agent_runs WHERE owner_id = $1 AND id = $2",
+    [ownerId, runId],
+  );
+  return rows[0]?.status ?? null;
+}
+
+export async function finishRun(
+  client: Pick<Pool | PoolClient, "query">,
+  runId: string,
+  status: "done" | "failed" | "cancelled",
+): Promise<void> {
+  await client.query(
+    "UPDATE agent_runs SET status = $2, ended_at = now() WHERE id = $1",
+    [runId, status],
+  );
+}
+
+export async function finishAttempt(
+  client: Pick<Pool | PoolClient, "query">,
+  attemptId: string,
+  status: "done" | "failed" | "fenced_out",
+): Promise<void> {
+  await client.query(
+    "UPDATE run_attempts SET status = $2, ended_at = now() WHERE id = $1",
+    [attemptId, status],
+  );
+}

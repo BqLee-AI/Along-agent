@@ -1,0 +1,26 @@
+schema: spec-driven
+
+# Project context — Along-agent（中文产出）
+context: |
+  Along-agent 是云端多租户 personal agent：Web 先行，后期再做桌面常驻壳。
+  真源关系：docs/design/ 是设计真源（为什么/怎么设计、表字段、状态机、错误码），
+  docs/prd/ 跟随；openspec/specs/ 是可验收行为契约真源（SHALL + Scenario，对应 D1-D10/A1-A4 变红测试）。
+  OpenSpec spec 只写行为与场景并引用 design 章节，不复制表字段/路由表；冲突时 design 优先，
+  先改 design → 同步 prd → 再改 OpenSpec。
+  Deferred 项（鉴权/LLM/市场/推送/计费）不得写进 openspec/specs，只能出现在 proposal 的非目标/Deferred。
+  引用 design 章节而不复制内容；中文产出。
+
+# Per-artifact rules
+rules:
+  proposal:
+    - 首行写 `Issue: #N`（一个 change 对应一个主 issue；纯文档/脚手架/CI 类 issue 不建 change）。
+    - 必含 Spec 路径 + 章节号（docs/design/NN §章节），必填。
+    - 必含 非目标/Deferred 节，列相关 Deferred（防猜字段）。
+    - 保持一页以内，只讲行为变更，不展开表字段/路由表。
+  tasks:
+    - 按可评审块拆分；末尾必须含 D 项变红测试（映射 D1-D10）或 A 项验收（映射 A1-A4）。
+    - 收口任务明确写 archive 步骤。
+  spec:
+    - 用 SHALL + #### Scenario（WHEN/THEN）格式，每条 Requirement 配 2-4 个 Scenario。
+    - Scenario 必须能映射到 D1-D10/A1-A4 的变红测试。
+    - 能力目录名与 docs/design/02 模块所有权表一致。
