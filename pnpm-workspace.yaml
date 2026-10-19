@@ -1,6 +1,7 @@
 packages:
-  - "apps/*"
-  - "packages/*"
-  - "scripts"
+  - 'apps/*'
+  - 'packages/*'
+  - 'scripts'
 allowBuilds:
+  '@fission-ai/openspec': false
   esbuild: true

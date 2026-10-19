@@ -1,19 +1,15 @@
-import { apiGet } from "../../../lib/api";
-import { describeApproval } from "../../../lib/presentation";
-import type { ApprovalDetail, Me } from "../../../lib/types";
-import ApprovalActions from "./ApprovalActions";
+import { apiGet } from '../../../lib/api';
+import { describeApproval } from '../../../lib/presentation';
+import type { ApprovalDetail, Me } from '../../../lib/types';
+import ApprovalActions from './ApprovalActions';
 
-export const dynamic = "force-dynamic";
+export const dynamic = 'force-dynamic';
 
-export default async function ApprovalDetailPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+export default async function ApprovalDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const [detailResult, meResult] = await Promise.all([
     apiGet<ApprovalDetail>(`/api/v1/approvals/${id}`),
-    apiGet<Me>("/api/v1/me"),
+    apiGet<Me>('/api/v1/me'),
   ]);
   if (!detailResult.ok) {
     return (
@@ -25,15 +21,15 @@ export default async function ApprovalDetailPage({
   }
   const detail = detailResult.data;
   const view = describeApproval(detail);
-  const actionable = detail.status === "pending";
+  const actionable = detail.status === 'pending';
   return (
     <section>
-      <h1>{detail.kind === "cancel_task" ? "取消确认" : "确认提醒"}</h1>
+      <h1>{detail.kind === 'cancel_task' ? '取消确认' : '确认提醒'}</h1>
       <p className="subtitle">
-        状态 {detail.status} ·{" "}
+        状态 {detail.status} ·{' '}
         {actionable
           ? `确认有效期 24 小时 · 剩余约 ${view.remainingLabel}（服务端计算）`
-          : "此确认已处理，不可再操作"}
+          : '此确认已处理，不可再操作'}
       </p>
       <div className="panel">
         <dl>

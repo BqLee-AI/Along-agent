@@ -18,27 +18,27 @@
 
 ### 1.1 已确认（Required）
 
-| 层级 | 选型 | 来源 | 说明 |
-| --- | --- | --- | --- |
-| 服务端语言 | TypeScript（Node 20 LTS+） | Required（合同） | TS 模块化单体，一个镜像 `api\|worker\|all` 三角色；time-core 为服务端纯函数子集 |
-| 唯一事实源 | PostgreSQL 16+ | Required；AF 三硬约束之一（Observed, AF§5） | Redis 仅加速且延后（v0 不引入）；业务状态一律以 PG 约束为准 |
-| Web 前端 | Next.js（App Router），RSC 开、Turbopack 开（默认配置） | Required（P0 冻结） | Web 先行，后用 Electron 套同一份 Next.js；v0 只做 Web 单端；偏离默认配置时另开 docs PR 说明 |
-| 认证 | Better Auth 自建 credential | Required（已定） | D7 空环境冒烟不依赖外部 IdP；v0 单租户；v0 端点只暴露 `GET /me` |
-| 实时对话 | SSE（`text/event-stream`） | Required | WS + `ws-ticket` P2 起；Web Push 仅兜底 |
-| 校验 | zod（前后端同源） | Required | `packages/contracts`、`packages/stream-protocol` 版本化 zod；卡片/事件名开工对照 `thread-stream.schema.json`（AF§7） |
-| 部署形态 | 单镜像 + compose 冒烟（起步） | Required；AF 自托管（Observed, AF§2/§5） | 一个镜像三种角色 `api\|worker\|all`（对标 AF `all/control/worker`）；做大后迁 K8s（Deferred 细节） |
-| 包管理/构建 | pnpm + Turbo | Proposed | pnpm monorepo，单锁文件 |
-| 可观测 | OpenTelemetry + 结构化日志 + `request_id` 全链路 | Required | v0 先 OTel+日志；PostHog/Sentry 为 Deferred |
+| 层级        | 选型                                                    | 来源                                        | 说明                                                                                                                 |
+| ----------- | ------------------------------------------------------- | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| 服务端语言  | TypeScript（Node 20 LTS+）                              | Required（合同）                            | TS 模块化单体，一个镜像 `api\|worker\|all` 三角色；time-core 为服务端纯函数子集                                      |
+| 唯一事实源  | PostgreSQL 16+                                          | Required；AF 三硬约束之一（Observed, AF§5） | Redis 仅加速且延后（v0 不引入）；业务状态一律以 PG 约束为准                                                          |
+| Web 前端    | Next.js（App Router），RSC 开、Turbopack 开（默认配置） | Required（P0 冻结）                         | Web 先行，后用 Electron 套同一份 Next.js；v0 只做 Web 单端；偏离默认配置时另开 docs PR 说明                          |
+| 认证        | Better Auth 自建 credential                             | Required（已定）                            | D7 空环境冒烟不依赖外部 IdP；v0 单租户；v0 端点只暴露 `GET /me`                                                      |
+| 实时对话    | SSE（`text/event-stream`）                              | Required                                    | WS + `ws-ticket` P2 起；Web Push 仅兜底                                                                              |
+| 校验        | zod（前后端同源）                                       | Required                                    | `packages/contracts`、`packages/stream-protocol` 版本化 zod；卡片/事件名开工对照 `thread-stream.schema.json`（AF§7） |
+| 部署形态    | 单镜像 + compose 冒烟（起步）                           | Required；AF 自托管（Observed, AF§2/§5）    | 一个镜像三种角色 `api\|worker\|all`（对标 AF `all/control/worker`）；做大后迁 K8s（Deferred 细节）                   |
+| 包管理/构建 | pnpm + Turbo                                            | Proposed                                    | pnpm monorepo，单锁文件                                                                                              |
+| 可观测      | OpenTelemetry + 结构化日志 + `request_id` 全链路        | Required                                    | v0 先 OTel+日志；PostHog/Sentry 为 Deferred                                                                          |
 
 ### 1.2 待定（Deferred，一律不猜）
 
-| 待定项 | 候选 | 决策点 | 本文档态度 |
-| --- | --- | --- | --- |
-| 目标市场/合规 | 数据驻留、隐私条款 | Deferred | 不设字段 |
-| 是否练仓颉 | CangjieMagic 是否进入生产路径 | P1 并行 Spike S1–S3，P2 末结案 | v0–P3 不用（见 11） |
-| 推送通道 | Web Push 供应商、邮件/短信 | Deferred | v0 只站内通知 + 活动页 |
-| LLM 供应商/计费 | provider、模型路由、额度 | Deferred | 预算字段只定语义（见 09），不绑定供应商 |
-| 向量库/RAG | pgvector vs 独立向量库 | P2+ | v0 不做 RAG |
+| 待定项          | 候选                          | 决策点                         | 本文档态度                              |
+| --------------- | ----------------------------- | ------------------------------ | --------------------------------------- |
+| 目标市场/合规   | 数据驻留、隐私条款            | Deferred                       | 不设字段                                |
+| 是否练仓颉      | CangjieMagic 是否进入生产路径 | P1 并行 Spike S1–S3，P2 末结案 | v0–P3 不用（见 11）                     |
+| 推送通道        | Web Push 供应商、邮件/短信    | Deferred                       | v0 只站内通知 + 活动页                  |
+| LLM 供应商/计费 | provider、模型路由、额度      | Deferred                       | 预算字段只定语义（见 09），不绑定供应商 |
+| 向量库/RAG      | pgvector vs 独立向量库        | P2+                            | v0 不做 RAG                             |
 
 ## 2. Monorepo 布局（Required）
 
@@ -103,13 +103,13 @@ packages/contracts ──depends──▶ zod（仅此）
 
 ## 4. 复用优先（Proposed → Required）
 
-| 优先级 | 内容 | 说明 |
-| --- | --- | --- |
-| P0 复用 | zod 契约、`code/data/msg/error` envelope、`request_id`+幂等键 | 全接口统一（见 10） |
-| P0 复用 | `normalize(wall_time,timezone_id,fold_choice,ruleset)` 签名与四基准测例 | B06§4 开工版冻结 |
-| P1 复用 | `packages/stream-protocol` 事件词汇 | AG-UI 待对照 `thread-stream.schema.json`（AF§7）；事件名开工前对照一次 |
-| P1 复用 | a13n `agent/skill/prompt revision` 不可变思想 | 落 `agent_runs/run_attempts/run_checkpoints`（见 09） |
-| 始终 | 不复制外部产物原文/token/DSN/PostHog key | 写作规范硬约束；任何硬编码第三方 secret 一律禁止入库 |
+| 优先级  | 内容                                                                    | 说明                                                                   |
+| ------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| P0 复用 | zod 契约、`code/data/msg/error` envelope、`request_id`+幂等键           | 全接口统一（见 10）                                                    |
+| P0 复用 | `normalize(wall_time,timezone_id,fold_choice,ruleset)` 签名与四基准测例 | B06§4 开工版冻结                                                       |
+| P1 复用 | `packages/stream-protocol` 事件词汇                                     | AG-UI 待对照 `thread-stream.schema.json`（AF§7）；事件名开工前对照一次 |
+| P1 复用 | a13n `agent/skill/prompt revision` 不可变思想                           | 落 `agent_runs/run_attempts/run_checkpoints`（见 09）                  |
+| 始终    | 不复制外部产物原文/token/DSN/PostHog key                                | 写作规范硬约束；任何硬编码第三方 secret 一律禁止入库                   |
 
 ## 5. 端口与环境（Required，细节见 13）
 

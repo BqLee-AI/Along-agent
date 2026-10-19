@@ -1,7 +1,7 @@
-import { createServer, type Server } from "node:http";
-import type { Pool } from "pg";
-import { handleRequest, type AppDeps } from "./app.js";
-import { createActorResolver } from "./auth.js";
+import { createServer, type Server } from 'node:http';
+import type { Pool } from 'pg';
+import { handleRequest, type AppDeps } from './app.js';
+import { createActorResolver } from './auth.js';
 
 export interface ServeOptions {
   port?: number;
@@ -18,10 +18,10 @@ export function serve(options: ServeOptions = {}): Server {
   const server = createServer((req, res) => {
     void handleRequest(req, res, deps).catch(() => {
       if (!res.headersSent) {
-        res.writeHead(500, { "content-type": "application/json" });
+        res.writeHead(500, { 'content-type': 'application/json' });
       }
       try {
-        res.end(JSON.stringify({ code: 500, data: null, msg: "internal error" }));
+        res.end(JSON.stringify({ code: 500, data: null, msg: 'internal error' }));
       } catch {
         // socket already gone
       }
@@ -38,8 +38,8 @@ export function serve(options: ServeOptions = {}): Server {
     });
     setTimeout(() => process.exit(0), 5000).unref();
   };
-  process.on("SIGTERM", shutdown);
-  process.on("SIGINT", shutdown);
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
 
   return server;
 }

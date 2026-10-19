@@ -1,11 +1,11 @@
-import { afterAll, describe, expect, it } from "vitest";
-import { AddressInfo } from "node:net";
-import type { IncomingMessage, ServerResponse } from "node:http";
-import { HealthSchema } from "@along/contracts";
-import { handleRequest } from "../src/http/app.js";
-import { serve } from "../src/http/server.js";
+import { afterAll, describe, expect, it } from 'vitest';
+import { AddressInfo } from 'node:net';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import { HealthSchema } from '@along/contracts';
+import { handleRequest } from '../src/http/app.js';
+import { serve } from '../src/http/server.js';
 
-const server = serve({ port: 0, tzdbVersion: "2024a" });
+const server = serve({ port: 0, tzdbVersion: '2024a' });
 
 afterAll(() => {
   server.close();
@@ -21,8 +21,8 @@ async function invokeInProcess(): Promise<{ status: number; body: unknown }> {
     body: unknown;
   }>();
   let status = 0;
-  let payload = "";
-  const req = { method: "GET", url: "/healthz", headers: {} } as unknown as IncomingMessage;
+  let payload = '';
+  const req = { method: 'GET', url: '/healthz', headers: {} } as unknown as IncomingMessage;
   const res = {
     writeHead(s: number) {
       status = s;
@@ -32,20 +32,20 @@ async function invokeInProcess(): Promise<{ status: number; body: unknown }> {
       resolve({ status, body: JSON.parse(payload) });
     },
   } as unknown as ServerResponse;
-  await handleRequest(req, res, { tzdbVersion: "2024a" });
+  await handleRequest(req, res, { tzdbVersion: '2024a' });
   return promise;
 }
 
-describe("contracts dual-run: /healthz", () => {
-  it("in-process handler shape", async () => {
+describe('contracts dual-run: /healthz', () => {
+  it('in-process handler shape', async () => {
     const { status, body } = await invokeInProcess();
     expect(status).toBe(200);
-    expect(HealthSchema.parse(body)).toEqual({ status: "ok" });
+    expect(HealthSchema.parse(body)).toEqual({ status: 'ok' });
   });
 
-  it("over HTTP", async () => {
+  it('over HTTP', async () => {
     const response = await fetch(`${baseUrl()}/healthz`);
     expect(response.status).toBe(200);
-    expect(HealthSchema.parse(await response.json())).toEqual({ status: "ok" });
+    expect(HealthSchema.parse(await response.json())).toEqual({ status: 'ok' });
   });
 });

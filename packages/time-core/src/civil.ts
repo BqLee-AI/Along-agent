@@ -57,7 +57,14 @@ export function civilFromEpoch(epochSeconds: number): Civil {
     days -= len;
     mo += 1;
   }
-  return { y, mo, d: days + 1, h: Math.floor(sod / 3600), mi: Math.floor((sod % 3600) / 60), s: sod % 60 };
+  return {
+    y,
+    mo,
+    d: days + 1,
+    h: Math.floor(sod / 3600),
+    mi: Math.floor((sod % 3600) / 60),
+    s: sod % 60,
+  };
 }
 
 export function pad2(n: number): string {

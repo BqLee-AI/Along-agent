@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from 'zod';
 
 // Notifications are an internal table (no public routes in v0). This schema
 // validates worker-side notice construction only.

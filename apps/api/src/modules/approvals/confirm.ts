@@ -1,6 +1,6 @@
-import { randomUUID } from "node:crypto";
-import type { Pool, PoolClient } from "pg";
-import { withClient, withTransaction } from "../../db/transaction.js";
+import { randomUUID } from 'node:crypto';
+import type { Pool, PoolClient } from 'pg';
+import { withClient, withTransaction } from '../../db/transaction.js';
 import {
   approvalExpired,
   approvalSuperseded,
@@ -11,13 +11,13 @@ import {
   stateConflict,
   validationError,
   type HttpError,
-} from "../../http/errors.js";
+} from '../../http/errors.js';
 import {
   computePresentationHash,
   PRESENTATION_VERSION_V1,
   shortNoOf,
   validateSeenContent,
-} from "./presentation.js";
+} from './presentation.js';
 import {
   findOutboxTaskByKey,
   findSuccessorId,
@@ -27,9 +27,9 @@ import {
   markConsumed,
   markRejected,
   persistExpiredIfDue,
-} from "./repository.js";
-import { ConfirmBodySchema, RejectBodySchema } from "./schemas.js";
-import { cancelTaskWithinTransaction } from "../tasks/cancel.js";
+} from './repository.js';
+import { ConfirmBodySchema, RejectBodySchema } from './schemas.js';
+import { cancelTaskWithinTransaction } from '../tasks/cancel.js';
 
 export interface ConfirmDeps {
   pool: Pool | null;
@@ -37,14 +37,14 @@ export interface ConfirmDeps {
 
 export interface ConfirmResult {
   approval_id: string;
-  status: "consumed";
+  status: 'consumed';
   task_id: string;
   duplicate: boolean;
 }
 
 export interface RejectResult {
   approval_id: string;
-  status: "rejected";
+  status: 'rejected';
   duplicate: boolean;
 }
 
@@ -67,12 +67,12 @@ function snapshotOf(row: {
   resolved_utc_offset_seconds: number;
 }) {
   return {
-    originalText: row.original_text ?? "",
+    originalText: row.original_text ?? '',
     localDatetime: row.wall_time,
     timezoneId: row.timezone_id,
     fold: (row.fold === 1 ? 1 : 0) as 0 | 1,
     offsetSeconds: row.resolved_utc_offset_seconds,
-    occurrence: "single" as const,
+    occurrence: 'single' as const,
     presentationVersion: PRESENTATION_VERSION_V1,
   };
 }
@@ -87,46 +87,44 @@ export async function confirmApproval(
   body: unknown,
 ): Promise<ConfirmResult> {
   const parsed = ConfirmBodySchema.safeParse(body);
-  if (!parsed.success) throw validationError("invalid confirm body");
+  if (!parsed.success) throw validationError('invalid confirm body');
   const { presentation_hash, seen_content, idempotency_key } = parsed.data;
   const pool = requirePool(deps);
   // Phase 0 (outside the transaction): persist lazy expiry on the DB clock.
   // A conditional UPDATE is idempotent, so concurrent confirms racing here
   // is safe; the main transaction below re-reads state under the row lock.
-  await withClient(pool, (client: PoolClient) =>
-    persistExpiredIfDue(client, approvalId),
-  );
+  await withClient(pool, (client: PoolClient) => persistExpiredIfDue(client, approvalId));
   return withTransaction(pool, async (client: PoolClient) => {
     const row = await getApprovalForUpdate(client, approvalId);
-    if (!row) throw notFound("approval not found") as HttpError;
-    if (row.owner_id !== ownerId) throw forbidden("approval not found") as HttpError;
+    if (!row) throw notFound('approval not found') as HttpError;
+    if (row.owner_id !== ownerId) throw forbidden('approval not found') as HttpError;
 
     // Terminal states first: repeat confirm returns the original task.
-    if (row.state === "consumed") {
-      if (row.kind === "cancel_task") {
+    if (row.state === 'consumed') {
+      if (row.kind === 'cancel_task') {
         return {
           approval_id: row.id,
-          status: "consumed" as const,
-          task_id: row.target_task_id ?? "",
+          status: 'consumed' as const,
+          task_id: row.target_task_id ?? '',
           duplicate: true,
         };
       }
-      if (!row.consumed_task_id) throw stateConflict("approval consumed without task");
+      if (!row.consumed_task_id) throw stateConflict('approval consumed without task');
       return {
         approval_id: row.id,
-        status: "consumed" as const,
+        status: 'consumed' as const,
         task_id: row.consumed_task_id,
         duplicate: true,
       };
     }
-    if (row.state === "rejected") {
-      throw stateConflict("approval already rejected") as HttpError;
+    if (row.state === 'rejected') {
+      throw stateConflict('approval already rejected') as HttpError;
     }
-    if (row.state === "superseded") {
+    if (row.state === 'superseded') {
       const successorId = await findSuccessorId(client, row.id);
       throw approvalSuperseded(successorId) as HttpError;
     }
-    if (row.state === "expired") {
+    if (row.state === 'expired') {
       throw approvalExpired() as HttpError;
     }
     // Expiry was already persisted in phase 0; no in-transaction check
@@ -146,21 +144,16 @@ export async function confirmApproval(
       seenContent: seen_content,
       snapshot,
       shortNo: shortNoOf(row.id),
-      variant:
-        row.kind === "cancel_task"
-          ? "cancel"
-          : row.fold === 1
-            ? "second"
-            : "ordinary",
+      variant: row.kind === 'cancel_task' ? 'cancel' : row.fold === 1 ? 'second' : 'ordinary',
       presentationVersion: row.presentation_version,
     });
     if (!ok) throw presentationMismatch() as HttpError;
 
     // cancel_task approvals commit the cancel request in the same transaction
     // as the approval consume (single sanctioned cross-module transaction).
-    if (row.kind === "cancel_task") {
+    if (row.kind === 'cancel_task') {
       if (!row.target_task_id) {
-        throw stateConflict("cancel approval without target task") as HttpError;
+        throw stateConflict('cancel approval without target task') as HttpError;
       }
       const key = outboxKey(ownerId, row.id, idempotency_key);
       const cancel = await cancelTaskWithinTransaction(client, {
@@ -172,7 +165,7 @@ export async function confirmApproval(
       await markConsumed(client, row.id, null);
       return {
         approval_id: row.id,
-        status: "consumed" as const,
+        status: 'consumed' as const,
         task_id: cancel.task_id,
         duplicate: cancel.duplicate,
       };
@@ -184,7 +177,7 @@ export async function confirmApproval(
     if (replayTaskId) {
       return {
         approval_id: row.id,
-        status: "consumed" as const,
+        status: 'consumed' as const,
         task_id: replayTaskId,
         duplicate: true,
       };
@@ -201,7 +194,7 @@ export async function confirmApproval(
     await markConsumed(client, row.id, taskId);
     return {
       approval_id: row.id,
-      status: "consumed" as const,
+      status: 'consumed' as const,
       task_id: taskId,
       duplicate: false,
     };
@@ -217,34 +210,32 @@ export async function rejectApproval(
   body: unknown,
 ): Promise<RejectResult> {
   const parsed = RejectBodySchema.safeParse(body);
-  if (!parsed.success) throw validationError("invalid reject body");
+  if (!parsed.success) throw validationError('invalid reject body');
   const pool = requirePool(deps);
   // Phase 0: persist lazy expiry (same rationale as confirm).
-  await withClient(pool, (client: PoolClient) =>
-    persistExpiredIfDue(client, approvalId),
-  );
+  await withClient(pool, (client: PoolClient) => persistExpiredIfDue(client, approvalId));
   return withTransaction(pool, async (client: PoolClient) => {
     const row = await getApprovalForUpdate(client, approvalId);
-    if (!row) throw notFound("approval not found") as HttpError;
-    if (row.owner_id !== ownerId) throw forbidden("approval not found") as HttpError;
+    if (!row) throw notFound('approval not found') as HttpError;
+    if (row.owner_id !== ownerId) throw forbidden('approval not found') as HttpError;
 
-    if (row.state === "rejected") {
-      return { approval_id: row.id, status: "rejected" as const, duplicate: true };
+    if (row.state === 'rejected') {
+      return { approval_id: row.id, status: 'rejected' as const, duplicate: true };
     }
-    if (row.state === "consumed") {
-      throw stateConflict("approval already consumed, use cancel", {
-        task_id: row.kind === "cancel_task" ? row.target_task_id : row.consumed_task_id,
+    if (row.state === 'consumed') {
+      throw stateConflict('approval already consumed, use cancel', {
+        task_id: row.kind === 'cancel_task' ? row.target_task_id : row.consumed_task_id,
       }) as HttpError;
     }
-    if (row.state === "superseded") {
+    if (row.state === 'superseded') {
       const successorId = await findSuccessorId(client, row.id);
       throw approvalSuperseded(successorId) as HttpError;
     }
-    if (row.state === "expired") {
+    if (row.state === 'expired') {
       throw approvalExpired() as HttpError;
     }
     // Expiry already persisted in phase 0.
     await markRejected(client, row.id);
-    return { approval_id: row.id, status: "rejected" as const, duplicate: false };
+    return { approval_id: row.id, status: 'rejected' as const, duplicate: false };
   });
 }

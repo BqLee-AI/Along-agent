@@ -2,8 +2,8 @@
 // GET /conversations/{id} (history replay). Connect-time failures use the
 // JSON envelope; once the stream is open every failure is a thread.failed
 // event (docs/api/conversations §4).
-import type { IncomingMessage, ServerResponse } from "node:http";
-import type { Pool } from "pg";
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { Pool } from 'pg';
 import {
   csrfMismatch,
   failEnvelope,
@@ -14,14 +14,10 @@ import {
   requestIdOf,
   sendJson,
   unauthorized,
-} from "../../http/errors.js";
-import { verifyCsrf, type ActorResolver } from "../../http/auth.js";
-import type { ThreadEvent } from "@along/stream-protocol";
-import {
-  executeRun,
-  getConversationDetail,
-  startConversationRun,
-} from "./service.js";
+} from '../../http/errors.js';
+import { verifyCsrf, type ActorResolver } from '../../http/auth.js';
+import type { ThreadEvent } from '@along/stream-protocol';
+import { executeRun, getConversationDetail, startConversationRun } from './service.js';
 
 export interface RouteDeps {
   pool: Pool | null;
@@ -38,9 +34,9 @@ function queryOf(url: URL): Record<string, string | string[] | undefined> {
 }
 
 function idempotencyKeyOf(req: IncomingMessage): string | null {
-  const raw = req.headers["idempotency-key"];
+  const raw = req.headers['idempotency-key'];
   const value = Array.isArray(raw) ? raw[0] : raw;
-  return value && value.trim() !== "" ? value.trim() : null;
+  return value && value.trim() !== '' ? value.trim() : null;
 }
 
 function writeEvent(res: ServerResponse, event: ThreadEvent): boolean {
@@ -57,8 +53,8 @@ export async function handleConversationRoute(
 ): Promise<boolean> {
   const { pathname } = url;
   if (
-    pathname !== "/api/v1/conversations/messages" &&
-    !pathname.startsWith("/api/v1/conversations/")
+    pathname !== '/api/v1/conversations/messages' &&
+    !pathname.startsWith('/api/v1/conversations/')
   ) {
     return false;
   }
@@ -71,7 +67,7 @@ export async function handleConversationRoute(
   }
 
   try {
-    if (req.method === "POST" && pathname === "/api/v1/conversations/messages") {
+    if (req.method === 'POST' && pathname === '/api/v1/conversations/messages') {
       if (!verifyCsrf(req, actor)) {
         sendJson(res, 403, failEnvelope(csrfMismatch(), requestId), requestId);
         return true;
@@ -84,10 +80,10 @@ export async function handleConversationRoute(
         idempotencyKeyOf(req),
       );
       res.writeHead(200, {
-        "content-type": "text/event-stream",
-        "cache-control": "no-cache, no-transform",
-        connection: "keep-alive",
-        "x-request-id": requestId,
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache, no-transform',
+        connection: 'keep-alive',
+        'x-request-id': requestId,
       });
       res.flushHeaders?.();
       if (started.replay) {
@@ -97,11 +93,9 @@ export async function handleConversationRoute(
         res.end();
         return true;
       }
-      if (!started.context) throw new Error("run context missing");
+      if (!started.context) throw new Error('run context missing');
       try {
-        await executeRun(deps, started.context, async (event) =>
-          writeEvent(res, event),
-        );
+        await executeRun(deps, started.context, async (event) => writeEvent(res, event));
       } catch {
         // executeRun already attempted thread.failed; just close the stream.
       }
@@ -110,15 +104,10 @@ export async function handleConversationRoute(
     }
 
     const detailMatch = /^\/api\/v1\/conversations\/([^/]+)$/.exec(pathname);
-    if (req.method === "GET" && detailMatch) {
-      const conversationId = detailMatch[1] ?? "";
-      if (!isUuid(conversationId)) throw notFound("conversation not found");
-      const detail = await getConversationDetail(
-        deps,
-        actor.ownerId,
-        conversationId,
-        queryOf(url),
-      );
+    if (req.method === 'GET' && detailMatch) {
+      const conversationId = detailMatch[1] ?? '';
+      if (!isUuid(conversationId)) throw notFound('conversation not found');
+      const detail = await getConversationDetail(deps, actor.ownerId, conversationId, queryOf(url));
       sendJson(res, 200, okEnvelope(detail, requestId), requestId);
       return true;
     }
@@ -138,8 +127,8 @@ export async function handleConversationRoute(
       {
         code: 500,
         data: null,
-        msg: "internal error",
-        error: { code: "INTERNAL_ERROR", message: "internal error", request_id: requestId },
+        msg: 'internal error',
+        error: { code: 'INTERNAL_ERROR', message: 'internal error', request_id: requestId },
         request_id: requestId,
       },
       requestId,

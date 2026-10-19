@@ -27,16 +27,16 @@ approvals 1 ── 0..n cards    (逻辑引用，待确认卡片可挂 approval)
 
 ### 字段
 
-| 字段 | 类型 | 约束 | 说明 |
-| --- | --- | --- | --- |
-| `id` | `uuid` | primary key | 简报 ID |
-| `owner_id` | `uuid` | not null | 所属用户，查询必带 |
-| `brief_date` | `date` | not null | 简报日期（按已确认时区的本地日期） |
-| `timezone_id` | `text` | not null | 生成时采用的时区 |
-| `schema_version` | `text` | not null | 简报结构版本（如 `brief.v1`） |
-| `summary` | `text` | not null, default `''` | 摘要正文 |
-| `payload` | `jsonb` | not null, default `'{}'` | 结构化内容（议程/提醒清单摘要；不存敏感原文） |
-| `created_at` | `timestamptz` | not null, default `now()` | 创建时间 |
+| 字段             | 类型          | 约束                      | 说明                                          |
+| ---------------- | ------------- | ------------------------- | --------------------------------------------- |
+| `id`             | `uuid`        | primary key               | 简报 ID                                       |
+| `owner_id`       | `uuid`        | not null                  | 所属用户，查询必带                            |
+| `brief_date`     | `date`        | not null                  | 简报日期（按已确认时区的本地日期）            |
+| `timezone_id`    | `text`        | not null                  | 生成时采用的时区                              |
+| `schema_version` | `text`        | not null                  | 简报结构版本（如 `brief.v1`）                 |
+| `summary`        | `text`        | not null, default `''`    | 摘要正文                                      |
+| `payload`        | `jsonb`       | not null, default `'{}'`  | 结构化内容（议程/提醒清单摘要；不存敏感原文） |
+| `created_at`     | `timestamptz` | not null, default `now()` | 创建时间                                      |
 
 ### 约束与索引
 
@@ -57,20 +57,20 @@ approvals 1 ── 0..n cards    (逻辑引用，待确认卡片可挂 approval)
 
 ### 字段
 
-| 字段 | 类型 | 约束 | 说明 |
-| --- | --- | --- | --- |
-| `id` | `uuid` | primary key | 卡片 ID |
-| `owner_id` | `uuid` | not null | 所属用户，查询必带 |
-| `brief_id` | `uuid` | nullable | 所属简报（逻辑引用，可空；对话中产生的卡片可无简报） |
-| `kind` | `text` | not null | 按 `task_confirm/task_progress/info` 约束（P1 三类；健康卡 Deferred） |
-| `schema_version` | `text` | not null | 卡片结构版本（如 `card.v1`），各带版本化 schema |
-| `title` | `text` | not null | 卡片标题 |
-| `body` | `text` | not null, default `''` | 卡片正文（由冻结快照生成） |
-| `task_id` | `uuid` | nullable | 关联 task（逻辑引用） |
-| `approval_id` | `uuid` | nullable | 关联 approval（逻辑引用，待确认卡片） |
-| `status` | `text` | not null, default `'active'` | 按 `active/dismissed/expired` 约束 |
-| `created_at` | `timestamptz` | not null, default `now()` | 创建时间 |
-| `updated_at` | `timestamptz` | not null, default `now()` | 更新时间 |
+| 字段             | 类型          | 约束                         | 说明                                                                  |
+| ---------------- | ------------- | ---------------------------- | --------------------------------------------------------------------- |
+| `id`             | `uuid`        | primary key                  | 卡片 ID                                                               |
+| `owner_id`       | `uuid`        | not null                     | 所属用户，查询必带                                                    |
+| `brief_id`       | `uuid`        | nullable                     | 所属简报（逻辑引用，可空；对话中产生的卡片可无简报）                  |
+| `kind`           | `text`        | not null                     | 按 `task_confirm/task_progress/info` 约束（P1 三类；健康卡 Deferred） |
+| `schema_version` | `text`        | not null                     | 卡片结构版本（如 `card.v1`），各带版本化 schema                       |
+| `title`          | `text`        | not null                     | 卡片标题                                                              |
+| `body`           | `text`        | not null, default `''`       | 卡片正文（由冻结快照生成）                                            |
+| `task_id`        | `uuid`        | nullable                     | 关联 task（逻辑引用）                                                 |
+| `approval_id`    | `uuid`        | nullable                     | 关联 approval（逻辑引用，待确认卡片）                                 |
+| `status`         | `text`        | not null, default `'active'` | 按 `active/dismissed/expired` 约束                                    |
+| `created_at`     | `timestamptz` | not null, default `now()`    | 创建时间                                                              |
+| `updated_at`     | `timestamptz` | not null, default `now()`    | 更新时间                                                              |
 
 ### 约束与索引
 

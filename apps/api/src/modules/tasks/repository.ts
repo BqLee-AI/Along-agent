@@ -1,4 +1,4 @@
-import type { PoolClient } from "pg";
+import type { PoolClient } from 'pg';
 
 export interface TaskRow {
   id: string;
@@ -37,26 +37,21 @@ export interface TaskListFilter {
   cursor?: { fireAt: string; id: string };
 }
 
-export async function listTasks(
-  client: PoolClient,
-  filter: TaskListFilter,
-): Promise<TaskRow[]> {
+export async function listTasks(client: PoolClient, filter: TaskListFilter): Promise<TaskRow[]> {
   const params: unknown[] = [filter.ownerId];
-  const where: string[] = ["owner_id = $1"];
-  if (filter.status !== "all") {
+  const where: string[] = ['owner_id = $1'];
+  if (filter.status !== 'all') {
     params.push(filter.status);
     where.push(`state = $${params.length}`);
   }
   if (filter.cursor) {
     params.push(filter.cursor.fireAt, filter.cursor.id);
-    where.push(
-      `(fire_at_utc, id) > ($${params.length - 1}, $${params.length})`,
-    );
+    where.push(`(fire_at_utc, id) > ($${params.length - 1}, $${params.length})`);
   }
   params.push(filter.limit + 1);
   const { rows } = await client.query<TaskRow & { fire_at_cursor: string }>(
     `SELECT *, to_char(fire_at_utc, 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS fire_at_cursor ` +
-      `FROM tasks WHERE ${where.join(" AND ")} ` +
+      `FROM tasks WHERE ${where.join(' AND ')} ` +
       `ORDER BY fire_at_utc ASC, id ASC LIMIT $${params.length}`,
     params as never[],
   );
@@ -76,10 +71,7 @@ export async function getTask(
   ownerId: string,
   taskId: string,
 ): Promise<TaskLookup> {
-  const { rows } = await client.query<TaskRow>(
-    "SELECT * FROM tasks WHERE id = $1",
-    [taskId],
-  );
+  const { rows } = await client.query<TaskRow>('SELECT * FROM tasks WHERE id = $1', [taskId]);
   const row = rows[0];
   if (!row) return { found: false };
   if (row.owner_id !== ownerId) return { found: true, forbidden: true };
@@ -93,17 +85,15 @@ export async function listTaskEvents(
   cursor?: { recordedAt: string; id: string },
 ): Promise<TaskEventRow[]> {
   const params: unknown[] = [taskId];
-  const where: string[] = ["task_id = $1"];
+  const where: string[] = ['task_id = $1'];
   if (cursor) {
     params.push(cursor.recordedAt, cursor.id);
-    where.push(
-      `(recorded_at_utc, id) > ($${params.length - 1}, $${params.length})`,
-    );
+    where.push(`(recorded_at_utc, id) > ($${params.length - 1}, $${params.length})`);
   }
   params.push(limit + 1);
   const { rows } = await client.query<TaskEventRow & { recorded_at_cursor: string }>(
     `SELECT *, to_char(recorded_at_utc, 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS recorded_at_cursor ` +
-      `FROM task_events WHERE ${where.join(" AND ")} ` +
+      `FROM task_events WHERE ${where.join(' AND ')} ` +
       `ORDER BY recorded_at_utc ASC, id ASC LIMIT $${params.length}`,
     params as never[],
   );

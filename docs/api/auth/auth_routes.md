@@ -11,9 +11,9 @@
 
 ## 2. 路由
 
-| 方法 | 路径 | 鉴权 | CSRF | 说明 |
-| --- | --- | --- | --- | --- |
-| GET | `/me` | 会话自检（无会话返回 401，不跳转） | 否 | 当前 actor 快照 + CSRF token 下发 |
+| 方法 | 路径  | 鉴权                               | CSRF | 说明                              |
+| ---- | ----- | ---------------------------------- | ---- | --------------------------------- |
+| GET  | `/me` | 会话自检（无会话返回 401，不跳转） | 否   | 当前 actor 快照 + CSRF token 下发 |
 
 ### GET /me [Required]
 
@@ -47,7 +47,11 @@
   "code": 40101,
   "data": null,
   "msg": "未登录",
-  "error": { "code": "UNAUTHENTICATED", "message": "会话无效或已过期，请重新登录。", "request_id": "req_…" },
+  "error": {
+    "code": "UNAUTHENTICATED",
+    "message": "会话无效或已过期，请重新登录。",
+    "request_id": "req_…"
+  },
   "request_id": "req_…"
 }
 ```

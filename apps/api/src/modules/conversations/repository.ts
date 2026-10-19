@@ -1,12 +1,12 @@
 // Conversation/runs repository (issue #9). Owns conversations, messages,
 // agent_runs, run_attempts, run_checkpoints and the idempotency ledger.
 // No tasks/outbox/approval writes here.
-import type { Pool, PoolClient } from "pg";
+import type { Pool, PoolClient } from 'pg';
 import {
   THREAD_PROTOCOL_VERSION,
   ThreadEventSchema,
   type ThreadEvent,
-} from "@along/stream-protocol";
+} from '@along/stream-protocol';
 
 export interface ConversationRow {
   id: string;
@@ -17,7 +17,7 @@ export interface ConversationRow {
 }
 
 export async function getConversation(
-  client: Pick<Pool | PoolClient, "query">,
+  client: Pick<Pool | PoolClient, 'query'>,
   conversationId: string,
 ): Promise<ConversationRow | null> {
   const { rows } = await client.query<ConversationRow>(
@@ -29,7 +29,7 @@ export async function getConversation(
 }
 
 export async function createConversation(
-  client: Pick<Pool | PoolClient, "query">,
+  client: Pick<Pool | PoolClient, 'query'>,
   args: { ownerId: string; anchorIso: string; title: string },
 ): Promise<ConversationRow> {
   const { rows } = await client.query<ConversationRow>(
@@ -39,14 +39,14 @@ export async function createConversation(
     [args.ownerId, args.title, args.anchorIso],
   );
   const row = rows[0];
-  if (!row) throw new Error("conversation insert returned no row");
+  if (!row) throw new Error('conversation insert returned no row');
   return row;
 }
 
 // First confirmed timezone wins and freezes for the conversation; later
 // messages cannot move the anchor's clock.
 export async function freezeConversationTimezone(
-  client: Pick<Pool | PoolClient, "query">,
+  client: Pick<Pool | PoolClient, 'query'>,
   conversationId: string,
   timezoneId: string,
 ): Promise<void> {
@@ -58,11 +58,11 @@ export async function freezeConversationTimezone(
 }
 
 export async function insertMessage(
-  client: Pick<Pool | PoolClient, "query">,
+  client: Pick<Pool | PoolClient, 'query'>,
   args: {
     ownerId: string;
     conversationId: string;
-    role: "user" | "assistant" | "system";
+    role: 'user' | 'assistant' | 'system';
     content: string;
     requestId: string | null;
   },
@@ -73,18 +73,18 @@ export async function insertMessage(
     [args.ownerId, args.conversationId, args.role, args.content, args.requestId],
   );
   const id = rows[0]?.id;
-  if (!id) throw new Error("message insert returned no row");
+  if (!id) throw new Error('message insert returned no row');
   return id;
 }
 
 export async function insertRun(
-  client: Pick<Pool | PoolClient, "query">,
+  client: Pick<Pool | PoolClient, 'query'>,
   args: {
     runId: string;
     ownerId: string;
     conversationId: string;
     agentRevision: string;
-    mode: "chat" | "task";
+    mode: 'chat' | 'task';
     maxIterations: number;
     maxTokens: number;
   },
@@ -106,7 +106,7 @@ export async function insertRun(
 }
 
 export async function insertAttempt(
-  client: Pick<Pool | PoolClient, "query">,
+  client: Pick<Pool | PoolClient, 'query'>,
   args: { attemptId: string; ownerId: string; runId: string; attemptNo: number },
 ): Promise<void> {
   await client.query(
@@ -119,7 +119,7 @@ export async function insertAttempt(
 // Appends one thread event and returns its global stream id (event_seq).
 // The checkpoint is append-only; replay and GET after_seq both read it.
 export async function appendCheckpoint(
-  client: Pick<Pool | PoolClient, "query">,
+  client: Pick<Pool | PoolClient, 'query'>,
   args: {
     ownerId: string;
     attemptId: string;
@@ -144,7 +144,7 @@ export async function appendCheckpoint(
     ],
   );
   const seq = rows[0]?.event_seq;
-  if (seq === undefined) throw new Error("checkpoint insert returned no row");
+  if (seq === undefined) throw new Error('checkpoint insert returned no row');
   return Number(seq);
 }
 
@@ -155,7 +155,7 @@ export interface IdempotencyRow {
 }
 
 export async function findIdempotency(
-  client: Pick<Pool | PoolClient, "query">,
+  client: Pick<Pool | PoolClient, 'query'>,
   ownerId: string,
   idempotencyKey: string,
 ): Promise<IdempotencyRow | null> {
@@ -171,7 +171,7 @@ export async function findIdempotency(
 // Expired keys are deleted before re-insert so a 24h-later retry with the
 // same key starts a fresh run instead of colliding with the stale PK.
 export async function deleteExpiredIdempotency(
-  client: Pick<Pool | PoolClient, "query">,
+  client: Pick<Pool | PoolClient, 'query'>,
   ownerId: string,
   idempotencyKey: string,
 ): Promise<void> {
@@ -185,7 +185,7 @@ export async function deleteExpiredIdempotency(
 // Plain insert: a concurrent duplicate raises 23505, which the caller turns
 // into a replay of the winning run (first writer wins, no overwrite).
 export async function insertIdempotency(
-  client: Pick<Pool | PoolClient, "query">,
+  client: Pick<Pool | PoolClient, 'query'>,
   args: {
     ownerId: string;
     idempotencyKey: string;
@@ -226,7 +226,7 @@ function envelopeOf(row: CheckpointRow): ThreadEvent {
 }
 
 export async function listRunEvents(
-  client: Pick<Pool | PoolClient, "query">,
+  client: Pick<Pool | PoolClient, 'query'>,
   ownerId: string,
   runId: string,
 ): Promise<ThreadEvent[]> {
@@ -243,7 +243,7 @@ export async function listRunEvents(
 }
 
 export async function listConversationEvents(
-  client: Pick<Pool | PoolClient, "query">,
+  client: Pick<Pool | PoolClient, 'query'>,
   args: {
     ownerId: string;
     conversationId: string;
@@ -266,35 +266,35 @@ export async function listConversationEvents(
 }
 
 export async function getRunStatus(
-  client: Pick<Pool | PoolClient, "query">,
+  client: Pick<Pool | PoolClient, 'query'>,
   ownerId: string,
   runId: string,
 ): Promise<string | null> {
   const { rows } = await client.query<{ status: string }>(
-    "SELECT status FROM agent_runs WHERE owner_id = $1 AND id = $2",
+    'SELECT status FROM agent_runs WHERE owner_id = $1 AND id = $2',
     [ownerId, runId],
   );
   return rows[0]?.status ?? null;
 }
 
 export async function finishRun(
-  client: Pick<Pool | PoolClient, "query">,
+  client: Pick<Pool | PoolClient, 'query'>,
   runId: string,
-  status: "done" | "failed" | "cancelled",
+  status: 'done' | 'failed' | 'cancelled',
 ): Promise<void> {
-  await client.query(
-    "UPDATE agent_runs SET status = $2, ended_at = now() WHERE id = $1",
-    [runId, status],
-  );
+  await client.query('UPDATE agent_runs SET status = $2, ended_at = now() WHERE id = $1', [
+    runId,
+    status,
+  ]);
 }
 
 export async function finishAttempt(
-  client: Pick<Pool | PoolClient, "query">,
+  client: Pick<Pool | PoolClient, 'query'>,
   attemptId: string,
-  status: "done" | "failed" | "fenced_out",
+  status: 'done' | 'failed' | 'fenced_out',
 ): Promise<void> {
-  await client.query(
-    "UPDATE run_attempts SET status = $2, ended_at = now() WHERE id = $1",
-    [attemptId, status],
-  );
+  await client.query('UPDATE run_attempts SET status = $2, ended_at = now() WHERE id = $1', [
+    attemptId,
+    status,
+  ]);
 }

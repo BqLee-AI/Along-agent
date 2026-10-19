@@ -2,8 +2,8 @@
 // 1. task row matches (id + fire_at + version), 2. state is scheduled,
 // 3. schedule_receipt binds to this task. Cancel-pending cancels block;
 // past-window rows report MISSED (the missed phase owns the transition).
-import { evaluateGate, type GateBlockReason } from "@along/scheduler-core";
-import type { SchedulerTaskRow } from "./scheduler-repository.js";
+import { evaluateGate, type GateBlockReason } from '@along/scheduler-core';
+import type { SchedulerTaskRow } from './scheduler-repository.js';
 
 export type { GateBlockReason };
 
@@ -18,7 +18,7 @@ export function decideSendGate(args: {
   scheduleReceipt: string;
   nowMs: number;
 }): GateDecision {
-  if (!args.task) return { allowed: false, reason: "NOT_FOUND" };
+  if (!args.task) return { allowed: false, reason: 'NOT_FOUND' };
   const verdict = evaluateGate(
     {
       found: true,

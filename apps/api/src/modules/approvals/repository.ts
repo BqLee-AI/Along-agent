@@ -1,4 +1,4 @@
-import type { PoolClient } from "pg";
+import type { PoolClient } from 'pg';
 
 // approvals repository: raw SQL reads. GET routes MUST NOT write.
 // Effective-status projection: a row stored as `pending` whose expires_at or
@@ -25,21 +25,21 @@ export interface ApprovalRow {
   consumed_task_id: string | null;
   supersedes_approval_id: string | null;
   // 0011 (#9): create_task (default, pre-0011 rows) or cancel_task.
-  kind: "create_task" | "cancel_task";
+  kind: 'create_task' | 'cancel_task';
   target_task_id: string | null;
   expected_state_version: number | null;
 }
 
-export type EffectiveStatus = "pending" | "expired";
+export type EffectiveStatus = 'pending' | 'expired';
 
 export function effectiveStatus(
-  row: Pick<ApprovalRow, "state" | "expires_at" | "fire_at_utc">,
+  row: Pick<ApprovalRow, 'state' | 'expires_at' | 'fire_at_utc'>,
   now: Date,
 ): string {
-  if (row.state !== "pending") return row.state;
-  if (row.expires_at.getTime() <= now.getTime()) return "expired";
-  if (row.fire_at_utc.getTime() <= now.getTime()) return "expired";
-  return "pending";
+  if (row.state !== 'pending') return row.state;
+  if (row.expires_at.getTime() <= now.getTime()) return 'expired';
+  if (row.fire_at_utc.getTime() <= now.getTime()) return 'expired';
+  return 'pending';
 }
 
 export interface ApprovalListFilter {
@@ -55,14 +55,14 @@ export async function listApprovals(
   filter: ApprovalListFilter,
 ): Promise<ApprovalRow[]> {
   const params: unknown[] = [filter.ownerId];
-  const where: string[] = ["owner_id = $1"];
-  if (filter.status !== "all") {
-    if (filter.status === "expired") {
+  const where: string[] = ['owner_id = $1'];
+  if (filter.status !== 'all') {
+    if (filter.status === 'expired') {
       params.push(filter.now.toISOString());
       where.push(
         `(state = 'expired' OR (state = 'pending' AND (expires_at <= $${params.length} OR fire_at_utc <= $${params.length})))`,
       );
-    } else if (filter.status === "pending") {
+    } else if (filter.status === 'pending') {
       params.push(filter.now.toISOString());
       where.push(
         `(state = 'pending' AND expires_at > $${params.length} AND fire_at_utc > $${params.length})`,
@@ -74,14 +74,12 @@ export async function listApprovals(
   }
   if (filter.cursor) {
     params.push(filter.cursor.createdAt, filter.cursor.id);
-    where.push(
-      `(created_at, id) < ($${params.length - 1}, $${params.length})`,
-    );
+    where.push(`(created_at, id) < ($${params.length - 1}, $${params.length})`);
   }
   params.push(filter.limit + 1);
   const { rows } = await client.query<ApprovalRow & { created_at_cursor: string }>(
     `SELECT *, to_char(created_at, 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS created_at_cursor ` +
-      `FROM approvals WHERE ${where.join(" AND ")} ` +
+      `FROM approvals WHERE ${where.join(' AND ')} ` +
       `ORDER BY created_at DESC, id DESC LIMIT $${params.length}`,
     params as never[],
   );
@@ -100,10 +98,9 @@ export async function getApproval(
   ownerId: string,
   approvalId: string,
 ): Promise<ApprovalLookup> {
-  const { rows } = await client.query<ApprovalRow>(
-    "SELECT * FROM approvals WHERE id = $1",
-    [approvalId],
-  );
+  const { rows } = await client.query<ApprovalRow>('SELECT * FROM approvals WHERE id = $1', [
+    approvalId,
+  ]);
   const row = rows[0];
   if (!row) return { found: false };
   if (row.owner_id !== ownerId) return { found: true, forbidden: true };
@@ -115,7 +112,7 @@ export async function findSuccessorId(
   approvalId: string,
 ): Promise<string | null> {
   const { rows } = await client.query<{ id: string }>(
-    "SELECT id FROM approvals WHERE supersedes_approval_id = $1 LIMIT 1",
+    'SELECT id FROM approvals WHERE supersedes_approval_id = $1 LIMIT 1',
     [approvalId],
   );
   return rows[0]?.id ?? null;
@@ -128,7 +125,7 @@ export async function getApprovalForUpdate(
   approvalId: string,
 ): Promise<ApprovalRow | null> {
   const { rows } = await client.query<ApprovalRow>(
-    "SELECT * FROM approvals WHERE id = $1 FOR UPDATE",
+    'SELECT * FROM approvals WHERE id = $1 FOR UPDATE',
     [approvalId],
   );
   return rows[0] ?? null;
@@ -152,10 +149,7 @@ export async function persistExpiredIfDue(
 }
 
 // Read-only DB-clock expiry probe (for tests / diagnostics).
-export async function isExpiredByDbClock(
-  client: PoolClient,
-  approvalId: string,
-): Promise<boolean> {
+export async function isExpiredByDbClock(client: PoolClient, approvalId: string): Promise<boolean> {
   const { rows } = await client.query<{ expired: boolean }>(
     `SELECT (expires_at <= now() OR fire_at_utc <= now()) AS expired
      FROM approvals WHERE id = $1`,
@@ -214,7 +208,7 @@ export async function insertOutboxSchedule(
       args.ownerId,
       args.taskId,
       JSON.stringify({
-        kind: "schedule",
+        kind: 'schedule',
         task_id: args.taskId,
         fire_at_utc: args.approval.fire_at_utc.toISOString(),
         timezone_id: args.approval.timezone_id,
@@ -231,7 +225,7 @@ export async function findOutboxTaskByKey(
   idempotencyKey: string,
 ): Promise<string | null> {
   const { rows } = await client.query<{ task_id: string }>(
-    "SELECT task_id FROM outbox WHERE idempotency_key = $1",
+    'SELECT task_id FROM outbox WHERE idempotency_key = $1',
     [idempotencyKey],
   );
   return rows[0]?.task_id ?? null;
@@ -248,11 +242,6 @@ export async function markConsumed(
   );
 }
 
-export async function markRejected(
-  client: PoolClient,
-  approvalId: string,
-): Promise<void> {
-  await client.query("UPDATE approvals SET state = 'rejected' WHERE id = $1", [
-    approvalId,
-  ]);
+export async function markRejected(client: PoolClient, approvalId: string): Promise<void> {
+  await client.query("UPDATE approvals SET state = 'rejected' WHERE id = $1", [approvalId]);
 }

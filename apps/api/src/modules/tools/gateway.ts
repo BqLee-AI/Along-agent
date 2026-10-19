@@ -2,8 +2,8 @@
 // implementations. docs/agent/02: allowlist -> strict zod -> risk gate ->
 // execute (read-only, or approval-only for high risk) -> audit row.
 // It never creates/updates tasks; high-risk tools only insert approvals.
-import { createHash } from "node:crypto";
-import type { Pool } from "pg";
+import { createHash } from 'node:crypto';
+import type { Pool } from 'pg';
 import {
   ALIAS_TABLE_V1,
   FIXTURE_V1,
@@ -11,24 +11,20 @@ import {
   normalize,
   type AmbiguousCandidate,
   type NormalizeErrorCode,
-} from "@along/time-core";
+} from '@along/time-core';
 import {
   createCancelTaskApproval,
   createTaskApproval,
   type CreatedApproval,
-} from "../approvals/create.js";
+} from '../approvals/create.js';
 import {
   renderEchoCancelV1,
   renderEchoV1,
   renderEchoV1Second,
   shortNoOf,
   type PresentationSnapshot,
-} from "../approvals/presentation.js";
-import {
-  TOOL_INPUT_SCHEMAS,
-  TOOL_IDS,
-  type ToolId,
-} from "./schemas.js";
+} from '../approvals/presentation.js';
+import { TOOL_INPUT_SCHEMAS, TOOL_IDS, type ToolId } from './schemas.js';
 
 export interface ToolContext {
   ownerId: string;
@@ -40,11 +36,11 @@ export interface ToolContext {
   confirmedTimezone: string | null;
   anchorReceivedAtUtc: string;
   receivedAtUtc: string;
-  foldChoice: "first" | "second" | "none";
+  foldChoice: 'first' | 'second' | 'none';
 }
 
 export interface ApprovalPayload {
-  kind: "approval";
+  kind: 'approval';
   approval: CreatedApproval;
   echo_text: string;
   card_id: string;
@@ -52,14 +48,14 @@ export interface ApprovalPayload {
 }
 
 export interface ClarifyPayload {
-  kind: "clarify";
+  kind: 'clarify';
   reason: string;
   phrase_key: string;
   text: string;
 }
 
 export interface ListTasksPayload {
-  kind: "list_tasks";
+  kind: 'list_tasks';
   tasks: {
     task_id: string;
     note_preview: string;
@@ -71,7 +67,7 @@ export interface ListTasksPayload {
 }
 
 export interface BriefPayload {
-  kind: "brief";
+  kind: 'brief';
   brief_id: string;
   date: string;
   cards: {
@@ -85,7 +81,7 @@ export interface BriefPayload {
 }
 
 export interface PrefsPayload {
-  kind: "prefs";
+  kind: 'prefs';
   timezone_id: string | null;
   alias_version: string;
   quiet_hours: null;
@@ -93,34 +89,28 @@ export interface PrefsPayload {
 }
 
 export type ToolPayload =
-  | ApprovalPayload
-  | ClarifyPayload
-  | ListTasksPayload
-  | BriefPayload
-  | PrefsPayload;
+  ApprovalPayload | ClarifyPayload | ListTasksPayload | BriefPayload | PrefsPayload;
 
 export type ToolOutcome =
-  | { status: "ok"; result: ToolPayload }
-  | { status: "denied"; error: { code: string; message: string } };
+  | { status: 'ok'; result: ToolPayload }
+  | { status: 'denied'; error: { code: string; message: string } };
 
 const CLARIFY_TEXT: Record<string, string> = {
-  ASK_YEAR: "请给年份：日期需要年份才能排期，请补充年份（如 2026 年 10 月 17 日 09:20）。",
-  ASK_TIMEZONE: "请给时区：按哪个时区排？（如 Asia/Shanghai；本次确认只用于本次）",
-  ASK_TIMEZONE_ALIAS:
-    "这个时区别名认不出来；请给规范 IANA 时区，如 Asia/Shanghai。",
-  ASK_DAYPART: "请明确是上午 09:00 还是晚上 21:00？（差半天，不能替选）",
-  ASK_DATE_RECONFIRM: "跨天了，请重新给具体日期。",
-  RANGE_UNSUPPORTED:
-    "范围无法唯一排触发点，请给准确时刻；v0 不支持范围提醒。",
-  NO_CALENDAR: "v0 不读日历不监测空闲，这次不保存；请给明确日期时间时区。",
-  ASK_EXACT_TIME: "请给准确的日期和时间；v0 不支持“尽快/晚点”。",
+  ASK_YEAR: '请给年份：日期需要年份才能排期，请补充年份（如 2026 年 10 月 17 日 09:20）。',
+  ASK_TIMEZONE: '请给时区：按哪个时区排？（如 Asia/Shanghai；本次确认只用于本次）',
+  ASK_TIMEZONE_ALIAS: '这个时区别名认不出来；请给规范 IANA 时区，如 Asia/Shanghai。',
+  ASK_DAYPART: '请明确是上午 09:00 还是晚上 21:00？（差半天，不能替选）',
+  ASK_DATE_RECONFIRM: '跨天了，请重新给具体日期。',
+  RANGE_UNSUPPORTED: '范围无法唯一排触发点，请给准确时刻；v0 不支持范围提醒。',
+  NO_CALENDAR: 'v0 不读日历不监测空闲，这次不保存；请给明确日期时间时区。',
+  ASK_EXACT_TIME: '请给准确的日期和时间；v0 不支持“尽快/晚点”。',
 };
 
 const TIME_ERROR_TEXT: Record<NormalizeErrorCode, string> = {
-  NONEXISTENT_LOCAL_TIME: "当地并不存在这个时刻；不猜、不存、不排，请重定。",
-  AMBIGUOUS_LOCAL_TIME: "这个本地时间出现了两次，请选择第一次或第二次。",
-  TZDB_UNAVAILABLE: "时区规则库暂不可用，现在无法排期，请稍后再试。",
-  UNKNOWN_TIMEZONE: "这个时区别名认不出来；请给规范 IANA 时区，如 Asia/Shanghai。",
+  NONEXISTENT_LOCAL_TIME: '当地并不存在这个时刻；不猜、不存、不排，请重定。',
+  AMBIGUOUS_LOCAL_TIME: '这个本地时间出现了两次，请选择第一次或第二次。',
+  TZDB_UNAVAILABLE: '时区规则库暂不可用，现在无法排期，请稍后再试。',
+  UNKNOWN_TIMEZONE: '这个时区别名认不出来；请给规范 IANA 时区，如 Asia/Shanghai。',
 };
 
 // "第一次 UTC−04:00（05:30 UTC），第二次 UTC−05:00（06:30 UTC），你要哪一次？"
@@ -129,26 +119,26 @@ function ambiguousText(candidates: AmbiguousCandidate[]): string {
   if (candidates.length === 0) return TIME_ERROR_TEXT.AMBIGUOUS_LOCAL_TIME;
   const parts = candidates.map((candidate) => {
     const minutes = Math.abs(candidate.offset_seconds) / 60;
-    const sign = candidate.offset_seconds < 0 ? "−" : "+";
-    const hh = String(Math.floor(minutes / 60)).padStart(2, "0");
-    const mm = String(minutes % 60).padStart(2, "0");
+    const sign = candidate.offset_seconds < 0 ? '−' : '+';
+    const hh = String(Math.floor(minutes / 60)).padStart(2, '0');
+    const mm = String(minutes % 60).padStart(2, '0');
     const utc = candidate.fire_at_utc.slice(11, 16);
-    const label = candidate.fold_choice === "first" ? "第一次" : "第二次";
+    const label = candidate.fold_choice === 'first' ? '第一次' : '第二次';
     return `${label} UTC${sign}${hh}:${mm}（${utc} UTC）`;
   });
-  return `出现了两次：${parts.join("，")}，你要哪一次？`;
+  return `出现了两次：${parts.join('，')}，你要哪一次？`;
 }
 
 // Deterministic canonical form for args_hash: sorted object keys, arrays in
 // order. Only the hash is stored (tool_calls never keeps raw args).
 function stableStringify(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
   const obj = value as Record<string, unknown>;
   return `{${Object.keys(obj)
     .sort()
     .map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`)
-    .join(",")}}`;
+    .join(',')}}`;
 }
 
 async function recordInvocation(
@@ -156,7 +146,7 @@ async function recordInvocation(
   ctx: ToolContext,
   toolId: string,
   argsHash: string,
-  decision: "allow" | "deny",
+  decision: 'allow' | 'deny',
   approvalId: string | null,
   errorCode: string | null,
 ): Promise<void> {
@@ -182,8 +172,8 @@ function approvalSnapshot(input: {
     timezoneId: input.timezoneId,
     fold: input.fold,
     offsetSeconds: input.offsetSeconds,
-    occurrence: "single",
-    presentationVersion: "v1",
+    occurrence: 'single',
+    presentationVersion: 'v1',
   };
 }
 
@@ -196,17 +186,17 @@ async function runProposeTask(
   if (!parsed.success) {
     return {
       payload: {
-        kind: "clarify",
-        reason: "INVALID_ARGS",
-        phrase_key: "INVALID_ARGS",
-        text: "工具参数不合法，已拒绝；请重述提醒内容与时间。",
+        kind: 'clarify',
+        reason: 'INVALID_ARGS',
+        phrase_key: 'INVALID_ARGS',
+        text: '工具参数不合法，已拒绝；请重述提醒内容与时间。',
       },
       approvalId: null,
-      errorCode: "TOOL_FORBIDDEN",
+      errorCode: 'TOOL_FORBIDDEN',
     };
   }
   const input = parsed.data;
-  const tz = input.timezone_hint ?? ctx.confirmedTimezone ?? "";
+  const tz = input.timezone_hint ?? ctx.confirmedTimezone ?? '';
 
   const classified = classifyEntry({
     text: input.raw_time_text,
@@ -216,12 +206,12 @@ async function runProposeTask(
     fold: ctx.foldChoice,
     ruleset: FIXTURE_V1,
   });
-  if (classified.class !== "normalize_ok" || !classified.wall_time || !classified.timezone_id) {
-    const phrase = classified.phrase_key ?? "ASK_EXACT_TIME";
+  if (classified.class !== 'normalize_ok' || !classified.wall_time || !classified.timezone_id) {
+    const phrase = classified.phrase_key ?? 'ASK_EXACT_TIME';
     return {
       payload: {
-        kind: "clarify",
-        reason: classified.reason ?? "UNCLASSIFIED",
+        kind: 'clarify',
+        reason: classified.reason ?? 'UNCLASSIFIED',
         phrase_key: phrase,
         text: CLARIFY_TEXT[phrase] ?? CLARIFY_TEXT.ASK_EXACT_TIME,
       },
@@ -232,18 +222,18 @@ async function runProposeTask(
   const normalized = normalize(
     classified.wall_time,
     classified.timezone_id,
-    classified.fold ?? "none",
+    classified.fold ?? 'none',
     FIXTURE_V1,
   );
-  if (normalized.kind === "error") {
+  if (normalized.kind === 'error') {
     const code = normalized.error;
     return {
       payload: {
-        kind: "clarify",
+        kind: 'clarify',
         reason: code,
         phrase_key: code,
         text:
-          code === "AMBIGUOUS_LOCAL_TIME"
+          code === 'AMBIGUOUS_LOCAL_TIME'
             ? ambiguousText(normalized.candidates ?? [])
             : TIME_ERROR_TEXT[code],
       },
@@ -277,7 +267,7 @@ async function runProposeTask(
       : renderEchoV1(snapshot, shortNoOf(approval.approvalId));
   return {
     payload: {
-      kind: "approval",
+      kind: 'approval',
       approval,
       echo_text: echo,
       card_id: `card:${approval.approvalId}`,
@@ -297,13 +287,13 @@ async function runRequestCancelTask(
   if (!parsed.success) {
     return {
       payload: {
-        kind: "clarify",
-        reason: "INVALID_ARGS",
-        phrase_key: "INVALID_ARGS",
-        text: "工具参数不合法，已拒绝；请给出要取消的任务 id。",
+        kind: 'clarify',
+        reason: 'INVALID_ARGS',
+        phrase_key: 'INVALID_ARGS',
+        text: '工具参数不合法，已拒绝；请给出要取消的任务 id。',
       },
       approvalId: null,
-      errorCode: "TOOL_FORBIDDEN",
+      errorCode: 'TOOL_FORBIDDEN',
     };
   }
   const input = parsed.data;
@@ -329,28 +319,28 @@ async function runRequestCancelTask(
   if (!task || task.owner_id !== ctx.ownerId) {
     return {
       payload: {
-        kind: "clarify",
-        reason: "TOOL_FORBIDDEN",
-        phrase_key: "TOOL_FORBIDDEN",
-        text: "没有找到可取消的任务；请确认任务 id。",
+        kind: 'clarify',
+        reason: 'TOOL_FORBIDDEN',
+        phrase_key: 'TOOL_FORBIDDEN',
+        text: '没有找到可取消的任务；请确认任务 id。',
       },
       approvalId: null,
-      errorCode: "TOOL_FORBIDDEN",
+      errorCode: 'TOOL_FORBIDDEN',
     };
   }
-  if (task.state === "fired" || task.state === "missed" || task.state === "cancelled") {
+  if (task.state === 'fired' || task.state === 'missed' || task.state === 'cancelled') {
     return {
       payload: {
-        kind: "clarify",
-        reason: "STATE_CONFLICT",
-        phrase_key: "STATE_CONFLICT",
-        text: "这条提醒已经结束或已取消，不需要再取消。",
+        kind: 'clarify',
+        reason: 'STATE_CONFLICT',
+        phrase_key: 'STATE_CONFLICT',
+        text: '这条提醒已经结束或已取消，不需要再取消。',
       },
       approvalId: null,
-      errorCode: "STATE_CONFLICT",
+      errorCode: 'STATE_CONFLICT',
     };
   }
-  const originalText = input.reason_text ?? task.original_note ?? "取消提醒";
+  const originalText = input.reason_text ?? task.original_note ?? '取消提醒';
   const fold: 0 | 1 = task.fold === 1 ? 1 : 0;
   const approval = await createCancelTaskApproval(pool, {
     ownerId: ctx.ownerId,
@@ -377,7 +367,7 @@ async function runRequestCancelTask(
   );
   return {
     payload: {
-      kind: "approval",
+      kind: 'approval',
       approval,
       echo_text: echo,
       card_id: `card:${approval.approvalId}`,
@@ -388,7 +378,7 @@ async function runRequestCancelTask(
   };
 }
 
-const ACTIVE_STATES = ["saved", "pending_schedule", "scheduled", "cancel_pending"] as const;
+const ACTIVE_STATES = ['saved', 'pending_schedule', 'scheduled', 'cancel_pending'] as const;
 
 async function runListTasks(
   pool: Pool,
@@ -399,10 +389,10 @@ async function runListTasks(
   if (!parsed.success) {
     return {
       payload: {
-        kind: "clarify",
-        reason: "INVALID_ARGS",
-        phrase_key: "INVALID_ARGS",
-        text: "工具参数不合法，已拒绝。",
+        kind: 'clarify',
+        reason: 'INVALID_ARGS',
+        phrase_key: 'INVALID_ARGS',
+        text: '工具参数不合法，已拒绝。',
       },
       approvalId: null,
       errorCode: null,
@@ -425,10 +415,10 @@ async function runListTasks(
   const hasMore = rows.length > input.limit;
   return {
     payload: {
-      kind: "list_tasks",
+      kind: 'list_tasks',
       tasks: rows.slice(0, input.limit).map((row) => ({
         task_id: row.id,
-        note_preview: (row.original_note ?? "").slice(0, 30),
+        note_preview: (row.original_note ?? '').slice(0, 30),
         fire_at_local_text: row.wall_time,
         timezone_id: row.timezone_id,
         state: row.state,
@@ -449,10 +439,10 @@ async function runReadBriefCards(
   if (!parsed.success) {
     return {
       payload: {
-        kind: "clarify",
-        reason: "INVALID_ARGS",
-        phrase_key: "INVALID_ARGS",
-        text: "日期格式不合法；请给 YYYY-MM-DD。",
+        kind: 'clarify',
+        reason: 'INVALID_ARGS',
+        phrase_key: 'INVALID_ARGS',
+        text: '日期格式不合法；请给 YYYY-MM-DD。',
       },
       approvalId: null,
       errorCode: null,
@@ -474,16 +464,16 @@ async function runReadBriefCards(
   );
   return {
     payload: {
-      kind: "brief",
+      kind: 'brief',
       brief_id: `brief:${input.date}`,
       date: input.date,
       cards: rows.map((row) => ({
         card_id: row.id,
-        kind: "task",
-        title: (row.original_note ?? "").slice(0, 30),
+        kind: 'task',
+        title: (row.original_note ?? '').slice(0, 30),
         body_text: `${row.wall_time}（${row.timezone_id}）`,
         source_refs: [row.id],
-        presentation_version: "v1",
+        presentation_version: 'v1',
       })),
     },
     approvalId: null,
@@ -496,12 +486,12 @@ async function runGetUserPrefs(
   ctx: ToolContext,
 ): Promise<{ payload: ToolPayload; approvalId: null; errorCode: null }> {
   const { rows } = await pool.query<{ timezone_id: string | null }>(
-    "SELECT timezone_id FROM users WHERE id = $1",
+    'SELECT timezone_id FROM users WHERE id = $1',
     [ctx.ownerId],
   );
   return {
     payload: {
-      kind: "prefs",
+      kind: 'prefs',
       timezone_id: rows[0]?.timezone_id ?? null,
       alias_version: ALIAS_TABLE_V1.version,
       quiet_hours: null,
@@ -521,55 +511,59 @@ export async function invokeTool(
 ): Promise<ToolOutcome> {
   const known = (TOOL_IDS as readonly string[]).includes(toolId);
   if (!known) {
-    await recordInvocation(pool, ctx, toolId, "unknown", "deny", null, "TOOL_FORBIDDEN");
-    return { status: "denied", error: { code: "TOOL_FORBIDDEN", message: "unknown tool" } };
+    await recordInvocation(pool, ctx, toolId, 'unknown', 'deny', null, 'TOOL_FORBIDDEN');
+    return { status: 'denied', error: { code: 'TOOL_FORBIDDEN', message: 'unknown tool' } };
   }
   if (!ctx.allowlist.includes(toolId)) {
-    const argsHash = createHash("sha256").update(stableStringify(args ?? null)).digest("hex");
-    await recordInvocation(pool, ctx, toolId, argsHash, "deny", null, "TOOL_DENIED");
-    return { status: "denied", error: { code: "TOOL_DENIED", message: "tool not in allowlist" } };
+    const argsHash = createHash('sha256')
+      .update(stableStringify(args ?? null))
+      .digest('hex');
+    await recordInvocation(pool, ctx, toolId, argsHash, 'deny', null, 'TOOL_DENIED');
+    return { status: 'denied', error: { code: 'TOOL_DENIED', message: 'tool not in allowlist' } };
   }
-  const argsHash = createHash("sha256").update(stableStringify(args ?? null)).digest("hex");
+  const argsHash = createHash('sha256')
+    .update(stableStringify(args ?? null))
+    .digest('hex');
 
   let executed: { payload: ToolPayload; approvalId: string | null; errorCode: string | null };
   try {
     switch (toolId as ToolId) {
-      case "propose_task":
+      case 'propose_task':
         executed = await runProposeTask(pool, ctx, args);
         break;
-      case "request_cancel_task":
+      case 'request_cancel_task':
         executed = await runRequestCancelTask(pool, ctx, args);
         break;
-      case "list_tasks":
+      case 'list_tasks':
         executed = await runListTasks(pool, ctx, args);
         break;
-      case "read_brief_cards":
+      case 'read_brief_cards':
         executed = await runReadBriefCards(pool, ctx, args);
         break;
-      case "get_user_prefs":
+      case 'get_user_prefs':
         executed = await runGetUserPrefs(pool, ctx);
         break;
     }
   } catch (err) {
-    await recordInvocation(pool, ctx, toolId, argsHash, "allow", null, "TOOL_ERROR");
+    await recordInvocation(pool, ctx, toolId, argsHash, 'allow', null, 'TOOL_ERROR');
     throw err;
   }
 
-  const denied = executed.errorCode === "TOOL_FORBIDDEN";
+  const denied = executed.errorCode === 'TOOL_FORBIDDEN';
   await recordInvocation(
     pool,
     ctx,
     toolId,
     argsHash,
-    denied ? "deny" : "allow",
+    denied ? 'deny' : 'allow',
     executed.approvalId,
     executed.errorCode,
   );
   if (denied) {
     return {
-      status: "denied",
-      error: { code: "TOOL_FORBIDDEN", message: "tool invocation rejected" },
+      status: 'denied',
+      error: { code: 'TOOL_FORBIDDEN', message: 'tool invocation rejected' },
     };
   }
-  return { status: "ok", result: executed.payload };
+  return { status: 'ok', result: executed.payload };
 }

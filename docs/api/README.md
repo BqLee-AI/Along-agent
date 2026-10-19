@@ -80,51 +80,52 @@
 
 ## 5. 错误码总表 [Required]
 
-| HTTP | error.code | 含义 | 出现位置 |
-| --- | --- | --- | --- |
-| 409 | PRESENTATION_MISMATCH | 所见即所得不一致：`presentation_hash` 与服务端快照不符，停在待核对 | approvals confirm |
-| 422 | NONEXISTENT_LOCAL_TIME | 本地时间不存在（如夏令时跳变缺失时刻），不存不排 | conversations |
-| 422 | AMBIGUOUS_LOCAL_TIME | 本地时间出现两次，需 `fold_choice` 二选一，`details.candidates` 带两候选 | conversations |
-| 422 | UNKNOWN_TIMEZONE | 非法/未知 IANA 时区 | conversations |
-| 400 | VALIDATION_ERROR | 请求体 zod 校验失败（通用） | 全 POST |
-| 401 | UNAUTHENTICATED | 无会话或会话失效 | 全受保护路由 |
-| 403 | FORBIDDEN | 跨用户/跨租户访问 | 全受保护路由 |
-| 404 | NOT_FOUND | 资源不存在（含已清理墓碑只留号的情形按 404 + 提示） | GET 详情/事件 |
-| 409 | APPROVAL_SUPERSEDED | 确认已被新版本替代 | approvals confirm/reject |
-| 410 | APPROVAL_EXPIRED | 确认已过期（24h 或目标已过） | approvals confirm/reject |
-| 429 | BUDGET_EXCEEDED | 对话预算超限（token/轮次/时长），停并告知 | conversations SSE |
-| 429 | RATE_LIMITED | 限流，后续版本细化配额 [Proposed] | 全局 |
-| 503 | TZDB_UNAVAILABLE | 时区库不可用，时间归一拒绝服务 | conversations |
-| 503 | NOT_READY | /readyz 类型化错误，不降级（见 §6；旧名 SERVICE_NOT_READY 作废） | 探针 |
+| HTTP | error.code             | 含义                                                                     | 出现位置                 |
+| ---- | ---------------------- | ------------------------------------------------------------------------ | ------------------------ |
+| 409  | PRESENTATION_MISMATCH  | 所见即所得不一致：`presentation_hash` 与服务端快照不符，停在待核对       | approvals confirm        |
+| 422  | NONEXISTENT_LOCAL_TIME | 本地时间不存在（如夏令时跳变缺失时刻），不存不排                         | conversations            |
+| 422  | AMBIGUOUS_LOCAL_TIME   | 本地时间出现两次，需 `fold_choice` 二选一，`details.candidates` 带两候选 | conversations            |
+| 422  | UNKNOWN_TIMEZONE       | 非法/未知 IANA 时区                                                      | conversations            |
+| 400  | VALIDATION_ERROR       | 请求体 zod 校验失败（通用）                                              | 全 POST                  |
+| 401  | UNAUTHENTICATED        | 无会话或会话失效                                                         | 全受保护路由             |
+| 403  | FORBIDDEN              | 跨用户/跨租户访问                                                        | 全受保护路由             |
+| 404  | NOT_FOUND              | 资源不存在（含已清理墓碑只留号的情形按 404 + 提示）                      | GET 详情/事件            |
+| 409  | APPROVAL_SUPERSEDED    | 确认已被新版本替代                                                       | approvals confirm/reject |
+| 410  | APPROVAL_EXPIRED       | 确认已过期（24h 或目标已过）                                             | approvals confirm/reject |
+| 429  | BUDGET_EXCEEDED        | 对话预算超限（token/轮次/时长），停并告知                                | conversations SSE        |
+| 429  | RATE_LIMITED           | 限流，后续版本细化配额 [Proposed]                                        | 全局                     |
+| 503  | TZDB_UNAVAILABLE       | 时区库不可用，时间归一拒绝服务                                           | conversations            |
+| 503  | NOT_READY              | /readyz 类型化错误，不降级（见 §6；旧名 SERVICE_NOT_READY 作废）         | 探针                     |
+
 - [Required] numeric `40xxxx` 映射见 `docs/design/10-api-and-stream-design.md §6`；HTTP 状态以本表为准（S0 #14 冻结）。
 
 对外展示的触发/通知一律用“已记录/未记录到”口径，不使用成功保证类文案 [Required]。
 
 ## 6. 探针 [Required]
 
-| 方法 | 路径 | 鉴权 | CSRF | 说明 |
-| --- | --- | --- | --- | --- |
-| GET | `/healthz` | 无 | 否 | 存活探针，不依赖 DB；`200 {"status":"ok"}` |
-| GET | `/readyz` | 无 | 否 | 就绪探针；未就绪返回 `503` + 类型化错误（不支持组合/降级，缺 time-core ruleset 或 DB 不可达即非就绪） |
+| 方法 | 路径       | 鉴权 | CSRF | 说明                                                                                                  |
+| ---- | ---------- | ---- | ---- | ----------------------------------------------------------------------------------------------------- |
+| GET  | `/healthz` | 无   | 否   | 存活探针，不依赖 DB；`200 {"status":"ok"}`                                                            |
+| GET  | `/readyz`  | 无   | 否   | 就绪探针；未就绪返回 `503` + 类型化错误（不支持组合/降级，缺 time-core ruleset 或 DB 不可达即非就绪） |
 
 探针不走 §2 envelope，直接返回 `{"status":"ok"}` 或 `{"status":"not_ready","reason":"…"}`。
 
 ## 7. 全路由表 [Required]
 
-| # | 方法 | 路径 | 鉴权 | CSRF | 幂等键 | 说明 | 详见 |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | GET | `/me` | 会话（自检） | 否 | — | 当前 actor 快照 + CSRF token | auth/auth_routes.md |
-| 2 | GET | `/brief` | 是 | 否 | — | 每日简报 + 卡片列表（v0 仅 day-in-progress） | brief/brief_routes.md |
-| 3 | POST | `/conversations/messages` | 是 | 是 | 是 | 发送消息，SSE 流式回事件 | conversations/conversations_routes.md |
-| 4 | GET | `/conversations/{id}` | 是 | 否 | — | 会话恢复（历史事件重放） | conversations/conversations_routes.md |
-| 5 | GET | `/approvals` | 是 | 否 | — | 待确认/历史确认列表 | approvals/approvals_routes.md |
-| 6 | GET | `/approvals/{id}` | 是 | 否 | — | 确认详情（冻结快照+回显） | approvals/approvals_routes.md |
-| 7 | POST | `/approvals/{id}/actions/confirm` | 是 | 是 | 是 | 确认，体含 `presentation_hash` | approvals/approvals_routes.md |
-| 8 | POST | `/approvals/{id}/actions/reject` | 是 | 是 | 是 | 拒绝 | approvals/approvals_routes.md |
-| 9 | GET | `/tasks` | 是 | 否 | — | 任务列表 | tasks/tasks_routes.md |
-| 10 | GET | `/tasks/{id}` | 是 | 否 | — | 任务详情 | tasks/tasks_routes.md |
-| 11 | POST | `/tasks/{id}/actions/cancel` | 是 | 是 | 是 | 取消（幂等） | tasks/tasks_routes.md |
-| 12 | GET | `/tasks/{id}/events` | 是 | 否 | — | 只追加事件账（按 recorded_at） | tasks/tasks_routes.md |
+| #   | 方法 | 路径                              | 鉴权         | CSRF | 幂等键 | 说明                                         | 详见                                  |
+| --- | ---- | --------------------------------- | ------------ | ---- | ------ | -------------------------------------------- | ------------------------------------- |
+| 1   | GET  | `/me`                             | 会话（自检） | 否   | —      | 当前 actor 快照 + CSRF token                 | auth/auth_routes.md                   |
+| 2   | GET  | `/brief`                          | 是           | 否   | —      | 每日简报 + 卡片列表（v0 仅 day-in-progress） | brief/brief_routes.md                 |
+| 3   | POST | `/conversations/messages`         | 是           | 是   | 是     | 发送消息，SSE 流式回事件                     | conversations/conversations_routes.md |
+| 4   | GET  | `/conversations/{id}`             | 是           | 否   | —      | 会话恢复（历史事件重放）                     | conversations/conversations_routes.md |
+| 5   | GET  | `/approvals`                      | 是           | 否   | —      | 待确认/历史确认列表                          | approvals/approvals_routes.md         |
+| 6   | GET  | `/approvals/{id}`                 | 是           | 否   | —      | 确认详情（冻结快照+回显）                    | approvals/approvals_routes.md         |
+| 7   | POST | `/approvals/{id}/actions/confirm` | 是           | 是   | 是     | 确认，体含 `presentation_hash`               | approvals/approvals_routes.md         |
+| 8   | POST | `/approvals/{id}/actions/reject`  | 是           | 是   | 是     | 拒绝                                         | approvals/approvals_routes.md         |
+| 9   | GET  | `/tasks`                          | 是           | 否   | —      | 任务列表                                     | tasks/tasks_routes.md                 |
+| 10  | GET  | `/tasks/{id}`                     | 是           | 否   | —      | 任务详情                                     | tasks/tasks_routes.md                 |
+| 11  | POST | `/tasks/{id}/actions/cancel`      | 是           | 是   | 是     | 取消（幂等）                                 | tasks/tasks_routes.md                 |
+| 12  | GET  | `/tasks/{id}/events`              | 是           | 否   | —      | 只追加事件账（按 recorded_at）               | tasks/tasks_routes.md                 |
 
 ## 8. 维护方式
 

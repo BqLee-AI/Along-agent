@@ -1,18 +1,18 @@
-import { z } from "zod";
+import { z } from 'zod';
 
 export const TaskListQuerySchema = z.object({
   status: z
     .enum([
-      "saved",
-      "pending_schedule",
-      "scheduled",
-      "fired",
-      "missed",
-      "cancel_pending",
-      "cancelled",
-      "all",
+      'saved',
+      'pending_schedule',
+      'scheduled',
+      'fired',
+      'missed',
+      'cancel_pending',
+      'cancelled',
+      'all',
     ])
-    .default("all"),
+    .default('all'),
   cursor: z.string().max(2000).optional(),
   limit: z.coerce.number().int().min(1).max(50).default(20),
 });
@@ -62,7 +62,7 @@ export type TaskEventsQuery = z.infer<typeof TaskEventsQuerySchema>;
 // scheduler (#8) owns the vocabulary; approvals only needs to know the
 // envelope fields it writes.
 export const OutboxCommandSchema = z.object({
-  kind: z.literal("schedule"),
+  kind: z.literal('schedule'),
   task_id: z.string().uuid(),
   fire_at_utc: z.string(),
   timezone_id: z.string(),

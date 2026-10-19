@@ -1,8 +1,8 @@
 ---
 name: 通用任务
 description: spec-driven + issue-driven 通用模板
-title: "[Task] "
-labels: ["task"]
+title: '[Task] '
+labels: ['task']
 ---
 
 ## 背景

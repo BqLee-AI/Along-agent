@@ -18,6 +18,7 @@ TypeScript + Next.js（App Router）+ PostgreSQL 16 的云端个人助理；包�
 - 类型检查：`pnpm typecheck`
 - 单元测试：`pnpm test`（细分：`pnpm test:unit`、`pnpm test:contracts`）
 - 契约校验：`openspec validate <name> --strict`（如 `openspec validate v0-safety-contract --strict`）
+
 ## 代码约定
 
 - TypeScript 严格模式；模块按 `apps/api/src/modules/<name>/` 划分所有权，一模块一 schema 前缀。

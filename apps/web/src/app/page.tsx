@@ -1,12 +1,12 @@
-import Link from "next/link";
-import { apiGet } from "../lib/api";
-import { describeCard } from "../lib/presentation";
-import type { Brief } from "../lib/types";
+import Link from 'next/link';
+import { apiGet } from '../lib/api';
+import { describeCard } from '../lib/presentation';
+import type { Brief } from '../lib/types';
 
-export const dynamic = "force-dynamic";
+export const dynamic = 'force-dynamic';
 
 export default async function HomePage() {
-  const result = await apiGet<Brief>("/api/v1/brief");
+  const result = await apiGet<Brief>('/api/v1/brief');
   if (!result.ok) {
     return (
       <section>
@@ -20,11 +20,11 @@ export default async function HomePage() {
     <section>
       <h1>今日简报</h1>
       <p className="subtitle">
-        {brief.date} · {brief.timezone_id} · 待确认 {brief.summary.pending_count} · 已记录触发{" "}
+        {brief.date} · {brief.timezone_id} · 待确认 {brief.summary.pending_count} · 已记录触发{' '}
         {brief.summary.fired_count}
       </p>
       {brief.meta.timezone_note ? <p className="muted">{brief.meta.timezone_note}</p> : null}
-      {brief.meta.brief_state === "stale" ? (
+      {brief.meta.brief_state === 'stale' ? (
         <p className="error">
           简报可能过期，请 <Link href="/">刷新</Link> 重试。
         </p>

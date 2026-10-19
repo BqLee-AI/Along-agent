@@ -2,68 +2,104 @@ name: ci
 
 on:
   push:
-    branches: ["main"]
+    branches: ['main']
   pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   gate-manifest:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      # bootstrap：本地 composite 需先检出仓库才能解析，composite 内再做完整 checkout。
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: ./.github/actions/setup
       - run: node scripts/check-gate-manifest.mjs
       - run: node scripts/check-frozen-names.mjs
       - run: node scripts/scan-copy-claims.mjs
 
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: gate-manifest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: ./.github/actions/setup
       - run: pnpm lint
 
   depcruise:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: lint
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: ./.github/actions/setup
       - run: pnpm depcruise
 
   unit:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: depcruise
     env:
       TZ: Pacific/Kiritimati
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: ./.github/actions/setup
       - run: pnpm typecheck
       - run: pnpm test:unit
 
+  openspec-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: gate-manifest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: validate all changes (strict)
+        run: |
+          entries=$(ls -A openspec/changes | grep -v -e '^archive$' -e '^\.gitkeep$' || true)
+          if [ -z "$entries" ]; then
+            echo "no active changes under openspec/changes, skipping"
+          else
+            pnpm exec openspec validate --all --strict
+          fi
+
+  format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: gate-manifest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: pnpm format:check
+
   migration-scan:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: unit
     services:
       postgres:
@@ -83,13 +119,11 @@ jobs:
       DATABASE_URL: postgresql://along:along@localhost:5432/along
       BETTER_AUTH_SECRET: ci-only-secret-for-identity-tests
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: ./.github/actions/setup
       - run: sh scripts/db/apply.sh
       - run: node scripts/check-migrations.mjs
       - run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/db/verify-constraints.sql
@@ -105,6 +139,7 @@ jobs:
 
   scheduler-fault:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: migration-scan
     services:
       postgres:
@@ -124,33 +159,35 @@ jobs:
       DATABASE_URL: postgresql://along:along@localhost:5432/along
       BETTER_AUTH_SECRET: ci-only-secret-for-identity-tests
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: ./.github/actions/setup
       - run: sh scripts/db/apply.sh
       - run: pnpm build
       - run: pnpm --filter @along/api exec vitest run --config vitest.integration.config.ts test/integration/scheduler-fault.test.ts test/integration/scheduler-schedule.test.ts test/integration/tasks-cancel.test.ts
 
   contracts-dual:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: migration-scan
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: ./.github/actions/setup
       - run: pnpm test:contracts
 
   compose-smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: contracts-dual
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: ./.github/actions/setup
       - run: sh scripts/compose-smoke.sh

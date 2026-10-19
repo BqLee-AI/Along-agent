@@ -1,15 +1,15 @@
 // Issue #10: GET /brief deterministic projection.
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { randomUUID } from "node:crypto";
-import type { IncomingMessage, ServerResponse } from "node:http";
-import type { Pool } from "pg";
-import { handleRequest } from "../../src/http/app.js";
-import { getBrief } from "../../src/modules/brief/service.js";
-import { BriefResponseSchema } from "../../src/modules/brief/schemas.js";
-import { databaseUrl, requirePool } from "./setup.js";
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { Pool } from 'pg';
+import { handleRequest } from '../../src/http/app.js';
+import { getBrief } from '../../src/modules/brief/service.js';
+import { BriefResponseSchema } from '../../src/modules/brief/schemas.js';
+import { databaseUrl, requirePool } from './setup.js';
 
 const maybe = databaseUrl ? describe : describe.skip;
-const NOW = new Date("2026-10-17T00:00:00Z");
+const NOW = new Date('2026-10-17T00:00:00Z');
 
 async function seedTask(
   pool: Pool,
@@ -33,7 +33,7 @@ async function seedTask(
       args.state,
       args.fireAt,
       args.wallTime,
-      args.timezoneId ?? "Asia/Shanghai",
+      args.timezoneId ?? 'Asia/Shanghai',
       args.note,
     ],
   );
@@ -63,7 +63,7 @@ function fakePair(method: string, url: string) {
   const res = {
     status: 0,
     resHeaders: {} as Record<string, string>,
-    payload: "",
+    payload: '',
     writeHead(status: number, headers: Record<string, string>) {
       res.status = status;
       res.resHeaders = headers;
@@ -79,7 +79,7 @@ function fakePair(method: string, url: string) {
   return { req, res, body: () => JSON.parse(res.payload) as Record<string, unknown> };
 }
 
-maybe("brief", () => {
+maybe('brief', () => {
   let pool: Pool;
   beforeAll(() => {
     pool = requirePool();
@@ -88,163 +88,159 @@ maybe("brief", () => {
     await pool.end();
   });
 
-  it("assembles the confirmed-timezone date deterministically from tasks + approvals", async () => {
+  it('assembles the confirmed-timezone date deterministically from tasks + approvals', async () => {
     const ownerId = randomUUID();
     await seedTask(pool, ownerId, {
-      state: "scheduled",
-      fireAt: "2026-10-17T01:20:00Z",
-      wallTime: "2026-10-17 09:20",
-      note: "喝水",
+      state: 'scheduled',
+      fireAt: '2026-10-17T01:20:00Z',
+      wallTime: '2026-10-17 09:20',
+      note: '喝水',
     });
     await seedTask(pool, ownerId, {
-      state: "fired",
-      fireAt: "2026-10-17T00:00:00Z",
-      wallTime: "2026-10-17 08:00",
-      note: "吃药",
+      state: 'fired',
+      fireAt: '2026-10-17T00:00:00Z',
+      wallTime: '2026-10-17 08:00',
+      note: '吃药',
     });
     await seedTask(pool, ownerId, {
-      state: "cancelled",
-      fireAt: "2026-10-17T03:00:00Z",
-      wallTime: "2026-10-17 11:00",
-      note: "已取消",
+      state: 'cancelled',
+      fireAt: '2026-10-17T03:00:00Z',
+      wallTime: '2026-10-17 11:00',
+      note: '已取消',
     });
     await seedTask(pool, ownerId, {
-      state: "scheduled",
-      fireAt: "2026-10-18T01:20:00Z",
-      wallTime: "2026-10-18 09:20",
-      note: "明天",
+      state: 'scheduled',
+      fireAt: '2026-10-18T01:20:00Z',
+      wallTime: '2026-10-18 09:20',
+      note: '明天',
     });
     const approvalId = await seedPendingApproval(pool, ownerId, {
-      fireAt: "2026-10-17T02:00:00Z",
-      wallTime: "2026-10-17 10:00",
-      text: "明天 10:00 散步",
+      fireAt: '2026-10-17T02:00:00Z',
+      wallTime: '2026-10-17 10:00',
+      text: '明天 10:00 散步',
     });
 
-    const deps = { pool, tzdbVersion: "fixture-v1", now: () => NOW };
-    const brief = await getBrief(deps, ownerId, "Asia/Shanghai", {}, "req-test");
+    const deps = { pool, tzdbVersion: 'fixture-v1', now: () => NOW };
+    const brief = await getBrief(deps, ownerId, 'Asia/Shanghai', {}, 'req-test');
     expect(BriefResponseSchema.parse(brief)).toEqual(brief);
-    expect(brief.date).toBe("2026-10-17");
-    expect(brief.timezone_id).toBe("Asia/Shanghai");
+    expect(brief.date).toBe('2026-10-17');
+    expect(brief.timezone_id).toBe('Asia/Shanghai');
     expect(brief.summary).toEqual({ pending_count: 1, fired_count: 1 });
-    expect(brief.cards.map((card) => card.kind)).toEqual([
-      "task",
-      "task",
-      "approval",
-    ]);
+    expect(brief.cards.map((card) => card.kind)).toEqual(['task', 'task', 'approval']);
     expect(brief.cards[0]).toMatchObject({
-      kind: "task",
-      title: "吃药",
-      status: "fired",
-      fire_at_local: "2026-10-17 08:00",
+      kind: 'task',
+      title: '吃药',
+      status: 'fired',
+      fire_at_local: '2026-10-17 08:00',
     });
     expect(brief.cards[1]).toMatchObject({
-      kind: "task",
-      title: "喝水",
-      status: "scheduled",
-      fire_at_local: "2026-10-17 09:20",
+      kind: 'task',
+      title: '喝水',
+      status: 'scheduled',
+      fire_at_local: '2026-10-17 09:20',
     });
     expect(brief.cards[2]).toMatchObject({
-      kind: "approval",
-      status: "pending",
-      title: "请确认：明天 10:00 散步",
+      kind: 'approval',
+      status: 'pending',
+      title: '请确认：明天 10:00 散步',
       ref: { approval_id: approvalId },
     });
     expect(brief.meta).toEqual({
-      brief_state: "day-in-progress",
+      brief_state: 'day-in-progress',
       timezone_note: null,
     });
 
-    const again = await getBrief(deps, ownerId, "Asia/Shanghai", {}, "req-test");
+    const again = await getBrief(deps, ownerId, 'Asia/Shanghai', {}, 'req-test');
     expect(again).toEqual(brief);
   });
 
-  it("does not convert when the query timezone differs; it only notes it", async () => {
+  it('does not convert when the query timezone differs; it only notes it', async () => {
     const ownerId = randomUUID();
     await seedTask(pool, ownerId, {
-      state: "scheduled",
-      fireAt: "2026-10-17T01:20:00Z",
-      wallTime: "2026-10-17 09:20",
-      note: "喝水",
+      state: 'scheduled',
+      fireAt: '2026-10-17T01:20:00Z',
+      wallTime: '2026-10-17 09:20',
+      note: '喝水',
     });
     const brief = await getBrief(
-      { pool, tzdbVersion: "fixture-v1", now: () => NOW },
+      { pool, tzdbVersion: 'fixture-v1', now: () => NOW },
       ownerId,
-      "Asia/Shanghai",
-      { timezone: "America/New_York" },
-      "req-test",
+      'Asia/Shanghai',
+      { timezone: 'America/New_York' },
+      'req-test',
     );
-    expect(brief.timezone_id).toBe("Asia/Shanghai");
-    expect(brief.cards[0]).toMatchObject({ fire_at_local: "2026-10-17 09:20" });
-    expect(brief.meta.timezone_note).toContain("未换算");
+    expect(brief.timezone_id).toBe('Asia/Shanghai');
+    expect(brief.cards[0]).toMatchObject({ fire_at_local: '2026-10-17 09:20' });
+    expect(brief.meta.timezone_note).toContain('未换算');
   });
 
-  it("returns an empty brief for a day without cards and accepts an explicit date", async () => {
+  it('returns an empty brief for a day without cards and accepts an explicit date', async () => {
     const ownerId = randomUUID();
     const brief = await getBrief(
-      { pool, tzdbVersion: "fixture-v1", now: () => NOW },
+      { pool, tzdbVersion: 'fixture-v1', now: () => NOW },
       ownerId,
-      "Asia/Shanghai",
-      { date: "2026-10-19" },
-      "req-test",
+      'Asia/Shanghai',
+      { date: '2026-10-19' },
+      'req-test',
     );
     expect(brief).toMatchObject({
-      date: "2026-10-19",
+      date: '2026-10-19',
       summary: { pending_count: 0, fired_count: 0 },
       cards: [],
-      meta: { brief_state: "empty", timezone_note: null },
+      meta: { brief_state: 'empty', timezone_note: null },
     });
   });
 
-  it("rejects invalid dates, missing timezone, and non-ready DB", async () => {
-    const deps = { pool, tzdbVersion: "fixture-v1", now: () => NOW };
+  it('rejects invalid dates, missing timezone, and non-ready DB', async () => {
+    const deps = { pool, tzdbVersion: 'fixture-v1', now: () => NOW };
     await expect(
-      getBrief(deps, randomUUID(), "Asia/Shanghai", { date: "2026-02-30" }, "req"),
+      getBrief(deps, randomUUID(), 'Asia/Shanghai', { date: '2026-02-30' }, 'req'),
+    ).rejects.toMatchObject({ httpStatus: 400 });
+    await expect(getBrief(deps, randomUUID(), null, {}, 'req')).rejects.toMatchObject({
+      httpStatus: 400,
+    });
+    await expect(
+      getBrief(deps, randomUUID(), 'Not/AZone', { date: '2026-10-19' }, 'req'),
     ).rejects.toMatchObject({ httpStatus: 400 });
     await expect(
-      getBrief(deps, randomUUID(), null, {}, "req"),
-    ).rejects.toMatchObject({ httpStatus: 400 });
-    await expect(
-      getBrief(deps, randomUUID(), "Not/AZone", { date: "2026-10-19" }, "req"),
-    ).rejects.toMatchObject({ httpStatus: 400 });
-    await expect(
-      getBrief({ pool: null, tzdbVersion: "fixture-v1" }, randomUUID(), "Asia/Shanghai", {}, "req"),
+      getBrief({ pool: null, tzdbVersion: 'fixture-v1' }, randomUUID(), 'Asia/Shanghai', {}, 'req'),
     ).rejects.toMatchObject({ httpStatus: 503 });
     await expect(
-      getBrief({ pool, tzdbVersion: undefined }, randomUUID(), "Asia/Shanghai", {}, "req"),
+      getBrief({ pool, tzdbVersion: undefined }, randomUUID(), 'Asia/Shanghai', {}, 'req'),
     ).rejects.toMatchObject({ httpStatus: 503 });
   });
 
-  it("serves the HTTP envelope and guards unauthenticated requests", async () => {
+  it('serves the HTTP envelope and guards unauthenticated requests', async () => {
     const ownerId = randomUUID();
     await seedTask(pool, ownerId, {
-      state: "scheduled",
-      fireAt: "2026-10-17T01:20:00Z",
-      wallTime: "2026-10-17 09:20",
-      note: "喝水",
+      state: 'scheduled',
+      fireAt: '2026-10-17T01:20:00Z',
+      wallTime: '2026-10-17 09:20',
+      note: '喝水',
     });
     const actor = {
       ownerId,
       sessionId: null,
-      displayName: "tester",
-      timezoneId: "Asia/Shanghai",
+      displayName: 'tester',
+      timezoneId: 'Asia/Shanghai',
     };
-    const ok = fakePair("GET", "/api/v1/brief?date=2026-10-17");
+    const ok = fakePair('GET', '/api/v1/brief?date=2026-10-17');
     await handleRequest(ok.req, ok.res, {
       pool,
-      tzdbVersion: "fixture-v1",
+      tzdbVersion: 'fixture-v1',
       resolveActor: async () => actor,
     });
     expect(ok.res.status).toBe(200);
     const payload = ok.body();
     expect(payload).toMatchObject({
       code: 0,
-      data: { date: "2026-10-17", timezone_id: "Asia/Shanghai" },
+      data: { date: '2026-10-17', timezone_id: 'Asia/Shanghai' },
     });
 
-    const denied = fakePair("GET", "/api/v1/brief");
+    const denied = fakePair('GET', '/api/v1/brief');
     await handleRequest(denied.req, denied.res, {
       pool,
-      tzdbVersion: "fixture-v1",
+      tzdbVersion: 'fixture-v1',
       resolveActor: async () => null,
     });
     expect(denied.res.status).toBe(401);

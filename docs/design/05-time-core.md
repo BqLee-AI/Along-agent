@@ -100,9 +100,9 @@ normalize(wall_time, timezone_id, fold_choice, ruleset) -> Result
 
 ## 8. 错误码口径
 
-| 错误码 | HTTP | 对外话 |
-| --- | --- | --- |
-| NONEXISTENT_LOCAL_TIME | 422 | 当地并不存在，请重定 |
-| AMBIGUOUS_LOCAL_TIME（带两候选） | 422 | 出现了两次，请选第一次/第二次（含偏移） |
-| UNKNOWN_TIMEZONE | 422 | 请给规范时区或重选 |
-| TZDB_UNAVAILABLE | 503 | 时间规则不可用，暂不开张（readyz 同码） |
+| 错误码                           | HTTP | 对外话                                  |
+| -------------------------------- | ---- | --------------------------------------- |
+| NONEXISTENT_LOCAL_TIME           | 422  | 当地并不存在，请重定                    |
+| AMBIGUOUS_LOCAL_TIME（带两候选） | 422  | 出现了两次，请选第一次/第二次（含偏移） |
+| UNKNOWN_TIMEZONE                 | 422  | 请给规范时区或重选                      |
+| TZDB_UNAVAILABLE                 | 503  | 时间规则不可用，暂不开张（readyz 同码） |

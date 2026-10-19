@@ -1,7 +1,7 @@
 // GET /api/v1/brief (issue #10). Read-only, owner-scoped, no CSRF.
-import type { IncomingMessage, ServerResponse } from "node:http";
-import type { Pool } from "pg";
-import type { ActorResolver } from "../../http/auth.js";
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { Pool } from 'pg';
+import type { ActorResolver } from '../../http/auth.js';
 import {
   failEnvelope,
   HttpError,
@@ -9,8 +9,8 @@ import {
   requestIdOf,
   sendJson,
   unauthorized,
-} from "../../http/errors.js";
-import { getBrief } from "./service.js";
+} from '../../http/errors.js';
+import { getBrief } from './service.js';
 
 export interface BriefRouteDeps {
   pool: Pool | null;
@@ -25,7 +25,7 @@ export async function handleBriefRoute(
   url: URL,
   deps: BriefRouteDeps,
 ): Promise<boolean> {
-  if (url.pathname !== "/api/v1/brief" || req.method !== "GET") return false;
+  if (url.pathname !== '/api/v1/brief' || req.method !== 'GET') return false;
   const requestId = requestIdOf(req);
   const actor = await deps.resolveActor(req);
   if (!actor) {
@@ -48,7 +48,7 @@ export async function handleBriefRoute(
       requestId,
     );
     sendJson(res, 200, okEnvelope(brief, requestId), requestId, {
-      "cache-control": "no-store",
+      'cache-control': 'no-store',
     });
     return true;
   } catch (err) {
@@ -62,8 +62,8 @@ export async function handleBriefRoute(
       {
         code: 500,
         data: null,
-        msg: "internal error",
-        error: { code: "INTERNAL_ERROR", message: "internal error", request_id: requestId },
+        msg: 'internal error',
+        error: { code: 'INTERNAL_ERROR', message: 'internal error', request_id: requestId },
         request_id: requestId,
       },
       requestId,

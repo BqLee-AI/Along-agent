@@ -4,32 +4,30 @@
 // future so no sleep is needed: claim/send run after manually nudging
 // fire_at_utc into the past with a DB timestamp update (deterministic, no
 // sleep, no flakiness).
-import { beforeAll, afterAll, describe, expect, it } from "vitest";
-import { randomUUID } from "node:crypto";
-import type { Pool } from "pg";
-import { confirmApproval } from "../../src/modules/approvals/confirm.js";
-import { getApprovalDetail } from "../../src/modules/approvals/service.js";
-import { getTaskDetail } from "../../src/modules/tasks/service.js";
-import { runSchedulePhase } from "../../src/modules/tasks/scheduler/schedule.js";
-import { runClaimPhase } from "../../src/modules/tasks/scheduler/claim.js";
-import { runSendPhase } from "../../src/modules/tasks/scheduler/send.js";
-import { databaseUrl, requirePool, seedApproval } from "./setup.js";
+import { beforeAll, afterAll, describe, expect, it } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import type { Pool } from 'pg';
+import { confirmApproval } from '../../src/modules/approvals/confirm.js';
+import { getApprovalDetail } from '../../src/modules/approvals/service.js';
+import { getTaskDetail } from '../../src/modules/tasks/service.js';
+import { runSchedulePhase } from '../../src/modules/tasks/scheduler/schedule.js';
+import { runClaimPhase } from '../../src/modules/tasks/scheduler/claim.js';
+import { runSendPhase } from '../../src/modules/tasks/scheduler/send.js';
+import { databaseUrl, requirePool, seedApproval } from './setup.js';
 
 const maybe = databaseUrl ? describe : describe.skip;
 
-async function confirmTask(pool: Pool, ownerId?: string): Promise<{ taskId: string; ownerId: string }> {
+async function confirmTask(
+  pool: Pool,
+  ownerId?: string,
+): Promise<{ taskId: string; ownerId: string }> {
   const seed = await seedApproval(pool, ownerId ? { ownerId } : {});
   const { detail } = await getApprovalDetail({ pool }, seed.ownerId, seed.id);
-  const result = await confirmApproval(
-    { pool },
-    seed.ownerId,
-    seed.id,
-    {
-      presentation_hash: seed.presentationHash,
-      seen_content: detail.echo_text,
-      idempotency_key: randomUUID(),
-    },
-  );
+  const result = await confirmApproval({ pool }, seed.ownerId, seed.id, {
+    presentation_hash: seed.presentationHash,
+    seen_content: detail.echo_text,
+    idempotency_key: randomUUID(),
+  });
   return { taskId: result.task_id, ownerId: seed.ownerId };
 }
 
@@ -45,12 +43,12 @@ export async function driveClaimUntilLeased(
 ): Promise<void> {
   for (let i = 0; i < attempts; i += 1) {
     await runClaimPhase(pool, workerId);
-    const { rows } = await pool.query("SELECT lease_owner FROM task_leases WHERE task_id = $1", [
+    const { rows } = await pool.query('SELECT lease_owner FROM task_leases WHERE task_id = $1', [
       taskId,
     ]);
     if (rows[0]) return;
   }
-  const { rows } = await pool.query("SELECT lease_owner FROM task_leases WHERE task_id = $1", [
+  const { rows } = await pool.query('SELECT lease_owner FROM task_leases WHERE task_id = $1', [
     taskId,
   ]);
   expect(rows[0]).toBeTruthy();
@@ -65,10 +63,10 @@ export async function driveSendUntilFired(
   for (let i = 0; i < attempts; i += 1) {
     await runSendPhase(pool);
     const detail = await getTaskDetail({ pool }, ownerId, taskId);
-    if (detail.state === "fired") return;
+    if (detail.state === 'fired') return;
   }
   const detail = await getTaskDetail({ pool }, ownerId, taskId);
-  expect(detail.state).toBe("fired");
+  expect(detail.state).toBe('fired');
 }
 
 // Phase scans lock every due row in one tick transaction; parallel vitest
@@ -83,18 +81,18 @@ async function runScheduleUntil(
   for (let i = 0; i < attempts; i += 1) {
     await runSchedulePhase(pool);
     const detail = await getTaskDetail({ pool }, ownerId, taskId);
-    if (detail.state === "scheduled") return;
+    if (detail.state === 'scheduled') return;
     const { rows } = await pool.query(
       "SELECT status FROM outbox WHERE task_id = $1 AND command->>'kind' = 'schedule'",
       [taskId],
     );
     // superseded rows never become scheduled: surface immediately.
-    if (rows.some((r) => r.status === "superseded" || r.status === "failed_deadline")) return;
+    if (rows.some((r) => r.status === 'superseded' || r.status === 'failed_deadline')) return;
   }
   const detail = await getTaskDetail({ pool }, ownerId, taskId);
-  expect(detail.state).toBe("scheduled");
+  expect(detail.state).toBe('scheduled');
 }
-maybe("scheduler schedule/claim/send", () => {
+maybe('scheduler schedule/claim/send', () => {
   let pool: Pool;
   beforeAll(() => {
     pool = requirePool();
@@ -103,13 +101,13 @@ maybe("scheduler schedule/claim/send", () => {
     await pool.end();
   });
 
-  it("registers, claims and fires exactly one notice", async () => {
+  it('registers, claims and fires exactly one notice', async () => {
     const { taskId, ownerId } = await confirmTask(pool);
 
     // Schedule: outbox kind=schedule -> task scheduled + receipt + event.
     await runScheduleUntil(pool, taskId, ownerId);
     let detail = await getTaskDetail({ pool }, ownerId, taskId);
-    expect(detail.state).toBe("scheduled");
+    expect(detail.state).toBe('scheduled');
     expect(detail.schedule_receipt).toBe(`sched:${taskId}`);
 
     // Nudge fire_at into the past (deterministic; no sleep).
@@ -118,28 +116,28 @@ maybe("scheduler schedule/claim/send", () => {
     ]);
 
     // Claim: lease row appears with this worker as owner.
-    await driveClaimUntilLeased(pool, taskId, "worker-test-1");
+    await driveClaimUntilLeased(pool, taskId, 'worker-test-1');
     const { rows: leases } = await pool.query(
-      "SELECT lease_owner FROM task_leases WHERE task_id = $1",
+      'SELECT lease_owner FROM task_leases WHERE task_id = $1',
       [taskId],
     );
-    expect(leases[0]?.lease_owner).toBe("worker-test-1");
+    expect(leases[0]?.lease_owner).toBe('worker-test-1');
 
     // Send: gate passes, one notice, task fired + fired event.
     await driveSendUntilFired(pool, taskId, ownerId);
     detail = await getTaskDetail({ pool }, ownerId, taskId);
-    expect(detail.state).toBe("fired");
+    expect(detail.state).toBe('fired');
 
     const { rows: notices } = await pool.query(
-      "SELECT count(*) AS n FROM notifications WHERE task_id = $1",
+      'SELECT count(*) AS n FROM notifications WHERE task_id = $1',
       [taskId],
     );
     expect(Number(notices[0]?.n)).toBe(1);
     const { rows: events } = await pool.query(
-      "SELECT type FROM task_events WHERE task_id = $1 ORDER BY recorded_at_utc ASC",
+      'SELECT type FROM task_events WHERE task_id = $1 ORDER BY recorded_at_utc ASC',
       [taskId],
     );
-    expect(events.map((e) => e.type)).toEqual(["created", "scheduled", "fired"]);
+    expect(events.map((e) => e.type)).toEqual(['created', 'scheduled', 'fired']);
 
     // Resume (second send pass) does not double-fire: task-scoped check
     // (phase summaries are global; parallel files share one DB).
@@ -150,13 +148,13 @@ maybe("scheduler schedule/claim/send", () => {
     );
     expect(Number(firedAgain[0]?.n)).toBe(1);
     const { rows: notices2 } = await pool.query(
-      "SELECT count(*) AS n FROM notifications WHERE task_id = $1",
+      'SELECT count(*) AS n FROM notifications WHERE task_id = $1',
       [taskId],
     );
     expect(Number(notices2[0]?.n)).toBe(1);
   });
 
-  it("supersedes schedule rows whose version drifted", async () => {
+  it('supersedes schedule rows whose version drifted', async () => {
     const { taskId, ownerId } = await confirmTask(pool);
     // Drift the task version before the schedule phase runs.
     await pool.query(
@@ -172,15 +170,15 @@ maybe("scheduler schedule/claim/send", () => {
         "SELECT status FROM outbox WHERE task_id = $1 AND command->>'kind' = 'schedule'",
         [taskId],
       );
-      if (probe[0]?.status === "superseded" || probe[0]?.status === "failed_deadline") break;
+      if (probe[0]?.status === 'superseded' || probe[0]?.status === 'failed_deadline') break;
     }
     const { rows: outbox } = await pool.query(
       "SELECT status FROM outbox WHERE task_id = $1 AND command->>'kind' = 'schedule'",
       [taskId],
     );
-    expect(outbox[0]?.status).toBe("superseded");
+    expect(outbox[0]?.status).toBe('superseded');
     const detail = await getTaskDetail({ pool }, ownerId, taskId);
-    expect(detail.state).not.toBe("scheduled");
+    expect(detail.state).not.toBe('scheduled');
     void detail;
   });
 });

@@ -30,16 +30,16 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 
 ### 字段
 
-| 字段 | 类型 | 约束 | 说明 |
-| --- | --- | --- | --- |
-| `id` | `uuid` | primary key | 会话 ID |
-| `owner_id` | `uuid` | not null | 所属用户，查询必带 |
-| `title` | `text` | not null, default `''` | 会话题，可由首问生成；不影响语义 |
-| `status` | `text` | not null, default `'open'` | 按 `open/closed` 约束 |
-| `confirmed_timezone_id` | `text` | nullable | 本会话已确认时区；“明天”锚，未确认则 NULL |
-| `anchor_received_at_utc` | `timestamptz` | nullable | 服务端首次接收时刻（“明天”锚钟），冻结后不再重算 |
-| `created_at` | `timestamptz` | not null, default `now()` | 创建时间 |
-| `updated_at` | `timestamptz` | not null, default `now()` | 更新时间 |
+| 字段                     | 类型          | 约束                       | 说明                                             |
+| ------------------------ | ------------- | -------------------------- | ------------------------------------------------ |
+| `id`                     | `uuid`        | primary key                | 会话 ID                                          |
+| `owner_id`               | `uuid`        | not null                   | 所属用户，查询必带                               |
+| `title`                  | `text`        | not null, default `''`     | 会话题，可由首问生成；不影响语义                 |
+| `status`                 | `text`        | not null, default `'open'` | 按 `open/closed` 约束                            |
+| `confirmed_timezone_id`  | `text`        | nullable                   | 本会话已确认时区；“明天”锚，未确认则 NULL        |
+| `anchor_received_at_utc` | `timestamptz` | nullable                   | 服务端首次接收时刻（“明天”锚钟），冻结后不再重算 |
+| `created_at`             | `timestamptz` | not null, default `now()`  | 创建时间                                         |
+| `updated_at`             | `timestamptz` | not null, default `now()`  | 更新时间                                         |
 
 ### 约束与索引
 
@@ -59,15 +59,15 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 
 ### 字段
 
-| 字段 | 类型 | 约束 | 说明 |
-| --- | --- | --- | --- |
-| `id` | `uuid` | primary key | 消息 ID |
-| `owner_id` | `uuid` | not null | 所属用户，查询必带 |
-| `conversation_id` | `uuid` | not null, references `conversations(id)` on delete restrict | 所属会话 |
-| `role` | `text` | not null | 按 `user/assistant/system` 约束 |
-| `content` | `text` | not null | 消息正文（用户原话原样存；助手回复存最终合并文本） |
-| `request_id` | `text` | nullable | 全链路 `request_id`，幂等/排查用 |
-| `created_at` | `timestamptz` | not null, default `now()` | 创建时间 |
+| 字段              | 类型          | 约束                                                        | 说明                                               |
+| ----------------- | ------------- | ----------------------------------------------------------- | -------------------------------------------------- |
+| `id`              | `uuid`        | primary key                                                 | 消息 ID                                            |
+| `owner_id`        | `uuid`        | not null                                                    | 所属用户，查询必带                                 |
+| `conversation_id` | `uuid`        | not null, references `conversations(id)` on delete restrict | 所属会话                                           |
+| `role`            | `text`        | not null                                                    | 按 `user/assistant/system` 约束                    |
+| `content`         | `text`        | not null                                                    | 消息正文（用户原话原样存；助手回复存最终合并文本） |
+| `request_id`      | `text`        | nullable                                                    | 全链路 `request_id`，幂等/排查用                   |
+| `created_at`      | `timestamptz` | not null, default `now()`                                   | 创建时间                                           |
 
 ### 约束与索引
 
@@ -88,18 +88,18 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 
 ### 字段
 
-| 字段 | 类型 | 约束 | 说明 |
-| --- | --- | --- | --- |
-| `id` | `uuid` | primary key | run ID |
-| `owner_id` | `uuid` | not null | 所属用户，查询必带 |
-| `conversation_id` | `uuid` | not null, references `conversations(id)` on delete restrict | 所属会话 |
-| `agent_revision` | `text` | not null | 不可变 agent 版本号（逻辑引用 `agent_revisions.revision`） |
-| `mode` | `text` | not null | 按 `chat/task` 约束（v0 提醒路多为 `task`，纯问为 `chat`） |
-| `status` | `text` | not null, default `'running'` | 按 `running/suspended_approval/done/failed/cancelled` 约束 |
-| `budget_max_iterations` | `integer` | not null | 最大迭代（防死循环，v0 小值） |
-| `budget_max_tokens` | `integer` | not null | 最大 token（防烧钱） |
-| `created_at` | `timestamptz` | not null, default `now()` | 创建时间 |
-| `ended_at` | `timestamptz` | nullable | 结束时间 |
+| 字段                    | 类型          | 约束                                                        | 说明                                                       |
+| ----------------------- | ------------- | ----------------------------------------------------------- | ---------------------------------------------------------- |
+| `id`                    | `uuid`        | primary key                                                 | run ID                                                     |
+| `owner_id`              | `uuid`        | not null                                                    | 所属用户，查询必带                                         |
+| `conversation_id`       | `uuid`        | not null, references `conversations(id)` on delete restrict | 所属会话                                                   |
+| `agent_revision`        | `text`        | not null                                                    | 不可变 agent 版本号（逻辑引用 `agent_revisions.revision`） |
+| `mode`                  | `text`        | not null                                                    | 按 `chat/task` 约束（v0 提醒路多为 `task`，纯问为 `chat`） |
+| `status`                | `text`        | not null, default `'running'`                               | 按 `running/suspended_approval/done/failed/cancelled` 约束 |
+| `budget_max_iterations` | `integer`     | not null                                                    | 最大迭代（防死循环，v0 小值）                              |
+| `budget_max_tokens`     | `integer`     | not null                                                    | 最大 token（防烧钱）                                       |
+| `created_at`            | `timestamptz` | not null, default `now()`                                   | 创建时间                                                   |
+| `ended_at`              | `timestamptz` | nullable                                                    | 结束时间                                                   |
 
 ### 约束与索引
 
@@ -119,17 +119,17 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 
 ### 字段
 
-| 字段 | 类型 | 约束 | 说明 |
-| --- | --- | --- | --- |
-| `id` | `uuid` | primary key | attempt ID |
-| `owner_id` | `uuid` | not null | 所属用户，查询必带 |
-| `run_id` | `uuid` | not null, references `agent_runs(id)` on delete restrict | 所属 run |
-| `attempt_no` | `integer` | not null | 第几次尝试，从 1 递增 |
-| `lease_token` | `uuid` | nullable | fencing 租约令牌；Scheduler claim 持有者 |
-| `lease_expires_at` | `timestamptz` | nullable | 租约过期时间 |
-| `status` | `text` | not null, default `'running'` | 按 `running/done/failed/fenced_out` 约束 |
-| `created_at` | `timestamptz` | not null, default `now()` | 创建时间 |
-| `ended_at` | `timestamptz` | nullable | 结束时间 |
+| 字段               | 类型          | 约束                                                     | 说明                                     |
+| ------------------ | ------------- | -------------------------------------------------------- | ---------------------------------------- |
+| `id`               | `uuid`        | primary key                                              | attempt ID                               |
+| `owner_id`         | `uuid`        | not null                                                 | 所属用户，查询必带                       |
+| `run_id`           | `uuid`        | not null, references `agent_runs(id)` on delete restrict | 所属 run                                 |
+| `attempt_no`       | `integer`     | not null                                                 | 第几次尝试，从 1 递增                    |
+| `lease_token`      | `uuid`        | nullable                                                 | fencing 租约令牌；Scheduler claim 持有者 |
+| `lease_expires_at` | `timestamptz` | nullable                                                 | 租约过期时间                             |
+| `status`           | `text`        | not null, default `'running'`                            | 按 `running/done/failed/fenced_out` 约束 |
+| `created_at`       | `timestamptz` | not null, default `now()`                                | 创建时间                                 |
+| `ended_at`         | `timestamptz` | nullable                                                 | 结束时间                                 |
 
 ### 约束与索引
 
@@ -149,17 +149,17 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 
 ### 字段
 
-| 字段 | 类型 | 约束 | 说明 |
-| --- | --- | --- | --- |
-| `id` | `uuid` | primary key | checkpoint ID |
-| `owner_id` | `uuid` | not null | 所属用户，查询必带 |
-| `attempt_id` | `uuid` | not null, references `run_attempts(id)` on delete restrict | 所属 attempt |
-| `seq` | `bigint` | not null | attempt 内序号，从 1 递增 |
-| `event_seq` | `bigint` | not null, unique, default `nextval` | 全局跨会话流游标；`GET /conversations/{id}?after_seq=` 只做不透明比较 |
-| `kind` | `text` | not null | 按 `thinking/tool_call/tool_result/approval_required/answer/thread.started/message.delta/card.proposed/thread.completed/thread.failed/thread.cancelled` 约束（v1 冻结词集，见 `packages/stream-protocol`） |
-| `payload` | `jsonb` | not null, default `'{}'` | 结构化摘要（tool 名 + 参数摘要 + 结果摘要）；不存敏感原文 |
-| `stream_protocol_version` | `text` | not null | 投影协议版本（`packages/stream-protocol` 版本号），AG-UI 投影依据 |
-| `created_at` | `timestamptz` | not null, default `now()` | 创建时间 |
+| 字段                      | 类型          | 约束                                                       | 说明                                                                                                                                                                                                       |
+| ------------------------- | ------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                      | `uuid`        | primary key                                                | checkpoint ID                                                                                                                                                                                              |
+| `owner_id`                | `uuid`        | not null                                                   | 所属用户，查询必带                                                                                                                                                                                         |
+| `attempt_id`              | `uuid`        | not null, references `run_attempts(id)` on delete restrict | 所属 attempt                                                                                                                                                                                               |
+| `seq`                     | `bigint`      | not null                                                   | attempt 内序号，从 1 递增                                                                                                                                                                                  |
+| `event_seq`               | `bigint`      | not null, unique, default `nextval`                        | 全局跨会话流游标；`GET /conversations/{id}?after_seq=` 只做不透明比较                                                                                                                                      |
+| `kind`                    | `text`        | not null                                                   | 按 `thinking/tool_call/tool_result/approval_required/answer/thread.started/message.delta/card.proposed/thread.completed/thread.failed/thread.cancelled` 约束（v1 冻结词集，见 `packages/stream-protocol`） |
+| `payload`                 | `jsonb`       | not null, default `'{}'`                                   | 结构化摘要（tool 名 + 参数摘要 + 结果摘要）；不存敏感原文                                                                                                                                                  |
+| `stream_protocol_version` | `text`        | not null                                                   | 投影协议版本（`packages/stream-protocol` 版本号），AG-UI 投影依据                                                                                                                                          |
+| `created_at`              | `timestamptz` | not null, default `now()`                                  | 创建时间                                                                                                                                                                                                   |
 
 ### 约束与索引
 
@@ -180,16 +180,16 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 
 ### 字段
 
-| 字段 | 类型 | 约束 | 说明 |
-| --- | --- | --- | --- |
-| `owner_id` | `uuid` | not null, references `users(id)` | 所属用户 |
-| `idempotency_key` | `text` | not null | 客户端键；缺省回退 body `idempotency_key` 或 `request_id` |
-| `request_hash` | `text` | not null | 规范化请求体 SHA-256；同键不同体返回 `409 STATE_CONFLICT` |
-| `conversation_id` | `uuid` | not null, references `conversations(id)` | 命中的会话 |
-| `run_id` | `uuid` | not null, references `agent_runs(id)` | 命中的 run |
-| `user_message_id` | `uuid` | nullable, references `messages(id)` | 该次用户消息 |
-| `created_at` | `timestamptz` | not null, default `now()` | 创建时间 |
-| `expires_at` | `timestamptz` | not null | 24h 重放窗口 |
+| 字段              | 类型          | 约束                                     | 说明                                                      |
+| ----------------- | ------------- | ---------------------------------------- | --------------------------------------------------------- |
+| `owner_id`        | `uuid`        | not null, references `users(id)`         | 所属用户                                                  |
+| `idempotency_key` | `text`        | not null                                 | 客户端键；缺省回退 body `idempotency_key` 或 `request_id` |
+| `request_hash`    | `text`        | not null                                 | 规范化请求体 SHA-256；同键不同体返回 `409 STATE_CONFLICT` |
+| `conversation_id` | `uuid`        | not null, references `conversations(id)` | 命中的会话                                                |
+| `run_id`          | `uuid`        | not null, references `agent_runs(id)`    | 命中的 run                                                |
+| `user_message_id` | `uuid`        | nullable, references `messages(id)`      | 该次用户消息                                              |
+| `created_at`      | `timestamptz` | not null, default `now()`                | 创建时间                                                  |
+| `expires_at`      | `timestamptz` | not null                                 | 24h 重放窗口                                              |
 
 ### 约束与索引
 
@@ -209,18 +209,18 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 
 ### 字段
 
-| 字段 | 类型 | 约束 | 说明 |
-| --- | --- | --- | --- |
-| `id` | `uuid` | primary key | 行 ID |
-| `owner_id` | `uuid` | not null, references `users(id)` | 所属用户 |
-| `run_id` | `uuid` | not null, references `agent_runs(id)` | 所属 run |
-| `attempt_id` | `uuid` | nullable, references `run_attempts(id)` | 所属 attempt |
-| `tool_id` | `text` | not null | 工具名（含被拒的未知工具） |
-| `args_hash` | `text` | not null | 参数规范化 SHA-256；不存原文 |
-| `decision` | `text` | not null | `allow` / `deny` |
-| `approval_id` | `uuid` | nullable, references `approvals(id)` | 高风险工具产出的确认单 |
-| `error_code` | `text` | nullable | 拒绝/失败原因码 |
-| `created_at` | `timestamptz` | not null, default `now()` | 调用时间 |
+| 字段          | 类型          | 约束                                    | 说明                         |
+| ------------- | ------------- | --------------------------------------- | ---------------------------- |
+| `id`          | `uuid`        | primary key                             | 行 ID                        |
+| `owner_id`    | `uuid`        | not null, references `users(id)`        | 所属用户                     |
+| `run_id`      | `uuid`        | not null, references `agent_runs(id)`   | 所属 run                     |
+| `attempt_id`  | `uuid`        | nullable, references `run_attempts(id)` | 所属 attempt                 |
+| `tool_id`     | `text`        | not null                                | 工具名（含被拒的未知工具）   |
+| `args_hash`   | `text`        | not null                                | 参数规范化 SHA-256；不存原文 |
+| `decision`    | `text`        | not null                                | `allow` / `deny`             |
+| `approval_id` | `uuid`        | nullable, references `approvals(id)`    | 高风险工具产出的确认单       |
+| `error_code`  | `text`        | nullable                                | 拒绝/失败原因码              |
+| `created_at`  | `timestamptz` | not null, default `now()`               | 调用时间                     |
 
 ### 约束与索引
 
@@ -235,15 +235,15 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 
 ### 字段
 
-| 字段 | 类型 | 约束 | 说明 |
-| --- | --- | --- | --- |
-| `id` | `uuid` | primary key | 行 ID（内部） |
-| `owner_id` | `uuid` | nullable | NULL 表示全局共享 revision；非 NULL 为用户私有定制（v0 全 NULL，[Deferred] 私有化） |
-| `name` | `text` | not null | agent 名（v0 仅 `assistant`） |
-| `revision` | `text` | not null | 不可变版本号（如 `r1`），发布后冻结 |
-| `prompt_version` | `text` | not null | 关联的 prompt 版本（逻辑引用） |
-| `tools_allowlist` | `jsonb` | not null, default `'[]'` | 默认工具白名单 |
-| `created_at` | `timestamptz` | not null, default `now()` | 发布时间 |
+| 字段              | 类型          | 约束                      | 说明                                                                                |
+| ----------------- | ------------- | ------------------------- | ----------------------------------------------------------------------------------- |
+| `id`              | `uuid`        | primary key               | 行 ID（内部）                                                                       |
+| `owner_id`        | `uuid`        | nullable                  | NULL 表示全局共享 revision；非 NULL 为用户私有定制（v0 全 NULL，[Deferred] 私有化） |
+| `name`            | `text`        | not null                  | agent 名（v0 仅 `assistant`）                                                       |
+| `revision`        | `text`        | not null                  | 不可变版本号（如 `r1`），发布后冻结                                                 |
+| `prompt_version`  | `text`        | not null                  | 关联的 prompt 版本（逻辑引用）                                                      |
+| `tools_allowlist` | `jsonb`       | not null, default `'[]'`  | 默认工具白名单                                                                      |
+| `created_at`      | `timestamptz` | not null, default `now()` | 发布时间                                                                            |
 
 ### 约束与索引
 
@@ -258,13 +258,13 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 
 ### 字段
 
-| 字段 | 类型 | 约束 | 说明 |
-| --- | --- | --- | --- |
-| `id` | `uuid` | primary key | 行 ID（内部） |
-| `name` | `text` | not null | 模板名（如 `confirm_preview`） |
-| `version` | `text` | not null | 不可变版本号 |
-| `content_hash` | `text` | not null | 模板内容哈希（存哈希不存大文本正文的可选；[Proposed] 正文另存对象存储，DB 只留哈希） |
-| `created_at` | `timestamptz` | not null, default `now()` | 发布时间 |
+| 字段           | 类型          | 约束                      | 说明                                                                                 |
+| -------------- | ------------- | ------------------------- | ------------------------------------------------------------------------------------ |
+| `id`           | `uuid`        | primary key               | 行 ID（内部）                                                                        |
+| `name`         | `text`        | not null                  | 模板名（如 `confirm_preview`）                                                       |
+| `version`      | `text`        | not null                  | 不可变版本号                                                                         |
+| `content_hash` | `text`        | not null                  | 模板内容哈希（存哈希不存大文本正文的可选；[Proposed] 正文另存对象存储，DB 只留哈希） |
+| `created_at`   | `timestamptz` | not null, default `now()` | 发布时间                                                                             |
 
 ### 约束与索引
 

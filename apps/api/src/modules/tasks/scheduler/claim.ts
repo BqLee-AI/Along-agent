@@ -4,14 +4,11 @@
 // Fencing: only the lease owner whose expected_state_version matches may
 // fire. The send insert keys on send:<taskId>:<fireAtIso> with ON CONFLICT
 // DO NOTHING, so repeated claims never duplicate the send row.
-import { LEASE_TTL_MS, sendKeyFor } from "@along/scheduler-core";
-import { randomUUID } from "node:crypto";
-import type { Pool, PoolClient } from "pg";
-import { withTransaction } from "../../../db/transaction.js";
-import {
-  listClaimCandidates,
-  upsertTaskLease,
-} from "./scheduler-repository.js";
+import { LEASE_TTL_MS, sendKeyFor } from '@along/scheduler-core';
+import { randomUUID } from 'node:crypto';
+import type { Pool, PoolClient } from 'pg';
+import { withTransaction } from '../../../db/transaction.js';
+import { listClaimCandidates, upsertTaskLease } from './scheduler-repository.js';
 
 export const CLAIM_BATCH_LIMIT = 50;
 
@@ -69,7 +66,7 @@ async function enqueueSendRow(
       task.id,
       task.state_version,
       JSON.stringify({
-        kind: "send",
+        kind: 'send',
         task_id: task.id,
         fire_at_utc: task.fire_at_utc.toISOString(),
         expected_state_version: task.state_version,

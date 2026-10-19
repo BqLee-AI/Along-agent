@@ -27,22 +27,22 @@
 
 ### 1.1 取（7 不变量，原样迁云端）
 
-| # | B06 不变量 | 云端落点 |
-| --- | --- | --- |
-| 1 | 没点头不进钟 | approval pending 前 task 不存在；confirm 单事务建 task |
-| 2 | 没把握就说没把握 | time-core 归一失败只回澄清，不建 approval |
-| 3 | 对不上就停 | presentation_hash 对不上 → PRESENTATION_MISMATCH，不建 task |
-| 4 | 只追加不涂改 | task_events 只追加；改时间走新 task（recreated_from） |
-| 5 | 能量什么说什么 | Notifier 只认回执；无回执只说“已记录”，不说“已送达用户” |
-| 6 | 确认绑定整句或按钮，“好/嗯”不算 | 见 06；v0 不做语义放宽 |
-| 7 | 取消优先，取消后触发数 = 0 | cancel 置 cancel_pending→cancelled；触发门禁先查取消态 |
+| #   | B06 不变量                      | 云端落点                                                    |
+| --- | ------------------------------- | ----------------------------------------------------------- |
+| 1   | 没点头不进钟                    | approval pending 前 task 不存在；confirm 单事务建 task      |
+| 2   | 没把握就说没把握                | time-core 归一失败只回澄清，不建 approval                   |
+| 3   | 对不上就停                      | presentation_hash 对不上 → PRESENTATION_MISMATCH，不建 task |
+| 4   | 只追加不涂改                    | task_events 只追加；改时间走新 task（recreated_from）       |
+| 5   | 能量什么说什么                  | Notifier 只认回执；无回执只说“已记录”，不说“已送达用户”     |
+| 6   | 确认绑定整句或按钮，“好/嗯”不算 | 见 06；v0 不做语义放宽                                      |
+| 7   | 取消优先，取消后触发数 = 0      | cancel 置 cancel_pending→cancelled；触发门禁先查取消态      |
 
 ### 1.2 舍（2 本机假设，明确不迁）
 
-| B06 本机假设 | v0 云端做法 |
-| --- | --- |
-| SQLite 本机库 + 本机 outbox 扫表 | [Required] Postgres 唯一事实源；outbox 为领域事件表，由 worker 角色认领（见 08）；Redis 延后，不引入 |
-| 归一住仓颉服务端、TS 只摆 | [Required] time-core 放 TS 服务端纯函数（见 05）；CangjieMagic 仅作 AgentRuntime 第二实现，v0–P3 不用，不做时间归一（见 04） |
+| B06 本机假设                     | v0 云端做法                                                                                                                  |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| SQLite 本机库 + 本机 outbox 扫表 | [Required] Postgres 唯一事实源；outbox 为领域事件表，由 worker 角色认领（见 08）；Redis 延后，不引入                         |
+| 归一住仓颉服务端、TS 只摆        | [Required] time-core 放 TS 服务端纯函数（见 05）；CangjieMagic 仅作 AgentRuntime 第二实现，v0–P3 不用，不做时间归一（见 04） |
 
 ### 1.3 起步值声明
 
@@ -65,35 +65,35 @@
 
 ### 各步持久化与失败分支
 
-| 步骤 | 写什么 | 失败分支 |
-| --- | --- | --- |
-| 1 brief | [Observed] 不写业务对象；读 task/approval 投影即可 | 读失败 → 空简报 + 可重试，不捏造卡片 |
-| 2 messages SSE | [Required] 写 conversation message（用户句 + 助手句）；run 挂 checkpoint（agent_runs/run_attempts/run_checkpoints，见 04） | LLM 超时/预算超 → BUDGET_EXCEEDED 进可重试，不建 approval |
-| 3 normalize | [Required] 不写业务对象；只记 run_checkpoint（含 ruleset_id、tzdb_version） | 错误码见 §4，直接回澄清 |
-| 4a 建 approval | [Required] 写 approval(pending) + 快照冻结 | 写失败 → 回“没记上，请重发”，不给确认卡 |
-| 5 confirm | [Required] 见 §6 单事务 | APPROVAL_EXPIRED(410) / APPROVAL_SUPERSEDED / PRESENTATION_MISMATCH → 停，不建 task |
-| 7 登记 | [Required] schedule_receipt 回填 task；事件 scheduled | 无回执 → 停 pending_schedule，不标 scheduled |
-| 8 触发 | [Required] fired/missed 事件；Notifier 回执号 | ACK_UNKNOWN 只核对不重发（见 08） |
-| 取消 | [Required] cancel_pending→cancelled；cancel_requested 事件 | 无撤销回执 → 停 cancel_pending，不谎称已取消 |
+| 步骤           | 写什么                                                                                                                     | 失败分支                                                                            |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| 1 brief        | [Observed] 不写业务对象；读 task/approval 投影即可                                                                         | 读失败 → 空简报 + 可重试，不捏造卡片                                                |
+| 2 messages SSE | [Required] 写 conversation message（用户句 + 助手句）；run 挂 checkpoint（agent_runs/run_attempts/run_checkpoints，见 04） | LLM 超时/预算超 → BUDGET_EXCEEDED 进可重试，不建 approval                           |
+| 3 normalize    | [Required] 不写业务对象；只记 run_checkpoint（含 ruleset_id、tzdb_version）                                                | 错误码见 §4，直接回澄清                                                             |
+| 4a 建 approval | [Required] 写 approval(pending) + 快照冻结                                                                                 | 写失败 → 回“没记上，请重发”，不给确认卡                                             |
+| 5 confirm      | [Required] 见 §6 单事务                                                                                                    | APPROVAL_EXPIRED(410) / APPROVAL_SUPERSEDED / PRESENTATION_MISMATCH → 停，不建 task |
+| 7 登记         | [Required] schedule_receipt 回填 task；事件 scheduled                                                                      | 无回执 → 停 pending_schedule，不标 scheduled                                        |
+| 8 触发         | [Required] fired/missed 事件；Notifier 回执号                                                                              | ACK_UNKNOWN 只核对不重发（见 08）                                                   |
+| 取消           | [Required] cancel_pending→cancelled；cancel_requested 事件                                                                 | 无撤销回执 → 停 cancel_pending，不谎称已取消                                        |
 
 ## 3. v0 端点清单（约 12 + 2 探针，不新增）
 
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| GET | `/me` | 当前用户快照（鉴权 Deferred，字段不展开） |
-| GET | `/brief` | 今日简报 + 卡片（只读聚合） |
-| POST | `/conversations/messages` | 发送消息，SSE 回流（思考/澄清/确认卡引用，不直返 task） |
-| GET | `/conversations/{id}` | 会话详情（含消息 + 关联 approval/task id 引用） |
-| GET | `/approvals` | 待确认队列 |
-| GET | `/approvals/{id}` | 确认单详情 + 快照 |
-| POST | `/approvals/{id}/actions/confirm` | 确认（单事务建 task），见 06 |
-| POST | `/approvals/{id}/actions/reject` | 拒绝（pending→rejected） |
-| GET | `/tasks` | 任务列表 |
-| GET | `/tasks/{id}` | 任务详情 |
-| POST | `/tasks/{id}/actions/cancel` | 取消（cancel_pending→cancelled） |
-| GET | `/tasks/{id}/events` | 只追加事件账只读（见 07） |
-| GET | `/healthz` | 存活探针，不依赖 DB |
-| GET | `/readyz` | 就绪探针；类型化错误，不降级（见 05 tzdb 门） |
+| 方法 | 路径                              | 说明                                                    |
+| ---- | --------------------------------- | ------------------------------------------------------- |
+| GET  | `/me`                             | 当前用户快照（鉴权 Deferred，字段不展开）               |
+| GET  | `/brief`                          | 今日简报 + 卡片（只读聚合）                             |
+| POST | `/conversations/messages`         | 发送消息，SSE 回流（思考/澄清/确认卡引用，不直返 task） |
+| GET  | `/conversations/{id}`             | 会话详情（含消息 + 关联 approval/task id 引用）         |
+| GET  | `/approvals`                      | 待确认队列                                              |
+| GET  | `/approvals/{id}`                 | 确认单详情 + 快照                                       |
+| POST | `/approvals/{id}/actions/confirm` | 确认（单事务建 task），见 06                            |
+| POST | `/approvals/{id}/actions/reject`  | 拒绝（pending→rejected）                                |
+| GET  | `/tasks`                          | 任务列表                                                |
+| GET  | `/tasks/{id}`                     | 任务详情                                                |
+| POST | `/tasks/{id}/actions/cancel`      | 取消（cancel_pending→cancelled）                        |
+| GET  | `/tasks/{id}/events`              | 只追加事件账只读（见 07）                               |
+| GET  | `/healthz`                        | 存活探针，不依赖 DB                                     |
+| GET  | `/readyz`                         | 就绪探针；类型化错误，不降级（见 05 tzdb 门）           |
 
 - [Required] v0 不新增以上之外的端点；WS + ws-ticket 自 P2 起，Web Push 仅兜底，均不在 v0。
 - [Required] 全链路 `request_id` + 幂等键；POST confirm/cancel 连点只回同一结果。
@@ -151,16 +151,16 @@ pending -> superseded（被新确认单替代）
 
 ## 7. 错误码（v0 全集，本篇只列，细则各归属篇）
 
-| 错误码 | HTTP | 归属 |
-| --- | --- | --- |
-| PRESENTATION_MISMATCH | 409 | 06 |
-| APPROVAL_EXPIRED | 410 | 06 |
-| APPROVAL_SUPERSEDED | 409 | 06 |
-| NONEXISTENT_LOCAL_TIME | 422 | 05 |
-| AMBIGUOUS_LOCAL_TIME（带两候选） | 422 | 05 |
-| TZDB_UNAVAILABLE | 503 | 05 |
-| UNKNOWN_TIMEZONE | 422 | 05 |
-| BUDGET_EXCEEDED | 429 | 04 |
+| 错误码                           | HTTP | 归属 |
+| -------------------------------- | ---- | ---- |
+| PRESENTATION_MISMATCH            | 409  | 06   |
+| APPROVAL_EXPIRED                 | 410  | 06   |
+| APPROVAL_SUPERSEDED              | 409  | 06   |
+| NONEXISTENT_LOCAL_TIME           | 422  | 05   |
+| AMBIGUOUS_LOCAL_TIME（带两候选） | 422  | 05   |
+| TZDB_UNAVAILABLE                 | 503  | 05   |
+| UNKNOWN_TIMEZONE                 | 422  | 05   |
+| BUDGET_EXCEEDED                  | 429  | 04   |
 
 ## 8. 反事实检查（v0 开工前自问）
 

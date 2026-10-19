@@ -39,17 +39,17 @@ AgentRuntime.cancel({ run_id, reason, request_id }) → { run_id, state: cancell
 
 `packages/stream-protocol` 版本化（`protocol_version` 如 `v1`），事件名开工前对照 `thread-stream.schema.json`（AG-UI 投影，Observed AF§7；对照前标记为 Proposed 待确认）。
 
-| 事件 | payload 要点 | 说明 |
-| --- | --- | --- |
-| `thinking` | `{ text_summary }` | 思考摘要（非完整推理链；完整链不入库） |
-| `tool_call` | `{ tool, args_redacted, invocation_id }` | 参数经 allowlist+zod；敏感值只存引用/脱敏 |
-| `tool_result` | `{ invocation_id, ok, summary, evidence_ref? }` | 结果摘要；大对象存引用 |
-| `approval_required` | `{ approval_id, tool, reason }` | 挂起点；BFF 存审批单 |
-| `approval_resolved` | `{ approval_id, decision }` | 恢复或终止依据 |
-| `checkpoint` | `{ checkpoint_id, step_no, state_digest }` | 每次 tool 调用后发一次（P1 落库） |
-| `answer` | `{ delta/text }` | 最终回复增量/全文 |
-| `run_failed` | `{ reason, detail_ref }` | `BUDGET_EXCEEDED/TIMEOUT/TOOL_DENIED/APPROVAL_REJECTED` |
-| `done` | `{ iterations, tokens, usage_ref }` | 计费输入（usage 记录查询侧消费） |
+| 事件                | payload 要点                                    | 说明                                                    |
+| ------------------- | ----------------------------------------------- | ------------------------------------------------------- |
+| `thinking`          | `{ text_summary }`                              | 思考摘要（非完整推理链；完整链不入库）                  |
+| `tool_call`         | `{ tool, args_redacted, invocation_id }`        | 参数经 allowlist+zod；敏感值只存引用/脱敏               |
+| `tool_result`       | `{ invocation_id, ok, summary, evidence_ref? }` | 结果摘要；大对象存引用                                  |
+| `approval_required` | `{ approval_id, tool, reason }`                 | 挂起点；BFF 存审批单                                    |
+| `approval_resolved` | `{ approval_id, decision }`                     | 恢复或终止依据                                          |
+| `checkpoint`        | `{ checkpoint_id, step_no, state_digest }`      | 每次 tool 调用后发一次（P1 落库）                       |
+| `answer`            | `{ delta/text }`                                | 最终回复增量/全文                                       |
+| `run_failed`        | `{ reason, detail_ref }`                        | `BUDGET_EXCEEDED/TIMEOUT/TOOL_DENIED/APPROVAL_REJECTED` |
+| `done`              | `{ iterations, tokens, usage_ref }`             | 计费输入（usage 记录查询侧消费）                        |
 
 ## 4. run / attempt 状态图（Required）
 

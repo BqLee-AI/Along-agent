@@ -1,8 +1,8 @@
-import Link from "next/link";
-import { apiGet } from "../../lib/api";
-import type { TaskEventItem, TaskListItem } from "../../lib/types";
+import Link from 'next/link';
+import { apiGet } from '../../lib/api';
+import type { TaskEventItem, TaskListItem } from '../../lib/types';
 
-export const dynamic = "force-dynamic";
+export const dynamic = 'force-dynamic';
 
 interface TaskPage {
   items: TaskListItem[];
@@ -20,7 +20,7 @@ interface Row extends TaskEventItem {
 }
 
 export default async function ActivityPage() {
-  const tasksResult = await apiGet<TaskPage>("/api/v1/tasks?status=all&limit=50");
+  const tasksResult = await apiGet<TaskPage>('/api/v1/tasks?status=all&limit=50');
   if (!tasksResult.ok) {
     return (
       <section>
@@ -70,7 +70,7 @@ export default async function ActivityPage() {
                   <span className="badge">{row.taskState}</span>
                 </td>
                 <td>{row.recorded_at_utc}</td>
-                <td>{row.evidence_ref || "服务端记录"}</td>
+                <td>{row.evidence_ref || '服务端记录'}</td>
               </tr>
             ))}
           </tbody>

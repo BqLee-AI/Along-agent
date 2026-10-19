@@ -1,5 +1,5 @@
 // Notifications repository: read-only lookups for the worker send path.
-import type { PoolClient } from "pg";
+import type { PoolClient } from 'pg';
 
 export interface NoticeLookup {
   id: string;

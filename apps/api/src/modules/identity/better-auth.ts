@@ -1,7 +1,7 @@
-import { betterAuth, type Auth } from "better-auth";
-import { createAdapterFactory } from "better-auth/adapters";
-import type { Pool } from "pg";
-import { createPgAdapter } from "./pg-adapter.js";
+import { betterAuth, type Auth } from 'better-auth';
+import { createAdapterFactory } from 'better-auth/adapters';
+import type { Pool } from 'pg';
+import { createPgAdapter } from './pg-adapter.js';
 // - Field maps: email->auth_email (opaque HMAC handle), name->display_name,
 //   token->token_hash (hashed at rest by pg-adapter), password->password_hash.
 // - Session 7d fixed expiry; no refresh forwarding; no sign-up/sign-in HTTP
@@ -19,8 +19,8 @@ export function createAuth(pool: Pool | null) {
   const pgAdapter = createPgAdapter({ pool });
   const factory = createAdapterFactory({
     config: {
-      adapterId: "along-pg",
-      adapterName: "Along PG Adapter",
+      adapterId: 'along-pg',
+      adapterName: 'Along PG Adapter',
       usePlural: false,
       supportsBooleans: true,
       supportsDates: true,
@@ -32,7 +32,7 @@ export function createAuth(pool: Pool | null) {
   });
   return betterAuth({
     secret,
-    baseURL: process.env.APP_ORIGIN ?? "http://localhost:3000",
+    baseURL: process.env.APP_ORIGIN ?? 'http://localhost:3000',
     trustedOrigins: process.env.APP_ORIGIN ? [process.env.APP_ORIGIN] : [],
     database: factory,
     emailAndPassword: {
@@ -43,46 +43,46 @@ export function createAuth(pool: Pool | null) {
     session: {
       expiresIn: 60 * 60 * 24 * 7,
       updateAge: 60 * 60 * 24 * 7,
-      modelName: "sessions",
+      modelName: 'sessions',
       fields: {
-        userId: "user_id",
-        token: "token_hash",
-        expiresAt: "expires_at",
-        createdAt: "created_at",
-        updatedAt: "last_seen_at",
+        userId: 'user_id',
+        token: 'token_hash',
+        expiresAt: 'expires_at',
+        createdAt: 'created_at',
+        updatedAt: 'last_seen_at',
       },
       additionalFields: {
-        revoked_at: { type: "date", required: false },
-        client_info: { type: "json", required: false },
+        revoked_at: { type: 'date', required: false },
+        client_info: { type: 'json', required: false },
       },
     },
     user: {
-      modelName: "users",
+      modelName: 'users',
       fields: {
-        email: "auth_email",
-        name: "display_name",
-        emailVerified: "email_verified",
-        createdAt: "created_at",
-        updatedAt: "updated_at",
+        email: 'auth_email',
+        name: 'display_name',
+        emailVerified: 'email_verified',
+        createdAt: 'created_at',
+        updatedAt: 'updated_at',
       },
       additionalFields: {
-        auth_subject: { type: "string", required: false },
-        auth_provider: { type: "string", required: false },
-        primary_email_hash: { type: "string", required: false },
-        timezone_id: { type: "string", required: false },
-        status: { type: "string", required: false },
-        metadata: { type: "json", required: false },
+        auth_subject: { type: 'string', required: false },
+        auth_provider: { type: 'string', required: false },
+        primary_email_hash: { type: 'string', required: false },
+        timezone_id: { type: 'string', required: false },
+        status: { type: 'string', required: false },
+        metadata: { type: 'json', required: false },
       },
     },
     account: {
-      modelName: "auth_accounts",
+      modelName: 'auth_accounts',
       fields: {
-        userId: "user_id",
-        providerId: "provider_id",
-        accountId: "account_id",
+        userId: 'user_id',
+        providerId: 'provider_id',
+        accountId: 'account_id',
       },
       additionalFields: {
-        password_hash: { type: "string", required: false },
+        password_hash: { type: 'string', required: false },
       },
     },
   });

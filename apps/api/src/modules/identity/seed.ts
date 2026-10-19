@@ -1,12 +1,12 @@
-import { randomUUID } from "node:crypto";
-import type { Pool } from "pg";
+import { randomUUID } from 'node:crypto';
+import type { Pool } from 'pg';
 import {
   deriveAuthEmail,
   deriveCsrfToken,
   hashSessionToken,
   newSessionToken,
   signSessionCookieValue,
-} from "./crypto.js";
+} from './crypto.js';
 
 // Server-side session seeder (issue #27): v0 exposes no sign-up/sign-in
 // HTTP endpoints, so local dev/integration tests mint sessions directly.
@@ -27,17 +27,20 @@ export interface SeededSession {
   sessionId: string;
 }
 
-export async function seedSession(pool: Pool, opts: SeedSessionOptions = {}): Promise<SeededSession> {
+export async function seedSession(
+  pool: Pool,
+  opts: SeedSessionOptions = {},
+): Promise<SeededSession> {
   const token = newSessionToken();
   const identifier = `seed:${randomUUID()}`;
   const authEmail = deriveAuthEmail(identifier);
   const { rows: users } = await pool.query<{ id: string }>(
     `INSERT INTO users (display_name, auth_email, timezone_id)
      VALUES ($1, $2, $3) RETURNING id`,
-    [opts.displayName ?? "Seed User", authEmail, opts.timezoneId ?? "Asia/Shanghai"],
+    [opts.displayName ?? 'Seed User', authEmail, opts.timezoneId ?? 'Asia/Shanghai'],
   );
   const userId = users[0]?.id;
-  if (!userId) throw new Error("seed-session: user insert returned no id");
+  if (!userId) throw new Error('seed-session: user insert returned no id');
   await pool.query(
     `INSERT INTO auth_accounts (user_id, provider_id, account_id)
      VALUES ($1, 'credential', $2)`,
@@ -54,6 +57,11 @@ export async function seedSession(pool: Pool, opts: SeedSessionOptions = {}): Pr
     [userId, hashSessionToken(token), String(days)],
   );
   const sessionId = sessions[0]?.id;
-  if (!sessionId) throw new Error("seed-session: session insert returned no id");
-  return { userId, token: signSessionCookieValue(token), csrfToken: deriveCsrfToken(sessionId), sessionId };
+  if (!sessionId) throw new Error('seed-session: session insert returned no id');
+  return {
+    userId,
+    token: signSessionCookieValue(token),
+    csrfToken: deriveCsrfToken(sessionId),
+    sessionId,
+  };
 }

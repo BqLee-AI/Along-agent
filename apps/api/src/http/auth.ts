@@ -1,11 +1,11 @@
-import type { IncomingMessage } from "node:http";
-import type { Pool } from "pg";
+import type { IncomingMessage } from 'node:http';
+import type { Pool } from 'pg';
 import {
   deriveCsrfToken,
   hashSessionToken,
   verifyCsrfToken,
   verifySignedCookieValue,
-} from "../modules/identity/crypto.js";
+} from '../modules/identity/crypto.js';
 
 // Actor resolution for HTTP routes (issue #27). Production posture is
 // deny-by-default: the resolver returns null (-> 401 UNAUTHENTICATED) unless
@@ -26,13 +26,13 @@ export interface ResolverDeps {
   pool: Pool | null;
 }
 
-const SESSION_COOKIES = ["better-auth.session_token", "__Secure-better-auth.session_token"];
+const SESSION_COOKIES = ['better-auth.session_token', '__Secure-better-auth.session_token'];
 
 function cookieOf(req: IncomingMessage, name: string): string | null {
   const raw = req.headers.cookie;
   if (!raw) return null;
-  for (const part of raw.split(";")) {
-    const idx = part.indexOf("=");
+  for (const part of raw.split(';')) {
+    const idx = part.indexOf('=');
     if (idx < 0) continue;
     if (part.slice(0, idx).trim() === name) {
       // Malformed percent-escapes (URIError) mean unauthenticated, not 500.
@@ -86,20 +86,20 @@ async function resolveSession(pool: Pool, signed: string): Promise<SessionRow | 
 }
 
 export function createActorResolver(deps: ResolverDeps = { pool: null }): ActorResolver {
-  const allowDevAuth = process.env.ALLOW_DEV_AUTH === "1";
+  const allowDevAuth = process.env.ALLOW_DEV_AUTH === '1';
   const devOwnerId = process.env.DEV_OWNER_ID;
   return async (req: IncomingMessage) => {
     if (allowDevAuth && devOwnerId) {
       // Local dev bridge: still read the seeded user's display name/timezone so
       // brief/agent routes exercise the same timezone semantics as production.
-      let displayName = "";
+      let displayName = '';
       let timezoneId: string | null = null;
       if (deps.pool) {
         const { rows } = await deps.pool.query<{
           display_name: string;
           timezone_id: string | null;
-        }>("SELECT display_name, timezone_id FROM users WHERE id = $1", [devOwnerId]);
-        displayName = rows[0]?.display_name ?? "";
+        }>('SELECT display_name, timezone_id FROM users WHERE id = $1', [devOwnerId]);
+        displayName = rows[0]?.display_name ?? '';
         timezoneId = rows[0]?.timezone_id ?? null;
       }
       return { ownerId: devOwnerId, sessionId: null, displayName, timezoneId };
@@ -129,9 +129,9 @@ export function createActorResolver(deps: ResolverDeps = { pool: null }): ActorR
 // session id. Dev-bridge actors carry no session, so the guard passes them
 // (local-only path; production always has a session).
 export function verifyCsrf(req: IncomingMessage, actor: Actor): boolean {
-  if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") return true;
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return true;
   if (!actor.sessionId) return true;
-  const presented = req.headers["x-csrf-token"];
+  const presented = req.headers['x-csrf-token'];
   const token = Array.isArray(presented) ? presented[0] : presented;
   if (!token) return false;
   try {

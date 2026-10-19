@@ -93,8 +93,8 @@ presentation 输入
 
 ## 8. 错误码
 
-| 错误码 | HTTP | 含义 |
-| --- | --- | --- |
-| PRESENTATION_MISMATCH | 409 | 摆与存对不上，停 |
-| APPROVAL_EXPIRED | 410 | 超 24h 或目标已过 |
-| APPROVAL_SUPERSEDED | 409 | 已被新确认单替代 |
+| 错误码                | HTTP | 含义              |
+| --------------------- | ---- | ----------------- |
+| PRESENTATION_MISMATCH | 409  | 摆与存对不上，停  |
+| APPROVAL_EXPIRED      | 410  | 超 24h 或目标已过 |
+| APPROVAL_SUPERSEDED   | 409  | 已被新确认单替代  |
