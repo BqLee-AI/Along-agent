@@ -7,7 +7,7 @@
 
 - Node.js `>= 22`，pnpm `>= 10`（仓库当前 `packageManager: pnpm@11.25.0`，见 `package.json`）。
 - Monorepo 编排：Turbo（当前 `turbo@2.11.9`），命令全部经由根 `package.json` 的 scripts 调用。
-- 安装依赖：`pnpm install`（只需要执行一次，锁文件变更后重跑）。
+- 安装依赖：`pnpm install`（只需要执行一次，锁文件变更后重跑）；随后必须先跑 `pnpm build` 构建各 workspace 的 `dist/`（`apps/api` 经 tsx 直载 `@along/*` 的 `dist` 产物，无 `dist` 则 `pnpm dev` 起不来）。
 
 真实可用命令（以 `package.json` 为准，禁止自创）：
 

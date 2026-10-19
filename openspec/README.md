@@ -10,4 +10,4 @@
 
 ## 流程
 
-issue（中文 task 模板）→ 需要行为契约则建 change → `docs/<N>-spec-<slug>` 分支开 OpenSpec-only PR（标题 `docs(<area>): 中文摘要 (#N)`，正文 Refs #N + proposal 与 design 路径，CI 跑 `openspec validate <name> --strict`）→ 实现分支 `<type>/<N>-<slug>` 按 `tasks.md` 推进 → 收口 PR 写 `Closes #N` 并 `openspec archive <name>`（改了 design 则同步 prd 与 `docs/README.md`）。
+issue（中文 task 模板）→ 需要行为契约则建 change → `docs/<N>-spec-<slug>` 分支开 OpenSpec-only PR（标题与提交统一英文 `docs(<area>): description (#N)`，正文 Refs #N + proposal 与 design 路径，CI 跑 `openspec validate <name> --strict`）→ 实现分支 `<type>/<N>-<slug>` 按 `tasks.md` 推进 → 收口 PR 写 `Closes #N` 并 `openspec archive <name>`（改了 design 则同步 prd 与 `docs/README.md`）。
