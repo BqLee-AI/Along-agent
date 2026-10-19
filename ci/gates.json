@@ -4,34 +4,77 @@
     "D1": {
       "status": "enforced",
       "scope": "time-core zero outgoing deps; reverse-clock fixture; /readyz TZDB_UNAVAILABLE without TZDB_VERSION",
-      "owner": "#3"
+      "owner": "#3",
+      "enforced_by": { "job": "depcruise", "evidence": [".dependency-cruiser.cjs"] }
     },
     "D2": {
       "status": "enforced",
       "scope": "apps/web display layer: only frozen fields (fire_at_local/echo_text); no new Date/Date.now (ESLint) and fire_at_utc mutation leaves rendered output unchanged (apps/web/test/presentation.test.ts)",
-      "owner": "#10"
+      "owner": "#10",
+      "enforced_by": {
+        "job": "lint",
+        "evidence": ["eslint.config.mjs", "apps/web/test/presentation.test.ts"]
+      }
     },
     "D3": {
       "status": "enforced",
       "scope": "UNIQUE(id, fire_at_utc) on tasks (Contract UNIQUE(task_id, fire_at) mapping); pg_constraint definition assertion + two-session concurrent dual-write 23505 (scripts/db/d3-concurrent.test.sh)",
-      "owner": "#7"
+      "owner": "#7",
+      "enforced_by": {
+        "job": "migration-scan",
+        "evidence": [
+          "scripts/check-migrations.mjs",
+          "scripts/db/verify-constraints.sql",
+          "scripts/db/d3-d5.test.sql",
+          "scripts/db/d3-concurrent.test.sh"
+        ]
+      }
     },
     "D4": {
       "status": "enforced",
       "scope": "UNIQUE(recreated_from_task_id) on tasks (one successor per old task); second-successor dual-write 23505",
-      "owner": "#7"
+      "owner": "#7",
+      "enforced_by": {
+        "job": "migration-scan",
+        "evidence": [
+          "scripts/check-migrations.mjs",
+          "scripts/db/verify-constraints.sql",
+          "scripts/db/d3-d5.test.sql"
+        ]
+      }
     },
     "D5": {
       "status": "enforced",
       "scope": "task_events append-only: BEFORE UPDATE OR DELETE trigger rejects; seven-word closed type set",
-      "owner": "#7"
+      "owner": "#7",
+      "enforced_by": {
+        "job": "migration-scan",
+        "evidence": [
+          "scripts/check-migrations.mjs",
+          "scripts/db/verify-constraints.sql",
+          "scripts/db/d3-d5.test.sql"
+        ]
+      }
     },
     "D6": {
       "status": "enforced",
       "scope": "agent_revisions/prompt_versions immutability + run_checkpoints append-only; BEFORE UPDATE OR DELETE triggers reject with P0001; tool_calls audit table owned by ToolGateway (#9) must reuse the same trigger when it lands",
-      "owner": "#7"
+      "owner": "#7",
+      "enforced_by": {
+        "job": "migration-scan",
+        "evidence": [
+          "scripts/check-migrations.mjs",
+          "scripts/db/verify-constraints.sql",
+          "scripts/db/verify-agent-support.sql",
+          "scripts/db/agent-support.test.sql"
+        ]
+      }
     },
-    "D7": { "status": "enforced", "scope": "compose smoke on fresh volume" },
+    "D7": {
+      "status": "enforced",
+      "scope": "compose smoke on fresh volume",
+      "enforced_by": { "job": "compose-smoke", "evidence": ["scripts/compose-smoke.sh"] }
+    },
     "D8": {
       "status": "partial",
       "scope": "minimal contract dual-run: same healthz suite in-process and over HTTP"
@@ -39,8 +82,16 @@
     "D9": {
       "status": "enforced",
       "scope": "scheduler fault injection: cancel-after-commit firing-window trigger count = 0 + security_events cancel_breach ledger (apps/api/test/integration/scheduler-fault.test.ts)",
-      "owner": "#8"
+      "owner": "#8",
+      "enforced_by": {
+        "job": "scheduler-fault",
+        "evidence": ["apps/api/test/integration/scheduler-fault.test.ts"]
+      }
     },
-    "D10": { "status": "enforced", "scope": "copy-claim scan gate" }
+    "D10": {
+      "status": "enforced",
+      "scope": "copy-claim scan gate",
+      "enforced_by": { "job": "gate-manifest", "evidence": ["scripts/scan-copy-claims.mjs"] }
+    }
   }
 }

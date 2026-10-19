@@ -25,6 +25,7 @@ const STEPS = [
   { name: 'typecheck', run: 'pnpm typecheck' },
   { name: 'depcruise', run: 'pnpm depcruise' },
   { name: 'gate-manifest', run: 'node scripts/check-gate-manifest.mjs' },
+  { name: 'gates-executable', run: 'node scripts/check-gates-executable.mjs' },
   { name: 'frozen-names', run: 'node scripts/check-frozen-names.mjs' },
   { name: 'copy-claims', run: 'node scripts/scan-copy-claims.mjs' },
   { name: 'unit', run: 'pnpm test:unit' },
