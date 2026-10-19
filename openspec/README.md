@@ -1,7 +1,7 @@
 # OpenSpec 行为契约
 
 `openspec/specs/` 是可验收行为契约真源（SHALL + Scenario，对应 D1-D10/A1-A4 变红测试）；
-`docs/design/` 是设计真源（为什么/怎么设计、表字段、状态机、错误码）。spec 只写行为并引用 design 章节，不复制字段/路由表；冲突时 design 优先。
+`docs/design/` 是设计真源（为什么/怎么设计、表字段、状态机、错误码）。spec 只写行为并引用 design 章节，不复制字段/路由表；冲突矩阵：行为/验收以 spec 为准，字段/路由以 design/api/schema 为准，why 以 ADR 为准。
 
 ## 命名
 

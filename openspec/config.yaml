@@ -5,8 +5,9 @@ context: |
   Along-agent 是云端多租户 personal agent：Web 先行，后期再做桌面常驻壳。
   真源关系：docs/design/ 是设计真源（为什么/怎么设计、表字段、状态机、错误码），
   docs/prd/ 跟随；openspec/specs/ 是可验收行为契约真源（SHALL + Scenario，对应 D1-D10/A1-A4 变红测试）。
-  OpenSpec spec 只写行为与场景并引用 design 章节，不复制表字段/路由表；冲突时 design 优先，
-  先改 design → 同步 prd → 再改 OpenSpec。
+  OpenSpec spec 只写行为与场景并引用 design 章节，不复制表字段/路由表；
+  冲突矩阵：行为/验收以 spec 为准，字段/路由以 design/api/schema 为准，why 以 ADR 为准，
+  先改真源 → 同步跟随（先改 design → 同步 prd → 再改 OpenSpec）。
   Deferred 项（鉴权/LLM/市场/推送/计费）不得写进 openspec/specs，只能出现在 proposal 的非目标/Deferred。
   引用 design 章节而不复制内容；中文产出。
 

@@ -2,22 +2,22 @@
 
 ## 项目概览
 
-TypeScript + Next.js（App Router）+ PostgreSQL 16 的云端个人助理；包管理用 pnpm + Turbo；校验用 zod；实时对话走 SSE。当前只有 `docs/`，无实现代码（目录随 #2 建出）。
+TypeScript + Next.js（App Router）+ PostgreSQL 16 的云端个人助理；包管理用 pnpm + Turbo；校验用 zod；实时对话走 SSE。
 
 - 服务端：TS 模块化单体，一个镜像三种角色 `api|worker|all`；Postgres 唯一事实源，Redis 延后不引入。
-- 认证：Better Auth（自建 vs OIDC 二选一待 #1 拍板，细节 Deferred）。
+- 认证：Better Auth 自建 credential（#1 已定，单租户；v0 端点只暴露 `GET /me`）。
+- 布局：`apps/api`（服务端入口）、`apps/web`（Next.js）；`packages/time-core|scheduler-core|notifier-core|stream-protocol|contracts`；详见 `docs/design/01-tech-stack-and-repo-structure.md §2`。
 - 待定不猜：目标市场、LLM 供应商、推送通道、计费、是否练仓颉（见 `docs/prd/04-acceptance-open-questions.md` D1–D8）。
 
 ## 常用命令
 
-> 以下为占位，待 #2 建出目录后补齐可跑命令；当前唯一可跑的是 OpenSpec 校验。
+> 以根 `package.json` scripts 为准，禁止自创。
 
 - 安装依赖：`pnpm install`
 - 本地启动：`pnpm dev`（`apps/api` 3000 `ROLE=all`、`apps/web` 3100；需 `DATABASE_URL`、`TZDB_VERSION`）
 - 类型检查：`pnpm typecheck`
-- 单元测试：`pnpm test`
-- 契约校验：`openspec validate <name> --strict`（当前可跑，如 `openspec validate v0-safety-contract --strict`）
-
+- 单元测试：`pnpm test`（细分：`pnpm test:unit`、`pnpm test:contracts`）
+- 契约校验：`openspec validate <name> --strict`（如 `openspec validate v0-safety-contract --strict`）
 ## 代码约定
 
 - TypeScript 严格模式；模块按 `apps/api/src/modules/<name>/` 划分所有权，一模块一 schema 前缀。
@@ -40,8 +40,9 @@ TypeScript + Next.js（App Router）+ PostgreSQL 16 的云端个人助理；包�
 ## 文档索引
 
 - 先读 [文档中心](docs/README.md)，再读 [v0 垂直切片](docs/design/03-v0-vertical-slice.md)、[CI 死规矩](docs/design/13-p0-bootstrap-and-ci-rules.md)、[验收与待决](docs/prd/04-acceptance-open-questions.md)、[Schema 索引](docs/schema/README.md)、[API 索引](docs/api/README.md)。
-- `docs/design/` 为设计真源，`docs/prd/` 跟随；`openspec/specs/` 只写 SHALL + Scenario 并引用 design 章节，不复制字段/路由表；冲突时 design 优先。
+- 冲突矩阵：行为/验收以 spec 为准，字段/路由以 design/api/schema 为准，why 以 ADR 为准。
 - 改 `docs/design/` 的 PR 同步 `docs/prd/` 与 `docs/README.md` 索引。
+- 流程细节见 [CONTRIBUTING](CONTRIBUTING.md)，本文件只保留机器约束。
 
 ## 不要碰
 
@@ -52,7 +53,6 @@ TypeScript + Next.js（App Router）+ PostgreSQL 16 的云端个人助理；包�
 
 ## 提交与 PR
 
-- main 禁止直推，一律走 issue → 分支 → PR；分支名 `<type>/<N>-<slug>`，OpenSpec-only 用 `docs/<N>-spec-<slug>`。
-- issue/PR 正文直接用 `.github/` 官方模板（字段齐了再填，不要自创格式）：issue 选 `.github/ISSUE_TEMPLATE/task.md`（通用任务）或 `decision.md`（方案拍板）；PR 用 `.github/PULL_REQUEST_TEMPLATE.md`（关联/Spec/验收证据/Deferred 声明/OpenSpec change）。
-- 提交信息用英文，格式 `type(area): description`（如 `docs(governance): add repo AGENTS (#16)`）；PR 标题同格式。
-- 一个 PR 只做一件事；squash 合并；仅收口写 `Closes #N`，其余 `Refs #N`。
+- 提交信息与 PR 标题统一用英文，格式 type(area): description（如 docs(governance): add repo AGENTS (#16)）；issue/PR 正文用中文并套用 .github/ 模板。
+- main 禁止直推，一律走 issue → 分支 → PR；分支名 `<type>/<N>-<slug>`，OpenSpec-only 用 `docs/<N>-spec-<slug>`；一个 PR 只做一件事；squash 合并；仅收口写 `Closes #N`，其余 `Refs #N`。
+- 细节见 [CONTRIBUTING](CONTRIBUTING.md) §2–§5。
