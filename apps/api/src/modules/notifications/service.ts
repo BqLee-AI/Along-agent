@@ -3,8 +3,8 @@
 // original_note); never converts time. INSERT ... ON CONFLICT
 // (idempotency_key) DO NOTHING returns the existing row's receipt so retries
 // share one notice (kill -9 resume fires exactly once).
-import type { PoolClient } from "pg";
-import { noticeCopyFor } from "@along/notifier-core";
+import type { PoolClient } from 'pg';
+import { noticeCopyFor } from '@along/notifier-core';
 
 export interface InAppNotice {
   ownerId: string;
@@ -52,7 +52,7 @@ export async function deliverInApp(
     timezoneId: notice.timezoneId,
     originalNote: notice.originalNote,
   });
-  const status = result.delivered ? "sent" : "pending";
+  const status = result.delivered ? 'sent' : 'pending';
   const { rows } = await client.query<StoredNotice>(
     `INSERT INTO notifications (id, owner_id, task_id, channel, title, body,
        idempotency_key, status, sent_at)

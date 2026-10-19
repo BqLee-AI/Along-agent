@@ -15,7 +15,7 @@ export interface Brief {
   summary: { pending_count: number; fired_count: number };
   cards: BriefCard[];
   meta: {
-    brief_state: "empty" | "day-in-progress" | "stale";
+    brief_state: 'empty' | 'day-in-progress' | 'stale';
     stale_reason?: string | null;
     timezone_note: string | null;
   };
@@ -31,7 +31,7 @@ export interface ApprovalListItem {
 
 export interface ApprovalDetail {
   approval_id: string;
-  kind: "create_task" | "cancel_task";
+  kind: 'create_task' | 'cancel_task';
   status: string;
   echo_text: string;
   original_text: string | null;

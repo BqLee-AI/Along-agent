@@ -8,16 +8,16 @@ CangjieMagic 只作 AgentRuntime 第二实现（`CangjieAgentRuntime`，远程 H
 
 ## 已知能力（Observed，来自公开仓库文档）
 
-| 能力 | 事实 | 我方映射 |
-| --- | --- | --- |
-| 宏 DSL | `@agent`、`@prompt`、`@tool`、`@toolset` 声明智能体/提示词/工具；`@ai` 把大模型包装成类型化函数 | MVP 先 1 个 `assistant`；工具后期迁网关 |
-| 执行器 | 内置 `naive`、`react`、`tool-loop`（可配最大迭代）；实验性 `@execution`（plan/think/action/repeat/answer） | v0 直接用 `react`/`tool-loop` + 双预算 |
-| MCP | 既是客户端也是服务端；客户端支持三类接入（本地进程/远端两类）；本地能力可对外暴露为 MCP Server | 中期经 ToolGateway 聚合，仓颉侧只认网关 |
-| HITL | 事件与交互机制，用于执行期观察/拦截/人工审批 | 映射到 `approval_required` 事件 |
-| RAG | 外部知识源配置；embedding、向量库（内存/单机两种实现）、索引映射、语义检索原语 | P1 后接知识库服务 |
-| 模型配置 | 统一 `<provider>:<model>`，覆盖多家，可注册自定义实现 | 先接 1 家，key 走环境变量 |
-| 多 Agent | 线性协同 | 远期（规划者 → 执行者） |
-| 示例 | `quick_start` 等可运行示例 | 阶段 0 跑通示例为验收 |
+| 能力     | 事实                                                                                                       | 我方映射                                |
+| -------- | ---------------------------------------------------------------------------------------------------------- | --------------------------------------- |
+| 宏 DSL   | `@agent`、`@prompt`、`@tool`、`@toolset` 声明智能体/提示词/工具；`@ai` 把大模型包装成类型化函数            | MVP 先 1 个 `assistant`；工具后期迁网关 |
+| 执行器   | 内置 `naive`、`react`、`tool-loop`（可配最大迭代）；实验性 `@execution`（plan/think/action/repeat/answer） | v0 直接用 `react`/`tool-loop` + 双预算  |
+| MCP      | 既是客户端也是服务端；客户端支持三类接入（本地进程/远端两类）；本地能力可对外暴露为 MCP Server             | 中期经 ToolGateway 聚合，仓颉侧只认网关 |
+| HITL     | 事件与交互机制，用于执行期观察/拦截/人工审批                                                               | 映射到 `approval_required` 事件         |
+| RAG      | 外部知识源配置；embedding、向量库（内存/单机两种实现）、索引映射、语义检索原语                             | P1 后接知识库服务                       |
+| 模型配置 | 统一 `<provider>:<model>`，覆盖多家，可注册自定义实现                                                      | 先接 1 家，key 走环境变量               |
+| 多 Agent | 线性协同                                                                                                   | 远期（规划者 → 执行者）                 |
+| 示例     | `quick_start` 等可运行示例                                                                                 | 阶段 0 跑通示例为验收                   |
 
 ## 未验证项（Unverified，需 Spike）
 

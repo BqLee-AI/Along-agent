@@ -12,15 +12,15 @@ Closed event vocabularies with a frozen JSON Schema artifact.
 
 `THREAD_EVENT_TYPES` holds exactly the seven frozen SSE words:
 
-| SSE 事件 | 含义 |
-| --- | --- |
-| `thread.started` | 流开始，含 conversation_id + stream_protocol_version |
-| `message.delta` | 助手文本增量（只读呈现） |
-| `card.proposed` | 拟建卡片预览（v0 只读投影，不建 `cards` 表） |
-| `approval_required` | 需要确认，含 approval_id |
-| `thread.completed` | 正常结束 |
-| `thread.failed` | 失败，`error.code` 见 §4（含 BUDGET_EXCEEDED / 时间归一四错） |
-| `thread.cancelled` | 客户端中断后服务端确认取消 |
+| SSE 事件            | 含义                                                          |
+| ------------------- | ------------------------------------------------------------- |
+| `thread.started`    | 流开始，含 conversation_id + stream_protocol_version          |
+| `message.delta`     | 助手文本增量（只读呈现）                                      |
+| `card.proposed`     | 拟建卡片预览（v0 只读投影，不建 `cards` 表）                  |
+| `approval_required` | 需要确认，含 approval_id                                      |
+| `thread.completed`  | 正常结束                                                      |
+| `thread.failed`     | 失败，`error.code` 见 §4（含 BUDGET_EXCEEDED / 时间归一四错） |
+| `thread.cancelled`  | 客户端中断后服务端确认取消                                    |
 
 对照结论：上游 AG-UI `AgentEvent` 到本包 SSE 为投影关系，不各写一套
 （`approval_proposed→approval_required`、`answer/done→message.delta+thread.completed`、

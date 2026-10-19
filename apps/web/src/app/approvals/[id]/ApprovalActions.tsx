@@ -1,6 +1,6 @@
-"use client";
+'use client';
 
-import { useState } from "react";
+import { useState } from 'react';
 
 interface Props {
   approvalId: string;
@@ -20,11 +20,11 @@ export default function ApprovalActions({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function call(action: "confirm" | "reject"): Promise<void> {
+  async function call(action: 'confirm' | 'reject'): Promise<void> {
     setBusy(true);
     setError(null);
     const body =
-      action === "confirm"
+      action === 'confirm'
         ? {
             presentation_hash: presentationHash,
             seen_content: echoText,
@@ -33,10 +33,10 @@ export default function ApprovalActions({
         : { idempotency_key: crypto.randomUUID() };
     try {
       const response = await fetch(`/api/v1/approvals/${approvalId}/actions/${action}`, {
-        method: "POST",
+        method: 'POST',
         headers: {
-          "content-type": "application/json",
-          ...(csrfToken ? { "x-csrf-token": csrfToken } : {}),
+          'content-type': 'application/json',
+          ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}),
         },
         body: JSON.stringify(body),
       });
@@ -48,13 +48,13 @@ export default function ApprovalActions({
         setError(payload.error?.message ?? `请求失败（${response.status}）`);
         return;
       }
-      if (action === "confirm" && payload.data?.task_id) {
+      if (action === 'confirm' && payload.data?.task_id) {
         window.location.assign(`/tasks/${payload.data.task_id}`);
         return;
       }
-      window.location.assign("/approvals");
+      window.location.assign('/approvals');
     } catch {
-      setError("网络异常，请重试。");
+      setError('网络异常，请重试。');
     } finally {
       setBusy(false);
     }
@@ -66,13 +66,13 @@ export default function ApprovalActions({
         提醒保存在云端；到点在调度器成功运行时尝试通知。设备关机、休眠或进程未运行时可能错过，不保证准时响。
       </p>
       <div className="actions">
-        <button disabled={!actionable || busy} onClick={() => void call("confirm")}>
+        <button disabled={!actionable || busy} onClick={() => void call('confirm')}>
           确认
         </button>
         <button
           className="secondary"
           disabled={!actionable || busy}
-          onClick={() => void call("reject")}
+          onClick={() => void call('reject')}
         >
           拒绝
         </button>

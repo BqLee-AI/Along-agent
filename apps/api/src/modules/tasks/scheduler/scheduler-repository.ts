@@ -1,6 +1,6 @@
 // Scheduler repository: raw SQL for the worker role. All phase entry points
 // run inside caller-owned transactions; this module owns no BEGIN/COMMIT.
-import type { PoolClient } from "pg";
+import type { PoolClient } from 'pg';
 
 export interface SchedulerTaskRow {
   id: string;
@@ -55,10 +55,7 @@ export async function lockOutboxRow(
 }
 
 /** Due schedule rows: pending, and either never attempted or backoff elapsed. */
-export async function listDueScheduleRows(
-  client: PoolClient,
-  limit: number,
-): Promise<OutboxRow[]> {
+export async function listDueScheduleRows(client: PoolClient, limit: number): Promise<OutboxRow[]> {
   const { rows } = await client.query<OutboxRow>(
     `SELECT id, owner_id, task_id, expected_state_version, command,
        idempotency_key, attempt_no, status, created_at, updated_at,
@@ -168,10 +165,7 @@ export async function listMissedCandidates(
 }
 
 /** Due send rows: dispatched, backoff elapsed, still inside the fire window. */
-export async function listDueSendRows(
-  client: PoolClient,
-  limit: number,
-): Promise<OutboxRow[]> {
+export async function listDueSendRows(client: PoolClient, limit: number): Promise<OutboxRow[]> {
   const { rows } = await client.query<OutboxRow>(
     `SELECT o.id, o.owner_id, o.task_id, o.expected_state_version, o.command,
        o.idempotency_key, o.attempt_no, o.status, o.created_at, o.updated_at,
@@ -191,10 +185,7 @@ export async function listDueSendRows(
 }
 
 /** Due ack re-check rows: acked_unknown with an elapsed check schedule. */
-export async function listDueAckRows(
-  client: PoolClient,
-  limit: number,
-): Promise<OutboxRow[]> {
+export async function listDueAckRows(client: PoolClient, limit: number): Promise<OutboxRow[]> {
   const { rows } = await client.query<OutboxRow>(
     `SELECT id, owner_id, task_id, expected_state_version, command,
        idempotency_key, attempt_no, status, created_at, updated_at,
@@ -212,10 +203,7 @@ export async function listDueAckRows(
 }
 
 /** Due cancel rows: pending cancel commands. */
-export async function listDueCancelRows(
-  client: PoolClient,
-  limit: number,
-): Promise<OutboxRow[]> {
+export async function listDueCancelRows(client: PoolClient, limit: number): Promise<OutboxRow[]> {
   const { rows } = await client.query<OutboxRow>(
     `SELECT id, owner_id, task_id, expected_state_version, command,
        idempotency_key, attempt_no, status, created_at, updated_at,
@@ -258,10 +246,9 @@ export async function markOutboxAckUnknown(
 }
 
 export async function markOutboxSuperseded(client: PoolClient, outboxId: string): Promise<void> {
-  await client.query(
-    `UPDATE outbox SET status = 'superseded', updated_at = now() WHERE id = $1`,
-    [outboxId],
-  );
+  await client.query(`UPDATE outbox SET status = 'superseded', updated_at = now() WHERE id = $1`, [
+    outboxId,
+  ]);
 }
 
 export async function markOutboxFailedDeadline(
@@ -322,7 +309,13 @@ export async function transitionTask(
        schedule_receipt = COALESCE($5, schedule_receipt)
      WHERE id = $1 AND state = ANY($3) AND state_version = $4
      RETURNING id`,
-    [args.taskId, args.toState, args.fromStates, args.expectedVersion, args.scheduleReceipt ?? null],
+    [
+      args.taskId,
+      args.toState,
+      args.fromStates,
+      args.expectedVersion,
+      args.scheduleReceipt ?? null,
+    ],
   );
   return rows.length > 0;
 }

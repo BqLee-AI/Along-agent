@@ -1,18 +1,14 @@
 // Closed event vocabulary: docs/design/07 §1 (S0 frozen, seven words).
 export const EVENT_TYPES = [
-  "created",
-  "scheduled",
-  "fired",
-  "missed",
-  "cancel_requested",
-  "cancelled",
-  "reconciliation_run",
+  'created',
+  'scheduled',
+  'fired',
+  'missed',
+  'cancel_requested',
+  'cancelled',
+  'reconciliation_run',
 ] as const;
-export {
-  THREAD_EVENT_TYPES,
-  THREAD_PROTOCOL_VERSION,
-  ThreadEventSchema,
-} from "./thread-events.js";
+export { THREAD_EVENT_TYPES, THREAD_PROTOCOL_VERSION, ThreadEventSchema } from './thread-events.js';
 export type {
   ApprovalRequiredEvent,
   CardProposedEvent,
@@ -23,6 +19,6 @@ export type {
   ThreadEventType,
   ThreadFailedEvent,
   ThreadStartedEvent,
-} from "./thread-events.js";
+} from './thread-events.js';
 
 export type EventType = (typeof EVENT_TYPES)[number];

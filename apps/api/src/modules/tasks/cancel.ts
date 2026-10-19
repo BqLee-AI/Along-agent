@@ -9,10 +9,10 @@
 //     keeps blocking sends.
 //
 // No token plaintext is stored; the idempotency key is the caller's uuid.
-import { randomUUID } from "node:crypto";
-import { z } from "zod";
-import type { Pool, PoolClient } from "pg";
-import { withTransaction } from "../../db/transaction.js";
+import { randomUUID } from 'node:crypto';
+import { z } from 'zod';
+import type { Pool, PoolClient } from 'pg';
+import { withTransaction } from '../../db/transaction.js';
 import {
   forbidden,
   notFound,
@@ -20,17 +20,10 @@ import {
   stateConflict,
   validationError,
   type HttpError,
-} from "../../http/errors.js";
-import {
-  appendTaskEvent,
-  supersedeQueuedOutboxForTask,
-} from "./scheduler/scheduler-repository.js";
-import { hasCancelReceipt } from "./scheduler/registry.js";
-import {
-  findCancelRowByKey,
-  insertCancelCommand,
-  lockTaskForCancel,
-} from "./cancel-repository.js";
+} from '../../http/errors.js';
+import { appendTaskEvent, supersedeQueuedOutboxForTask } from './scheduler/scheduler-repository.js';
+import { hasCancelReceipt } from './scheduler/registry.js';
+import { findCancelRowByKey, insertCancelCommand, lockTaskForCancel } from './cancel-repository.js';
 
 export const CancelBodySchema = z.object({
   reason: z.string().max(2000).optional(),
@@ -74,23 +67,23 @@ export async function cancelTaskWithinTransaction(
   args: CancelWithinTxArgs,
 ): Promise<CancelResult> {
   const row = await lockTaskForCancel(client, args.taskId);
-  if (!row) throw notFound("task not found");
-  if (row.owner_id !== args.ownerId) throw forbidden("task not found");
+  if (!row) throw notFound('task not found');
+  if (row.owner_id !== args.ownerId) throw forbidden('task not found');
   // Terminal states: fired/missed cannot be cancelled.
-  if (row.state === "fired" || row.state === "missed") {
-    throw stateConflict("task already fired or missed", {
+  if (row.state === 'fired' || row.state === 'missed') {
+    throw stateConflict('task already fired or missed', {
       current_state: row.state,
     }) as HttpError;
   }
-  if (row.state === "cancelled") {
-    return { task_id: row.id, state: "cancelled", duplicate: true };
+  if (row.state === 'cancelled') {
+    return { task_id: row.id, state: 'cancelled', duplicate: true };
   }
-  if (row.state === "cancel_pending") {
+  if (row.state === 'cancel_pending') {
     // Same key replays; a new key tops up the cancel command row.
     const existing = await findCancelRowByKey(client, args.idempotencyKey);
     if (!existing) {
       const { rows: fireRows } = await client.query<{ fire_at_utc: Date }>(
-        "SELECT fire_at_utc FROM tasks WHERE id = $1",
+        'SELECT fire_at_utc FROM tasks WHERE id = $1',
         [row.id],
       );
       await insertCancelCommand(client, {
@@ -120,20 +113,20 @@ export async function cancelTaskWithinTransaction(
     [row.id, row.state_version],
   );
   if (!moved[0]) {
-    throw stateConflict("task state changed during cancel") as HttpError;
+    throw stateConflict('task state changed during cancel') as HttpError;
   }
   await appendTaskEvent(client, {
     ownerId: args.ownerId,
     taskId: row.id,
     stateVersion: moved[0].state_version,
-    type: "cancel_requested",
-    evidenceRef: "local",
+    type: 'cancel_requested',
+    evidenceRef: 'local',
   });
   // Cancel wins: supersede every queued sibling row for this task.
   await supersedeQueuedOutboxForTask(client, row.id);
   // Fire time is frozen on the task row; read it for the command payload.
   const { rows: fireRows } = await client.query<{ fire_at_utc: Date }>(
-    "SELECT fire_at_utc FROM tasks WHERE id = $1",
+    'SELECT fire_at_utc FROM tasks WHERE id = $1',
     [row.id],
   );
   const fireAt = fireRows[0]?.fire_at_utc ?? new Date();
@@ -162,18 +155,18 @@ export async function requestCancel(
   revokeCheck: RevokeCheck = hasCancelReceipt,
 ): Promise<CancelResult> {
   const parsed = CancelBodySchema.safeParse(body);
-  if (!parsed.success) throw validationError("invalid cancel body");
+  if (!parsed.success) throw validationError('invalid cancel body');
   const pool = deps.pool;
-  if (!pool) throw notReady("database unavailable");
+  if (!pool) throw notReady('database unavailable');
   const key = cancelKey(ownerId, taskId, parsed.data.idempotency_key);
   return withTransaction(pool, async (client: PoolClient) => {
     // Idempotency: same key replays the original cancel outcome.
     const replay = await findCancelRowByKey(client, key);
     if (replay) {
       const again = await lockTaskForCancel(client, taskId);
-      if (!again) throw notFound("task not found");
-      if (again.owner_id !== ownerId) throw forbidden("task not found");
-      if (again.state === "cancel_pending" || again.state === "cancelled") {
+      if (!again) throw notFound('task not found');
+      if (again.owner_id !== ownerId) throw forbidden('task not found');
+      if (again.state === 'cancel_pending' || again.state === 'cancelled') {
         return {
           task_id: again.id,
           state: again.state,
@@ -200,7 +193,7 @@ async function finishCancelStep(
 ): Promise<CancelResult> {
   // Step 2: only with a revoke receipt does the task reach cancelled.
   if (!revokeCheck(taskId)) {
-    return { task_id: taskId, state: "cancel_pending", duplicate: false };
+    return { task_id: taskId, state: 'cancel_pending', duplicate: false };
   }
   const { rows: moved } = await client.query<{ state_version: number }>(
     `UPDATE tasks SET state = 'cancelled', state_version = state_version + 1
@@ -209,17 +202,17 @@ async function finishCancelStep(
     [taskId, version],
   );
   if (!moved[0]) {
-    return { task_id: taskId, state: "cancel_pending", duplicate: false };
+    return { task_id: taskId, state: 'cancel_pending', duplicate: false };
   }
   await appendTaskEvent(client, {
     ownerId,
     taskId,
     stateVersion: moved[0].state_version,
-    type: "cancelled",
+    type: 'cancelled',
     evidenceRef: `cancel:${taskId}`,
   });
   await supersedeQueuedOutboxForTask(client, taskId);
-  return { task_id: taskId, state: "cancelled", duplicate: false };
+  return { task_id: taskId, state: 'cancelled', duplicate: false };
 }
 
 export { randomUUID };

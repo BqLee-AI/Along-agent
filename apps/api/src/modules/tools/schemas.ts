@@ -2,26 +2,26 @@
 // Every schema is .strict(): unknown fields (including injected runtime ids
 // such as user_id/conversation_id/run_id/request_id and time internals such as
 // fire_at_utc/fold/offset) are rejected at the gateway and audited as deny.
-import { z } from "zod";
+import { z } from 'zod';
 
 export const TOOL_IDS = [
-  "propose_task",
-  "request_cancel_task",
-  "list_tasks",
-  "read_brief_cards",
-  "get_user_prefs",
+  'propose_task',
+  'request_cancel_task',
+  'list_tasks',
+  'read_brief_cards',
+  'get_user_prefs',
 ] as const;
 
 export type ToolId = (typeof TOOL_IDS)[number];
 
 export const TASK_STATES = [
-  "saved",
-  "pending_schedule",
-  "scheduled",
-  "fired",
-  "missed",
-  "cancel_pending",
-  "cancelled",
+  'saved',
+  'pending_schedule',
+  'scheduled',
+  'fired',
+  'missed',
+  'cancel_pending',
+  'cancelled',
 ] as const;
 
 export const ProposeTaskInputSchema = z
@@ -29,7 +29,7 @@ export const ProposeTaskInputSchema = z
     raw_time_text: z.string().min(1).max(1000),
     timezone_hint: z.string().min(1).max(100).nullable().optional(),
     note: z.string().min(1).max(1000),
-    occurrence: z.literal("once"),
+    occurrence: z.literal('once'),
   })
   .strict();
 

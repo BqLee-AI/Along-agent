@@ -19,11 +19,11 @@ Observed / Required / Proposed / Deferred 同 01。**本篇所有数字阈值均
 
 ## 2. Spike S1–S3（Required 立项，阈值 Proposed 实验起步值）
 
-| Spike | 目标 | 通过标准（实验起步值，待校准） |
-| --- | --- | --- |
+| Spike               | 目标                                            | 通过标准（实验起步值，待校准）                                                                                                                                                      |
+| ------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | S1 契约+性能+稳定性 | 同一契约全绿；首 token 可接受；无泄漏；取消及时 | ① `contracts` 契约测试全绿（进程内+远程同一套）；② 100 并发下首 token p95 ≤ 150ms（本机/同内网，待校准）；③ 30min 持续流 RSS 不涨（±5% 内，待校准）；④ `cancel` 2s 内生效（待校准） |
-| S2 恰好一次 | kill -9 后 resume 副作用恰好一次 | ① `kill -9` 后 `resume(from_checkpoint)` 可续；② 工具副作用计数恰好一次（含 fencing/幂等键去重证据）；③ 重放不产生第二条 Task/通知 |
-| S3 生态贯通 | 卡片 zod、MCP 经网关、OTel、镜像 | ① 200 张卡片 zod 通过率 ≥ TS 实现 −2pt（待校准）；② MCP 调用经 ToolGateway（直连数为 0）；③ OTel trace 贯通（run→tool→approval 同 `request_id`）；④ 镜像构建 ≤ 10min（待校准） |
+| S2 恰好一次         | kill -9 后 resume 副作用恰好一次                | ① `kill -9` 后 `resume(from_checkpoint)` 可续；② 工具副作用计数恰好一次（含 fencing/幂等键去重证据）；③ 重放不产生第二条 Task/通知                                                  |
+| S3 生态贯通         | 卡片 zod、MCP 经网关、OTel、镜像                | ① 200 张卡片 zod 通过率 ≥ TS 实现 −2pt（待校准）；② MCP 调用经 ToolGateway（直连数为 0）；③ OTel trace 贯通（run→tool→approval 同 `request_id`）；④ 镜像构建 ≤ 10min（待校准）      |
 
 - 所有阈值标注 `[实验起步值]`；任一不达标只延期结案，不放宽标准。
 - 测量方法：与主路径同负载、同 `contracts` 用例、同 OTel collector；原始数据归档 `spikes/cangjie-runtime/reports/`。

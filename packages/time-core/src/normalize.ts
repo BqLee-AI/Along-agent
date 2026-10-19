@@ -1,24 +1,27 @@
 // Pure arithmetic normalize per docs/design/05-time-core.md §1/§4.
 // No Date, no Date.now, no process.env, no Intl. Integer epoch math only.
-import { daysSinceEpoch, formatUtc, parseUtcEpoch, parseWall } from "./civil.js";
-import type { AmbiguousCandidate, FoldChoice, NormalizeResult, TimeRuleset } from "./types.js";
+import { daysSinceEpoch, formatUtc, parseUtcEpoch, parseWall } from './civil.js';
+import type { AmbiguousCandidate, FoldChoice, NormalizeResult, TimeRuleset } from './types.js';
 
 interface EpochZone {
   base_offset_seconds: number;
   transitions: { epoch: number; offset_seconds: number }[];
 }
 
-function toEpochZone(ruleset: TimeRuleset): { id: string; zones: Record<string, EpochZone> } | null {
-  if (typeof ruleset !== "object" || ruleset === null) return null;
-  if (typeof ruleset.ruleset_id !== "string" || typeof ruleset.tzdb_version !== "string") return null;
-  if (typeof ruleset.zones !== "object" || ruleset.zones === null) return null;
+function toEpochZone(
+  ruleset: TimeRuleset,
+): { id: string; zones: Record<string, EpochZone> } | null {
+  if (typeof ruleset !== 'object' || ruleset === null) return null;
+  if (typeof ruleset.ruleset_id !== 'string' || typeof ruleset.tzdb_version !== 'string')
+    return null;
+  if (typeof ruleset.zones !== 'object' || ruleset.zones === null) return null;
   const zones: Record<string, EpochZone> = {};
   for (const [name, z] of Object.entries(ruleset.zones)) {
-    if (typeof z?.base_offset_seconds !== "number" || !Array.isArray(z?.transitions)) return null;
+    if (typeof z?.base_offset_seconds !== 'number' || !Array.isArray(z?.transitions)) return null;
     const transitions: { epoch: number; offset_seconds: number }[] = [];
     for (const t of z.transitions) {
       const epoch = parseUtcEpoch(t.at_utc);
-      if (epoch === null || typeof t.offset_seconds !== "number") return null;
+      if (epoch === null || typeof t.offset_seconds !== 'number') return null;
       transitions.push({ epoch, offset_seconds: t.offset_seconds });
     }
     transitions.sort((a, b) => a.epoch - b.epoch);
@@ -43,12 +46,14 @@ export function normalize(
   ruleset: TimeRuleset,
 ): NormalizeResult {
   const parsed = toEpochZone(ruleset);
-  if (parsed === null) return { kind: "error", error: "TZDB_UNAVAILABLE" };
+  if (parsed === null) return { kind: 'error', error: 'TZDB_UNAVAILABLE' };
   const zone = parsed.zones[timezoneId];
-  if (!zone) return { kind: "error", error: "UNKNOWN_TIMEZONE", ruleset_id: parsed.id };
+  if (!zone) return { kind: 'error', error: 'UNKNOWN_TIMEZONE', ruleset_id: parsed.id };
   const wall = parseWall(wallTime);
-  if (wall === null) return { kind: "error", error: "NONEXISTENT_LOCAL_TIME", ruleset_id: parsed.id };
-  const wallSeconds = daysSinceEpoch(wall.y, wall.mo, wall.d) * 86400 + wall.h * 3600 + wall.mi * 60 + wall.s;
+  if (wall === null)
+    return { kind: 'error', error: 'NONEXISTENT_LOCAL_TIME', ruleset_id: parsed.id };
+  const wallSeconds =
+    daysSinceEpoch(wall.y, wall.mo, wall.d) * 86400 + wall.h * 3600 + wall.mi * 60 + wall.s;
 
   // Candidate offset universe: base + every distinct transition offset.
   const offsets: Record<number, true> = { [zone.base_offset_seconds]: true };
@@ -62,12 +67,12 @@ export function normalize(
   matches.sort((a, b) => a.epoch - b.epoch);
 
   if (matches.length === 0) {
-    return { kind: "error", error: "NONEXISTENT_LOCAL_TIME", ruleset_id: parsed.id };
+    return { kind: 'error', error: 'NONEXISTENT_LOCAL_TIME', ruleset_id: parsed.id };
   }
   if (matches.length === 1) {
     const single = matches[0];
     return {
-      kind: "ok",
+      kind: 'ok',
       fire_at_utc: formatUtc(single.epoch),
       offset_seconds: single.offset,
       fold: 0,
@@ -75,24 +80,29 @@ export function normalize(
     };
   }
   const first: AmbiguousCandidate = {
-    fold_choice: "first",
+    fold_choice: 'first',
     offset_seconds: matches[0].offset,
     fire_at_utc: formatUtc(matches[0].epoch),
   };
   const second: AmbiguousCandidate = {
-    fold_choice: "second",
+    fold_choice: 'second',
     offset_seconds: matches[1].offset,
     fire_at_utc: formatUtc(matches[1].epoch),
   };
-  if (foldChoice === "none") {
-    return { kind: "error", error: "AMBIGUOUS_LOCAL_TIME", candidates: [first, second], ruleset_id: parsed.id };
+  if (foldChoice === 'none') {
+    return {
+      kind: 'error',
+      error: 'AMBIGUOUS_LOCAL_TIME',
+      candidates: [first, second],
+      ruleset_id: parsed.id,
+    };
   }
-  const chosen = foldChoice === "first" ? first : second;
+  const chosen = foldChoice === 'first' ? first : second;
   return {
-    kind: "ok",
+    kind: 'ok',
     fire_at_utc: chosen.fire_at_utc,
     offset_seconds: chosen.offset_seconds,
-    fold: foldChoice === "first" ? 0 : 1,
+    fold: foldChoice === 'first' ? 0 : 1,
     ruleset_id: parsed.id,
   };
 }

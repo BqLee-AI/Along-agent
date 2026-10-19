@@ -54,12 +54,12 @@
 
 ## 常见问题
 
-| 现象 | 原因 | 处理 |
-| --- | --- | --- |
-| 确认返回 `PRESENTATION_MISMATCH` | 回显与快照对不上 | 停在待核对，重回显新 approval，旧键作废 |
-| 确认返回 `APPROVAL_EXPIRED (410)` | 超 24h 或目标已过 | 旧确认作废，重走对话 |
-| 确认返回 `APPROVAL_SUPERSEDED` | 改字段已出新 approval | 用新 approval 确认 |
-| 归一返回 `NONEXISTENT_LOCAL_TIME` | 当地不存在的时刻 | 不猜不存，请重定 |
-| 归一返回 `AMBIGUOUS_LOCAL_TIME` | 重复时刻未选 | 出两候选（各带偏移），用户选 first/second |
-| `/readyz` 报 `TZDB_UNAVAILABLE` | 时区库缺失 | 不开张，先补 tzdb，不降级 |
-| 取消后仍收到触发 | 并发竞争 | 按违规计（分不清先后按违规计），查证据人复核 |
+| 现象                              | 原因                  | 处理                                         |
+| --------------------------------- | --------------------- | -------------------------------------------- |
+| 确认返回 `PRESENTATION_MISMATCH`  | 回显与快照对不上      | 停在待核对，重回显新 approval，旧键作废      |
+| 确认返回 `APPROVAL_EXPIRED (410)` | 超 24h 或目标已过     | 旧确认作废，重走对话                         |
+| 确认返回 `APPROVAL_SUPERSEDED`    | 改字段已出新 approval | 用新 approval 确认                           |
+| 归一返回 `NONEXISTENT_LOCAL_TIME` | 当地不存在的时刻      | 不猜不存，请重定                             |
+| 归一返回 `AMBIGUOUS_LOCAL_TIME`   | 重复时刻未选          | 出两候选（各带偏移），用户选 first/second    |
+| `/readyz` 报 `TZDB_UNAVAILABLE`   | 时区库缺失            | 不开张，先补 tzdb，不降级                    |
+| 取消后仍收到触发                  | 并发竞争              | 按违规计（分不清先后按违规计），查证据人复核 |

@@ -22,13 +22,13 @@
 
 ## 1. 总览与选型
 
-| 缝 | 职责一句话 | v0 落点 | P1+ |
-| --- | --- | --- | --- |
-| AgentRuntime | 跑对话/任务循环，产 AgentEvent 流 | TS 单实现；Spike S1 并行验证 | + CangjieAgentRuntime 远程实现，同一契约 |
-| ToolGateway | 白名单 + 校验 + 风险分级 + 审计 | 本地 3~5 工具（时间只读、便签读写类），无外部 MCP | MCP 经网关聚合，仓颉只认网关 |
-| Scheduler | 登记 schedule / 认领 lease + fencing / cancel | PG lease（见 08），无 Redis | 量大再议 Redis 延后项 |
-| Notifier | send → 回执 + 幂等 | 站内信（应用内通知）先行 | 邮件/推送后期，接口不变 |
-| ConnectorVault | secret 引用不出明文 | 仅接口 + Fake，无真实连接 | 第 1~2 真实连接按评审接入 |
+| 缝             | 职责一句话                                    | v0 落点                                           | P1+                                      |
+| -------------- | --------------------------------------------- | ------------------------------------------------- | ---------------------------------------- |
+| AgentRuntime   | 跑对话/任务循环，产 AgentEvent 流             | TS 单实现；Spike S1 并行验证                      | + CangjieAgentRuntime 远程实现，同一契约 |
+| ToolGateway    | 白名单 + 校验 + 风险分级 + 审计               | 本地 3~5 工具（时间只读、便签读写类），无外部 MCP | MCP 经网关聚合，仓颉只认网关             |
+| Scheduler      | 登记 schedule / 认领 lease + fencing / cancel | PG lease（见 08），无 Redis                       | 量大再议 Redis 延后项                    |
+| Notifier       | send → 回执 + 幂等                            | 站内信（应用内通知）先行                          | 邮件/推送后期，接口不变                  |
+| ConnectorVault | secret 引用不出明文                           | 仅接口 + Fake，无真实连接                         | 第 1~2 真实连接按评审接入                |
 
 ## 2. AgentRuntime（run / resume / cancel → AgentEvent）
 
@@ -129,11 +129,11 @@ outbox（领域事件，只追加）
 
 ## 8. 反事实检查表
 
-| 反事实 | 后果 | 契约对策 |
-| --- | --- | --- |
-| 跨模块直读对方表 | 一处改表全链崩 | [Required] 只传 id，读自己投影 |
-| 网关外直调 MCP | 白名单/审计被绕过 | [Required] 仓颉只认网关 |
-| 仓颉直连业务库 | 鉴权/隔离击穿 | [Required] 上下文由调用方传入 |
-| LLM 算时间 | DST/歧义不可复现 | [Required] 时间只经 time-core（见 05） |
-| 展示层换算时间 | 摆与存对不上 | [Required] 展示只读冻结字段（见 06） |
-| cancel 可复活 | 取消后仍响 | [Required] 取消终态，核对“曾排上”也不复活 |
+| 反事实           | 后果              | 契约对策                                  |
+| ---------------- | ----------------- | ----------------------------------------- |
+| 跨模块直读对方表 | 一处改表全链崩    | [Required] 只传 id，读自己投影            |
+| 网关外直调 MCP   | 白名单/审计被绕过 | [Required] 仓颉只认网关                   |
+| 仓颉直连业务库   | 鉴权/隔离击穿     | [Required] 上下文由调用方传入             |
+| LLM 算时间       | DST/歧义不可复现  | [Required] 时间只经 time-core（见 05）    |
+| 展示层换算时间   | 摆与存对不上      | [Required] 展示只读冻结字段（见 06）      |
+| cancel 可复活    | 取消后仍响        | [Required] 取消终态，核对“曾排上”也不复活 |

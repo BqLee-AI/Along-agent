@@ -6,10 +6,10 @@
 
 ## 1. 路由
 
-| 方法 | 路径 | 鉴权 | CSRF | 幂等键 | 说明 |
-| --- | --- | --- | --- | --- | --- |
-| POST | `/conversations/messages` | 是 | 是 | 是（`Idempotency-Key`） | 发送消息，SSE 流 |
-| GET | `/conversations/{id}` | 是 | 否 | — | 会话恢复（历史事件重放） |
+| 方法 | 路径                      | 鉴权 | CSRF | 幂等键                  | 说明                     |
+| ---- | ------------------------- | ---- | ---- | ----------------------- | ------------------------ |
+| POST | `/conversations/messages` | 是   | 是   | 是（`Idempotency-Key`） | 发送消息，SSE 流         |
+| GET  | `/conversations/{id}`     | 是   | 否   | —                       | 会话恢复（历史事件重放） |
 
 ## 2. POST /conversations/messages [Required]
 
@@ -35,15 +35,15 @@
 
 响应：`Content-Type: text/event-stream`，`200` 建连；首事件必为 `thread.started`（含 `conversation_id` + `stream_protocol_version`），尾事件为 `thread.completed | thread.failed | thread.cancelled` 之一。每行 `data: {protocol_version, seq, type, payload, request_id}`（design/10 §4），`seq` 即 `run_checkpoints.event_seq`，用于 `?after_seq=` 补全。事件名与字段以 `packages/stream-protocol` 的 `thread-stream.schema.json` 为准，本文只列 v0 必需子集（S0 #14 冻结：`design/09` AgentEvent→本篇 SSE 为投影关系，不各写一套；`approval_proposed→approval_required`、`answer/done→message.delta+thread.completed`、`run_failed→thread.failed`、`thinking/tool_call/tool_result→message.delta/tool.status`）：
 
-| SSE 事件 | 含义 |
-| --- | --- |
-| `thread.started` | 流开始，含 conversation_id |
-| `message.delta` | 助手文本增量（展示层只读呈现，不做时间换算） |
-| `card.proposed` | 拟建卡片预览（含 `card_id`、`schema_version`、冻结快照摘要；v0 只读投影，不建 `cards` 表） |
+| SSE 事件            | 含义                                                                                         |
+| ------------------- | -------------------------------------------------------------------------------------------- |
+| `thread.started`    | 流开始，含 conversation_id                                                                   |
+| `message.delta`     | 助手文本增量（展示层只读呈现，不做时间换算）                                                 |
+| `card.proposed`     | 拟建卡片预览（含 `card_id`、`schema_version`、冻结快照摘要；v0 只读投影，不建 `cards` 表）   |
 | `approval_required` | 需要确认，含 `approval_id`（v0 只认按钮确认，文本只做展示；前端跳确认门，见 approvals 文档） |
-| `thread.completed` | 正常结束 |
-| `thread.failed` | 失败，`error.code` 见 §4（含 BUDGET_EXCEEDED / 时间归一四错） |
-| `thread.cancelled` | 客户端中断后服务端确认取消 |
+| `thread.completed`  | 正常结束                                                                                     |
+| `thread.failed`     | 失败，`error.code` 见 §4（含 BUDGET_EXCEEDED / 时间归一四错）                                |
+| `thread.cancelled`  | 客户端中断后服务端确认取消                                                                   |
 
 `approval_required` 示例（单行 `data`）：
 

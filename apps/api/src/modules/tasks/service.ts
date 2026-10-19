@@ -1,5 +1,5 @@
-import type { Pool, PoolClient } from "pg";
-import { withClient } from "../../db/transaction.js";
+import type { Pool, PoolClient } from 'pg';
+import { withClient } from '../../db/transaction.js';
 import {
   decodeCursor,
   encodeCursor,
@@ -9,9 +9,9 @@ import {
   notReady,
   validationError,
   type HttpError,
-} from "../../http/errors.js";
-import { getTask, listTaskEvents, listTasks } from "./repository.js";
-import { TaskEventsQuerySchema, TaskListQuerySchema } from "./schemas.js";
+} from '../../http/errors.js';
+import { getTask, listTaskEvents, listTasks } from './repository.js';
+import { TaskEventsQuerySchema, TaskListQuerySchema } from './schemas.js';
 
 export interface Deps {
   pool: Pool | null;
@@ -64,18 +64,18 @@ export async function listTasksForOwner(
     cursor: Array.isArray(query.cursor) ? query.cursor[0] : query.cursor,
     limit: Array.isArray(query.limit) ? query.limit[0] : query.limit,
   });
-  if (!parsed.success) throw validationError("invalid query");
+  if (!parsed.success) throw validationError('invalid query');
   let cursor: { fireAt: string; id: string } | undefined;
   if (parsed.data.cursor) {
     const decoded = decodeCursor(parsed.data.cursor);
     if (
       !decoded ||
-      typeof decoded.fireAt !== "string" ||
-      typeof decoded.id !== "string" ||
+      typeof decoded.fireAt !== 'string' ||
+      typeof decoded.id !== 'string' ||
       !isUuid(decoded.id) ||
       Number.isNaN(Date.parse(decoded.fireAt))
     ) {
-      throw validationError("invalid cursor");
+      throw validationError('invalid cursor');
     }
     cursor = { fireAt: decoded.fireAt, id: decoded.id };
   }
@@ -100,8 +100,7 @@ export async function listTasksForOwner(
     schedule_receipt: row.schedule_receipt,
   }));
   const lastRow = page[page.length - 1] as
-    | ({ id: string; fire_at_utc: Date; fire_at_cursor?: string })
-    | undefined;
+    { id: string; fire_at_utc: Date; fire_at_cursor?: string } | undefined;
   const nextCursor =
     hasMore && lastRow
       ? encodeCursor({
@@ -119,8 +118,8 @@ export async function getTaskDetail(
 ): Promise<TaskDetail> {
   return withClient(requirePool(deps), async (client: PoolClient) => {
     const lookup = await getTask(client, ownerId, taskId);
-    if (!lookup.found) throw notFound("task not found") as HttpError;
-    if (lookup.forbidden) throw forbidden("task not found") as HttpError;
+    if (!lookup.found) throw notFound('task not found') as HttpError;
+    if (lookup.forbidden) throw forbidden('task not found') as HttpError;
     const row = lookup.row;
     return {
       task_id: row.id,
@@ -148,31 +147,26 @@ export async function getTaskEvents(
     cursor: Array.isArray(query.cursor) ? query.cursor[0] : query.cursor,
     limit: Array.isArray(query.limit) ? query.limit[0] : query.limit,
   });
-  if (!parsed.success) throw validationError("invalid query");
+  if (!parsed.success) throw validationError('invalid query');
   let cursor: { recordedAt: string; id: string } | undefined;
   if (parsed.data.cursor) {
     const decoded = decodeCursor(parsed.data.cursor);
     if (
       !decoded ||
-      typeof decoded.recordedAt !== "string" ||
-      typeof decoded.id !== "string" ||
+      typeof decoded.recordedAt !== 'string' ||
+      typeof decoded.id !== 'string' ||
       !isUuid(decoded.id) ||
       Number.isNaN(Date.parse(decoded.recordedAt))
     ) {
-      throw validationError("invalid cursor");
+      throw validationError('invalid cursor');
     }
     cursor = { recordedAt: decoded.recordedAt, id: decoded.id };
   }
   return withClient(requirePool(deps), async (client: PoolClient) => {
     const lookup = await getTask(client, ownerId, taskId);
-    if (!lookup.found) throw notFound("task not found") as HttpError;
-    if (lookup.forbidden) throw forbidden("task not found") as HttpError;
-    const rows = await listTaskEvents(
-      client,
-      taskId,
-      parsed.data.limit,
-      cursor,
-    );
+    if (!lookup.found) throw notFound('task not found') as HttpError;
+    if (lookup.forbidden) throw forbidden('task not found') as HttpError;
+    const rows = await listTaskEvents(client, taskId, parsed.data.limit, cursor);
     const hasMore = rows.length > parsed.data.limit;
     const page = hasMore ? rows.slice(0, parsed.data.limit) : rows;
     const items: TaskEventItem[] = page.map((row) => ({
@@ -183,8 +177,7 @@ export async function getTaskEvents(
       evidence_ref: row.evidence_ref,
     }));
     const lastRow = page[page.length - 1] as
-      | ({ id: string; recorded_at_utc: Date; recorded_at_cursor?: string })
-      | undefined;
+      { id: string; recorded_at_utc: Date; recorded_at_cursor?: string } | undefined;
     const nextCursor =
       hasMore && lastRow
         ? encodeCursor({

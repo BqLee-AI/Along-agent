@@ -11,15 +11,15 @@
 
 真实可用命令（以 `package.json` 为准，禁止自创）：
 
-| 用途 | 命令 |
-| --- | --- |
-| 本地启动 | `pnpm dev`（`turbo run dev`；`apps/api` 3000 `ROLE=all`、`apps/web` 3100） |
-| 类型检查 | `pnpm typecheck`（`turbo run typecheck`） |
-| 单元测试 | `pnpm test` / `pnpm test:unit` |
-| 契约测试 | `pnpm test:contracts` |
-| Lint | `pnpm lint`（`eslint . && turbo run lint`） |
-| 构建 | `pnpm build` |
-| 依赖边界（D1） | `pnpm depcruise` |
+| 用途                     | 命令                                                                                      |
+| ------------------------ | ----------------------------------------------------------------------------------------- |
+| 本地启动                 | `pnpm dev`（`turbo run dev`；`apps/api` 3000 `ROLE=all`、`apps/web` 3100）                |
+| 类型检查                 | `pnpm typecheck`（`turbo run typecheck`）                                                 |
+| 单元测试                 | `pnpm test` / `pnpm test:unit`                                                            |
+| 契约测试                 | `pnpm test:contracts`                                                                     |
+| Lint                     | `pnpm lint`（`eslint . && turbo run lint`）                                               |
+| 构建                     | `pnpm build`                                                                              |
+| 依赖边界（D1）           | `pnpm depcruise`                                                                          |
 | 契约校验（当前唯一可跑） | `openspec validate <name> --strict`（如 `openspec validate v0-safety-contract --strict`） |
 
 环境变量占位（只占位，不写真实值）：`DATABASE_URL`、`TZDB_VERSION`（见 `.env.example`）。
@@ -67,6 +67,9 @@
 - 改了代码就要补或改对应的测试，即使没人要求。
 - D1–D10 是合并门槛（见 `docs/design/13-p0-bootstrap-and-ci-rules.md §3`）：time-core 零依赖、展示禁算时间、唯一约束、只追加、空环境冒烟、契约双跑、取消后触发数 = 0、口径天花板，每条必有变红测试。
 - S0 冻结别名禁入：`outbox_events`、`schedule_confirmed`、`SERVICE_NOT_READY`、`C-XXXX`、整句文本确认。
+
+- 一键 verify：`node scripts/verify.mjs`（等价 `pnpm verify`），按序跑 `lint → typecheck → depcruise → 三个治理脚本 → test:unit → openspec validate --all --strict → format:check`，任一失败即停并报步名。`openspec/changes` 下无 active change 时该步提示跳过，也可用 `--skip openspec` 主动跳过。
+- 红例含义：`lint/typecheck` 红=代码或类型坏；`depcruise` 红=越 D1 依赖边界；治理脚本红=门清单/冻结名/文案断言坏（看输出行）；`test:unit` 红=单元坏；`openspec validate` 红=change 的 proposal/tasks/spec 不一致；`format:check` 红=跑 `pnpm format` 后重提。
 
 ## 7. AI 辅助声明
 

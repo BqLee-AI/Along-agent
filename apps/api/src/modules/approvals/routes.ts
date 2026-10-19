@@ -1,5 +1,5 @@
-import type { IncomingMessage, ServerResponse } from "node:http";
-import type { Pool } from "pg";
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { Pool } from 'pg';
 import {
   csrfMismatch,
   failEnvelope,
@@ -10,13 +10,10 @@ import {
   requestIdOf,
   sendJson,
   unauthorized,
-} from "../../http/errors.js";
-import { verifyCsrf, type ActorResolver } from "../../http/auth.js";
-import { confirmApproval, rejectApproval } from "./confirm.js";
-import {
-  getApprovalDetail,
-  listApprovalsForOwner,
-} from "./service.js";
+} from '../../http/errors.js';
+import { verifyCsrf, type ActorResolver } from '../../http/auth.js';
+import { confirmApproval, rejectApproval } from './confirm.js';
+import { getApprovalDetail, listApprovalsForOwner } from './service.js';
 
 export interface RouteDeps {
   pool: Pool | null;
@@ -43,7 +40,7 @@ export async function handleApprovalRoute(
   deps: RouteDeps,
 ): Promise<boolean> {
   const { pathname } = url;
-  if (pathname !== "/api/v1/approvals" && !pathname.startsWith("/api/v1/approvals/")) {
+  if (pathname !== '/api/v1/approvals' && !pathname.startsWith('/api/v1/approvals/')) {
     return false;
   }
 
@@ -55,17 +52,17 @@ export async function handleApprovalRoute(
   }
 
   try {
-    if (req.method === "GET" && pathname === "/api/v1/approvals") {
+    if (req.method === 'GET' && pathname === '/api/v1/approvals') {
       const result = await listApprovalsForOwner(deps, actor.ownerId, queryOf(url));
       sendJson(res, 200, okEnvelope(result, requestId), requestId);
       return true;
     }
 
     const detailMatch = /^\/api\/v1\/approvals\/([^/]+)$/.exec(pathname);
-    if (req.method === "GET" && detailMatch) {
-      const approvalId = detailMatch[1] ?? "";
+    if (req.method === 'GET' && detailMatch) {
+      const approvalId = detailMatch[1] ?? '';
       if (!isUuid(approvalId)) {
-        throw notFound("approval not found");
+        throw notFound('approval not found');
       }
       const { detail } = await getApprovalDetail(deps, actor.ownerId, approvalId);
       sendJson(res, 200, okEnvelope(detail, requestId), requestId);
@@ -73,14 +70,14 @@ export async function handleApprovalRoute(
     }
 
     const confirmMatch = /^\/api\/v1\/approvals\/([^/]+)\/actions\/confirm$/.exec(pathname);
-    if (req.method === "POST" && confirmMatch) {
+    if (req.method === 'POST' && confirmMatch) {
       if (!verifyCsrf(req, actor)) {
         sendJson(res, 403, failEnvelope(csrfMismatch(), requestId), requestId);
         return true;
       }
-      const approvalId = confirmMatch[1] ?? "";
+      const approvalId = confirmMatch[1] ?? '';
       if (!isUuid(approvalId)) {
-        throw notFound("approval not found");
+        throw notFound('approval not found');
       }
       const result = await confirmApproval(deps, actor.ownerId, approvalId, deps.body);
       sendJson(res, 200, okEnvelope(result, requestId), requestId);
@@ -88,14 +85,14 @@ export async function handleApprovalRoute(
     }
 
     const rejectMatch = /^\/api\/v1\/approvals\/([^/]+)\/actions\/reject$/.exec(pathname);
-    if (req.method === "POST" && rejectMatch) {
+    if (req.method === 'POST' && rejectMatch) {
       if (!verifyCsrf(req, actor)) {
         sendJson(res, 403, failEnvelope(csrfMismatch(), requestId), requestId);
         return true;
       }
-      const approvalId = rejectMatch[1] ?? "";
+      const approvalId = rejectMatch[1] ?? '';
       if (!isUuid(approvalId)) {
-        throw notFound("approval not found");
+        throw notFound('approval not found');
       }
       const result = await rejectApproval(deps, actor.ownerId, approvalId, deps.body);
       sendJson(res, 200, okEnvelope(result, requestId), requestId);
@@ -113,8 +110,8 @@ export async function handleApprovalRoute(
       {
         code: 500,
         data: null,
-        msg: "internal error",
-        error: { code: "INTERNAL_ERROR", message: "internal error", request_id: requestId },
+        msg: 'internal error',
+        error: { code: 'INTERNAL_ERROR', message: 'internal error', request_id: requestId },
         request_id: requestId,
       },
       requestId,

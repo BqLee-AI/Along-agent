@@ -23,7 +23,7 @@ export const OUTBOX_POLL_INTERVAL_MS = 30 * 1000;
 
 // Local schedule-registry receipt prefix: schedule receipts issued by the
 // schedule phase take the form `sched:<taskId>`.
-export const SCHEDULE_RECEIPT_PREFIX = "sched:";
+export const SCHEDULE_RECEIPT_PREFIX = 'sched:';
 
 export function scheduleReceiptFor(taskId: string): string {
   return `${SCHEDULE_RECEIPT_PREFIX}${taskId}`;
@@ -76,18 +76,16 @@ export function ackDelayForCheck(checkNo: number): number | null {
   return ACK_CHECK_DELAYS_MS[checkNo] ?? null;
 }
 
-export type GateVerdict =
-  | { ok: true }
-  | { ok: false; reason: GateBlockReason };
+export type GateVerdict = { ok: true } | { ok: false; reason: GateBlockReason };
 
 export type GateBlockReason =
-  | "NOT_FOUND"
-  | "VERSION_MISMATCH"
-  | "NOT_SCHEDULED"
-  | "CANCEL_PENDING"
-  | "CANCELLED"
-  | "RECEIPT_MISMATCH"
-  | "MISSED";
+  | 'NOT_FOUND'
+  | 'VERSION_MISMATCH'
+  | 'NOT_SCHEDULED'
+  | 'CANCEL_PENDING'
+  | 'CANCELLED'
+  | 'RECEIPT_MISMATCH'
+  | 'MISSED';
 
 export interface GateSnapshot {
   found: boolean;
@@ -109,24 +107,20 @@ export interface GateClaim {
  * Cancel-pending tasks are always blocked; cancelled tasks stay blocked.
  * A fully elapsed fire window reports MISSED (caller marks missed, no refire).
  */
-export function evaluateGate(
-  snapshot: GateSnapshot,
-  claim: GateClaim,
-  nowMs: number,
-): GateVerdict {
-  if (!snapshot.found) return { ok: false, reason: "NOT_FOUND" };
-  if (snapshot.state === "cancelled") return { ok: false, reason: "CANCELLED" };
-  if (snapshot.state === "cancel_pending") return { ok: false, reason: "CANCEL_PENDING" };
-  if (snapshot.state !== "scheduled") return { ok: false, reason: "NOT_SCHEDULED" };
+export function evaluateGate(snapshot: GateSnapshot, claim: GateClaim, nowMs: number): GateVerdict {
+  if (!snapshot.found) return { ok: false, reason: 'NOT_FOUND' };
+  if (snapshot.state === 'cancelled') return { ok: false, reason: 'CANCELLED' };
+  if (snapshot.state === 'cancel_pending') return { ok: false, reason: 'CANCEL_PENDING' };
+  if (snapshot.state !== 'scheduled') return { ok: false, reason: 'NOT_SCHEDULED' };
   if (snapshot.stateVersion !== claim.expectedStateVersion) {
-    return { ok: false, reason: "VERSION_MISMATCH" };
+    return { ok: false, reason: 'VERSION_MISMATCH' };
   }
   if (snapshot.scheduleReceipt !== claim.scheduleReceipt) {
-    return { ok: false, reason: "RECEIPT_MISMATCH" };
+    return { ok: false, reason: 'RECEIPT_MISMATCH' };
   }
   void claim.taskId;
   if (isPastFireWindow(snapshot.fireAtMs, nowMs)) {
-    return { ok: false, reason: "MISSED" };
+    return { ok: false, reason: 'MISSED' };
   }
   return { ok: true };
 }

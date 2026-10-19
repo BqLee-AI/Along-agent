@@ -18,12 +18,12 @@ Content 表（`briefs`、`cards`）为 v1 / Deferred，移出 v0 落地顺序（
 - Conversation / Runs 是对话与执行存档底座，commitments 引用 `conversation_id` / `run_id`。
 - Commitments 含状态机与 outbox；P1 content（`briefs`/`cards`，只读投影，见 `docs/api/brief/brief_routes.md`）依赖 commitments，移出 v0 不阻塞主链路。
 
-| 分组 | 文档 | 表 |
-| --- | --- | --- |
-| Identity | [identity-schema.md](identity-schema.md) | `users`、`sessions` |
-| Conversation / Runs | [conversation-and-runs-schema.md](conversation-and-runs-schema.md) | `conversations`、`messages`、`agent_runs`、`run_attempts`、`run_checkpoints`、`conversation_idempotency`、`tool_calls`、`agent_revisions`、`prompt_versions` |
-| Commitments | [commitments-schema.md](commitments-schema.md) | `approvals`、`tasks`、`task_events`、`outbox`、`notifications`、`task_leases`、`security_events` |
-| Content（v1 / Deferred，移出 v0） | [content-schema.md](content-schema.md) | `briefs`、`cards` |
+| 分组                              | 文档                                                               | 表                                                                                                                                                           |
+| --------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Identity                          | [identity-schema.md](identity-schema.md)                           | `users`、`sessions`                                                                                                                                          |
+| Conversation / Runs               | [conversation-and-runs-schema.md](conversation-and-runs-schema.md) | `conversations`、`messages`、`agent_runs`、`run_attempts`、`run_checkpoints`、`conversation_idempotency`、`tool_calls`、`agent_revisions`、`prompt_versions` |
+| Commitments                       | [commitments-schema.md](commitments-schema.md)                     | `approvals`、`tasks`、`task_events`、`outbox`、`notifications`、`task_leases`、`security_events`                                                             |
+| Content（v1 / Deferred，移出 v0） | [content-schema.md](content-schema.md)                             | `briefs`、`cards`                                                                                                                                            |
 
 引用：落地顺序对应 B03 微服务下沉原则与 B06 建表顺序（P3 vertical 切片）[B03][B06]。
 

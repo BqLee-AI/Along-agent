@@ -1,8 +1,8 @@
-import Link from "next/link";
-import { apiGet } from "../../lib/api";
-import type { ApprovalListItem } from "../../lib/types";
+import Link from 'next/link';
+import { apiGet } from '../../lib/api';
+import type { ApprovalListItem } from '../../lib/types';
 
-export const dynamic = "force-dynamic";
+export const dynamic = 'force-dynamic';
 
 interface Page {
   items: ApprovalListItem[];
@@ -10,7 +10,7 @@ interface Page {
 }
 
 export default async function ApprovalsPage() {
-  const result = await apiGet<Page>("/api/v1/approvals?limit=50");
+  const result = await apiGet<Page>('/api/v1/approvals?limit=50');
   if (!result.ok) {
     return (
       <section>

@@ -2,19 +2,19 @@
 // projection, docs/design/10 §1 (S0 #14 frozen, seven words).
 // Every event object is .strict(): unknown fields are rejected, so the wire
 // shape can never silently widen. protocol_version is frozen at "v1".
-import { z } from "zod";
+import { z } from 'zod';
 
-export const THREAD_PROTOCOL_VERSION = "v1" as const;
+export const THREAD_PROTOCOL_VERSION = 'v1' as const;
 
 // Frozen SSE vocabulary: exactly these seven words, no more.
 export const THREAD_EVENT_TYPES = [
-  "thread.started",
-  "message.delta",
-  "card.proposed",
-  "approval_required",
-  "thread.completed",
-  "thread.failed",
-  "thread.cancelled",
+  'thread.started',
+  'message.delta',
+  'card.proposed',
+  'approval_required',
+  'thread.completed',
+  'thread.failed',
+  'thread.cancelled',
 ] as const;
 
 export type ThreadEventType = (typeof THREAD_EVENT_TYPES)[number];
@@ -26,7 +26,7 @@ export const ThreadStartedPayloadSchema = z
   .object({
     conversation_id: uuidSchema,
     run_id: uuidSchema,
-    stream_protocol_version: z.literal("v1"),
+    stream_protocol_version: z.literal('v1'),
     ruleset_id: z.string().min(1).max(200),
     tzdb_version: z.string().min(1).max(100),
   })
@@ -45,7 +45,7 @@ export const CardProposedPayloadSchema = z
     conversation_id: uuidSchema,
     run_id: uuidSchema,
     card_id: z.string().min(1).max(200),
-    schema_version: z.literal("v1"),
+    schema_version: z.literal('v1'),
     wall_time: z.string().min(1).max(100),
     timezone_id: z.string().min(1).max(100),
     original_text: z.string().min(1).max(1000),
@@ -110,21 +110,21 @@ function envelopeOf<TType extends ThreadEventType, TPayload extends z.ZodTypeAny
     .strict();
 }
 
-export const ThreadEventSchema = z.discriminatedUnion("type", [
-  envelopeOf("thread.started", ThreadStartedPayloadSchema),
-  envelopeOf("message.delta", MessageDeltaPayloadSchema),
-  envelopeOf("card.proposed", CardProposedPayloadSchema),
-  envelopeOf("approval_required", ApprovalRequiredPayloadSchema),
-  envelopeOf("thread.completed", ThreadCompletedPayloadSchema),
-  envelopeOf("thread.failed", ThreadFailedPayloadSchema),
-  envelopeOf("thread.cancelled", ThreadCancelledPayloadSchema),
+export const ThreadEventSchema = z.discriminatedUnion('type', [
+  envelopeOf('thread.started', ThreadStartedPayloadSchema),
+  envelopeOf('message.delta', MessageDeltaPayloadSchema),
+  envelopeOf('card.proposed', CardProposedPayloadSchema),
+  envelopeOf('approval_required', ApprovalRequiredPayloadSchema),
+  envelopeOf('thread.completed', ThreadCompletedPayloadSchema),
+  envelopeOf('thread.failed', ThreadFailedPayloadSchema),
+  envelopeOf('thread.cancelled', ThreadCancelledPayloadSchema),
 ]);
 
 export type ThreadEvent = z.infer<typeof ThreadEventSchema>;
-export type ThreadStartedEvent = Extract<ThreadEvent, { type: "thread.started" }>;
-export type MessageDeltaEvent = Extract<ThreadEvent, { type: "message.delta" }>;
-export type CardProposedEvent = Extract<ThreadEvent, { type: "card.proposed" }>;
-export type ApprovalRequiredEvent = Extract<ThreadEvent, { type: "approval_required" }>;
-export type ThreadCompletedEvent = Extract<ThreadEvent, { type: "thread.completed" }>;
-export type ThreadFailedEvent = Extract<ThreadEvent, { type: "thread.failed" }>;
-export type ThreadCancelledEvent = Extract<ThreadEvent, { type: "thread.cancelled" }>;
+export type ThreadStartedEvent = Extract<ThreadEvent, { type: 'thread.started' }>;
+export type MessageDeltaEvent = Extract<ThreadEvent, { type: 'message.delta' }>;
+export type CardProposedEvent = Extract<ThreadEvent, { type: 'card.proposed' }>;
+export type ApprovalRequiredEvent = Extract<ThreadEvent, { type: 'approval_required' }>;
+export type ThreadCompletedEvent = Extract<ThreadEvent, { type: 'thread.completed' }>;
+export type ThreadFailedEvent = Extract<ThreadEvent, { type: 'thread.failed' }>;
+export type ThreadCancelledEvent = Extract<ThreadEvent, { type: 'thread.cancelled' }>;

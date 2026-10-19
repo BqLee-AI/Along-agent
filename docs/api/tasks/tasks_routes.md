@@ -6,12 +6,12 @@
 
 ## 1. 路由
 
-| 方法 | 路径 | 鉴权 | CSRF | 幂等键 | 说明 |
-| --- | --- | --- | --- | --- | --- |
-| GET | `/tasks` | 是 | 否 | — | 任务列表 |
-| GET | `/tasks/{id}` | 是 | 否 | — | 任务详情 |
-| POST | `/tasks/{id}/actions/cancel` | 是 | 是 | 是 | 取消（幂等） |
-| GET | `/tasks/{id}/events` | 是 | 否 | — | 只追加事件账 |
+| 方法 | 路径                         | 鉴权 | CSRF | 幂等键 | 说明         |
+| ---- | ---------------------------- | ---- | ---- | ------ | ------------ |
+| GET  | `/tasks`                     | 是   | 否   | —      | 任务列表     |
+| GET  | `/tasks/{id}`                | 是   | 否   | —      | 任务详情     |
+| POST | `/tasks/{id}/actions/cancel` | 是   | 是   | 是     | 取消（幂等） |
+| GET  | `/tasks/{id}/events`         | 是   | 否   | —      | 只追加事件账 |
 
 ## 2. GET /tasks 与 GET /tasks/{id} [Required]
 
@@ -51,7 +51,9 @@
 {
   "code": 0,
   "data": { "task_id": "tsk_01J…", "state": "cancelled", "duplicate": false },
-  "msg": "ok", "error": null, "request_id": "req_…"
+  "msg": "ok",
+  "error": null,
+  "request_id": "req_…"
 }
 ```
 

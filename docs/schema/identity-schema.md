@@ -29,20 +29,20 @@ users 1 ── 0..n <全业务表 via owner_id 逻辑引用>
 
 ### 字段
 
-| 字段 | 类型 | 约束 | 说明 |
-| --- | --- | --- | --- |
-| `id` | `uuid` | primary key | 用户 ID，全业务表 `owner_id` 逻辑引用目标 |
-| `display_name` | `text` | not null, default `''` | 展示名，可改 |
-| `primary_email_hash` | `text` | nullable | 主邮箱哈希（只存哈希，不存明文邮箱） |
-| `auth_email` | `text` | not null, unique | 不透明登录句柄（HMAC 派生，形如 `<hex>@local.invalid`，不是明文邮箱；轮换 `BETTER_AUTH_SECRET` 会失效） |
-| `email_verified` | `boolean` | not null, default `false` | 邮箱已验证（v0 自建 seed 为 false） |
-| `auth_subject` | `text` | nullable | 内部身份标识（自建 credential）；格式随 Better Auth 落地补齐 |
-| `auth_provider` | `text` | nullable | 约束为 `local`（v0 仅自建；OIDC 不在 v0 范围） |
-| `timezone_id` | `text` | nullable | 已确认时区（IANA 文本）；“明天”解析锚 + time-core 输入，未确认则 NULL |
-| `status` | `text` | not null, default `'active'` | 按 `active/disabled/deleted_requested` 约束 |
-| `created_at` | `timestamptz` | not null, default `now()` | 创建时间 |
-| `updated_at` | `timestamptz` | not null, default `now()` | 更新时间 |
-| `metadata` | `jsonb` | not null, default `'{}'` | 扩展信息，不存敏感值 |
+| 字段                 | 类型          | 约束                         | 说明                                                                                                    |
+| -------------------- | ------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `id`                 | `uuid`        | primary key                  | 用户 ID，全业务表 `owner_id` 逻辑引用目标                                                               |
+| `display_name`       | `text`        | not null, default `''`       | 展示名，可改                                                                                            |
+| `primary_email_hash` | `text`        | nullable                     | 主邮箱哈希（只存哈希，不存明文邮箱）                                                                    |
+| `auth_email`         | `text`        | not null, unique             | 不透明登录句柄（HMAC 派生，形如 `<hex>@local.invalid`，不是明文邮箱；轮换 `BETTER_AUTH_SECRET` 会失效） |
+| `email_verified`     | `boolean`     | not null, default `false`    | 邮箱已验证（v0 自建 seed 为 false）                                                                     |
+| `auth_subject`       | `text`        | nullable                     | 内部身份标识（自建 credential）；格式随 Better Auth 落地补齐                                            |
+| `auth_provider`      | `text`        | nullable                     | 约束为 `local`（v0 仅自建；OIDC 不在 v0 范围）                                                          |
+| `timezone_id`        | `text`        | nullable                     | 已确认时区（IANA 文本）；“明天”解析锚 + time-core 输入，未确认则 NULL                                   |
+| `status`             | `text`        | not null, default `'active'` | 按 `active/disabled/deleted_requested` 约束                                                             |
+| `created_at`         | `timestamptz` | not null, default `now()`    | 创建时间                                                                                                |
+| `updated_at`         | `timestamptz` | not null, default `now()`    | 更新时间                                                                                                |
+| `metadata`           | `jsonb`       | not null, default `'{}'`     | 扩展信息，不存敏感值                                                                                    |
 
 ### 约束与索引
 
@@ -65,16 +65,16 @@ users 1 ── 0..n <全业务表 via owner_id 逻辑引用>
 
 ### 字段
 
-| 字段 | 类型 | 约束 | 说明 |
-| --- | --- | --- | --- |
-| `id` | `uuid` | primary key | 会话 ID |
-| `user_id` | `uuid` | not null, references `users(id)` on delete restrict | 所属用户 |
-| `token_hash` | `text` | not null, unique | 会话 token 的 HMAC-SHA256（`session:<token>` 加盐）；明文只在 cookie/内存，永不入库 |
-| `created_at` | `timestamptz` | not null, default `now()` | 创建时间 |
-| `expires_at` | `timestamptz` | not null | 过期时间（v0 固定 7 天），过期会话不可用 |
-| `revoked_at` | `timestamptz` | nullable | 撤销时间，非 NULL 即已撤销（软撤销，永不硬删） |
-| `last_seen_at` | `timestamptz` | nullable | 最后活跃时间（[Proposed] 用于过期顺路清与诊断） |
-| `client_info` | `jsonb` | not null, default `'{}'` | 客户端信息（UA/设备名摘要）；不存 token原文 |
+| 字段           | 类型          | 约束                                                | 说明                                                                                |
+| -------------- | ------------- | --------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `id`           | `uuid`        | primary key                                         | 会话 ID                                                                             |
+| `user_id`      | `uuid`        | not null, references `users(id)` on delete restrict | 所属用户                                                                            |
+| `token_hash`   | `text`        | not null, unique                                    | 会话 token 的 HMAC-SHA256（`session:<token>` 加盐）；明文只在 cookie/内存，永不入库 |
+| `created_at`   | `timestamptz` | not null, default `now()`                           | 创建时间                                                                            |
+| `expires_at`   | `timestamptz` | not null                                            | 过期时间（v0 固定 7 天），过期会话不可用                                            |
+| `revoked_at`   | `timestamptz` | nullable                                            | 撤销时间，非 NULL 即已撤销（软撤销，永不硬删）                                      |
+| `last_seen_at` | `timestamptz` | nullable                                            | 最后活跃时间（[Proposed] 用于过期顺路清与诊断）                                     |
+| `client_info`  | `jsonb`       | not null, default `'{}'`                            | 客户端信息（UA/设备名摘要）；不存 token原文                                         |
 
 ### 约束与索引
 
@@ -98,15 +98,15 @@ users 1 ── 0..n <全业务表 via owner_id 逻辑引用>
 
 ### 字段
 
-| 字段 | 类型 | 约束 | 说明 |
-| --- | --- | --- | --- |
-| `id` | `uuid` | primary key | 行 ID |
-| `user_id` | `uuid` | not null, references `users(id)` on delete restrict | 所属用户 |
-| `provider_id` | `text` | not null, default `'credential'` | 按 `credential` 约束（v0 仅自建；OIDC 不在 v0 范围） |
-| `account_id` | `text` | not null | 账号标识（v0 seed 形如 `seed:<user_id>`） |
-| `password_hash` | `text` | nullable | 密码哈希；v0 恒 NULL（无登录端点） |
-| `created_at` | `timestamptz` | not null, default `now()` | 创建时间 |
-| `updated_at` | `timestamptz` | not null, default `now()` | 更新时间 |
+| 字段            | 类型          | 约束                                                | 说明                                                 |
+| --------------- | ------------- | --------------------------------------------------- | ---------------------------------------------------- |
+| `id`            | `uuid`        | primary key                                         | 行 ID                                                |
+| `user_id`       | `uuid`        | not null, references `users(id)` on delete restrict | 所属用户                                             |
+| `provider_id`   | `text`        | not null, default `'credential'`                    | 按 `credential` 约束（v0 仅自建；OIDC 不在 v0 范围） |
+| `account_id`    | `text`        | not null                                            | 账号标识（v0 seed 形如 `seed:<user_id>`）            |
+| `password_hash` | `text`        | nullable                                            | 密码哈希；v0 恒 NULL（无登录端点）                   |
+| `created_at`    | `timestamptz` | not null, default `now()`                           | 创建时间                                             |
+| `updated_at`    | `timestamptz` | not null, default `now()`                           | 更新时间                                             |
 
 ### 约束与索引
 

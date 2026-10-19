@@ -29,13 +29,13 @@
 
 ## v0 五视图（真源对象与必须展示字段）
 
-| 视图 | 真源对象（Contract 表名） | 必须展示字段 | 非目标 |
-| --- | --- | --- | --- |
-| 简报视图 | tasks + approvals | 每条 fire_at_utc（本地呈现）、状态、待确认数 | 不展示 UTC/fold 内部码 |
-| 卡片视图 | approvals | original_text、归一本地时间、timezone_id、过期倒计时 | 不换算、不改写冻结内容 |
-| 对话视图 | agent_runs + run_attempts | SSE 流式正文、待审批提示、预算状态 | 不展示系统提示词与内部轨迹 |
-| 确认视图 | approvals | 冻结方案全文、presentation_version、24h 有效期、常驻不承诺告知 | "好/嗯/行"快捷确认按钮 |
-| 任务视图 | tasks | 状态、fire_at_utc、登记回执有无、取消入口 | 改期原地编辑（必须取消旧 + 建新） |
+| 视图     | 真源对象（Contract 表名） | 必须展示字段                                                   | 非目标                            |
+| -------- | ------------------------- | -------------------------------------------------------------- | --------------------------------- |
+| 简报视图 | tasks + approvals         | 每条 fire_at_utc（本地呈现）、状态、待确认数                   | 不展示 UTC/fold 内部码            |
+| 卡片视图 | approvals                 | original_text、归一本地时间、timezone_id、过期倒计时           | 不换算、不改写冻结内容            |
+| 对话视图 | agent_runs + run_attempts | SSE 流式正文、待审批提示、预算状态                             | 不展示系统提示词与内部轨迹        |
+| 确认视图 | approvals                 | 冻结方案全文、presentation_version、24h 有效期、常驻不承诺告知 | "好/嗯/行"快捷确认按钮            |
+| 任务视图 | tasks                     | 状态、fire_at_utc、登记回执有无、取消入口                      | 改期原地编辑（必须取消旧 + 建新） |
 
 - [Required] 每个视图的主对象与真源表一一对应：tasks、approvals、task_events、agent_runs（含 run_attempts / run_checkpoints）、outbox；跨视图联动只传 id，不拼快照。
 - [Required] 确认按钮上方常驻短告知："到点会在调度器成功运行时尝试通知；设备关机、休眠或进程未运行时可能错过，云端版以可测指标为准。"（口径天花板见 03）

@@ -1,4 +1,4 @@
-import type { Pool, PoolClient } from "pg";
+import type { Pool, PoolClient } from 'pg';
 
 // Read-only helper: run fn with a checked-out client, always released.
 export async function withClient<T>(
@@ -20,13 +20,13 @@ export async function withTransaction<T>(
 ): Promise<T> {
   const client = await pool.connect();
   try {
-    await client.query("BEGIN");
+    await client.query('BEGIN');
     try {
       const result = await fn(client);
-      await client.query("COMMIT");
+      await client.query('COMMIT');
       return result;
     } catch (err) {
-      await client.query("ROLLBACK");
+      await client.query('ROLLBACK');
       throw err;
     }
   } finally {

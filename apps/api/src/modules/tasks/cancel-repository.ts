@@ -1,6 +1,6 @@
 // Cancel repository: raw SQL for the cancel path. No writes to
 // agent_runs/run_attempts/run_checkpoints/tool_calls (owned by #9).
-import type { PoolClient } from "pg";
+import type { PoolClient } from 'pg';
 
 export interface CancelTaskRow {
   id: string;
@@ -55,7 +55,7 @@ export async function insertCancelCommand(
       args.taskId,
       args.expectedStateVersion,
       JSON.stringify({
-        kind: "cancel",
+        kind: 'cancel',
         task_id: args.taskId,
         fire_at_utc: args.fireAtIso,
         expected_state_version: args.expectedStateVersion,
@@ -69,9 +69,9 @@ export async function insertCancelCommand(
   const existing = await findCancelRowByKey(client, args.idempotencyKey);
   void existing;
   const { rows: again } = await client.query<{ id: string }>(
-    "SELECT id FROM outbox WHERE idempotency_key = $1",
+    'SELECT id FROM outbox WHERE idempotency_key = $1',
     [args.idempotencyKey],
   );
-  if (!again[0]) throw new Error("cancel outbox insert lost");
+  if (!again[0]) throw new Error('cancel outbox insert lost');
   return again[0].id;
 }

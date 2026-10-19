@@ -13,24 +13,24 @@ Observed / Required / Proposed / Deferred 同 01。
 
 ## 1. 六条原则 → 落点（Required）
 
-| # | a13n 原则（Observed, AF） | 本项目落点模块 | 落法 |
-| --- | --- | --- | --- |
-| 1 | harness 可替换 | 五缝 + 双实现同一契约（09/11） | `AgentRuntime/ToolGateway/Scheduler/Notifier/ConnectorVault` P1 起全接口化；Ts 与 Cangjie 同一 `contracts` 测试双跑；替换任一缝只需过同一套契约 |
-| 2 | checkpoint 可恢复 | `agent_runs/run_attempts/run_checkpoints` + lease（09 §6） | P1 落库可续跑；P2 lease+fencing；Spike S2 同标准验收 |
-| 3 | 自托管 | 单镜像 + compose 冒烟（01/13） | 一个镜像 `api\|worker\|all`；`docker compose up` 空环境冒烟为 CI 门；K8s Deferred |
-| 4 | 不可变 revision | `agent/skill/prompt` + `presentation_version` + `tzdb_version`（09 §7；B06§5） | DB 禁 UPDATE/DELETE（迁移层强制）；旧 revision 跑完旧 run；模板 bug 只作废重来 |
-| 5 | AG-UI 投影 | `packages/stream-protocol` 版本化 zod（09 §3；10 §4） | 事件名开工对照 `thread-stream.schema.json`；投影只读 AgentEvent，不反写运行时 |
-| 6 | 不支持组合 → 类型化错误不降级 | `/readyz`（10 §6） | 规则缺失/依赖未就绪只返回 `TZDB_UNAVAILABLE/NOT_READY` + `details.missing[]`，永不降级为可用 |
+| #   | a13n 原则（Observed, AF）     | 本项目落点模块                                                                 | 落法                                                                                                                                            |
+| --- | ----------------------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | harness 可替换                | 五缝 + 双实现同一契约（09/11）                                                 | `AgentRuntime/ToolGateway/Scheduler/Notifier/ConnectorVault` P1 起全接口化；Ts 与 Cangjie 同一 `contracts` 测试双跑；替换任一缝只需过同一套契约 |
+| 2   | checkpoint 可恢复             | `agent_runs/run_attempts/run_checkpoints` + lease（09 §6）                     | P1 落库可续跑；P2 lease+fencing；Spike S2 同标准验收                                                                                            |
+| 3   | 自托管                        | 单镜像 + compose 冒烟（01/13）                                                 | 一个镜像 `api\|worker\|all`；`docker compose up` 空环境冒烟为 CI 门；K8s Deferred                                                               |
+| 4   | 不可变 revision               | `agent/skill/prompt` + `presentation_version` + `tzdb_version`（09 §7；B06§5） | DB 禁 UPDATE/DELETE（迁移层强制）；旧 revision 跑完旧 run；模板 bug 只作废重来                                                                  |
+| 5   | AG-UI 投影                    | `packages/stream-protocol` 版本化 zod（09 §3；10 §4）                          | 事件名开工对照 `thread-stream.schema.json`；投影只读 AgentEvent，不反写运行时                                                                   |
+| 6   | 不支持组合 → 类型化错误不降级 | `/readyz`（10 §6）                                                             | 规则缺失/依赖未就绪只返回 `TZDB_UNAVAILABLE/NOT_READY` + `details.missing[]`，永不降级为可用                                                    |
 
 ## 2. CI 门（Required，实现见 13）
 
-| 门 | 拦截内容 | 对应原则 |
-| --- | --- | --- |
-| depcruise 依赖门 | `time-core` 零依赖、`spikes/*` 不碰业务、跨模块只经 `contracts` | #1、红线 |
-| 纯函数门 | `time-core` 禁时钟/禁 env/禁网络；单测用 fixture 规则 | #4（可复现） |
-| 约束存在门 | `UNIQUE(task_id,fire_at)`、`recreated_from` 唯一、`task_events` 无 UPDATE/DELETE 迁移扫描 | #4（DB 承载规则） |
-| 契约双跑门 | 同一 `contracts.test.ts` 进程内 + HTTP 双跑全绿 | #1 |
-| 冒烟门 | 空环境 `compose up` + `/readyz` 类型化失败演练（缺 TZDB 时） | #3、#6 |
+| 门               | 拦截内容                                                                                  | 对应原则          |
+| ---------------- | ----------------------------------------------------------------------------------------- | ----------------- |
+| depcruise 依赖门 | `time-core` 零依赖、`spikes/*` 不碰业务、跨模块只经 `contracts`                           | #1、红线          |
+| 纯函数门         | `time-core` 禁时钟/禁 env/禁网络；单测用 fixture 规则                                     | #4（可复现）      |
+| 约束存在门       | `UNIQUE(task_id,fire_at)`、`recreated_from` 唯一、`task_events` 无 UPDATE/DELETE 迁移扫描 | #4（DB 承载规则） |
+| 契约双跑门       | 同一 `contracts.test.ts` 进程内 + HTTP 双跑全绿                                           | #1                |
+| 冒烟门           | 空环境 `compose up` + `/readyz` 类型化失败演练（缺 TZDB 时）                              | #3、#6            |
 
 ## 3. Postgres 贯穿原则（Required，AF 三硬约束 Observed AF§5）
 

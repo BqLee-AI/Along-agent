@@ -1,4 +1,4 @@
-import { Pool, type PoolClient } from "pg";
+import { Pool, type PoolClient } from 'pg';
 
 // Pool factory: created from DATABASE_URL on demand. Null pool (no
 // DATABASE_URL) means "DB unavailable" — routes return 503 NOT_READY and

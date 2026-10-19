@@ -4,7 +4,10 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "files": ["dist", "thread-stream.schema.json"],
+  "files": [
+    "dist",
+    "thread-stream.schema.json"
+  ],
   "exports": {
     ".": "./dist/index.js"
   },

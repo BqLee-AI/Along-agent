@@ -1,11 +1,11 @@
-import type { Metadata } from "next";
-import Link from "next/link";
-import type { ReactNode } from "react";
-import "./globals.css";
+import type { Metadata } from 'next';
+import Link from 'next/link';
+import type { ReactNode } from 'react';
+import './globals.css';
 
 export const metadata: Metadata = {
-  title: "Along",
-  description: "云端个人助理：简报、确认、提醒与活动账。",
+  title: 'Along',
+  description: '云端个人助理：简报、确认、提醒与活动账。',
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

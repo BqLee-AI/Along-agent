@@ -46,10 +46,10 @@
 
 ## 术语（本目录内）
 
-| 术语 | 说明 |
-| --- | --- |
-| 简报 / 卡片 | /brief 聚合视图与其条目呈现；卡片只读 presentation 冻结字段 |
-| 提议 / 确认门 | Agent 产出待确认方案；approval confirm/reject 为唯一放行点 |
-| task / approval | 调度任务与其确认单；状态机见 prd/README Required 列表 |
-| 活动账 | task_events 只追加账本的面向用户投影 |
-| 五缝 | AgentRuntime / ToolGateway / Scheduler / Notifier / ConnectorVault 五个模块缝合面 |
+| 术语            | 说明                                                                              |
+| --------------- | --------------------------------------------------------------------------------- |
+| 简报 / 卡片     | /brief 聚合视图与其条目呈现；卡片只读 presentation 冻结字段                       |
+| 提议 / 确认门   | Agent 产出待确认方案；approval confirm/reject 为唯一放行点                        |
+| task / approval | 调度任务与其确认单；状态机见 prd/README Required 列表                             |
+| 活动账          | task_events 只追加账本的面向用户投影                                              |
+| 五缝            | AgentRuntime / ToolGateway / Scheduler / Notifier / ConnectorVault 五个模块缝合面 |

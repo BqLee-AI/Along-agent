@@ -1,8 +1,12 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { randomUUID } from "node:crypto";
-import type { Pool } from "pg";
-import { getTaskDetail, getTaskEvents, listTasksForOwner } from "../../src/modules/tasks/service.js";
-import { databaseUrl, requirePool } from "./setup.js";
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import type { Pool } from 'pg';
+import {
+  getTaskDetail,
+  getTaskEvents,
+  listTasksForOwner,
+} from '../../src/modules/tasks/service.js';
+import { databaseUrl, requirePool } from './setup.js';
 
 const maybe = databaseUrl ? describe : describe.skip;
 
@@ -22,7 +26,7 @@ async function seedTask(pool: Pool, ownerId: string): Promise<string> {
   return taskId;
 }
 
-maybe("tasks read routes", () => {
+maybe('tasks read routes', () => {
   let pool: Pool;
   beforeAll(() => {
     pool = requirePool();
@@ -31,41 +35,41 @@ maybe("tasks read routes", () => {
     await pool.end();
   });
 
-  it("lists tasks ordered by fire_at with keyset pagination", async () => {
+  it('lists tasks ordered by fire_at with keyset pagination', async () => {
     const owner = randomUUID();
     await seedTask(pool, owner);
     await seedTask(pool, owner);
-    const first = await listTasksForOwner({ pool }, owner, { limit: "1" });
+    const first = await listTasksForOwner({ pool }, owner, { limit: '1' });
     expect(first.items).toHaveLength(1);
-    expect(first.items[0]?.fire_at_local).toBe("2026-10-17 09:20");
+    expect(first.items[0]?.fire_at_local).toBe('2026-10-17 09:20');
     expect(first.next_cursor).not.toBeNull();
     const second = await listTasksForOwner({ pool }, owner, {
-      limit: "1",
+      limit: '1',
       cursor: first.next_cursor ?? undefined,
     });
     expect(second.items).toHaveLength(1);
   });
 
-  it("detail exposes frozen fields without conversion", async () => {
+  it('detail exposes frozen fields without conversion', async () => {
     const owner = randomUUID();
     const taskId = await seedTask(pool, owner);
     const detail = await getTaskDetail({ pool }, owner, taskId);
     expect(detail.task_id).toBe(taskId);
-    expect(detail.state).toBe("saved");
+    expect(detail.state).toBe('saved');
     expect(detail.state_version).toBe(1);
-    expect(detail.fire_at_local).toBe("2026-10-17 09:20");
+    expect(detail.fire_at_local).toBe('2026-10-17 09:20');
   });
 
-  it("events project the append-only ledger ascending", async () => {
+  it('events project the append-only ledger ascending', async () => {
     const owner = randomUUID();
     const taskId = await seedTask(pool, owner);
     const { items } = await getTaskEvents({ pool }, owner, taskId, {});
     expect(items).toHaveLength(1);
-    expect(items[0]?.type).toBe("created");
-    expect(items[0]?.evidence_ref).toBe("req-seed");
+    expect(items[0]?.type).toBe('created');
+    expect(items[0]?.evidence_ref).toBe('req-seed');
   });
 
-  it("cross-owner reads are forbidden, missing rows are 404", async () => {
+  it('cross-owner reads are forbidden, missing rows are 404', async () => {
     const owner = randomUUID();
     const taskId = await seedTask(pool, owner);
     await expect(getTaskDetail({ pool }, randomUUID(), taskId)).rejects.toMatchObject({

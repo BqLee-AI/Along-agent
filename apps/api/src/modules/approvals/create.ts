@@ -2,12 +2,9 @@
 // approval, request_cancel_task -> cancel_task approval. Both only INSERT an
 // approval(pending); they never touch tasks/outbox. Task creation stays in
 // confirm.ts (single sanctioned cross-module transaction).
-import { randomUUID } from "node:crypto";
-import type { Pool, PoolClient } from "pg";
-import {
-  computePresentationHash,
-  PRESENTATION_VERSION_V1,
-} from "./presentation.js";
+import { randomUUID } from 'node:crypto';
+import type { Pool, PoolClient } from 'pg';
+import { computePresentationHash, PRESENTATION_VERSION_V1 } from './presentation.js';
 
 const APPROVAL_TTL_HOURS = 24;
 
@@ -63,7 +60,7 @@ function snapshotOf(input: {
     timezoneId: input.timezoneId,
     fold: input.fold,
     offsetSeconds: input.offsetSeconds,
-    occurrence: "single" as const,
+    occurrence: 'single' as const,
     presentationVersion: PRESENTATION_VERSION_V1,
   };
 }
@@ -75,7 +72,7 @@ export function wallTextOf(wallIso: string): string {
 }
 
 export async function createTaskApproval(
-  client: Pick<Pool | PoolClient, "query">,
+  client: Pick<Pool | PoolClient, 'query'>,
   input: CreateTaskApprovalInput,
 ): Promise<CreatedApproval> {
   const approvalId = randomUUID();
@@ -105,7 +102,7 @@ export async function createTaskApproval(
     ],
   );
   const expiresAt = rows[0]?.expires_at;
-  if (!expiresAt) throw new Error("approval insert returned no row");
+  if (!expiresAt) throw new Error('approval insert returned no row');
   return {
     approvalId,
     originalText: input.originalText,
@@ -124,7 +121,7 @@ export async function createTaskApproval(
 // same conversation returns the existing pending row instead of stacking
 // duplicates (the approve button must point at one card).
 export async function createCancelTaskApproval(
-  client: Pick<Pool | PoolClient, "query">,
+  client: Pick<Pool | PoolClient, 'query'>,
   input: CancelTaskApprovalInput,
 ): Promise<CreatedApproval> {
   const existing = await client.query<{
@@ -192,7 +189,7 @@ export async function createCancelTaskApproval(
     ],
   );
   const expiresAt = rows[0]?.expires_at;
-  if (!expiresAt) throw new Error("approval insert returned no row");
+  if (!expiresAt) throw new Error('approval insert returned no row');
   return {
     approvalId,
     originalText: input.originalText,

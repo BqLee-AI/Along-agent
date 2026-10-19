@@ -10,8 +10,8 @@ export type {
   TimeRuleset,
   ZoneRules,
   ZoneTransition,
-} from "./types.js";
-export { FIXTURE_V1 } from "./fixtures/fixture-v1.js";
-export { normalize, formatUtc } from "./normalize.js";
-export { classifyEntry, ALIAS_TABLE_V1 } from "./entry.js";
-export type { EntryClass, EntryClassifyResult } from "./entry.js";
+} from './types.js';
+export { FIXTURE_V1 } from './fixtures/fixture-v1.js';
+export { normalize, formatUtc } from './normalize.js';
+export { classifyEntry, ALIAS_TABLE_V1 } from './entry.js';
+export type { EntryClass, EntryClassifyResult } from './entry.js';

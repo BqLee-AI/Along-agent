@@ -1,19 +1,19 @@
-import { z } from "zod";
+import { z } from 'zod';
 
 export const ApprovalStatusSchema = z.enum([
-  "pending",
-  "consumed",
-  "rejected",
-  "expired",
-  "superseded",
+  'pending',
+  'consumed',
+  'rejected',
+  'expired',
+  'superseded',
 ]);
 
 export type ApprovalStatus = z.infer<typeof ApprovalStatusSchema>;
 
 export const ApprovalListQuerySchema = z.object({
   status: z
-    .enum(["pending", "consumed", "rejected", "expired", "superseded", "all"])
-    .default("pending"),
+    .enum(['pending', 'consumed', 'rejected', 'expired', 'superseded', 'all'])
+    .default('pending'),
   cursor: z.string().max(2000).optional(),
   limit: z.coerce.number().int().min(1).max(50).default(20),
 });
@@ -30,7 +30,7 @@ export const ApprovalItemSchema = z.object({
 
 export const ApprovalDetailSchema = z.object({
   approval_id: z.string().uuid(),
-  kind: z.enum(["create_task", "cancel_task"]),
+  kind: z.enum(['create_task', 'cancel_task']),
   status: z.string(),
   echo_text: z.string(),
   original_text: z.string().nullable(),

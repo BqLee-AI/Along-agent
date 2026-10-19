@@ -1,5 +1,5 @@
-import type { IncomingMessage, ServerResponse } from "node:http";
-import type { Pool } from "pg";
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { Pool } from 'pg';
 import {
   csrfMismatch,
   failEnvelope,
@@ -10,14 +10,10 @@ import {
   requestIdOf,
   sendJson,
   unauthorized,
-} from "../../http/errors.js";
-import { verifyCsrf, type ActorResolver } from "../../http/auth.js";
-import { requestCancel } from "./cancel.js";
-import {
-  getTaskDetail,
-  getTaskEvents,
-  listTasksForOwner,
-} from "./service.js";
+} from '../../http/errors.js';
+import { verifyCsrf, type ActorResolver } from '../../http/auth.js';
+import { requestCancel } from './cancel.js';
+import { getTaskDetail, getTaskEvents, listTasksForOwner } from './service.js';
 
 export interface RouteDeps {
   pool: Pool | null;
@@ -45,7 +41,7 @@ export async function handleTaskRoute(
   deps: RouteDeps,
 ): Promise<boolean> {
   const { pathname } = url;
-  if (pathname !== "/api/v1/tasks" && !pathname.startsWith("/api/v1/tasks/")) {
+  if (pathname !== '/api/v1/tasks' && !pathname.startsWith('/api/v1/tasks/')) {
     return false;
   }
 
@@ -57,30 +53,30 @@ export async function handleTaskRoute(
   }
 
   try {
-    if (req.method === "GET" && pathname === "/api/v1/tasks") {
+    if (req.method === 'GET' && pathname === '/api/v1/tasks') {
       const result = await listTasksForOwner(deps, actor.ownerId, queryOf(url));
       sendJson(res, 200, okEnvelope(result, requestId), requestId);
       return true;
     }
 
     const eventsMatch = /^\/api\/v1\/tasks\/([^/]+)\/events$/.exec(pathname);
-    if (req.method === "GET" && eventsMatch) {
-      const taskId = eventsMatch[1] ?? "";
-      if (!isUuid(taskId)) throw notFound("task not found");
+    if (req.method === 'GET' && eventsMatch) {
+      const taskId = eventsMatch[1] ?? '';
+      if (!isUuid(taskId)) throw notFound('task not found');
       const result = await getTaskEvents(deps, actor.ownerId, taskId, queryOf(url));
       sendJson(res, 200, okEnvelope(result, requestId), requestId);
       return true;
     }
 
     const cancelMatch = /^\/api\/v1\/tasks\/([^/]+)\/actions\/cancel$/.exec(pathname);
-    if (req.method === "POST" && cancelMatch) {
+    if (req.method === 'POST' && cancelMatch) {
       if (!verifyCsrf(req, actor)) {
         sendJson(res, 403, failEnvelope(csrfMismatch(), requestId), requestId);
         return true;
       }
-      const taskId = cancelMatch[1] ?? "";
+      const taskId = cancelMatch[1] ?? '';
       if (!isUuid(taskId)) {
-        throw notFound("task not found");
+        throw notFound('task not found');
       }
       const result = await requestCancel({ pool: deps.pool }, actor.ownerId, taskId, deps.body);
       sendJson(res, 200, okEnvelope(result, requestId), requestId);
@@ -88,9 +84,9 @@ export async function handleTaskRoute(
     }
 
     const detailMatch = /^\/api\/v1\/tasks\/([^/]+)$/.exec(pathname);
-    if (req.method === "GET" && detailMatch) {
-      const taskId = detailMatch[1] ?? "";
-      if (!isUuid(taskId)) throw notFound("task not found");
+    if (req.method === 'GET' && detailMatch) {
+      const taskId = detailMatch[1] ?? '';
+      if (!isUuid(taskId)) throw notFound('task not found');
       const detail = await getTaskDetail(deps, actor.ownerId, taskId);
       sendJson(res, 200, okEnvelope(detail, requestId), requestId);
       return true;
@@ -107,8 +103,8 @@ export async function handleTaskRoute(
       {
         code: 500,
         data: null,
-        msg: "internal error",
-        error: { code: "INTERNAL_ERROR", message: "internal error", request_id: requestId },
+        msg: 'internal error',
+        error: { code: 'INTERNAL_ERROR', message: 'internal error', request_id: requestId },
         request_id: requestId,
       },
       requestId,

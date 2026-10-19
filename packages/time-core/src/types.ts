@@ -1,6 +1,6 @@
 // Contract per docs/design/05-time-core.md §1 (first|second|none).
 // Zero imports: no external deps allowed in packages/time-core/src (D1 gate).
-export type FoldChoice = "first" | "second" | "none";
+export type FoldChoice = 'first' | 'second' | 'none';
 
 export interface ZoneTransition {
   at_utc: string;
@@ -19,13 +19,13 @@ export interface TimeRuleset {
 }
 
 export interface AmbiguousCandidate {
-  fold_choice: "first" | "second";
+  fold_choice: 'first' | 'second';
   offset_seconds: number;
   fire_at_utc: string;
 }
 
 export interface NormalizeOk {
-  kind: "ok";
+  kind: 'ok';
   fire_at_utc: string;
   offset_seconds: number;
   fold: 0 | 1;
@@ -33,13 +33,10 @@ export interface NormalizeOk {
 }
 
 export type NormalizeErrorCode =
-  | "NONEXISTENT_LOCAL_TIME"
-  | "AMBIGUOUS_LOCAL_TIME"
-  | "UNKNOWN_TIMEZONE"
-  | "TZDB_UNAVAILABLE";
+  'NONEXISTENT_LOCAL_TIME' | 'AMBIGUOUS_LOCAL_TIME' | 'UNKNOWN_TIMEZONE' | 'TZDB_UNAVAILABLE';
 
 export interface NormalizeError {
-  kind: "error";
+  kind: 'error';
   error: NormalizeErrorCode;
   candidates?: AmbiguousCandidate[];
   ruleset_id?: string;

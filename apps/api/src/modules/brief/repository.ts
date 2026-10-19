@@ -1,7 +1,7 @@
 // Brief read projection (issue #10). [跨模块读] tasks + approvals by
 // owner and frozen local date. Reads only: the brief has no write path and no
 // snapshot table (S0 #14: v0 briefs are a deterministic projection).
-import type { PoolClient } from "pg";
+import type { PoolClient } from 'pg';
 
 export interface BriefTaskRow {
   id: string;
@@ -14,7 +14,7 @@ export interface BriefTaskRow {
 
 export interface BriefApprovalRow {
   id: string;
-  kind: "create_task" | "cancel_task";
+  kind: 'create_task' | 'cancel_task';
   original_text: string | null;
   fire_at_utc: Date;
   wall_time: string;

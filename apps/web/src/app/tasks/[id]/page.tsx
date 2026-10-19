@@ -1,24 +1,20 @@
-import { apiGet } from "../../../lib/api";
-import type { Me, TaskDetail, TaskEventItem } from "../../../lib/types";
-import CancelAction from "./CancelAction";
+import { apiGet } from '../../../lib/api';
+import type { Me, TaskDetail, TaskEventItem } from '../../../lib/types';
+import CancelAction from './CancelAction';
 
-export const dynamic = "force-dynamic";
+export const dynamic = 'force-dynamic';
 
 interface EventsPage {
   items: TaskEventItem[];
   next_cursor: string | null;
 }
 
-export default async function TaskDetailPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+export default async function TaskDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const [detailResult, eventsResult, meResult] = await Promise.all([
     apiGet<TaskDetail>(`/api/v1/tasks/${id}`),
     apiGet<EventsPage>(`/api/v1/tasks/${id}/events?limit=50`),
-    apiGet<Me>("/api/v1/me"),
+    apiGet<Me>('/api/v1/me'),
   ]);
   if (!detailResult.ok) {
     return (
@@ -39,7 +35,7 @@ export default async function TaskDetailPage({
       <div className="panel">
         <dl>
           <dt className="muted">登记回执</dt>
-          <dd>{task.schedule_receipt ?? "无（未确认调度成功）"}</dd>
+          <dd>{task.schedule_receipt ?? '无（未确认调度成功）'}</dd>
           <dt className="muted">状态版本</dt>
           <dd>{task.state_version}</dd>
           <dt className="muted">创建时间</dt>
@@ -74,7 +70,7 @@ export default async function TaskDetailPage({
               <tr key={event.event_id}>
                 <td>{event.type}</td>
                 <td>{event.recorded_at_utc}</td>
-                <td>{event.evidence_ref || "服务端记录"}</td>
+                <td>{event.evidence_ref || '服务端记录'}</td>
               </tr>
             ))}
           </tbody>

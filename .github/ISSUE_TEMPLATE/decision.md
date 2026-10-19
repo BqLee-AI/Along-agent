@@ -1,8 +1,8 @@
 ---
 name: 决策事项
 description: P0 阻塞类决策模板
-title: "[Decision] "
-labels: ["decision"]
+title: '[Decision] '
+labels: ['decision']
 ---
 
 ## 背景

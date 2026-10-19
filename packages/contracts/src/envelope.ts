@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from 'zod';
 
 // Envelope: docs/design/10 §1 { code, data, msg, error? }; error carries request_id.
 export const ErrorBodySchema = z.object({

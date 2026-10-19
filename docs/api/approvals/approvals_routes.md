@@ -6,12 +6,12 @@
 
 ## 1. 路由
 
-| 方法 | 路径 | 鉴权 | CSRF | 幂等键 | 说明 |
-| --- | --- | --- | --- | --- | --- |
-| GET | `/approvals` | 是 | 否 | — | 确认列表（默认待确认优先） |
-| GET | `/approvals/{id}` | 是 | 否 | — | 确认详情（冻结快照 + 回显） |
-| POST | `/approvals/{id}/actions/confirm` | 是 | 是 | 是 | 确认并建 Task（同事务） |
-| POST | `/approvals/{id}/actions/reject` | 是 | 是 | 是 | 拒绝（终态 rejected） |
+| 方法 | 路径                              | 鉴权 | CSRF | 幂等键 | 说明                        |
+| ---- | --------------------------------- | ---- | ---- | ------ | --------------------------- |
+| GET  | `/approvals`                      | 是   | 否   | —      | 确认列表（默认待确认优先）  |
+| GET  | `/approvals/{id}`                 | 是   | 否   | —      | 确认详情（冻结快照 + 回显） |
+| POST | `/approvals/{id}/actions/confirm` | 是   | 是   | 是     | 确认并建 Task（同事务）     |
+| POST | `/approvals/{id}/actions/reject`  | 是   | 是   | 是     | 拒绝（终态 rejected）       |
 
 ## 2. GET /approvals [Required]
 
@@ -21,7 +21,15 @@
 
 ```json
 {
-  "items": [{ "approval_id": "apr_01J…", "title": "明天 9:20 喝水提醒", "status": "pending", "expires_at": "2026-10-17T09:19:00Z", "created_at": "…" }],
+  "items": [
+    {
+      "approval_id": "apr_01J…",
+      "title": "明天 9:20 喝水提醒",
+      "status": "pending",
+      "expires_at": "2026-10-17T09:19:00Z",
+      "created_at": "…"
+    }
+  ],
   "next_cursor": null
 }
 ```
@@ -41,7 +49,12 @@
   "original_text": "明天 9:20 喝水",
   "fire_at_local": "2026-10-17 09:20",
   "expires_in_seconds": 82800,
-  "snapshot": { "fire_at_utc": "2026-10-17T01:20:00Z", "timezone_id": "Asia/Shanghai", "fold": 0, "offset_seconds": 28800 },
+  "snapshot": {
+    "fire_at_utc": "2026-10-17T01:20:00Z",
+    "timezone_id": "Asia/Shanghai",
+    "fold": 0,
+    "offset_seconds": 28800
+  },
   "presentation_hash": "ph_…",
   "presentation_version": 1,
   "expires_at": "…",
@@ -57,7 +70,11 @@
 `POST /approvals/{id}/actions/confirm` 请求体（S0 #14 冻结：`approval_id` 取自路径，不在 body 重复）：
 
 ```json
-{ "presentation_hash": "ph_…", "seen_content": "当时看到的完整回显原文", "idempotency_key": "550e8400-…" }
+{
+  "presentation_hash": "ph_…",
+  "seen_content": "当时看到的完整回显原文",
+  "idempotency_key": "550e8400-…"
+}
 ```
 
 - 三件套校验：`approval_id` + 服务端冻结快照 + `presentation_hash`（规范编码：排版空格不计、原话空格计、时间先归一再编码）。对不上返回 `409 PRESENTATION_MISMATCH`，停在待核对，不建 Task。
@@ -74,7 +91,11 @@
   "code": 400001,
   "data": null,
   "msg": "所见与存档不一致",
-  "error": { "code": "PRESENTATION_MISMATCH", "message": "页面所见与存档快照不一致，已停在待核对，未创建提醒。", "request_id": "req_…" },
+  "error": {
+    "code": "PRESENTATION_MISMATCH",
+    "message": "页面所见与存档快照不一致，已停在待核对，未创建提醒。",
+    "request_id": "req_…"
+  },
   "request_id": "req_…"
 }
 ```

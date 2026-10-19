@@ -1,5 +1,5 @@
-import { createPool } from "../db/pool.js";
-import { seedSession } from "../modules/identity/seed.js";
+import { createPool } from '../db/pool.js';
+import { seedSession } from '../modules/identity/seed.js';
 
 // CLI: pnpm --filter @along/api seed:session
 // Requires DATABASE_URL + BETTER_AUTH_SECRET. Prints the session cookie
@@ -7,7 +7,7 @@ import { seedSession } from "../modules/identity/seed.js";
 async function main(): Promise<void> {
   const pool = createPool();
   if (!pool) {
-    console.error("seed:session: DATABASE_URL is required");
+    console.error('seed:session: DATABASE_URL is required');
     process.exit(1);
   }
   try {
