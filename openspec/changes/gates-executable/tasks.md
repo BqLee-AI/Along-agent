@@ -16,7 +16,10 @@
 
 ## 3. 变红测试（D 项映射）
 
+- [ ] D1：删 `depcruise` job 引用，新脚本必红（对应 D1 时间唯一权威）
+- [ ] D2：删 `lint` job 或 `apps/web/test/presentation.test.ts` evidence，新脚本必红（对应 D2 展示禁算时间；另有 eslint.config.mjs D2 门随 lint 同跑）
 - [ ] D3/D4/D5/D6：删 `migration-scan` job 或任一 `scripts/db/*.sql` evidence，新脚本必红（删 job 红、删文件红各演练一次）
-- [ ] D1：删 `depcruise` job 引用，新脚本必红
-- [ ] D10：删 `scan-copy-claims` evidence，新脚本必红
-- [ ] 3.x 收口：实现 PR 写 Closes #9；本 change 无 design 改动，不 archive specs（specs/gates 为新增能力，archive 时移入 `openspec/specs/gates/`）
+- [ ] D7：删 `compose-smoke` job 或 `scripts/compose-smoke.sh` evidence，新脚本必红（对应 D7 空环境冒烟）
+- [ ] D9：删 `scheduler-fault` job 或 `apps/api/test/integration/scheduler-fault.test.ts` evidence，新脚本必红（对应 D9 取消后触发数=0）
+- [ ] D10：删 `scan-copy-claims` evidence，新脚本必红（对应 D10 口径天花板）
+- [ ] 3.x 收口：实现 PR 写 Closes #9；收口执行 `openspec archive gates-executable -y`（specs/gates 合入 `openspec/specs/gates/`）

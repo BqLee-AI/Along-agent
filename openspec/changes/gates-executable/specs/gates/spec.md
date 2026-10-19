@@ -64,12 +64,17 @@ Spec 真源：docs/design/13-p0-bootstrap-and-ci-rules.md §3（D1–D10 死规�
 
 每条死规矩 SHALL 有删执行链即红的演练记录。
 
-#### Scenario: D1/D10 映射
+#### Scenario: D1/D2/D10 映射
 
-- WHEN 分别删 depcruise job 引用 / scan-copy-claims evidence（演练后恢复）
-- THEN 新脚本对 D1/D10 报红（对应 D1 时间唯一权威、D10 口径天花板）
+- WHEN 分别删 depcruise job 引用 / lint job 或 presentation.test.ts / scan-copy-claims evidence（演练后恢复）
+- THEN 新脚本对 D1/D2/D10 报红（对应 D1 时间唯一权威、D2 展示禁算时间、D10 口径天花板）
 
 #### Scenario: D3–D6 映射
 
 - WHEN 删 migration-scan job 或任一 scripts/db evidence（演练后恢复）
 - THEN 新脚本对 D3/D4/D5/D6 报红（对应 D3 唯一约束、D4 后继唯一、D5 只追加、D6 不可变）
+
+#### Scenario: D7/D9 映射
+
+- WHEN 分别删 compose-smoke job 或 compose-smoke.sh / scheduler-fault job 或 scheduler-fault.test.ts（演练后恢复）
+- THEN 新脚本对 D7/D9 报红（对应 D7 空环境冒烟、D9 取消后触发数=0）
