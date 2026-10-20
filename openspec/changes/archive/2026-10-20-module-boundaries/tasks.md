@@ -19,7 +19,7 @@
 
 - [x] D1：每条新增模块/包/跨应用规则各有越界变红输出；真实仓库 depcruise 与合法 fixture 全绿（`pnpm depcruise`：368 modules / 715 dependencies；`pnpm --filter @along/scripts exec vitest run test/boundaries.test.ts`：43 tests passed，含新增模块自动发现红/绿例）。
 - [x] D1：confirm 精确公共调用通过，跨模块 cancel-repository 仍被拒绝；不扩大事务豁免。
-- [ ] D2–D10 / A1–A4：语义不变，`pnpm verify`、类型检查及测试全部通过，最终 CI checks 全绿。
+- [x] D2–D10 / A1–A4：语义不变，`node scripts/verify.mjs` 全部 10 步通过；实现提交 `ecf8afb` 的 [CI](https://github.com/BqLee-AI/Along-agent/actions/runs/39361516591) 五项 checks 全绿。
 - [x] 3.1 实现经独立 review；任意模块来源漏门修复后复审 approve。
 - [x] 3.2 `pnpm exec openspec archive module-boundaries --yes` 完成；随后 `pnpm exec openspec validate --all --strict`：3 passed。
-- [ ] 3.3 收口 PR 附变红证据、CI 链接并写 `Closes #14`，仅在 approve 与全 checks 绿后 squash 合并。
+- [x] 3.3 收口 PR #19 附变红证据与 CI 链接并写 `Closes #14`；合并按该 PR 最终 approve 与全 checks 绿的状态放行。
