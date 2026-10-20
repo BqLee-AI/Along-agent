@@ -35,6 +35,8 @@ Spec:（可填 openspec/changes/<name>/proposal.md 或 docs/design 路径 §章�
 
 <!-- CI 链接 / 测试输出 / 变红 PR 链接 -->
 
+<!-- Required checks：static、migration-scan、scheduler-fault、contracts-dual、compose-smoke；须全部通过。 -->
+
 ## Reviewer focus
 
 <!-- 请 reviewer 重点看哪里：风险点、不确定处、需拍板处 -->

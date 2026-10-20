@@ -31,7 +31,7 @@
 | 10   | [API 与流式通道](design/10-api-and-stream-design.md)                     | REST 真源、envelope、SSE 版本化、WS 延后                            |
 | 11   | [CangjieMagic spike 与灰度](design/11-cangjie-runtime-spike.md)          | 第二实现验证 S1–S3、灰度与结案条件                                  |
 | 12   | [a13n 六思想落点](design/12-a13n-principles-landing.md)                  | harness/checkpoint/自托管/revision/AG-UI 投影/readyz                |
-| 13   | [P0 开工与 CI 死规矩](design/13-p0-bootstrap-and-ci-rules.md)            | 仓库启动清单、推送三问、D1–D10 变红测试                             |
+| 13   | [P0 开工与 CI 死规矩](design/13-p0-bootstrap-and-ci-rules.md)            | 仓库启动清单、推送三问、D1–D10 变红测试、静态合一与 DB 并行合并门   |
 
 ## 三、API（6 篇）
 

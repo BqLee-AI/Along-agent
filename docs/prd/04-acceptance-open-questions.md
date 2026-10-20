@@ -9,6 +9,7 @@
 - [Required] A3 kill 后恰好一次：worker kill -9 后 resume，副作用（触发请求）恰好一次：lease + fencing 保证单 claim；发了没回只核对不重发；取消已提交后触发数 = 0。
 - [Required] A4 DST 追问：不存在的本地时刻拒收（NONEXISTENT_LOCAL_TIME，不猜不存不排）；出现两次的时刻必须追问两候选（AMBIGUOUS_LOCAL_TIME 带 first/second + 偏移）；未知时区别名报 UNKNOWN_TIMEZONE；规则缺失报 TZDB_UNAVAILABLE 且服务不就绪。
 - [Required] 验收环境：单镜像 all 角色 + compose 冒烟；Postgres 唯一事实源；Redis 缺席不得影响验收（Redis 已延后）。
+- [Required] CI 合并门：`static` 通过后并行运行迁移约束、调度故障与契约双跑，再由 `compose-smoke` 收口；五个 job 全通过才允许合并，D1–D10 语义不变（见 design/13 §3–§4）。
 
 ## Deferred 清单（每条写明阻塞阶段）
 

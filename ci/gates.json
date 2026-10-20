@@ -5,14 +5,14 @@
       "status": "enforced",
       "scope": "time-core zero outgoing deps; reverse-clock fixture; /readyz TZDB_UNAVAILABLE without TZDB_VERSION",
       "owner": "#3",
-      "enforced_by": { "job": "depcruise", "evidence": [".dependency-cruiser.cjs"] }
+      "enforced_by": { "job": "static", "evidence": [".dependency-cruiser.cjs"] }
     },
     "D2": {
       "status": "enforced",
       "scope": "apps/web display layer: only frozen fields (fire_at_local/echo_text); no new Date/Date.now (ESLint) and fire_at_utc mutation leaves rendered output unchanged (apps/web/test/presentation.test.ts)",
       "owner": "#10",
       "enforced_by": {
-        "job": "lint",
+        "job": "static",
         "evidence": ["eslint.config.mjs", "apps/web/test/presentation.test.ts"]
       }
     },
@@ -91,7 +91,7 @@
     "D10": {
       "status": "enforced",
       "scope": "copy-claim scan gate",
-      "enforced_by": { "job": "gate-manifest", "evidence": ["scripts/scan-copy-claims.mjs"] }
+      "enforced_by": { "job": "static", "evidence": ["scripts/scan-copy-claims.mjs"] }
     }
   }
 }

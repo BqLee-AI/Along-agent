@@ -47,9 +47,11 @@ Observed / Required / Proposed / Deferred 同 01。
 | D9  | 取消后触发数=0                                   | 故障注入测试：cancel 提交后 firing 窗口内触发请求计数必须为 0（分不清先后按违规计）；破 0 写 `security_events`（一年留存，不跟 task 走）                                                                                                                                                                                                                |
 | D10 | 口径天花板                                       | 文案扫描门：对外字符串禁止“一定响/必达/已读”类承诺；只允许“已记录/待排期/未观察到”类表述                                                                                                                                                                                                                                                                |
 
-## 4. CI 布局（Proposed）
+## 4. CI 布局（Required）
 
-- `lint → depcruise(D1) → unit(D1/D2/D10) → migration-scan(D3/D4/D5/D6) → contracts-dual(D8) → compose-smoke(D7/D9)`；任一红停线，不进下一环。
+- `static` 一次安装后执行 `node scripts/verify.mjs`，顺序与本地相同，涵盖 lint、typecheck、depcruise、治理脚本、unit、OpenSpec 与阻塞式 format。
+- `migration-scan(D3/D4/D5/D6)`、`scheduler-fault(D9)`、`contracts-dual(D8)` 只依赖 `static`，各自独立执行，不共享数据库状态。
+- `compose-smoke(D7)` 依赖上述三个 job 全部通过；任一失败即禁止合并。Required checks 为这五个工具链无关的 job 名。
 - Spike 报告（S1–S3）走独立 job，不阻塞主链，但 P2 末缺报告即“未结案”（见 11）。
 
 ## 引用
