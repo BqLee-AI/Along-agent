@@ -73,6 +73,7 @@
 - S0 冻结别名禁入：`outbox_events`、`schedule_confirmed`、`SERVICE_NOT_READY`、`C-XXXX`、整句文本确认。
 
 - 一键 verify：`bun run verify`，保留 `scripts/verify.mjs`；也可用 `bun scripts/verify.mjs` 或 `node scripts/verify.mjs` 调用，内部统一执行 Bun 命令。按序跑 `lint → typecheck → depcruise → gate-manifest → gates-executable → frozen-names → copy-claims → test:unit → openspec validate --all --strict → format:check`，任一失败即停并报步名与非零退出码。`openspec/changes` 下无 active change 时 OpenSpec 步提示跳过，也可用 `--skip openspec` 主动跳过。
+- 同次 `verify` 仅在 `typecheck` 成功后，让后续单元步骤复用其已构建的共享 packages，省去重复构建；失败即停，不消费失败构建。独立 `bun run test:unit` 或 `verify --skip typecheck` 仍先构建包，不以旧 `dist/`、跨次运行标记或其他 job 的产物代替准备。
 - 红例含义：`lint/typecheck` 红=代码或类型坏；`depcruise` 红=越 D1 依赖边界；治理脚本红=门清单/执行证据/冻结名/文案断言坏（看输出行）；`test:unit` 红=单元坏；`openspec validate` 红=change 的 proposal/tasks/spec 不一致；`format:check` 红=跑 `bun run format` 后重提，不能作为非阻塞警告放行。
 - 测试统一使用 `bun:test`，通过文件级并行提速，保留文件状态隔离与 mock/spy/时钟恢复；不把有共享状态的用例改成文件内 concurrent。单元入口排除数据库集，契约入口不能只跑契约包而漏掉 API 两种传输。数据库与调度故障入口使用真实 PostgreSQL 16、原迁移和明确测试环境，不跳过唯一性、只追加或取消窗口断言。
 
@@ -94,5 +95,5 @@
 
 - PR 必须附：① CI 全绿链接；② 关键测试输出（粘贴或 CI 日志链接）；③ 若触及 D1–D10，每条附变红测试链接或变异证明。
 - Reviewer 只看证据合入：无验收证据、无 Deferred 声明、无 Spec 引用的 PR 直接打回，不进入代码细节评审。
-- Required checks（5 个，任一红即合并不通过）：static、migration-scan、scheduler-fault、contracts-dual、compose-smoke。`static` 一次安装后运行本地同一 `verify` 入口；三个 DB/契约 job 只依赖 `static`，`compose-smoke` 等三者全部通过再运行。含义见 `docs/design/13-p0-bootstrap-and-ci-rules.md §3–§4`。
+- Required checks（5 个，必须全部成功才允许合并）：static、migration-scan、scheduler-fault、contracts-dual、compose-smoke。`static` 一次安装后运行本地同一 `verify` 入口；其余四个 job 都只依赖 `static`，通过后各自隔离并行，static 失败则全部下游不运行。Compose 不等待三个 DB/契约 job，因此其中一项失败时 Compose 可能已经消耗构建与运行资源，但不改变合并门，也不共享用户数据或可变数据库。Compose 宿主不安装没有宿主消费者的依赖，镜像内仍真实冻结安装与构建，保留两轮全新卷 D7。含义见 `docs/design/13-p0-bootstrap-and-ci-rules.md §3–§4`。
 - `scripts/check-gates-executable.mjs` 断言每条 enforced 门在 `ci/gates.json` 的 `enforced_by`（CI job 名 + evidence 文件）真实存在，跑在 `static` job 与本地 verify 的 gate-manifest 步之后。
