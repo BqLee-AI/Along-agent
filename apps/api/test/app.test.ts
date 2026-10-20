@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'bun:test';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { handleRequest } from '../src/http/app.js';
 

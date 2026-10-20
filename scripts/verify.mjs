@@ -1,6 +1,6 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 // 一键 verify：按固定顺序串行跑完全部门禁，任一失败即停并报步名。
-// 用法：node scripts/verify.mjs [--skip <step...>]，如 --skip openspec
+// 用法：bun scripts/verify.mjs [--skip <step...>]；也兼容 node 调用。
 import { spawnSync } from 'node:child_process';
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -21,16 +21,16 @@ const skip = new Set();
 }
 
 const STEPS = [
-  { name: 'lint', run: 'pnpm lint' },
-  { name: 'typecheck', run: 'pnpm typecheck' },
-  { name: 'depcruise', run: 'pnpm depcruise' },
-  { name: 'gate-manifest', run: 'node scripts/check-gate-manifest.mjs' },
-  { name: 'gates-executable', run: 'node scripts/check-gates-executable.mjs' },
-  { name: 'frozen-names', run: 'node scripts/check-frozen-names.mjs' },
-  { name: 'copy-claims', run: 'node scripts/scan-copy-claims.mjs' },
-  { name: 'unit', run: 'pnpm test:unit' },
-  { name: 'openspec', run: 'pnpm exec openspec validate --all --strict' },
-  { name: 'format:check', run: 'pnpm format:check' },
+  { name: 'lint', run: 'bun run lint' },
+  { name: 'typecheck', run: 'bun run typecheck' },
+  { name: 'depcruise', run: 'bun run depcruise' },
+  { name: 'gate-manifest', run: 'bun scripts/check-gate-manifest.mjs' },
+  { name: 'gates-executable', run: 'bun scripts/check-gates-executable.mjs' },
+  { name: 'frozen-names', run: 'bun scripts/check-frozen-names.mjs' },
+  { name: 'copy-claims', run: 'bun scripts/scan-copy-claims.mjs' },
+  { name: 'unit', run: 'bun run test:unit' },
+  { name: 'openspec', run: 'bunx --bun --no-install openspec validate --all --strict' },
+  { name: 'format:check', run: 'bun run format:check' },
 ];
 
 function hasActiveChanges() {
@@ -52,7 +52,7 @@ for (const step of STEPS) {
   }
   if (step.name === 'openspec' && !hasActiveChanges()) {
     console.log(
-      '\n[verify] 跳过：openspec（openspec/changes 下无 active change；有 change 时再跑 `pnpm exec openspec validate --all --strict`）',
+      '\n[verify] 跳过：openspec（openspec/changes 下无 active change；有 change 时再跑 `bunx --bun --no-install openspec validate --all --strict`）',
     );
     continue;
   }

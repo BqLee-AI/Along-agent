@@ -33,7 +33,10 @@ export interface NormalizeOk {
 }
 
 export type NormalizeErrorCode =
-  'NONEXISTENT_LOCAL_TIME' | 'AMBIGUOUS_LOCAL_TIME' | 'UNKNOWN_TIMEZONE' | 'TZDB_UNAVAILABLE';
+  | 'NONEXISTENT_LOCAL_TIME'
+  | 'AMBIGUOUS_LOCAL_TIME'
+  | 'UNKNOWN_TIMEZONE'
+  | 'TZDB_UNAVAILABLE';
 
 export interface NormalizeError {
   kind: 'error';

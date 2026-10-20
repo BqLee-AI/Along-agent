@@ -1,9 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'bun:test';
 import { EVENT_TYPES } from '../src/index.js';
 
 describe('stream-protocol', () => {
   it('holds exactly the seven frozen event words', () => {
-    expect([...EVENT_TYPES].sort()).toEqual(
+    expect<readonly string[]>([...EVENT_TYPES].sort()).toEqual(
       [
         'cancel_requested',
         'cancelled',

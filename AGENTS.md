@@ -2,7 +2,7 @@
 
 ## 项目概览
 
-TypeScript + Next.js（App Router）+ PostgreSQL 16 的云端个人助理；包管理用 pnpm + Turbo；校验用 zod；实时对话走 SSE。
+TypeScript + Next.js（App Router）+ PostgreSQL 16 的云端个人助理；包管理与运行用 Bun 1.4.2 workspaces（单一 bun.lock），根 scripts 显式编排依赖，不使用 Turbo；校验用 zod；实时对话走 SSE。
 
 - 服务端：TS 模块化单体，一个镜像三种角色 `api|worker|all`；Postgres 唯一事实源，Redis 延后不引入。
 - 认证：Better Auth 自建 credential（#1 已定，单租户；v0 端点只暴露 `GET /me`）。
@@ -13,10 +13,12 @@ TypeScript + Next.js（App Router）+ PostgreSQL 16 的云端个人助理；包�
 
 > 以根 `package.json` scripts 为准，禁止自创。
 
-- 安装依赖：`pnpm install`
-- 本地启动：`pnpm dev`（`apps/api` 3000 `ROLE=all`、`apps/web` 3100；需 `DATABASE_URL`、`TZDB_VERSION`）
-- 类型检查：`pnpm typecheck`
-- 单元测试：`pnpm test`（细分：`pnpm test:unit`、`pnpm test:contracts`）
+- 安装依赖：`bun install --frozen-lockfile`
+- 构建：`bun run build:packages`；`bun run build` 先包后应用，`bun run build:api` 构建 API 及依赖；其他需要产物的入口先构建依赖包。
+- 本地启动：`bun run dev`（`apps/api` 3000 `ROLE=all`、`apps/web` 3100；需 `DATABASE_URL`、`TZDB_VERSION`）
+- 类型检查：`bun run typecheck`；Lint：`bun run lint`（Oxlint 1.89.0）
+- 测试：`bun run test:unit`、`bun run test:contracts`（API 进程内/HTTP 双跑及契约包）、`bun run test:integration`（全部 9 个 DB 文件）、`bun run test:scheduler`（D9 指定集）；使用 `bun:test`，保持文件级隔离，不以文件内 concurrent 替代。
+- 统一检查：`bun run verify`；格式修复/阻塞检查：`bun run format` / `bun run format:check`（Oxfmt 0.74.0）。
 - 契约校验：`openspec validate <name> --strict`（如 `openspec validate v0-safety-contract --strict`）
 
 ## 代码约定

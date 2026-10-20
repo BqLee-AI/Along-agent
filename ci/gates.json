@@ -23,11 +23,16 @@
     },
     "D2": {
       "status": "enforced",
-      "scope": "apps/web display layer: only frozen fields (fire_at_local/echo_text); no new Date/Date.now (ESLint) and fire_at_utc mutation leaves rendered output unchanged (apps/web/test/presentation.test.ts)",
+      "scope": "apps/web display layer: only frozen fields (fire_at_local/echo_text); no new Date/Date.now (Oxlint AST selectors) and fire_at_utc mutation leaves rendered output unchanged (apps/web/test/presentation.test.ts)",
       "owner": "#10",
       "enforced_by": {
         "job": "static",
-        "evidence": ["eslint.config.mjs", "apps/web/test/presentation.test.ts"]
+        "evidence": [
+          ".oxlintrc.json",
+          "scripts/lint-rules.mjs",
+          "scripts/test/lint.test.ts",
+          "apps/web/test/presentation.test.ts"
+        ]
       }
     },
     "D3": {

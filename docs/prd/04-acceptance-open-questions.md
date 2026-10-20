@@ -10,6 +10,8 @@
 - [Required] A4 DST 追问：不存在的本地时刻拒收（NONEXISTENT_LOCAL_TIME，不猜不存不排）；出现两次的时刻必须追问两候选（AMBIGUOUS_LOCAL_TIME 带 first/second + 偏移）；未知时区别名报 UNKNOWN_TIMEZONE；规则缺失报 TZDB_UNAVAILABLE 且服务不就绪。
 - [Required] 验收环境：单镜像 all 角色 + compose 冒烟；Postgres 唯一事实源；Redis 缺席不得影响验收（Redis 已延后）。
 - [Required] CI 合并门：`static` 通过后并行运行迁移约束、调度故障与契约双跑，再由 `compose-smoke` 收口；五个 job 全通过才允许合并，D1–D10 语义不变（见 design/13 §3–§4）。
+- [Required] 工具链验收遵循 Bun 1.4.2 冻结安装、Oxlint 1.89.0、Oxfmt 0.74.0 与 `bun:test`；`bun run verify` 是本地与 static 的共同阻塞入口。文件级并行保留隔离及 mock/时钟恢复；`test:contracts` 包含 API 两种传输及契约包，`test:integration` 覆盖全部 9 个真实 PostgreSQL 16 文件，`test:scheduler` 保留 D9 指定集。D1/D2 原边界与断言不因工具迁移改变（见 design/01 §5、design/13 §3–§4、ADR 0006）。
+- [Required] Compose 使用实际 Bun 镜像构建与运行路径，不依赖宿主机产物；缺/有 `TZDB_VERSION` 两种就绪场景均须保留，格式错误不能作为警告放行。验收结果记在对应 change tasks / PR，不把未执行检查写成完成。
 
 ## Deferred 清单（每条写明阻塞阶段）
 

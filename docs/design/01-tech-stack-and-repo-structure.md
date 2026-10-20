@@ -20,14 +20,14 @@
 
 | 层级        | 选型                                                    | 来源                                        | 说明                                                                                                                 |
 | ----------- | ------------------------------------------------------- | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| 服务端语言  | TypeScript（Node 20 LTS+）                              | Required（合同）                            | TS 模块化单体，一个镜像 `api\|worker\|all` 三角色；time-core 为服务端纯函数子集                                      |
+| 服务端语言  | TypeScript（Bun 1.4.2 运行）                            | Required（#13）                             | TS 模块化单体，一个镜像 `api\|worker\|all` 三角色；time-core 为服务端纯函数子集                                      |
 | 唯一事实源  | PostgreSQL 16+                                          | Required；AF 三硬约束之一（Observed, AF§5） | Redis 仅加速且延后（v0 不引入）；业务状态一律以 PG 约束为准                                                          |
 | Web 前端    | Next.js（App Router），RSC 开、Turbopack 开（默认配置） | Required（P0 冻结）                         | Web 先行，后用 Electron 套同一份 Next.js；v0 只做 Web 单端；偏离默认配置时另开 docs PR 说明                          |
 | 认证        | Better Auth 自建 credential                             | Required（已定）                            | D7 空环境冒烟不依赖外部 IdP；v0 单租户；v0 端点只暴露 `GET /me`                                                      |
 | 实时对话    | SSE（`text/event-stream`）                              | Required                                    | WS + `ws-ticket` P2 起；Web Push 仅兜底                                                                              |
 | 校验        | zod（前后端同源）                                       | Required                                    | `packages/contracts`、`packages/stream-protocol` 版本化 zod；卡片/事件名开工对照 `thread-stream.schema.json`（AF§7） |
 | 部署形态    | 单镜像 + compose 冒烟（起步）                           | Required；AF 自托管（Observed, AF§2/§5）    | 一个镜像三种角色 `api\|worker\|all`（对标 AF `all/control/worker`）；做大后迁 K8s（Deferred 细节）                   |
-| 包管理/构建 | pnpm + Turbo                                            | Proposed                                    | pnpm monorepo，单锁文件                                                                                              |
+| 包管理/构建 | Bun 1.4.2 workspaces + 单一 bun.lock                    | Required（ADR 0006，取代 0002）             | 根 scripts 显式依赖优先构建；Oxlint 1.89.0、Oxfmt 0.74.0、bun:test 统一质量入口                                      |
 | 可观测      | OpenTelemetry + 结构化日志 + `request_id` 全链路        | Required                                    | v0 先 OTel+日志；PostHog/Sentry 为 Deferred                                                                          |
 
 ### 1.2 待定（Deferred，一律不猜）
@@ -116,6 +116,9 @@ packages/contracts ──depends──▶ zod（仅此）
 - `apps/api`：`PORT=3000`（`ROLE=all` 本地一键起）；`apps/web`：`PORT=3100`，`NEXT_PUBLIC_API_BASE` 指向 api。
 - PG：`DATABASE_URL`；`TZDB_VERSION` 显式声明（缺失则 `/readyz` 类型化失败，见 10/13）。
 - 模型 key、向量库地址（如有）一律环境变量/Secret，不进代码（Observed, B03§6）。
+- 工具链：`bun install --frozen-lockfile`；`bun run build:packages` 构建共享包，`bun run build` 先包后应用，`bun run build:api` 构建 API 及依赖。开发、类型检查与测试同样须满足包产物前置，不依赖旧 `dist/`。
+- 本地入口：`bun run dev`、`bun run typecheck`、`bun run lint`、`bun run verify`；格式修复与阻塞检查为 `bun run format` / `bun run format:check`。完整测试分组见 [贡献指南](../../CONTRIBUTING.md)。
+- Docker 使用固定 Bun、冻结安装与依赖优先构建，以 Bun 启动三角色服务；真实 Dockerfile 从源码与 `bun.lock` 构建，不借宿主机产物或容器内旧工具旁路。D7 健康/就绪行为不变（见 13 §4）。
 
 ## 引用
 

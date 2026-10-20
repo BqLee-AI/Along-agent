@@ -1,7 +1,7 @@
 import { createPool } from '../db/pool.js';
 import { seedSession } from '../modules/identity/seed.js';
 
-// CLI: pnpm --filter @along/api seed:session
+// CLI: bun run --filter @along/api seed:session
 // Requires DATABASE_URL + BETTER_AUTH_SECRET. Prints the session cookie
 // value and CSRF token for local dev. Never log the secret itself.
 async function main(): Promise<void> {

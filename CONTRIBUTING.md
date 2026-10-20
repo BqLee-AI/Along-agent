@@ -5,22 +5,26 @@
 
 ## 1. 环境要求
 
-- Node.js `>= 22`，pnpm `>= 10`（仓库当前 `packageManager: pnpm@11.25.0`，见 `package.json`）。
-- Monorepo 编排：Turbo（当前 `turbo@2.11.9`），命令全部经由根 `package.json` 的 scripts 调用。
-- 安装依赖：`pnpm install`（只需要执行一次，锁文件变更后重跑）；随后必须先跑 `pnpm build` 构建各 workspace 的 `dist/`（`apps/api` 经 tsx 直载 `@along/*` 的 `dist` 产物，无 `dist` 则 `pnpm dev` 起不来）。
+- Bun 固定 `1.4.2`，使用 workspaces 与单一 `bun.lock`；不再通过独立任务编排器运行。Node.js `>= 22` 可用于调用兼容的 `scripts/verify.mjs`，不替代 Bun 安装、构建与测试。
+- Lint 使用 Oxlint `1.89.0`，格式化使用 Oxfmt `0.74.0`；命令统一经根 `package.json` scripts 调用。
+- 安装依赖：`bun install --frozen-lockfile`；锁文件与 manifest 不一致即失败，不在 CI 中改锁。需要 workspace `dist/` 的构建、开发、类型检查与测试入口须先构建依赖包，不依赖宿主机旧产物或其他 CI job 的文件。
 
 真实可用命令（以 `package.json` 为准，禁止自创）：
 
-| 用途                     | 命令                                                                                      |
-| ------------------------ | ----------------------------------------------------------------------------------------- |
-| 本地启动                 | `pnpm dev`（`turbo run dev`；`apps/api` 3000 `ROLE=all`、`apps/web` 3100）                |
-| 类型检查                 | `pnpm typecheck`（`turbo run typecheck`）                                                 |
-| 单元测试                 | `pnpm test` / `pnpm test:unit`                                                            |
-| 契约测试                 | `pnpm test:contracts`                                                                     |
-| Lint                     | `pnpm lint`（`eslint . && turbo run lint`）                                               |
-| 构建                     | `pnpm build`                                                                              |
-| 依赖边界（D1）           | `pnpm depcruise`                                                                          |
-| 契约校验（当前唯一可跑） | `openspec validate <name> --strict`（如 `openspec validate v0-safety-contract --strict`） |
+| 用途                | 命令                                                                                                 |
+| ------------------- | ---------------------------------------------------------------------------------------------------- |
+| 本地启动            | `bun run dev`（先构建依赖包；`apps/api` 3000 `ROLE=all`、`apps/web` 3100）                           |
+| 类型检查            | `bun run typecheck`                                                                                  |
+| 单元测试            | `bun run test:unit`（非数据库测试）                                                                  |
+| 契约测试            | `bun run test:contracts`（API 进程内与 HTTP 双跑 + 契约包）                                          |
+| 数据库测试          | `bun run test:integration`（全部 9 个 DB 文件）                                                      |
+| 调度故障测试        | `bun run test:scheduler`（D9 指定集）                                                                |
+| Lint                | `bun run lint`                                                                                       |
+| 构建                | `bun run build:packages`（共享包）、`bun run build`（先包后应用）、`bun run build:api`（API 及依赖） |
+| 依赖边界（D1）      | `bun run depcruise`                                                                                  |
+| 统一门禁            | `bun run verify`                                                                                     |
+| 格式修复 / 阻塞检查 | `bun run format` / `bun run format:check`                                                            |
+| 契约校验            | `openspec validate <name> --strict`（如 `openspec validate v0-safety-contract --strict`）            |
 
 环境变量占位（只占位，不写真实值）：`DATABASE_URL`、`TZDB_VERSION`（见 `.env.example`）。
 缺 `TZDB_VERSION` 时 `/readyz` 返回 `503 TZDB_UNAVAILABLE`，属预期行为（D1/D7）。
@@ -63,17 +67,18 @@
 
 ## 6. 测试门槛（提交前必过）
 
-- `pnpm typecheck` 与 `pnpm test`（含 `test:unit` / `test:contracts`）必须全部通过；任一红即合并不通过。
+- `bun run verify`、`bun run test:contracts` 及相关数据库门必须全部通过；任一红即合并不通过。
 - 改了代码就要补或改对应的测试，即使没人要求。
 - D1–D10 是合并门槛（见 `docs/design/13-p0-bootstrap-and-ci-rules.md §3`）：time-core 零依赖、展示禁算时间、唯一约束、只追加、空环境冒烟、契约双跑、取消后触发数 = 0、口径天花板，每条必有变红测试。
 - S0 冻结别名禁入：`outbox_events`、`schedule_confirmed`、`SERVICE_NOT_READY`、`C-XXXX`、整句文本确认。
 
-- 一键 verify：`node scripts/verify.mjs`（等价 `pnpm verify`），按序跑 `lint → typecheck → depcruise → 三个治理脚本 → test:unit → openspec validate --all --strict → format:check`，任一失败即停并报步名。`openspec/changes` 下无 active change 时该步提示跳过，也可用 `--skip openspec` 主动跳过。
-- 红例含义：`lint/typecheck` 红=代码或类型坏；`depcruise` 红=越 D1 依赖边界；治理脚本红=门清单/冻结名/文案断言坏（看输出行）；`test:unit` 红=单元坏；`openspec validate` 红=change 的 proposal/tasks/spec 不一致；`format:check` 红=跑 `pnpm format` 后重提。
+- 一键 verify：`bun run verify`，保留 `scripts/verify.mjs`；也可用 `bun scripts/verify.mjs` 或 `node scripts/verify.mjs` 调用，内部统一执行 Bun 命令。按序跑 `lint → typecheck → depcruise → gate-manifest → gates-executable → frozen-names → copy-claims → test:unit → openspec validate --all --strict → format:check`，任一失败即停并报步名与非零退出码。`openspec/changes` 下无 active change 时 OpenSpec 步提示跳过，也可用 `--skip openspec` 主动跳过。
+- 红例含义：`lint/typecheck` 红=代码或类型坏；`depcruise` 红=越 D1 依赖边界；治理脚本红=门清单/执行证据/冻结名/文案断言坏（看输出行）；`test:unit` 红=单元坏；`openspec validate` 红=change 的 proposal/tasks/spec 不一致；`format:check` 红=跑 `bun run format` 后重提，不能作为非阻塞警告放行。
+- 测试统一使用 `bun:test`，通过文件级并行提速，保留文件状态隔离与 mock/spy/时钟恢复；不把有共享状态的用例改成文件内 concurrent。单元入口排除数据库集，契约入口不能只跑契约包而漏掉 API 两种传输。数据库与调度故障入口使用真实 PostgreSQL 16、原迁移和明确测试环境，不跳过唯一性、只追加或取消窗口断言。
 
 ### D1 依赖边界与变红证据
 
-- `pnpm depcruise` 实际扫描 `apps packages`；`pnpm --filter @along/scripts exec vitest run test/boundaries.test.ts` 单独运行真实 depcruise 的正反 fixture。后者也属于既有 `test:unit`，两者均由 `pnpm verify` 执行。
+- `bun run depcruise` 实际扫描 `apps packages`；`scripts/test/boundaries.test.ts` 使用 `bun:test` 运行真实 depcruise 的正反 fixture，属于 `bun run test:unit`，两者均由 `bun run verify` 执行。
 - API 按执行目录下 `apps/api/src/modules/` 的实际子目录逐模块生成规则，新增模块无需维护名单。禁止直接引用其他模块的 `repository`、`schema`、`schemas` 同名文件/目录或 `-repository`、`-schema`、`-schemas` 后缀实现；包含嵌套路径和 `import type`。自身存储访问和公共服务调用仍合法，不新增公共服务封闭白名单。
 - 保留 conversations→tools/gateway、tasks→notifications/service、tools→approvals/create/presentation 和 approvals/confirm→tasks/cancel；confirm 改为引用 tasks/cancel-repository 仍报 `no-approvals-cross-module-storage`，没有事务存储层通配豁免。
 - Web 不得直接引用 API 源码（含类型），报 `no-web-to-api`；HTTP 客户端不受影响。

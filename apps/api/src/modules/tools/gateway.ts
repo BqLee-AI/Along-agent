@@ -89,7 +89,11 @@ export interface PrefsPayload {
 }
 
 export type ToolPayload =
-  ApprovalPayload | ClarifyPayload | ListTasksPayload | BriefPayload | PrefsPayload;
+  | ApprovalPayload
+  | ClarifyPayload
+  | ListTasksPayload
+  | BriefPayload
+  | PrefsPayload;
 
 export type ToolOutcome =
   | { status: 'ok'; result: ToolPayload }

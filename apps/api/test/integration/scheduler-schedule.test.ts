@@ -4,7 +4,7 @@
 // future so no sleep is needed: claim/send run after manually nudging
 // fire_at_utc into the past with a DB timestamp update (deterministic, no
 // sleep, no flakiness).
-import { beforeAll, afterAll, describe, expect, it } from 'vitest';
+import { beforeAll, afterAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
 import { confirmApproval } from '../../src/modules/approvals/confirm.js';
@@ -32,7 +32,7 @@ async function confirmTask(
 }
 
 // Own-row drivers: keep pressing phases until OUR task settles. Parallel
-// vitest files contend through SKIP LOCKED whole-list scans, so a single pass
+// test files contend through SKIP LOCKED whole-list scans, so a single pass
 // may skip our row while global summaries count other tasks. Global phase
 // summaries must never gate own-task assertions.
 export async function driveClaimUntilLeased(
@@ -69,7 +69,7 @@ export async function driveSendUntilFired(
   expect(detail.state).toBe('fired');
 }
 
-// Phase scans lock every due row in one tick transaction; parallel vitest
+// Phase scans lock every due row in one tick transaction; parallel test
 // files contend through SKIP LOCKED, so a single pass may skip our row while
 // the global summary counts other tasks. Retry our own task until it settles.
 async function runScheduleUntil(

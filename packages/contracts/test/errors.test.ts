@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'bun:test';
 import { ERROR_CODES } from '../src/errors.js';
 import { EnvelopeSchema } from '../src/envelope.js';
 
