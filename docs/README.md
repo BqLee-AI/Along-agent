@@ -17,21 +17,21 @@
 
 ## 二、总体设计（真源，13 篇）
 
-| 序号 | 文档                                                                     | 作用                                                                                           |
-| ---- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
-| 01   | [技术栈与仓库结构](design/01-tech-stack-and-repo-structure.md)           | TS 模块化单体、Bun workspaces、依赖优先构建、依赖方向、复用优先                                |
-| 02   | [模块化单体与拆分触发](design/02-modular-monolith-and-split-triggers.md) | 模块清单、所有权、拆分判据 a–d、B03 十服务裁决                                                 |
-| 03   | [v0 垂直切片](design/03-v0-vertical-slice.md)                            | 简报→卡片→对话→确认→调度→触发→通知→活动页端到端                                                |
-| 04   | [五缝契约](design/04-five-seams-contract.md)                             | AgentRuntime/ToolGateway/Scheduler/Notifier/ConnectorVault 端口契约                            |
-| 05   | [time-core 时间层](design/05-time-core.md)                               | 服务端纯函数 normalize；LLM 不算时间，展示层不换算                                             |
-| 06   | [approvals 确认门](design/06-approvals-confirmation-gate.md)             | 副作用承诺持久对象、状态机、presentation_hash 幂等消费                                         |
-| 07   | [task_events 事件账](design/07-task-events-ledger.md)                    | 只追加账本、取消优先、活动页读模型                                                             |
-| 08   | [调度与投递](design/08-scheduler-and-delivery.md)                        | worker 角色、PG lease+fencing、outbox、Notifier 投递                                           |
-| 09   | [AgentRuntime 与 checkpoint](design/09-agent-runtime-and-checkpoint.md)  | TsAgentRuntime 主实现、run/attempt/checkpoint、预算权威                                        |
-| 10   | [API 与流式通道](design/10-api-and-stream-design.md)                     | REST 真源、envelope、SSE 版本化、WS 延后                                                       |
-| 11   | [CangjieMagic spike 与灰度](design/11-cangjie-runtime-spike.md)          | 第二实现验证 S1–S3、灰度与结案条件                                                             |
-| 12   | [a13n 六思想落点](design/12-a13n-principles-landing.md)                  | harness/checkpoint/自托管/revision/AG-UI 投影/readyz                                           |
-| 13   | [P0 开工与 CI 死规矩](design/13-p0-bootstrap-and-ci-rules.md)            | Bun/Ox 统一入口、同次构建复用、static 后四路隔离并行、五门全成功、真实 DB 与双轮新卷 Docker 门 |
+| 序号 | 文档                                                                     | 作用                                                                                         |
+| ---- | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| 01   | [技术栈与仓库结构](design/01-tech-stack-and-repo-structure.md)           | TS 模块化单体、Bun workspaces、依赖优先构建、依赖方向、复用优先                              |
+| 02   | [模块化单体与拆分触发](design/02-modular-monolith-and-split-triggers.md) | 模块清单、所有权、拆分判据 a–d、B03 十服务裁决                                               |
+| 03   | [v0 垂直切片](design/03-v0-vertical-slice.md)                            | 简报→卡片→对话→确认→调度→触发→通知→活动页端到端                                              |
+| 04   | [五缝契约](design/04-five-seams-contract.md)                             | AgentRuntime/ToolGateway/Scheduler/Notifier/ConnectorVault 端口契约                          |
+| 05   | [time-core 时间层](design/05-time-core.md)                               | 服务端纯函数 normalize；LLM 不算时间，展示层不换算                                           |
+| 06   | [approvals 确认门](design/06-approvals-confirmation-gate.md)             | 副作用承诺持久对象、状态机、presentation_hash 幂等消费                                       |
+| 07   | [task_events 事件账](design/07-task-events-ledger.md)                    | 只追加账本、取消优先、活动页读模型                                                           |
+| 08   | [调度与投递](design/08-scheduler-and-delivery.md)                        | worker 角色、PG lease+fencing、outbox、Notifier 投递                                         |
+| 09   | [AgentRuntime 与 checkpoint](design/09-agent-runtime-and-checkpoint.md)  | TsAgentRuntime 主实现、run/attempt/checkpoint、预算权威                                      |
+| 10   | [API 与流式通道](design/10-api-and-stream-design.md)                     | REST 真源、envelope、SSE 版本化、WS 延后                                                     |
+| 11   | [CangjieMagic spike 与灰度](design/11-cangjie-runtime-spike.md)          | 第二实现验证 S1–S3、灰度与结案条件                                                           |
+| 12   | [a13n 六思想落点](design/12-a13n-principles-landing.md)                  | harness/checkpoint/自托管/revision/AG-UI 投影/readyz                                         |
+| 13   | [P0 开工与 CI 死规矩](design/13-p0-bootstrap-and-ci-rules.md)            | Bun/Ox 统一入口、依赖优先构建与串行类型检查、限流边界 CLI、static 后四路隔离并行、五门全成功 |
 
 ## 三、API（6 篇）
 
@@ -85,7 +85,7 @@
 ## 八、OpenSpec 行为契约与 ADR
 
 - [OpenSpec 说明](../openspec/README.md)：`openspec/specs/` 为可验收行为契约真源（SHALL + Scenario），`docs/design/` 为设计真源；spec 只写行为并引用 design 章节，不复制字段/路由表。
-- [ADR 决策记录](adr/README.md)：0000 模板、0001–0005 种子 ADR、[0006 Bun + Ox 工具链](adr/0006-bun-ox-toolchain.md)（取代 0002）及 [0007 CI 关键路径局部修订](adr/0007-ci-critical-path.md)（仅调整 0006 的编排/失败传播边界，不取代 Bun/Ox 选型）；冻结决策正文保留，改口径另起新 ADR。
+- [ADR 决策记录](adr/README.md)：0000 模板、0001–0005 种子 ADR、[0006 Bun + Ox 工具链](adr/0006-bun-ox-toolchain.md)（取代 0002）、[0007 CI 关键路径局部修订](adr/0007-ci-critical-path.md)（调整 0006 的编排/失败传播）及 [0008 static 内部调度](adr/0008-static-scheduling.md)（局部修订 0007 的内部并发边界）；Bun/Ox 选型和五门全成功不变，冻结决策正文保留，改口径另起新 ADR。
 - 冲突矩阵：行为/验收以 spec 为准，字段/路由以 design/api/schema 为准，why 以 ADR 为准。
 
 ## 维护约定
