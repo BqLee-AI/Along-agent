@@ -19,7 +19,7 @@
     "typecheck": "bun run build:packages && bun run --bun --filter '*' typecheck",
     "lint": "oxlint .",
     "test": "bun run test:unit",
-    "test:unit": "bun run build:packages && bun test --parallel=4 --path-ignore-patterns '**/test/integration/**' ./apps ./packages ./scripts/test",
+    "test:unit": "bun scripts/test-unit.mjs",
     "test:contracts": "bun run build:packages && bun test --parallel=4 ./apps/api/test/contracts.test.ts ./packages/contracts/test ./packages/stream-protocol/test",
     "test:integration": "bun run build:api && bun test --parallel=4 ./apps/api/test/integration",
     "test:scheduler": "bun run build:api && bun test --parallel=4 ./apps/api/test/integration/scheduler-fault.test.ts ./apps/api/test/integration/scheduler-schedule.test.ts ./apps/api/test/integration/tasks-cancel.test.ts",

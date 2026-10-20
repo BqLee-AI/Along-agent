@@ -4,6 +4,7 @@
 import { spawnSync } from 'node:child_process';
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { runUnit } from './test-unit.mjs';
 
 const ROOT = process.cwd();
 
@@ -45,6 +46,8 @@ function hasActiveChanges() {
 
 let ran = 0;
 let failed = null;
+// 仅记录本进程内成功完成的 typecheck；跳过或失败都不能证明 packages 已准备。
+let packagesPrepared = false;
 for (const step of STEPS) {
   if (skip.has(step.name)) {
     console.log(`\n[verify] 跳过：${step.name}（--skip 指定）`);
@@ -57,11 +60,15 @@ for (const step of STEPS) {
     continue;
   }
   console.log(`\n[verify] 开始：${step.name}：${step.run}`);
-  const res = spawnSync(step.run, { cwd: ROOT, stdio: 'inherit', shell: true });
+  const res =
+    step.name === 'unit'
+      ? runUnit({ packagesPrepared })
+      : spawnSync(step.run, { cwd: ROOT, stdio: 'inherit', shell: true });
   if (res.status !== 0) {
     failed = { name: step.name, code: res.status ?? 1 };
     break;
   }
+  if (step.name === 'typecheck') packagesPrepared = true;
   ran++;
 }
 

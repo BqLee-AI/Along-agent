@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-10-20
 - **Deciders**: issue #13（已接受的 bun-ox-toolchain 契约，PR #18）
-- **Supersedes / Superseded by**: Supersedes: [0002](0002-pnpm-turbo.md)
+- **Supersedes / Superseded by**: Supersedes: [0002](0002-pnpm-turbo.md)；Superseded by（仅 CI 编排与失败传播部分）: [0007](0007-ci-critical-path.md)，Bun/Ox 工具选型仍有效
 
 ## Context
 
