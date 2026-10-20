@@ -71,6 +71,15 @@
 - 一键 verify：`node scripts/verify.mjs`（等价 `pnpm verify`），按序跑 `lint → typecheck → depcruise → 三个治理脚本 → test:unit → openspec validate --all --strict → format:check`，任一失败即停并报步名。`openspec/changes` 下无 active change 时该步提示跳过，也可用 `--skip openspec` 主动跳过。
 - 红例含义：`lint/typecheck` 红=代码或类型坏；`depcruise` 红=越 D1 依赖边界；治理脚本红=门清单/冻结名/文案断言坏（看输出行）；`test:unit` 红=单元坏；`openspec validate` 红=change 的 proposal/tasks/spec 不一致；`format:check` 红=跑 `pnpm format` 后重提。
 
+### D1 依赖边界与变红证据
+
+- `pnpm depcruise` 实际扫描 `apps packages`；`pnpm --filter @along/scripts exec vitest run test/boundaries.test.ts` 单独运行真实 depcruise 的正反 fixture。后者也属于既有 `test:unit`，两者均由 `pnpm verify` 执行。
+- API 按执行目录下 `apps/api/src/modules/` 的实际子目录逐模块生成规则，新增模块无需维护名单。禁止直接引用其他模块的 `repository`、`schema`、`schemas` 同名文件/目录或 `-repository`、`-schema`、`-schemas` 后缀实现；包含嵌套路径和 `import type`。自身存储访问和公共服务调用仍合法，不新增公共服务封闭白名单。
+- 保留 conversations→tools/gateway、tasks→notifications/service、tools→approvals/create/presentation 和 approvals/confirm→tasks/cancel；confirm 改为引用 tasks/cancel-repository 仍报 `no-approvals-cross-module-storage`，没有事务存储层通配豁免。
+- Web 不得直接引用 API 源码（含类型），报 `no-web-to-api`；HTTP 客户端不受影响。
+- 共享包依赖范围：time-core 仅自身源码；contracts、stream-protocol 仅自身源码与 zod；scheduler-core 仅自身源码、contracts、time-core；notifier-core 仅自身源码、contracts。未声明的 workspace、应用、外部包和 Node 内置模块均拒绝。
+- `scripts/fixtures/boundaries/` 保留扫描输入；测试复制到临时目录并链接已安装的真实 zod/TypeScript，逐条断言 depcruise 退出码、违规规则名且无未解析依赖。绿例覆盖合法调用，红例输出 `[red] exit=1 <规则>: <来源> → <目标>`，D1 evidence 由 `ci/gates.json` 登记。
+
 ## 7. AI 辅助声明
 
 - 使用 AI 辅助（代码/文档/测试）须在 PR 正文 `验收证据` 或 `Deferred 声明` 附近加一行声明，例如：`AI 声明：本 PR 由 <工具名> 辅助起草，已人工复核 design 引用与测试证据。`
