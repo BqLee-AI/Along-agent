@@ -1,8 +1,11 @@
 # gates Specification
 
 ## Purpose
+
 TBD - created by archiving change gates-executable. Update Purpose after archive.
+
 ## Requirements
+
 ### Requirement: gate 清单机读可执行
 
 清单 SHALL 让每条 enforced gate 可机读定位其 CI 执行位置，不靠人工对照。
@@ -56,8 +59,8 @@ TBD - created by archiving change gates-executable. Update Purpose after archive
 
 #### Scenario: CI 同跑
 
-- WHEN gate-manifest job 执行
-- THEN 同 job 内跑 `check-gates-executable.mjs`，红则整 job 红
+- WHEN static job 经 `node scripts/verify.mjs` 执行静态校验
+- THEN 同 job 内在 gate-manifest 步之后跑 `check-gates-executable.mjs`，红则整 job 红
 
 ### Requirement: D 项变红映射
 
@@ -65,8 +68,8 @@ TBD - created by archiving change gates-executable. Update Purpose after archive
 
 #### Scenario: D1/D2/D10 映射
 
-- WHEN 分别删 depcruise job 引用 / lint job 或 presentation.test.ts / scan-copy-claims evidence（演练后恢复）
-- THEN 新脚本对 D1/D2/D10 报红（对应 D1 时间唯一权威、D2 展示禁算时间、D10 口径天花板）
+- WHEN 删除 static job，或分别删除 D1 的 .dependency-cruiser.cjs / D2 的 presentation.test.ts / D10 的 scan-copy-claims.mjs evidence（演练后恢复）
+- THEN 新脚本对受影响的 D1/D2/D10 报红（对应 D1 时间唯一权威、D2 展示禁算时间、D10 口径天花板）；static job 缺失时三项均红
 
 #### Scenario: D3–D6 映射
 
@@ -77,4 +80,3 @@ TBD - created by archiving change gates-executable. Update Purpose after archive
 
 - WHEN 分别删 compose-smoke job 或 compose-smoke.sh / scheduler-fault job 或 scheduler-fault.test.ts（演练后恢复）
 - THEN 新脚本对 D7/D9 报红（对应 D7 空环境冒烟、D9 取消后触发数=0）
-

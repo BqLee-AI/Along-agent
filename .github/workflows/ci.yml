@@ -13,49 +13,9 @@ permissions:
   contents: read
 
 jobs:
-  gate-manifest:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      # bootstrap：本地 composite 需先检出仓库才能解析，composite 内再做完整 checkout。
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-        with:
-          fetch-depth: 1
-          persist-credentials: false
-      - uses: ./.github/actions/setup
-      - run: node scripts/check-gate-manifest.mjs
-      - run: node scripts/check-gates-executable.mjs
-      - run: node scripts/check-frozen-names.mjs
-      - run: node scripts/scan-copy-claims.mjs
-
-  lint:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: gate-manifest
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-        with:
-          fetch-depth: 1
-          persist-credentials: false
-      - uses: ./.github/actions/setup
-      - run: pnpm lint
-
-  depcruise:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: lint
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-        with:
-          fetch-depth: 1
-          persist-credentials: false
-      - uses: ./.github/actions/setup
-      - run: pnpm depcruise
-
-  unit:
+  static:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: depcruise
     env:
       TZ: Pacific/Kiritimati
     steps:
@@ -64,44 +24,12 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
       - uses: ./.github/actions/setup
-      - run: pnpm typecheck
-      - run: pnpm test:unit
-
-  openspec-validate:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    needs: gate-manifest
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-        with:
-          fetch-depth: 1
-          persist-credentials: false
-      - uses: ./.github/actions/setup
-      - name: validate all changes (strict)
-        run: |
-          entries=$(ls -A openspec/changes | grep -v -e '^archive$' -e '^\.gitkeep$' || true)
-          if [ -z "$entries" ]; then
-            echo "no active changes under openspec/changes, skipping"
-          else
-            pnpm exec openspec validate --all --strict
-          fi
-
-  format:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    needs: gate-manifest
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-        with:
-          fetch-depth: 1
-          persist-credentials: false
-      - uses: ./.github/actions/setup
-      - run: pnpm format:check
+      - run: node scripts/verify.mjs
 
   migration-scan:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: unit
+    needs: static
     services:
       postgres:
         image: postgres:16-alpine
@@ -141,7 +69,7 @@ jobs:
   scheduler-fault:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: migration-scan
+    needs: static
     services:
       postgres:
         image: postgres:16-alpine
@@ -172,7 +100,7 @@ jobs:
   contracts-dual:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: migration-scan
+    needs: static
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -184,7 +112,7 @@ jobs:
   compose-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: contracts-dual
+    needs: [migration-scan, scheduler-fault, contracts-dual]
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
