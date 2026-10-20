@@ -8,7 +8,7 @@
 
 ## 2. 单锁文件、执行入口与构建顺序
 
-- [ ] 2.1 根 `packageManager` 固定 `bun@1.4.2`，根 workspaces 覆盖 apps/_、packages/_、scripts；同步 engines、Bun 类型和安装要求，删除 pnpm 专有配置及 pnpm-workspace.yaml/pnpm-lock.yaml，只提交单一 bun.lock。
+- [ ] 2.1 根 `packageManager` 固定 `bun@1.4.2`，根 workspaces 覆盖 `apps/*`、`packages/*`、`scripts`；同步 engines、Bun 类型和安装要求，删除 pnpm 专有配置及 pnpm-workspace.yaml/pnpm-lock.yaml，只提交单一 bun.lock。
 - [ ] 2.2 用 Bun 根/workspace scripts 取代 Turbo，保留所有有效的 build/dev/typecheck/test/test:unit/test:contracts/test:integration 入口；移除 turbo 依赖与 turbo.json，不留旧脚本别名或伪成功占位任务。
 - [ ] 2.3 显式恢复原 `^build` 前置：干净 checkout 中先产出被依赖 packages 的 dist，再检查/测试/构建消费者；不能依赖本机遗留 dist、spike 的复制产物或 CI 跨 job 文件共享。梳理 Bun filter 的运行顺序，不把并行调度误当拓扑排序。
 - [ ] 2.4 保留 `scripts/verify.mjs` 作为唯一顺序编排源，由 `bun run verify` 调用；内部旧工具链命令全量切换，步名、首错终止与退出码保持可观察，不新增第二套 Node/Bun 校验逻辑。
