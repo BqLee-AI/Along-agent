@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'bun:test';
 import {
   ACK_CHECK_DELAYS_MS,
   FIRE_WINDOW_MS,

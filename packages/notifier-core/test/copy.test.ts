@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'bun:test';
 import {
   CANCEL_CONFIRMING_COPY,
   CANCEL_INTERCEPT_COPY,

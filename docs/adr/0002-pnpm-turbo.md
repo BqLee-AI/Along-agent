@@ -1,9 +1,9 @@
 # ADR 0002：包管理与构建用 pnpm + Turbo
 
-- **Status**: Accepted
+- **Status**: Superseded
 - **Date**: 2026-10-19
 - **Deciders**: P0 治理（issue #1）
-- **Supersedes / Superseded by**: 无
+- **Supersedes / Superseded by**: Superseded by: [0006](0006-bun-ox-toolchain.md)
 
 ## Context
 

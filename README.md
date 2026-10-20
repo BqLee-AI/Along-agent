@@ -37,9 +37,11 @@ issue → Spec 章节 → OpenSpec change（如需）→ 分支 → PR → CI �
 
 ## 本地运行
 
-- 安装依赖：`pnpm install`
-- 本地启动：`pnpm dev`（`apps/api` 3000 `ROLE=all`、`apps/web` 3100）
-- 类型检查：`pnpm typecheck`；单元测试：`pnpm test`（细分 `pnpm test:unit`、`pnpm test:contracts`）
+- 工具链：Bun `1.4.2`（workspaces + 单一 `bun.lock`），Oxlint `1.89.0`、Oxfmt `0.74.0`；安装依赖：`bun install --frozen-lockfile`。
+- 本地启动：`bun run dev`（先构建依赖包；`apps/api` 3000 `ROLE=all`、`apps/web` 3100）。
+- 构建：`bun run build:packages` 构建共享包；`bun run build` 先包后应用；`bun run build:api` 构建 API 及其依赖。
+- 检查：`bun run verify`；类型与 lint 可分别运行 `bun run typecheck`、`bun run lint`；格式修复/阻塞检查为 `bun run format` / `bun run format:check`。
+- 测试：`bun run test:unit`（非数据库）、`bun run test:contracts`（API 进程内/HTTP 双跑及契约包）、`bun run test:integration`（全部 9 个真实数据库文件）、`bun run test:scheduler`（D9 指定集）；数据库测试需 PostgreSQL 16 与测试环境，详见 [贡献指南](CONTRIBUTING.md)。
 - 契约校验：`openspec validate <name> --strict`（如 `openspec validate v0-safety-contract --strict`）
 - 环境变量：`DATABASE_URL`、`TZDB_VERSION`（缺失则 `/readyz` 503 `TZDB_UNAVAILABLE`，属预期行为）。
 

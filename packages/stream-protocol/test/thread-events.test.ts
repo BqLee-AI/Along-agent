@@ -1,6 +1,6 @@
 // Thread-event envelope unit tests (issue #9): strictness, version pin,
 // frozen seven-word vocabulary, and EVENT_TYPES untouched.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'bun:test';
 import {
   EVENT_TYPES,
   THREAD_EVENT_TYPES,
@@ -38,7 +38,7 @@ describe('thread-events', () => {
   });
 
   it('holds exactly the seven frozen thread words', () => {
-    expect([...THREAD_EVENT_TYPES].sort()).toEqual(
+    expect<readonly string[]>([...THREAD_EVENT_TYPES].sort()).toEqual(
       [
         'approval_required',
         'card.proposed',
@@ -173,7 +173,7 @@ describe('thread-events', () => {
   });
 
   it('keeps EVENT_TYPES as the seven task-ledger words', () => {
-    expect([...EVENT_TYPES].sort()).toEqual(
+    expect<readonly string[]>([...EVENT_TYPES].sort()).toEqual(
       [
         'cancel_requested',
         'cancelled',

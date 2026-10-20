@@ -4,11 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "vitest run",
-    "test:unit": "vitest run",
-    "lint": "echo ok"
-  },
-  "devDependencies": {
-    "vitest": "3.2.7"
+    "test": "bun test --parallel=4 ./test",
+    "test:unit": "bun test --parallel=4 ./test"
   }
 }

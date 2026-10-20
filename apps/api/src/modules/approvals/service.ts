@@ -180,7 +180,8 @@ export async function listApprovalsForOwner(
     created_at: row.created_at.toISOString(),
   }));
   const lastRow = page[page.length - 1] as
-    { id: string; created_at: Date; created_at_cursor?: string } | undefined;
+    | { id: string; created_at: Date; created_at_cursor?: string }
+    | undefined;
   const nextCursor =
     hasMore && lastRow
       ? encodeCursor({

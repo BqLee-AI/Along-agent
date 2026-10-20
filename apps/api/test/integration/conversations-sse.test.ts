@@ -1,7 +1,7 @@
 // Issue #9: conversation SSE contract — deterministic triage, approval
 // cards, clarify-only normalize failures, budget, idempotent replay,
 // after_seq cursor, disconnect cancellation, cancel approvals via tool call.
-import { beforeAll, afterAll, describe, expect, it } from 'vitest';
+import { beforeAll, afterAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Pool } from 'pg';
@@ -512,7 +512,7 @@ maybe('conversation runtime', () => {
       limit: '10',
     });
     expect(detail.events).toEqual(events.slice(1));
-    expect(detail.next_after_seq).toBe(events.at(-1)?.seq);
+    expect<number | null | undefined>(detail.next_after_seq).toBe(events.at(-1)?.seq);
   });
 
   it('disconnect persists thread.cancelled and marks the run cancelled', async () => {

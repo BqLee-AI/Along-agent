@@ -1,17 +1,17 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, jest } from 'bun:test';
 import { FIXTURE_V1 } from '../src/fixtures/fixture-v1.js';
 import { normalize } from '../src/normalize.js';
 
 afterEach(() => {
-  vi.useRealTimers();
-  vi.restoreAllMocks();
+  jest.useRealTimers();
+  jest.restoreAllMocks();
 });
 
 describe('reverse clock', () => {
   it('fake system time and alien TZ do not move output', () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('1999-01-01T00:00:00Z'));
-    const spy = vi.spyOn(Date, 'now');
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('1999-01-01T00:00:00Z'));
+    const spy = jest.spyOn(Date, 'now');
     const a = normalize('2026-10-17T09:20:00', 'Asia/Shanghai', 'none', FIXTURE_V1);
     expect(a).toEqual({
       kind: 'ok',
@@ -20,7 +20,7 @@ describe('reverse clock', () => {
       fold: 0,
       ruleset_id: 'FIXTURE_V1',
     });
-    vi.setSystemTime(new Date('2099-12-31T23:59:59Z'));
+    jest.setSystemTime(new Date('2099-12-31T23:59:59Z'));
     const b = normalize('2026-11-01T01:30:00', 'America/New_York', 'none', FIXTURE_V1);
     expect(b).toEqual({
       kind: 'error',

@@ -14,19 +14,14 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
-    "lint": "eslint src test",
-    "test": "vitest run",
-    "test:unit": "vitest run",
-    "test:contracts": "vitest run",
-    "depcruise": "echo ok"
+    "test": "bun test --parallel=4 ./test",
+    "test:unit": "bun test --parallel=4 ./test",
+    "test:contracts": "bun test --parallel=4 ./test"
   },
   "dependencies": {
     "zod": "3.25.76"
   },
   "devDependencies": {
-    "typescript": "5.9.3",
-    "vitest": "3.2.7",
-    "eslint": "9.39.4",
-    "typescript-eslint": "8.53.0"
+    "typescript": "5.9.3"
   }
 }

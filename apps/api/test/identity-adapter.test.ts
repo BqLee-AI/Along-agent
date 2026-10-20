@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'bun:test';
 import { mapValue, translateWhere } from '../src/modules/identity/pg-adapter.js';
 
 const SECRET = 'test-secret-for-identity-unit';

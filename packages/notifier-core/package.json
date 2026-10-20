@@ -9,17 +9,12 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "lint": "eslint src",
-    "test": "vitest run --passWithNoTests",
-    "test:unit": "vitest run --passWithNoTests",
-    "test:contracts": "vitest run --passWithNoTests",
-    "depcruise": "echo ok"
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
+    "test": "bun test --parallel=4 ./test",
+    "test:unit": "bun test --parallel=4 ./test",
+    "test:contracts": "bun test --parallel=4 ./test"
   },
   "devDependencies": {
-    "typescript": "5.9.3",
-    "vitest": "3.2.7",
-    "eslint": "9.39.4",
-    "typescript-eslint": "8.53.0"
+    "typescript": "5.9.3"
   }
 }

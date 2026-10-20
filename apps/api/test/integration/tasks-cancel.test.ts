@@ -1,7 +1,7 @@
 // Cancel route: state machine, idempotency, auth/CSRF, terminal guards.
 // Drives requestCancel directly (HTTP envelope parity is asserted through
 // the CSRF + uuid-shape cases below via handleTaskRoute in the route test).
-import { beforeAll, afterAll, describe, expect, it } from 'vitest';
+import { beforeAll, afterAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
 import { confirmApproval } from '../../src/modules/approvals/confirm.js';

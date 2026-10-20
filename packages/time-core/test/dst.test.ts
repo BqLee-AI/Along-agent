@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'bun:test';
 import { FIXTURE_V1 } from '../src/fixtures/fixture-v1.js';
 import { normalize } from '../src/normalize.js';
 

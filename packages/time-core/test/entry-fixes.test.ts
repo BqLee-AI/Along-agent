@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'bun:test';
 import { ALIAS_TABLE_V1, classifyEntry } from '../src/entry.js';
 import { FIXTURE_V1 } from '../src/fixtures/fixture-v1.js';
 

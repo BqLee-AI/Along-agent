@@ -24,7 +24,7 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
       - uses: ./.github/actions/setup
-      - run: node scripts/verify.mjs
+      - run: bun run verify
 
   migration-scan:
     runs-on: ubuntu-latest
@@ -54,7 +54,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
       - run: sh scripts/db/apply.sh
-      - run: node scripts/check-migrations.mjs
+      - run: bun scripts/check-migrations.mjs
       - run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/db/verify-constraints.sql
       - run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/db/verify-conversation.sql
       - run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/db/d3-d5.test.sql
@@ -62,9 +62,8 @@ jobs:
       - run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/db/verify-agent-support.sql
       - run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/db/agent-support.test.sql
       - run: sh scripts/db/d3-concurrent.test.sh
-      - run: pnpm build
-      - run: pnpm --filter @along/api exec tsc -p tsconfig.json
-      - run: pnpm --filter @along/api test:integration
+      - run: bun run build
+      - run: bun run --filter @along/api test:integration
 
   scheduler-fault:
     runs-on: ubuntu-latest
@@ -94,8 +93,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
       - run: sh scripts/db/apply.sh
-      - run: pnpm build
-      - run: pnpm --filter @along/api exec vitest run --config vitest.integration.config.ts test/integration/scheduler-fault.test.ts test/integration/scheduler-schedule.test.ts test/integration/tasks-cancel.test.ts
+      - run: bun run test:scheduler
 
   contracts-dual:
     runs-on: ubuntu-latest
@@ -107,7 +105,7 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
       - uses: ./.github/actions/setup
-      - run: pnpm test:contracts
+      - run: bun run test:contracts
 
   compose-smoke:
     runs-on: ubuntu-latest

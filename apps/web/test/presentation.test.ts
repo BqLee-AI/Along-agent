@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'bun:test';
 import { describeApproval, describeCard } from '../src/lib/presentation';
 import type { ApprovalDetail, BriefCard } from '../src/lib/types';
 

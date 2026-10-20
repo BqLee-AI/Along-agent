@@ -6,14 +6,13 @@
   "main": "./dist/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev": "tsx watch src/main.ts",
-    "seed:session": "tsx src/bin/seed-session.ts",
+    "dev": "cd ../.. && bun --watch apps/api/src/main.ts",
+    "seed:session": "bun src/bin/seed-session.ts",
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
-    "lint": "eslint src test",
-    "test": "vitest run",
-    "test:unit": "vitest run --exclude test/integration/**",
-    "test:integration": "vitest run --config vitest.integration.config.ts",
-    "depcruise": "echo ok"
+    "test": "bun test --parallel=4 --path-ignore-patterns '**/test/integration/**' ./test",
+    "test:unit": "bun test --parallel=4 --path-ignore-patterns '**/test/integration/**' ./test",
+    "test:contracts": "bun test --parallel=4 ./test/contracts.test.ts",
+    "test:integration": "bun test --parallel=4 ./test/integration"
   },
   "dependencies": {
     "@along/contracts": "workspace:*",
@@ -28,10 +27,6 @@
   "devDependencies": {
     "@types/node": "20.19.43",
     "@types/pg": "8.15.5",
-    "eslint": "9.39.4",
-    "tsx": "4.21.0",
-    "typescript": "5.9.3",
-    "typescript-eslint": "8.53.0",
-    "vitest": "3.2.7"
+    "typescript": "5.9.3"
   }
 }

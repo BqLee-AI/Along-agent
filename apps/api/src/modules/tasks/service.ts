@@ -100,7 +100,8 @@ export async function listTasksForOwner(
     schedule_receipt: row.schedule_receipt,
   }));
   const lastRow = page[page.length - 1] as
-    { id: string; fire_at_utc: Date; fire_at_cursor?: string } | undefined;
+    | { id: string; fire_at_utc: Date; fire_at_cursor?: string }
+    | undefined;
   const nextCursor =
     hasMore && lastRow
       ? encodeCursor({
@@ -177,7 +178,8 @@ export async function getTaskEvents(
       evidence_ref: row.evidence_ref,
     }));
     const lastRow = page[page.length - 1] as
-      { id: string; recorded_at_utc: Date; recorded_at_cursor?: string } | undefined;
+      | { id: string; recorded_at_utc: Date; recorded_at_cursor?: string }
+      | undefined;
     const nextCursor =
       hasMore && lastRow
         ? encodeCursor({

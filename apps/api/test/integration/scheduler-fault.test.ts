@@ -3,7 +3,7 @@
 // second worker resume exactly once. Time is forced with DB timestamp updates
 // (never sleep): fire_at_utc is nudged into the past, lease expiry backdated.
 // D9 authoritative assertions live here (see ci/gates.json scope).
-import { beforeAll, afterAll, describe, expect, it } from 'vitest';
+import { beforeAll, afterAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
 import { confirmApproval } from '../../src/modules/approvals/confirm.js';

@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'bun:test';
 import { AddressInfo } from 'node:net';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { HealthSchema } from '@along/contracts';

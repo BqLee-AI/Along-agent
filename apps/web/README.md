@@ -6,10 +6,11 @@ Next.js App Router client for the v0 loop: 今日简报 → 确认 → 任务/�
 
 ```bash
 # API (repo root; DATABASE_URL + TZDB_VERSION required)
-pnpm --filter @along/api exec tsx src/main.ts
+bun run build:packages
+bun run --filter @along/api dev
 
 # Web on http://localhost:3100
-pnpm --filter @along/web dev
+bun run --bun --filter @along/web dev
 ```
 
 `API_BASE` defaults to `http://127.0.0.1:3000`. Server components forward the
@@ -27,7 +28,7 @@ ALLOW_DEV_AUTH=1 DEV_OWNER_ID=<seeded-user-uuid> ...
 `src/lib/presentation.ts` is the only display projection. It renders frozen
 server strings (`fire_at_local`, `echo_text`) and never reads
 `snapshot.fire_at_utc`; `test/presentation.test.ts` mutates the UTC instant and
-asserts the output is unchanged. ESLint rejects `new Date(...)`/`Date.now()`
+asserts the output is unchanged. Oxlint rejects `new Date(...)`/`Date.now()`
 under `apps/web`.
 
 ## Scope
