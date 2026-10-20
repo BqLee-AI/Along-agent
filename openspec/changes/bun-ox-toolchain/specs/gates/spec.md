@@ -1,0 +1,159 @@
+## MODIFIED Requirements
+
+### Requirement: verify 主链覆盖
+
+一键 verify SHALL 以 `bun run verify` 为本地与 CI 的共同入口，按既有顺序执行 lint、typecheck、depcruise、gate-manifest、gates-executable、frozen-names、copy-claims、unit、OpenSpec 严格校验与阻塞式 format:check；构建前置和工具替换不得省略门，任一步失败即停并报告步名及非零退出码。
+
+#### Scenario: 本地与 CI 同一阻塞主链
+
+- WHEN 在干净安装与所需包构建前置满足后运行 `bun run verify`，或 static job 调用该入口
+- THEN 相同门以相同顺序执行，gates-executable 位于 gate-manifest 之后，全部成功才返回 0（映射 D1/D2/D10 的执行链保护）
+
+#### Scenario: 格式错误不是非阻塞警告
+
+- WHEN 被检查文件存在 oxfmt 格式错误
+- THEN format:check、verify 与 static 返回失败，不使用 continue-on-error 或退出码吞并放行（映射 D1/D2/D10 的合并门完整性）
+
+#### Scenario: 治理脚本失败阻止后续步骤
+
+- WHEN gate-manifest、gates-executable、frozen-names 或 copy-claims 任一步失败
+- THEN verify 报告失败步名并中止后续步骤，原禁词/口径与缺执行检查不因 Bun 切换而跳过（映射 D1–D10 的执行指向、D10 的口径扫描）
+
+#### Scenario: 干净 checkout 恢复构建依赖
+
+- WHEN 干净 checkout 尚无 workspace dist，执行需要依赖产物的 build、typecheck 或测试入口
+- THEN 被依赖 packages 先成功构建，消费者随后执行，不以旧 dist 或跨 CI job 文件共享充当构建前置（映射 D1/D2/D8 的真实测试执行）
+
+## ADDED Requirements
+
+### Requirement: Bun 单一工具链入口
+
+仓库 SHALL 固定 Bun 1.4.2、workspaces 与单一 bun.lock；本地、CI、Docker 的有效安装、构建和测试命令 SHALL 完成干净切换，不保留 pnpm/Turbo/ESLint/Vitest 活动调用或直接依赖。
+
+#### Scenario: 冻结安装可复现
+
+- WHEN 新环境按声明的 Bun 1.4.2 执行 `bun install --frozen-lockfile`
+- THEN 使用已提交 bun.lock 安装全部工作区依赖；manifest 与锁文件不一致时失败，而非改写锁文件继续（映射 D1/D2/D8 的可复现门执行）
+
+#### Scenario: 任一活动入口均走新工具链
+
+- WHEN 检查根与 workspace scripts、verify、CI setup/workflow 和实际 Docker 构建/运行路径
+- THEN 不存在 pnpm/Turbo/ESLint/Vitest 活动调用或相应旧配置入口，包依赖及测试仍由实际命令执行，历史归档文字不被误认为当前操作说明（映射 D1/D2/D7/D8 的执行链保护）
+
+### Requirement: D2 Oxlint 语法边界等价
+
+D2 SHALL 在 Oxlint 1.89.0 的 JS 插件内直接使用原 selector `NewExpression[callee.name='Date']` 与 `CallExpression[callee.object.name='Date'][callee.property.name='now']`，限定 `apps/web/**/*.{ts,tsx,js,jsx}` 并保持原全局忽略路径；不得回退 ESLint 或用独立扫描脚本替代。
+
+#### Scenario: 四种源扩展名中的直接取时必红
+
+- WHEN apps/web 中的 JS、TS、JSX、TSX fixture 含 `new Date()` 或 `Date.now()`
+- THEN Oxlint 输出对应 D2 原错误文案并返回非零，所有四种扩展名均被覆盖（映射 D2 展示层禁算时间）
+
+#### Scenario: 相近表达式遵守原 AST selector
+
+- WHEN fixture 含 `new Date`、`new (Date)()`、被局部变量遮蔽的 `Date`、`Date[now]()`、`Date?.now()` 或 `Date.now?.()`
+- THEN 对应原 selector 的表达式仍被拒绝；`Date()`、仅引用 `Date.now`、`Date['now']()`、`globalThis.Date.now()`、别名取时和 TS 包装导致 callee 不匹配的表达式不因迁移扩大禁令（映射 D2 语法边界正反例）
+
+#### Scenario: 原允许路径与忽略路径不误报
+
+- WHEN 同样的禁用表达式位于 apps/api、其他 packages、apps/webish、apps/web 的 mjs/cjs 文件，或任意 dist/node_modules/coverage/.next 路径
+- THEN D2 插件不报告该表达式，apps/web 原覆盖路径中的对应 fixture 仍报告（映射 D2 路径边界正反例）
+
+### Requirement: 非 D2 lint 质量约束显式迁移
+
+工具替换 SHALL 盘点原 typescript-eslint recommended 规则与作用域，显式记录 Oxlint 对应规则、级别和差异；不得以只迁 D2、整体关闭正确性规则、静默扩大 ignore 或无关业务改写替代已有 lint 质量门。
+
+#### Scenario: 现有未使用符号检查仍实际执行
+
+- WHEN 在原 lint 覆盖范围放入违反已采用未使用符号策略的代表性 TS fixture
+- THEN Oxlint 的对应配置规则使 lint 与 verify 失败；类型位置引用、参数忽略等语义差异有逐项记录与正反证据，不用 spike 的全局规则关闭配置掩盖差异（映射 D2 lint 执行门完整性）
+
+#### Scenario: 迁移不借机改变展示与治理业务
+
+- WHEN Oxlint 原生规则与旧推荐规则的行为存在差异
+- THEN 实现说明该差异及采用的规则映射，保留展示投影和治理断言，不通过宽泛 disable、删除测试或改写业务来制造全绿（映射 D2/D10 的既有回归保护）
+
+### Requirement: bun:test 保留测试集合与隔离
+
+全部现有 27 个测试文件 SHALL 迁移至 bun:test，保留断言、文件级状态隔离、时钟/spy 恢复、单元与真实数据库分组以及进程内/HTTP 契约双跑；并行优化不得改变用例间共享状态语义或静默漏测。
+
+#### Scenario: 非数据库测试集合完整运行
+
+- WHEN 运行新 test:unit 入口
+- THEN 现有非数据库测试文件实际执行，integration 不因删除 Vitest include/exclude 配置而误入默认单元发现；空包许可不能令应存在的测试集合静默为空（映射 D1/D2/D10 的单元门）
+
+#### Scenario: 反向时钟与文件级并行仍隔离
+
+- WHEN 时间内核测试通过 Bun jest API 设置反向系统时间并 spy Date.now，同时启用文件级并行
+- THEN 原时间归一化断言通过、Date.now 的禁调用断言保留，mock/clock 按原生命周期恢复，不用文件内 concurrent 取代文件隔离（映射 D1 时间唯一权威）
+
+#### Scenario: 契约入口真实包含两种传输
+
+- WHEN 执行根 `bun run test:contracts` 或 contracts-dual job
+- THEN API contracts.test.ts 中进程内与 HTTP 两组测试以及既有契约包测试均实际运行；任一组失败即该入口失败，不因 API 缺少旧 test:contracts 脚本而漏掉 HTTP（映射 D8 契约双跑）
+
+#### Scenario: 数据库与故障测试仍使用真实约束
+
+- WHEN 执行 integration 与 scheduler-fault 集合
+- THEN 现有 9 个 DB 文件在真实 PostgreSQL 16、原迁移和明确测试环境下执行；唯一性/只追加/取消窗口断言不跳过，重复注册的 case 与独立声明数明确区分（映射 D3–D6/D9）
+
+### Requirement: D1 出边断言保留 Bun 执行路径
+
+dependency-cruiser SHALL 在 Bun 下继续执行现有出边配置，保留 time-core 外部出边禁止、契约依赖限制和环检测，而非仅检查命令存在。
+
+#### Scenario: 外部与内置模块依赖必红
+
+- WHEN packages/time-core/src 新增对 agent-runtime 或 node:fs 的依赖，包括配置已覆盖的类型依赖
+- THEN Bun 执行的 dependency-cruiser 报 time-core-zero-egress 并返回非零，verify 不继续（映射 D1 依赖边界）
+
+#### Scenario: 现有允许依赖不扩大限制
+
+- WHEN time-core 仅含现有合法源码与配置允许的内部模块依赖
+- THEN 同一配置通过，不将工具迁移变成新的依赖规则设计（映射 D1 正向边界）
+
+### Requirement: CI 沿用既有门禁 DAG
+
+CI SHALL 沿用 #12 的五个 required checks 及依赖关系；static 运行统一 verify，三个下游数据库/契约 job 只依赖 static、各自独立，compose-smoke 等三者全部成功，不以换工具名削弱门的覆盖或失败传播。
+
+#### Scenario: static 失败阻止下游
+
+- WHEN lint、typecheck、依赖边界、治理、单元、OpenSpec 或格式检查令 static 失败
+- THEN migration-scan、scheduler-fault、contracts-dual 及 compose-smoke 不作为成功下游执行（映射 D1–D10 的合并门完整性）
+
+#### Scenario: 三条验证链可独立执行
+
+- WHEN static 成功
+- THEN migration-scan、scheduler-fault、contracts-dual 均可独立启动，保留各自测试/SQL/构建前置与所需数据库，不新增三者间串行依赖或共享可变数据库状态（映射 D3–D6/D8/D9）
+
+#### Scenario: 镜像冒烟等待全部上游
+
+- WHEN 三个下游 job 任一失败，或三者全部成功
+- THEN 前者不能放行 compose-smoke，后者才运行真实容器冒烟；五个 required check 名不因工具链重命名（映射 D7 及其上游保护）
+
+### Requirement: Docker 实际使用 Bun 工具链
+
+Docker/Compose SHALL 与宿主机和 CI 同步使用固定 Bun 的冻结安装、工作区构建与服务运行路径，保持现有角色和 D7 健康/就绪行为，不留只在容器内继续使用旧工具链的旁路。
+
+#### Scenario: 从无旧产物的上下文构建服务镜像
+
+- WHEN Compose 从干净源码、package manifests 与 bun.lock 构建实际 Dockerfile
+- THEN 镜像完成 Bun 冻结安装和依赖优先构建，以 Bun 启动服务，不要求 pnpm-workspace.yaml、pnpm-lock.yaml、turbo.json 或宿主机 dist（映射 D7 可复现启动）
+
+#### Scenario: Bun 镜像保持空环境冒烟语义
+
+- WHEN 对新卷服务分别不给和显式给 TZDB_VERSION 执行 compose-smoke
+- THEN /healthz 为 200，未登录 /api/v1/me 与 /api/v1/brief 为 401；缺 TZDB 的 /readyz 为 503 且带 TZDB_UNAVAILABLE，有 TZDB 时为 200，不通过部署或修改业务来绕过（映射 D1/D7）
+
+### Requirement: 门清单随执行证据同步
+
+工具链迁移 SHALL 同步 ci/gates.json 的实际配置/插件/测试证据及当前贡献说明，保持既有缺 job/缺证据即红的机读检查；不得让旧 ESLint 文件名成为已删除的假证据。
+
+#### Scenario: D2 新证据真实存在
+
+- WHEN 读取迁移后 D2 的 enforced_by
+- THEN job 指向 static，evidence 指向存在的 Oxlint 配置、D2 插件及展示测试；可执行检查通过且原 ESLint 配置不再作为活动证据（映射 D2 执行指向）
+
+#### Scenario: 删迁移后的执行证据仍红
+
+- WHEN 在演练中移除受影响 gate 的 job、Oxlint 配置/插件或其他任一必需 evidence
+- THEN gates-executable 报对应门与缺项并非零退出，恢复后通过，当前文档/模板的 Bun 命令与该执行链一致（映射 D1–D10 的证据完整性）
