@@ -41,19 +41,20 @@
 - [x] D1：真实 Bun depcruise 正例与 42 个拒绝 fixture 通过，反向时钟原断言通过；仓库图无违规（363 modules / 713 dependencies）。
 - [x] D2：真实 Oxlint 拒绝四种扩展名及 nested/shadow/optional/computed identifier 的 17 个位置，放行原相近语法、其他目录/扩展名和四个原忽略路径；展示投影原测试通过。
 - [x] D2/D10：代表性非 D2 红例仍 error；实际 Web probe 使 verify 在 lint 停止；格式破坏令 format:check 及 Node 兼容 verify 的格式步 exit 1（该定向演练显式跳过前 9 步，不冒充完整绿跑）。删新 D2 evidence/static 的副本演练均红；所有探针已恢复。
-- [ ] D3–D6/D9：真实 PG integration、SQL 约束、并发写、取消/调度故障注入全部绿，无跳过或断言削弱；附执行集合和输出，不以仅单元绿代替。
+- [x] D3–D6/D9：实现提交 `44a241c` 的 [CI](https://github.com/BqLee-AI/Along-agent/actions/runs/39365651789) 完成真实 PG integration、全部原 SQL/并发断言和取消/调度故障注入，五个 required checks 全绿。
 - [x] D8：真实 Bun 镜像中根契约 14 pass/4 文件，进程内/HTTP 分别破坏时均 1 fail、root exit 1；工作树测试未改为红例。
 - [x] D7：独占 Compose 项目新卷真实 Bun 镜像验收 healthz 200、未登录 me/brief 401、无 TZDB readyz 503+TZDB_UNAVAILABLE、有 TZDB 200；脚本退出清理任务卷，不碰用户项目。
-- [ ] D1–D10：干净环境 `bun install --frozen-lockfile`、`bun run verify`、完整测试分组和五个 required checks 全绿；严格 OpenSpec 校验 valid。附 27 文件逐文件结果、独立用例与重复执行的区分、改前/改后 CI run URL 和墙钟；≤3 分钟为目标、≤2 分钟为冲刺，未达时据实报告而非跳门。
-- [ ] 收口：独立 review 后，收口 PR 写 Closes #13；勾选实际完成任务，执行 `bunx --no-install openspec archive bun-ox-toolchain -y` 合并 gates delta，并执行 `bunx --no-install openspec validate --all --strict`，保留 archive 记录与最终验收证据。
+- [x] D1–D10：实现提交 `44a241c` 在干净 CI 冻结安装、verify、完整测试分组及五个 required checks 全绿；归档后严格校验 2 passed。29 文件结果与独立/重复数见下；墙钟 204 秒，较同工作量基线 300 秒缩短 32.0%，未达到 180 秒目标，不跳门换绿。
+- [x] 收口：独立 review approve、PR #20 写 `Closes #13`，archive 合并 8 个新增/1 个修改的 gates requirements，随后严格全量校验通过。最终提交仍按 PR 最新 approve、全 checks 绿与 CLEAN 状态放行。
 
 ## 7. 本地验收记录（2026-10-20）
 
-- 环境：Windows x64、Bun 1.4.2；DB 使用任务独占 PostgreSQL 16 库和白名单环境、`TZ=Pacific/Kiritimati`。完整 verify 10 步通过；OpenSpec 3 passed。OpenSpec 的第三方遥测请求超时未影响校验退出码。
+- 环境：Windows x64、Bun 1.4.2；DB 使用任务独占 PostgreSQL 16 库和白名单环境、`TZ=Pacific/Kiritimati`。归档前完整 verify 10 步通过、OpenSpec 3 passed；归档后独立严格校验 2 passed，无 active change 时 verify 按原逻辑跳过该步。第三方遥测超时未影响校验退出码。
 - 完整 API/Next 生产构建通过。实际 `bun run dev` 启动两个服务：首页 200、API healthz 200、同源代理未登录 401；API watch 从仓库根跟踪共享包 dist，触碰依赖时连接短暂重置，随后 healthz 200 恢复。
 - 20 个非 DB 文件 132 pass / 0 fail；9 个 DB 文件 62 pass / 0 fail / 0 skip，合计 194 次执行、192 个独立定义。独立数扣除 schedule 的 2 次重复注册，不把重复执行当新覆盖。
 - 四处 matcher 类型修正后的 SSE 单文件追加验证为 20 pass / 0 fail；不重复其他 DB 文件。契约根入口另外在一次性镜像中 14 pass，两个模式分别变红均退出 1。
-- CI 基线：#12 run `39358591669` 首 job 到末 job 252 秒；含 #14 边界测试的 #19 run `39362035667` 为本迁移前完整五 job 证据。迁移后的 run 与墙钟在 PR 验收记录补充。
+- CI 对照：#12 [run 39358591669](https://github.com/BqLee-AI/Along-agent/actions/runs/39358591669) 为 252 秒（当时无 #14 边界测试）；同工作量的 #19 [run 39362035667](https://github.com/BqLee-AI/Along-agent/actions/runs/39362035667) 为 300 秒。本迁移实现提交 `44a241c` 的 [run 39365651789](https://github.com/BqLee-AI/Along-agent/actions/runs/39365651789) 首 job `03:42:03Z` 至末 job `03:45:27Z` 为 204 秒，缩短 32.0%；static 64 秒、migration-scan 61 秒、scheduler-fault 48 秒、contracts-dual 26 秒、compose-smoke 74 秒。目标 180 秒未达；实测 verify 为 53 秒、完整构建所在 job 为 61 秒、真实 Compose 步为 64 秒，未删减验收路径。
+- 资源：独占测试库正常删除并查得不存在；两个已合并 spec worktree 与 spike 内容已清理。用户库、原 PostgreSQL 容器及卷保留。
 
 | 非 DB 文件                                          | pass |
 | --------------------------------------------------- | ---: |
