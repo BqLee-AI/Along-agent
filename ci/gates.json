@@ -3,9 +3,23 @@
   "gates": {
     "D1": {
       "status": "enforced",
-      "scope": "time-core zero outgoing deps; reverse-clock fixture; /readyz TZDB_UNAVAILABLE without TZDB_VERSION",
-      "owner": "#3",
-      "enforced_by": { "job": "static", "evidence": [".dependency-cruiser.cjs"] }
+      "scope": "time-core zero outgoing deps; shared-package declared dependencies; API cross-module repository/schema isolation; Web/API source isolation; real depcruise positive/negative fixtures; reverse-clock fixture; /readyz TZDB_UNAVAILABLE without TZDB_VERSION",
+      "owner": "#3, #14",
+      "enforced_by": {
+        "job": "static",
+        "evidence": [
+          ".dependency-cruiser.cjs",
+          "scripts/test/boundaries.test.ts",
+          "scripts/fixtures/boundaries/green.ts",
+          "scripts/fixtures/boundaries/apps/api/src/modules/future-module/bad.ts",
+          "scripts/fixtures/boundaries/apps/api/src/modules/approvals/bad.ts",
+          "scripts/fixtures/boundaries/apps/api/src/modules/identity/shapes/bad-0.ts",
+          "scripts/fixtures/boundaries/apps/web/bad-type.ts",
+          "scripts/fixtures/boundaries/packages/scheduler-core/src/bad-workspace.ts",
+          "scripts/fixtures/boundaries/packages/notifier-core/src/bad-builtin.ts",
+          "scripts/fixtures/boundaries/packages/stream-protocol/src/bad-external.ts"
+        ]
+      }
     },
     "D2": {
       "status": "enforced",
