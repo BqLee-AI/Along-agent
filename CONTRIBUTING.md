@@ -73,7 +73,7 @@
 - S0 冻结别名禁入：`outbox_events`、`schedule_confirmed`、`SERVICE_NOT_READY`、`C-XXXX`、整句文本确认。
 
 - 一键 verify：`bun run verify`，保留 `scripts/verify.mjs`；也可用 `bun scripts/verify.mjs` 或 `node scripts/verify.mjs` 调用，内部统一执行 Bun 命令。按序跑 `lint → typecheck → depcruise → gate-manifest → gates-executable → frozen-names → copy-claims → test:unit → openspec validate --all --strict → format:check`，任一失败即停并报步名与非零退出码。`openspec/changes` 下无 active change 时 OpenSpec 步提示跳过，也可用 `--skip openspec` 主动跳过。
-- 同次 `verify` 仅在 `typecheck` 成功后，让后续单元步骤复用其已构建的共享 packages，省去重复构建；失败即停，不消费失败构建。独立 `bun run test:unit` 或 `verify --skip typecheck` 仍先构建包，不以旧 `dist/`、跨次运行标记或其他 job 的产物代替准备。
+- 同次 `verify` 仅在 `typecheck` 成功后，让后续单元步骤复用其已构建的共享 packages，省去重复构建；失败即停，不消费失败构建。共享包构建保留依赖拓扑，其后的 workspace 类型检查用 `--sequential` 串行执行，不省略源码、测试或 Next route typegen。独立 `bun run test:unit` 或 `verify --skip typecheck` 仍先构建包，不以旧 `dist/`、跨次运行标记或其他 job 的产物代替准备。
 - 红例含义：`lint/typecheck` 红=代码或类型坏；`depcruise` 红=越 D1 依赖边界；治理脚本红=门清单/执行证据/冻结名/文案断言坏（看输出行）；`test:unit` 红=单元坏；`openspec validate` 红=change 的 proposal/tasks/spec 不一致；`format:check` 红=跑 `bun run format` 后重提，不能作为非阻塞警告放行。
 - 测试统一使用 `bun:test`，通过文件级并行提速，保留文件状态隔离与 mock/spy/时钟恢复；不把有共享状态的用例改成文件内 concurrent。单元入口排除数据库集，契约入口不能只跑契约包而漏掉 API 两种传输。数据库与调度故障入口使用真实 PostgreSQL 16、原迁移和明确测试环境，不跳过唯一性、只追加或取消窗口断言。
 
@@ -84,7 +84,7 @@
 - 保留 conversations→tools/gateway、tasks→notifications/service、tools→approvals/create/presentation 和 approvals/confirm→tasks/cancel；confirm 改为引用 tasks/cancel-repository 仍报 `no-approvals-cross-module-storage`，没有事务存储层通配豁免。
 - Web 不得直接引用 API 源码（含类型），报 `no-web-to-api`；HTTP 客户端不受影响。
 - 共享包依赖范围：time-core 仅自身源码；contracts、stream-protocol 仅自身源码与 zod；scheduler-core 仅自身源码、contracts、time-core；notifier-core 仅自身源码、contracts。未声明的 workspace、应用、外部包和 Node 内置模块均拒绝。
-- `scripts/fixtures/boundaries/` 保留扫描输入；测试复制到临时目录并链接已安装的真实 zod/TypeScript，逐条断言 depcruise 退出码、违规规则名且无未解析依赖。绿例覆盖合法调用，红例输出 `[red] exit=1 <规则>: <来源> → <目标>`，D1 evidence 由 `ci/gates.json` 登记。
+- `scripts/fixtures/boundaries/` 保留扫描输入；测试复制到只读使用的临时目录并链接已安装的真实 zod/TypeScript，最多两个异步 CLI 同时运行，逐条断言 depcruise 退出码、违规规则名且无未解析依赖。绿例保留 err/JSON 两种真实扫描，清理前等待已排队及运行中的 CLI 结束；红例输出 `[red] exit=1 <规则>: <来源> → <目标>`，D1 evidence 由 `ci/gates.json` 登记。此并发仅用于边界 fixture，不改共享时钟、mock 或数据库用例的并发。
 
 ## 7. AI 辅助声明
 

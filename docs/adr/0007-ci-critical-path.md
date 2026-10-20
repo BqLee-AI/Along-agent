@@ -4,6 +4,7 @@
 - **Date**: 2026-10-20
 - **Deciders**: issue #21（已接受的 optimize-ci-critical-path 契约，PR #22）
 - **Supersedes**: [0006](0006-bun-ox-toolchain.md) 的 CI 编排与失败传播部分；不取代 Bun/Ox 工具选型，0006 其他决策继续有效
+- **Superseded by**: [0008](0008-static-scheduling.md) 仅修订 static 内部类型检查和只读边界 fixture 的并发；五门编排、构建复用及失败传播继续有效
 
 ## Context
 

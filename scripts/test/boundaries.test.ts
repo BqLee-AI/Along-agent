@@ -1,5 +1,5 @@
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { execFileSync } from 'node:child_process';
+import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
+import { execFile } from 'node:child_process';
 import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -25,6 +25,11 @@ const packages = [
   ['stream-protocol', 'stream-protocol-zod-only'],
 ];
 let target: string;
+// Queue time counts towards Bun's per-test timeout; only this isolated file is concurrent.
+setDefaultTimeout(30_000);
+const cruises = [Promise.resolve(), Promise.resolve()];
+let nextCruise = 0;
+let closing = false;
 
 beforeAll(() => {
   target = mkdtempSync(join(tmpdir(), 'along-boundaries-'));
@@ -45,11 +50,15 @@ beforeAll(() => {
   }
 });
 
-afterAll(() => {
+afterAll(async () => {
+  closing = true;
+  // Drain every queued/started CLI before removing the shared, read-only fixture.
+  await Promise.all(cruises);
   if (target) rmSync(target, { recursive: true, force: true });
 });
 
-function cruise(entry: string, reporter = 'err'): { code: number; output: string } {
+function cruise(entry: string, reporter = 'err'): Promise<{ code: number; output: string }> {
+  if (closing) return Promise.reject(new Error('Boundary fixture is closing'));
   const args = [
     join(root, 'node_modules', 'dependency-cruiser', 'bin', 'dependency-cruiser.mjs'),
     '--config',
@@ -58,24 +67,39 @@ function cruise(entry: string, reporter = 'err'): { code: number; output: string
     reporter,
     entry,
   ];
-  try {
-    return {
-      code: 0,
-      output: execFileSync(process.execPath, args, {
-        cwd: target,
-        encoding: 'utf8',
-        env: { ...process.env, NO_COLOR: '1' },
-        stdio: ['ignore', 'pipe', 'pipe'],
+  const slot = nextCruise++ % cruises.length;
+  const result = cruises[slot]!.then(
+    () =>
+      new Promise<{ code: number; output: string }>((resolve, reject) => {
+        execFile(
+          process.execPath,
+          args,
+          {
+            cwd: target,
+            encoding: 'utf8',
+            env: { ...process.env, NO_COLOR: '1' },
+          },
+          (error, stdout, stderr) => {
+            // Spawn, signal and buffer errors must fail the test, not look like a rule rejection.
+            if (error && (typeof error.code !== 'number' || error.signal)) {
+              reject(error);
+            } else {
+              resolve({ code: error?.code ?? 0, output: `${stdout}${stderr}` });
+            }
+          },
+        );
       }),
-    };
-  } catch (error) {
-    const err = error as { status?: number; stdout?: string; stderr?: string };
-    return { code: err.status ?? -1, output: `${err.stdout ?? ''}${err.stderr ?? ''}` };
-  }
+  );
+  // A failed CLI still releases its slot; retain its rejection for the calling test.
+  cruises[slot] = result.then(
+    () => {},
+    () => {},
+  );
+  return result;
 }
 
-function expectRed(entry: string, rule: string) {
-  const result = cruise(entry);
+async function expectRed(entry: string, rule: string) {
+  const result = await cruise(entry);
   expect(result.code, result.output).toBe(1);
   expect(result.output).toContain(`error ${rule}: ${entry} → `);
   // Local fixture imports use .js specifiers: a resolved .ts target proves real resolution.
@@ -86,11 +110,11 @@ function expectRed(entry: string, rule: string) {
   console.info(`[red] exit=${result.code}${result.output}`);
 }
 
-describe('D1 dependency boundaries (real depcruise)', () => {
-  it('allows own storage, public calls, confirm→cancel, HTTP and declared package dependencies', () => {
-    const result = cruise('green.ts');
+describe.concurrent('D1 dependency boundaries (real depcruise)', () => {
+  it('allows own storage, public calls, confirm→cancel, HTTP and declared package dependencies', async () => {
+    const result = await cruise('green.ts');
     expect(result.code, result.output).toBe(0);
-    const report = JSON.parse(cruise('green.ts', 'json').output);
+    const report = JSON.parse((await cruise('green.ts', 'json')).output);
     expect(report.summary.violations).toEqual([]);
     expect(
       report.modules.flatMap((module: { dependencies: { couldNotResolve?: boolean }[] }) =>
@@ -101,30 +125,30 @@ describe('D1 dependency boundaries (real depcruise)', () => {
 
   it.each(modules)(
     'rejects %s crossing into another module’s storage, including type imports',
-    (module) => {
-      expectRed(`apps/api/src/modules/${module}/bad.ts`, `no-${module}-cross-module-storage`);
+    async (module) => {
+      await expectRed(`apps/api/src/modules/${module}/bad.ts`, `no-${module}-cross-module-storage`);
     },
   );
 
   it.each(Array.from({ length: 12 }, (_, index) => index))(
     'rejects storage file/directory/suffix and nested type-import shape %i',
-    (index) => {
-      expectRed(
+    async (index) => {
+      await expectRed(
         `apps/api/src/modules/identity/shapes/bad-${index}.ts`,
         'no-identity-cross-module-storage',
       );
     },
   );
 
-  it.each(['bad.ts', 'bad-type.ts'])('rejects Web→API %s', (entry) => {
-    expectRed(`apps/web/${entry}`, 'no-web-to-api');
+  it.each(['bad.ts', 'bad-type.ts'])('rejects Web→API %s', async (entry) => {
+    await expectRed(`apps/web/${entry}`, 'no-web-to-api');
   });
 
   it.each(
     packages.flatMap(([name, rule]) =>
       ['workspace', 'app', 'builtin', 'external'].map((kind) => ({ name, rule, kind })),
     ),
-  )('rejects $name → undeclared $kind dependency', ({ name, rule, kind }) => {
-    expectRed(`packages/${name}/src/bad-${kind}.ts`, rule);
+  )('rejects $name → undeclared $kind dependency', async ({ name, rule, kind }) => {
+    await expectRed(`packages/${name}/src/bad-${kind}.ts`, rule);
   });
 });

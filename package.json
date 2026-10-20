@@ -16,7 +16,7 @@
     "build:api": "bun run build:packages && bun run --bun --filter @along/api build",
     "build": "bun run build:packages && bun run --bun --filter './apps/*' build",
     "dev": "bun run build:packages && bun run --bun --parallel --filter './apps/*' dev",
-    "typecheck": "bun run build:packages && bun run --bun --filter '*' typecheck",
+    "typecheck": "bun run build:packages && bun run --bun --sequential --filter '*' typecheck",
     "lint": "oxlint .",
     "test": "bun run test:unit",
     "test:unit": "bun scripts/test-unit.mjs",
