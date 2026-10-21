@@ -41,6 +41,15 @@ export const TaskDetailSchema = z.object({
   recreated_from: z.string().nullable(),
   schedule_receipt: z.string().nullable(),
   created_at: z.string(),
+  notifications: z.array(
+    z.object({
+      id: z.string().uuid(),
+      title: z.string(),
+      body: z.string(),
+      status: z.enum(['pending', 'sent', 'failed']),
+      sent_at: z.string().datetime().nullable(),
+    }),
+  ),
 });
 
 export const TaskEventItemSchema = z.object({

@@ -1,0 +1,2252 @@
+{
+  "source_commit": "914cca971f03e7a0a813a7aff8890aa36c82951a",
+  "role": "all",
+  "tzdb": "fixture-v1",
+  "owner_timezone": "Asia/Shanghai",
+  "baseline": {
+    "pg_time": "2026-10-21T07:31:03.43394+00:00",
+    "owner_tasks": 0,
+    "owner_approvals": 0,
+    "owner_outbox": 0
+  },
+  "p0_before": {
+    "pg_time": "2026-10-21T07:56:40.83545+00:00",
+    "approval": {
+      "state": "pending",
+      "consumed_task_id": null,
+      "wall_time": "2026-10-21 15:59",
+      "timezone_id": "Asia/Shanghai"
+    },
+    "tasks": 0,
+    "outbox": 0
+  },
+  "stages": {
+    "brief": {
+      "http": 200,
+      "projection": {
+        "date": "2026-10-21",
+        "timezone_id": "Asia/Shanghai",
+        "summary": {
+          "pending_count": 1,
+          "fired_count": 0
+        },
+        "cards": [
+          {
+            "card_id": "card_approval_1e0d461d-0bdf-4820-bccc-b163e690b577",
+            "schema_version": 1,
+            "title": "请确认：2026-10-21 15:59 提醒我喝水（北京时间）",
+            "kind": "approval",
+            "status": "pending",
+            "ref": {
+              "approval_id": "1e0d461d-0bdf-4820-bccc-b163e690b577"
+            }
+          }
+        ],
+        "meta": {
+          "brief_state": "day-in-progress",
+          "timezone_note": null
+        }
+      },
+      "repeat_equal": true
+    },
+    "read_only_card": {
+      "response": {
+        "status": 200,
+        "body": {
+          "code": 0,
+          "data": {
+            "approval_id": "1e0d461d-0bdf-4820-bccc-b163e690b577",
+            "kind": "create_task",
+            "status": "pending",
+            "echo_text": "请确认 A-1E0D：你说'2026-10-21 15:59 提醒我喝水（北京时间）'，我将它归一为 2026-10-21 15:59（Asia/Shanghai），设为单次提醒；确认前不会创建正式提醒，也不会排期。",
+            "original_text": "2026-10-21 15:59 提醒我喝水（北京时间）",
+            "fire_at_local": "2026-10-21 15:59",
+            "expires_in_seconds": 86304,
+            "snapshot": {
+              "fire_at_utc": "2026-10-21T07:59:00.000Z",
+              "timezone_id": "Asia/Shanghai",
+              "fold": 0,
+              "offset_seconds": 28800
+            },
+            "presentation_hash": "ph_80ab062a720e8bd6761eed67b5752cc9b565657f9269cffbb7a19b47fa007566",
+            "presentation_version": "v1",
+            "expires_at": "2026-10-22T07:55:40.247Z",
+            "recreated_from": null
+          },
+          "msg": "ok",
+          "error": null,
+          "request_id": "a5972a44-71a3-4a0a-86d3-f2cf812ec84d"
+        }
+      },
+      "sql_after": {
+        "pg_time": "2026-10-21T07:57:15.461103+00:00",
+        "approval": {
+          "state": "pending",
+          "consumed_task_id": null,
+          "wall_time": "2026-10-21 15:59",
+          "timezone_id": "Asia/Shanghai"
+        },
+        "tasks": 0,
+        "outbox": 0
+      },
+      "no_business_diff": true
+    },
+    "conversation": {
+      "capture": {
+        "status": 200,
+        "request": {
+          "raw_text": "2026-10-21 16:01 提醒我喝水（北京时间）",
+          "confirmed_timezone": "Asia/Shanghai",
+          "idempotency_key": "521c2bcf-c67f-4f29-ab96-8fc0dfb8015f"
+        },
+        "frames": [
+          {
+            "protocol_version": "v1",
+            "seq": 6,
+            "type": "thread.started",
+            "payload": {
+              "conversation_id": "06ccecc5-bdf5-475b-b14a-1fa06ea499cc",
+              "run_id": "f0cfdecd-18ab-45a9-83fb-6924bf64f7a6",
+              "stream_protocol_version": "v1",
+              "ruleset_id": "FIXTURE_V1",
+              "tzdb_version": "fixture-v1"
+            },
+            "request_id": "41d3a063-f5a8-433a-a6d9-09caa9878524"
+          },
+          {
+            "protocol_version": "v1",
+            "seq": 7,
+            "type": "message.delta",
+            "payload": {
+              "conversation_id": "06ccecc5-bdf5-475b-b14a-1fa06ea499cc",
+              "run_id": "f0cfdecd-18ab-45a9-83fb-6924bf64f7a6",
+              "delta": "è¯·ç¡®è®¤ A-2EECï¼šä½ è¯´'2026-10-21 16:01 æé†’æˆ‘å–æ°´ï¼ˆåŒ—äº¬æ—¶é—´ï¼‰'ï¼Œæˆ‘å°†å®ƒå½’ä¸€ä¸º 2026-10-21 16:01ï¼ˆAsia/Shanghaiï¼‰ï¼Œè®¾ä¸ºå•æ¬¡æé†’ï¼›ç¡®è®¤å‰ä¸ä¼šåˆ›å»ºæ­£å¼æé†’ï¼Œä¹Ÿä¸ä¼šæŽ’æœŸã€‚"
+            },
+            "request_id": "41d3a063-f5a8-433a-a6d9-09caa9878524"
+          },
+          {
+            "protocol_version": "v1",
+            "seq": 8,
+            "type": "card.proposed",
+            "payload": {
+              "conversation_id": "06ccecc5-bdf5-475b-b14a-1fa06ea499cc",
+              "run_id": "f0cfdecd-18ab-45a9-83fb-6924bf64f7a6",
+              "card_id": "card:2eeca8c8-7c6e-4691-9628-1249f4f0232b",
+              "schema_version": "v1",
+              "wall_time": "2026-10-21 16:01",
+              "timezone_id": "Asia/Shanghai",
+              "original_text": "2026-10-21 16:01 æé†’æˆ‘å–æ°´ï¼ˆåŒ—äº¬æ—¶é—´ï¼‰"
+            },
+            "request_id": "41d3a063-f5a8-433a-a6d9-09caa9878524"
+          },
+          {
+            "protocol_version": "v1",
+            "seq": 9,
+            "type": "approval_required",
+            "payload": {
+              "conversation_id": "06ccecc5-bdf5-475b-b14a-1fa06ea499cc",
+              "run_id": "f0cfdecd-18ab-45a9-83fb-6924bf64f7a6",
+              "approval_id": "2eeca8c8-7c6e-4691-9628-1249f4f0232b",
+              "card_id": "card:2eeca8c8-7c6e-4691-9628-1249f4f0232b",
+              "presentation_hash": "ph_017a7f87c7a8f571ecfe84b24be58f236d114d2e1f138be9bb106e457ff16d73"
+            },
+            "request_id": "41d3a063-f5a8-433a-a6d9-09caa9878524"
+          },
+          {
+            "protocol_version": "v1",
+            "seq": 10,
+            "type": "thread.completed",
+            "payload": {
+              "conversation_id": "06ccecc5-bdf5-475b-b14a-1fa06ea499cc",
+              "run_id": "f0cfdecd-18ab-45a9-83fb-6924bf64f7a6",
+              "approval_id": "2eeca8c8-7c6e-4691-9628-1249f4f0232b"
+            },
+            "request_id": "41d3a063-f5a8-433a-a6d9-09caa9878524"
+          }
+        ]
+      },
+      "sql_unconfirmed": {
+        "pg_time": "2026-10-21T07:57:52.88398+00:00",
+        "approval": {
+          "state": "pending",
+          "consumed_task_id": null,
+          "wall_time": "2026-10-21 16:01",
+          "timezone_id": "Asia/Shanghai"
+        },
+        "tasks": 0,
+        "outbox": 0
+      },
+      "fire_at_chosen": "2026-10-21T08:01:00+00:00"
+    },
+    "confirmation": {
+      "first_status": 200,
+      "first_response_body": "CDP body evicted after real window.location.assign; not recorded",
+      "original_key_recovered_from_durable_scoped_outbox": true,
+      "frozen_fields_from_visible_approval": true,
+      "request": {
+        "presentation_hash": "ph_017a7f87c7a8f571ecfe84b24be58f236d114d2e1f138be9bb106e457ff16d73",
+        "seen_content": "请确认 A-2EEC：你说'2026-10-21 16:01 提醒我喝水（北京时间）'，我将它归一为 2026-10-21 16:01（Asia/Shanghai），设为单次提醒；确认前不会创建正式提醒，也不会排期。",
+        "idempotency_key": "f8f9fdfb-5de8-4b68-806e-9f7273ac7ab6"
+      },
+      "replay": {
+        "status": 200,
+        "body": {
+          "code": 0,
+          "data": {
+            "approval_id": "2eeca8c8-7c6e-4691-9628-1249f4f0232b",
+            "status": "consumed",
+            "task_id": "37e32d67-8bc4-47df-bed9-128da2d4d279",
+            "duplicate": true
+          },
+          "msg": "ok",
+          "error": null,
+          "request_id": "8fdc3a5b-d405-428d-94e6-1f686d3ab998"
+        }
+      },
+      "sql": {
+        "pg_time": "2026-10-21T08:02:08.044326+00:00",
+        "task": {
+          "id": "37e32d67-8bc4-47df-bed9-128da2d4d279",
+          "state": "fired",
+          "state_version": 3,
+          "source_approval_id": "2eeca8c8-7c6e-4691-9628-1249f4f0232b",
+          "schedule_receipt": "sched:37e32d67-8bc4-47df-bed9-128da2d4d279",
+          "fire_at_utc": "2026-10-21T08:01:00+00:00",
+          "wall_time": "2026-10-21 16:01",
+          "timezone_id": "Asia/Shanghai",
+          "tzdb_version": "fixture-v1"
+        },
+        "events": [
+          {
+            "type": "created",
+            "state_version": 1,
+            "recorded_at_utc": "2026-10-21T07:58:36.232418+00:00",
+            "evidence_ref": "local"
+          },
+          {
+            "type": "scheduled",
+            "state_version": 2,
+            "recorded_at_utc": "2026-10-21T07:58:48.227095+00:00",
+            "evidence_ref": "sched:37e32d67-8bc4-47df-bed9-128da2d4d279"
+          },
+          {
+            "type": "fired",
+            "state_version": 3,
+            "recorded_at_utc": "2026-10-21T08:01:18.256871+00:00",
+            "evidence_ref": "inapp:send:37e32d67-8bc4-47df-bed9-128da2d4d279:2026-10-21T08:01:00.000Z"
+          }
+        ],
+        "outbox": [
+          {
+            "kind": "schedule",
+            "status": "superseded",
+            "expected_state_version": 1,
+            "provider_receipt_id": "sched:37e32d67-8bc4-47df-bed9-128da2d4d279"
+          },
+          {
+            "kind": "send",
+            "status": "superseded",
+            "expected_state_version": 2,
+            "provider_receipt_id": "inapp:send:37e32d67-8bc4-47df-bed9-128da2d4d279:2026-10-21T08:01:00.000Z"
+          }
+        ],
+        "notifications": [
+          {
+            "id": "560ebf13-622c-4c28-a1d0-28ef4af73f6e",
+            "title": "提醒 2026-10-21 16:01 Asia/Shanghai",
+            "body": "已记录：2026-10-21 16:01 提醒我喝水（北京时间）（2026-10-21 16:01 Asia/Shanghai）。到点在调度器运行时尝试通知，关机、休眠或队列拥堵可能错过。",
+            "status": "sent",
+            "sent_at": "2026-10-21T08:01:18.256871+00:00"
+          }
+        ],
+        "leases": 1,
+        "breaches": 0
+      },
+      "recorded_task_redirect": [
+        {
+          "seq": 92,
+          "ts": 1792569516252,
+          "status": 200
+        }
+      ],
+      "later_readonly_key_corroboration": {
+        "query": "SELECT json_build_object('pg_time',now(),'rows',COALESCE(json_agg(json_build_object('owner_id',owner_id,'task_id',task_id,'idempotency_key',idempotency_key,'original_confirmation_key',split_part(idempotency_key,':',4))),'[]'::json)) FROM outbox WHERE owner_id='SYNTHETIC_OWNER'::uuid AND task_id='37e32d67-8bc4-47df-bed9-128da2d4d279'::uuid AND idempotency_key LIKE 'confirm:SYNTHETIC_OWNER:2eeca8c8-7c6e-4691-9628-1249f4f0232b:%';",
+        "result": {
+          "pg_time": "2026-10-21T08:32:27.51679+00:00",
+          "rows": [
+            {
+              "owner_id": "SYNTHETIC_OWNER",
+              "task_id": "37e32d67-8bc4-47df-bed9-128da2d4d279",
+              "idempotency_key": "confirm:SYNTHETIC_OWNER:2eeca8c8-7c6e-4691-9628-1249f4f0232b:f8f9fdfb-5de8-4b68-806e-9f7273ac7ab6",
+              "original_confirmation_key": "f8f9fdfb-5de8-4b68-806e-9f7273ac7ab6"
+            }
+          ]
+        },
+        "scope": "Later read-only corroboration, not the missing first HTTP response body or original recovery capture."
+      }
+    },
+    "fired_notice": {
+      "sql": {
+        "pg_time": "2026-10-21T08:02:36.66371+00:00",
+        "task": {
+          "id": "37e32d67-8bc4-47df-bed9-128da2d4d279",
+          "state": "fired",
+          "state_version": 3,
+          "source_approval_id": "2eeca8c8-7c6e-4691-9628-1249f4f0232b",
+          "schedule_receipt": "sched:37e32d67-8bc4-47df-bed9-128da2d4d279",
+          "fire_at_utc": "2026-10-21T08:01:00+00:00",
+          "wall_time": "2026-10-21 16:01",
+          "timezone_id": "Asia/Shanghai",
+          "tzdb_version": "fixture-v1"
+        },
+        "events": [
+          {
+            "type": "created",
+            "state_version": 1,
+            "recorded_at_utc": "2026-10-21T07:58:36.232418+00:00",
+            "evidence_ref": "local"
+          },
+          {
+            "type": "scheduled",
+            "state_version": 2,
+            "recorded_at_utc": "2026-10-21T07:58:48.227095+00:00",
+            "evidence_ref": "sched:37e32d67-8bc4-47df-bed9-128da2d4d279"
+          },
+          {
+            "type": "fired",
+            "state_version": 3,
+            "recorded_at_utc": "2026-10-21T08:01:18.256871+00:00",
+            "evidence_ref": "inapp:send:37e32d67-8bc4-47df-bed9-128da2d4d279:2026-10-21T08:01:00.000Z"
+          }
+        ],
+        "outbox": [
+          {
+            "kind": "schedule",
+            "status": "superseded",
+            "expected_state_version": 1,
+            "provider_receipt_id": "sched:37e32d67-8bc4-47df-bed9-128da2d4d279"
+          },
+          {
+            "kind": "send",
+            "status": "superseded",
+            "expected_state_version": 2,
+            "provider_receipt_id": "inapp:send:37e32d67-8bc4-47df-bed9-128da2d4d279:2026-10-21T08:01:00.000Z"
+          }
+        ],
+        "notifications": [
+          {
+            "id": "560ebf13-622c-4c28-a1d0-28ef4af73f6e",
+            "title": "提醒 2026-10-21 16:01 Asia/Shanghai",
+            "body": "已记录：2026-10-21 16:01 提醒我喝水（北京时间）（2026-10-21 16:01 Asia/Shanghai）。到点在调度器运行时尝试通知，关机、休眠或队列拥堵可能错过。",
+            "status": "sent",
+            "sent_at": "2026-10-21T08:01:18.256871+00:00"
+          }
+        ],
+        "leases": 1,
+        "breaches": 0
+      },
+      "detail": {
+        "status": 200,
+        "body": {
+          "code": 0,
+          "data": {
+            "task_id": "37e32d67-8bc4-47df-bed9-128da2d4d279",
+            "kind": "notify_only",
+            "state": "fired",
+            "state_version": 3,
+            "fire_at_utc": "2026-10-21T08:01:00.000Z",
+            "fire_at_local": "2026-10-21 16:01",
+            "timezone_id": "Asia/Shanghai",
+            "source_approval_id": "2eeca8c8-7c6e-4691-9628-1249f4f0232b",
+            "recreated_from": null,
+            "schedule_receipt": "sched:37e32d67-8bc4-47df-bed9-128da2d4d279",
+            "created_at": "2026-10-21T07:58:36.232Z",
+            "notifications": [
+              {
+                "id": "560ebf13-622c-4c28-a1d0-28ef4af73f6e",
+                "title": "提醒 2026-10-21 16:01 Asia/Shanghai",
+                "body": "已记录：2026-10-21 16:01 提醒我喝水（北京时间）（2026-10-21 16:01 Asia/Shanghai）。到点在调度器运行时尝试通知，关机、休眠或队列拥堵可能错过。",
+                "status": "sent",
+                "sent_at": "2026-10-21T08:01:18.256Z"
+              }
+            ]
+          },
+          "msg": "ok",
+          "error": null,
+          "request_id": "a5411691-9292-4ca5-877b-5a0ac8cbba14"
+        }
+      },
+      "provider_calls": [
+        {
+          "kind": "provider_call",
+          "pid": 26380,
+          "task_id": "37e32d67-8bc4-47df-bed9-128da2d4d279",
+          "observed_at": "2026-10-21T08:01:18.261Z",
+          "sequence": 1
+        }
+      ],
+      "page_text": "Along\n今日\n对话\n确认\n任务\n活动\n任务 37e32d67\n\nfired · 2026-10-21 16:01（Asia/Shanghai）\n\n登记回执\nsched:37e32d67-8bc4-47df-bed9-128da2d4d279\n状态版本\n3\n创建时间\n2026-10-21T07:58:36.232Z\n取消这条提醒\n站内通知\n\n以下仅为站内通知记录，不表示用户收到或看过。\n\n提醒 2026-10-21 16:01 Asia/Shanghai\n\n已记录：2026-10-21 16:01 提醒我喝水（北京时间）（2026-10-21 16:01 Asia/Shanghai）。到点在调度器运行时尝试通知，关机、休眠或队列拥堵可能错过。\n\n记录状态\nsent\n发送时间（UTC）\n2026-10-21T08:01:18.256Z\n事件账\n类型\t记录时间（UTC）\t证据\ncreated\t2026-10-21T07:58:36.232Z\tlocal\nscheduled\t2026-10-21T07:58:48.227Z\tsched:37e32d67-8bc4-47df-bed9-128da2d4d279\nfired\t2026-10-21T08:01:18.256Z\tinapp:send:37e32d67-8bc4-47df-bed9-128da2d4d279:2026-10-21T08:01:00.000Z",
+      "final_sql": {
+        "pg_time": "2026-10-21T08:24:46.379036+00:00",
+        "task": {
+          "id": "37e32d67-8bc4-47df-bed9-128da2d4d279",
+          "state": "fired",
+          "state_version": 3,
+          "source_approval_id": "2eeca8c8-7c6e-4691-9628-1249f4f0232b",
+          "schedule_receipt": "sched:37e32d67-8bc4-47df-bed9-128da2d4d279",
+          "fire_at_utc": "2026-10-21T08:01:00+00:00",
+          "wall_time": "2026-10-21 16:01",
+          "timezone_id": "Asia/Shanghai",
+          "tzdb_version": "fixture-v1"
+        },
+        "events": [
+          {
+            "type": "created",
+            "state_version": 1,
+            "recorded_at_utc": "2026-10-21T07:58:36.232418+00:00",
+            "evidence_ref": "local"
+          },
+          {
+            "type": "scheduled",
+            "state_version": 2,
+            "recorded_at_utc": "2026-10-21T07:58:48.227095+00:00",
+            "evidence_ref": "sched:37e32d67-8bc4-47df-bed9-128da2d4d279"
+          },
+          {
+            "type": "fired",
+            "state_version": 3,
+            "recorded_at_utc": "2026-10-21T08:01:18.256871+00:00",
+            "evidence_ref": "inapp:send:37e32d67-8bc4-47df-bed9-128da2d4d279:2026-10-21T08:01:00.000Z"
+          }
+        ],
+        "outbox": [
+          {
+            "kind": "schedule",
+            "status": "superseded",
+            "expected_state_version": 1,
+            "provider_receipt_id": "sched:37e32d67-8bc4-47df-bed9-128da2d4d279"
+          },
+          {
+            "kind": "send",
+            "status": "superseded",
+            "expected_state_version": 2,
+            "provider_receipt_id": "inapp:send:37e32d67-8bc4-47df-bed9-128da2d4d279:2026-10-21T08:01:00.000Z"
+          }
+        ],
+        "notifications": [
+          {
+            "id": "560ebf13-622c-4c28-a1d0-28ef4af73f6e",
+            "title": "提醒 2026-10-21 16:01 Asia/Shanghai",
+            "body": "已记录：2026-10-21 16:01 提醒我喝水（北京时间）（2026-10-21 16:01 Asia/Shanghai）。到点在调度器运行时尝试通知，关机、休眠或队列拥堵可能错过。",
+            "status": "sent",
+            "sent_at": "2026-10-21T08:01:18.256871+00:00"
+          }
+        ],
+        "leases": 1,
+        "breaches": 0
+      },
+      "final_page_text": "Along\n今日\n对话\n确认\n任务\n活动\n任务 37e32d67\n\nfired · 2026-10-21 16:01（Asia/Shanghai）\n\n登记回执\nsched:37e32d67-8bc4-47df-bed9-128da2d4d279\n状态版本\n3\n创建时间\n2026-10-21T07:58:36.232Z\n取消这条提醒\n站内通知\n\n以下仅为站内通知记录，不表示用户收到或看过。\n\n提醒 2026-10-21 16:01 Asia/Shanghai\n\n已记录：2026-10-21 16:01 提醒我喝水（北京时间）（2026-10-21 16:01 Asia/Shanghai）。到点在调度器运行时尝试通知，关机、休眠或队列拥堵可能错过。\n\n记录状态\nsent\n发送时间（UTC）\n2026-10-21T08:01:18.256Z\n事件账\n类型\t记录时间（UTC）\t证据\ncreated\t2026-10-21T07:58:36.232Z\tlocal\nscheduled\t2026-10-21T07:58:48.227Z\tsched:37e32d67-8bc4-47df-bed9-128da2d4d279\nfired\t2026-10-21T08:01:18.256Z\tinapp:send:37e32d67-8bc4-47df-bed9-128da2d4d279:2026-10-21T08:01:00.000Z"
+    },
+    "activity": {
+      "response": {
+        "status": 200,
+        "body": {
+          "code": 0,
+          "data": {
+            "items": [
+              {
+                "event_id": "148178c5-9826-40d7-ab46-5c3f49aa77d8",
+                "type": "created",
+                "recorded_at_utc": "2026-10-21T07:58:36.232Z",
+                "state_version": 1,
+                "evidence_ref": "local"
+              },
+              {
+                "event_id": "0ef803cf-a938-47b3-b182-27618263390a",
+                "type": "scheduled",
+                "recorded_at_utc": "2026-10-21T07:58:48.227Z",
+                "state_version": 2,
+                "evidence_ref": "sched:37e32d67-8bc4-47df-bed9-128da2d4d279"
+              },
+              {
+                "event_id": "0f6e0d29-1c63-4144-9257-441af330abf6",
+                "type": "fired",
+                "recorded_at_utc": "2026-10-21T08:01:18.256Z",
+                "state_version": 3,
+                "evidence_ref": "inapp:send:37e32d67-8bc4-47df-bed9-128da2d4d279:2026-10-21T08:01:00.000Z"
+              }
+            ],
+            "next_cursor": null
+          },
+          "msg": "ok",
+          "error": null,
+          "request_id": "80612327-2c54-443b-a9c4-6fb4b5d22f96"
+        }
+      },
+      "page_text": "Along\n今日\n对话\n确认\n任务\n活动\n活动账\n\n只读展示服务端记录到的事件。没有外部凭据的行显示“服务端记录”，不声称用户已读。\n\n类型\t任务\t记录时间（UTC）\t证据\nfired\t37e32d67fired\t2026-10-21T08:01:18.256Z\tinapp:send:37e32d67-8bc4-47df-bed9-128da2d4d279:2026-10-21T08:01:00.000Z\nscheduled\t37e32d67fired\t2026-10-21T07:58:48.227Z\tsched:37e32d67-8bc4-47df-bed9-128da2d4d279\ncreated\t37e32d67fired\t2026-10-21T07:58:36.232Z\tlocal"
+    },
+    "cancel": {
+      "sse": {
+        "status": 200,
+        "request": {
+          "raw_text": "2026-10-21 16:08 提醒我喝水（北京时间）",
+          "confirmed_timezone": "Asia/Shanghai",
+          "idempotency_key": "8edde962-35d0-411f-a819-88eeb2b7ccc2"
+        },
+        "frames": [
+          {
+            "protocol_version": "v1",
+            "seq": 11,
+            "type": "thread.started",
+            "payload": {
+              "conversation_id": "d3b76eb7-bbf3-4e10-8ced-c8af81e018a6",
+              "run_id": "8d5b5cc1-bb7b-4069-aadd-04eaeecd41fa",
+              "stream_protocol_version": "v1",
+              "ruleset_id": "FIXTURE_V1",
+              "tzdb_version": "fixture-v1"
+            },
+            "request_id": "97a82dcb-51f3-4a14-ac6d-90accab452c3"
+          },
+          {
+            "protocol_version": "v1",
+            "seq": 12,
+            "type": "message.delta",
+            "payload": {
+              "conversation_id": "d3b76eb7-bbf3-4e10-8ced-c8af81e018a6",
+              "run_id": "8d5b5cc1-bb7b-4069-aadd-04eaeecd41fa",
+              "delta": "è¯·ç¡®è®¤ A-450Aï¼šä½ è¯´'2026-10-21 16:08 æé†’æˆ‘å–æ°´ï¼ˆåŒ—äº¬æ—¶é—´ï¼‰'ï¼Œæˆ‘å°†å®ƒå½’ä¸€ä¸º 2026-10-21 16:08ï¼ˆAsia/Shanghaiï¼‰ï¼Œè®¾ä¸ºå•æ¬¡æé†’ï¼›ç¡®è®¤å‰ä¸ä¼šåˆ›å»ºæ­£å¼æé†’ï¼Œä¹Ÿä¸ä¼šæŽ’æœŸã€‚"
+            },
+            "request_id": "97a82dcb-51f3-4a14-ac6d-90accab452c3"
+          },
+          {
+            "protocol_version": "v1",
+            "seq": 13,
+            "type": "card.proposed",
+            "payload": {
+              "conversation_id": "d3b76eb7-bbf3-4e10-8ced-c8af81e018a6",
+              "run_id": "8d5b5cc1-bb7b-4069-aadd-04eaeecd41fa",
+              "card_id": "card:450ac229-878a-4612-aedd-af98f31a8a3b",
+              "schema_version": "v1",
+              "wall_time": "2026-10-21 16:08",
+              "timezone_id": "Asia/Shanghai",
+              "original_text": "2026-10-21 16:08 æé†’æˆ‘å–æ°´ï¼ˆåŒ—äº¬æ—¶é—´ï¼‰"
+            },
+            "request_id": "97a82dcb-51f3-4a14-ac6d-90accab452c3"
+          },
+          {
+            "protocol_version": "v1",
+            "seq": 14,
+            "type": "approval_required",
+            "payload": {
+              "conversation_id": "d3b76eb7-bbf3-4e10-8ced-c8af81e018a6",
+              "run_id": "8d5b5cc1-bb7b-4069-aadd-04eaeecd41fa",
+              "approval_id": "450ac229-878a-4612-aedd-af98f31a8a3b",
+              "card_id": "card:450ac229-878a-4612-aedd-af98f31a8a3b",
+              "presentation_hash": "ph_2f49e5c6973d190e75d9872dd7256219eb37e9ae9cb8156c4a61cc0cb34c3cb1"
+            },
+            "request_id": "97a82dcb-51f3-4a14-ac6d-90accab452c3"
+          },
+          {
+            "protocol_version": "v1",
+            "seq": 15,
+            "type": "thread.completed",
+            "payload": {
+              "conversation_id": "d3b76eb7-bbf3-4e10-8ced-c8af81e018a6",
+              "run_id": "8d5b5cc1-bb7b-4069-aadd-04eaeecd41fa",
+              "approval_id": "450ac229-878a-4612-aedd-af98f31a8a3b"
+            },
+            "request_id": "97a82dcb-51f3-4a14-ac6d-90accab452c3"
+          }
+        ]
+      },
+      "confirm": {
+        "status": 200,
+        "request": {
+          "presentation_hash": "ph_2f49e5c6973d190e75d9872dd7256219eb37e9ae9cb8156c4a61cc0cb34c3cb1",
+          "seen_content": "请确认 A-450A：你说'2026-10-21 16:08 提醒我喝水（北京时间）'，我将它归一为 2026-10-21 16:08（Asia/Shanghai），设为单次提醒；确认前不会创建正式提醒，也不会排期。",
+          "idempotency_key": "09fa95b4-27f3-419b-aaf1-5143f75e0393"
+        }
+      },
+      "sql_scheduled": {
+        "pg_time": "2026-10-21T08:05:11.590491+00:00",
+        "task": {
+          "id": "60d43b93-a0f7-4eb1-8eb8-d3e4333421f4",
+          "state": "scheduled",
+          "state_version": 2,
+          "source_approval_id": "450ac229-878a-4612-aedd-af98f31a8a3b",
+          "schedule_receipt": "sched:60d43b93-a0f7-4eb1-8eb8-d3e4333421f4",
+          "fire_at_utc": "2026-10-21T08:08:00+00:00",
+          "wall_time": "2026-10-21 16:08",
+          "timezone_id": "Asia/Shanghai",
+          "tzdb_version": "fixture-v1"
+        },
+        "events": [
+          {
+            "type": "created",
+            "state_version": 1,
+            "recorded_at_utc": "2026-10-21T08:04:48.140206+00:00",
+            "evidence_ref": "local"
+          },
+          {
+            "type": "scheduled",
+            "state_version": 2,
+            "recorded_at_utc": "2026-10-21T08:04:48.223666+00:00",
+            "evidence_ref": "sched:60d43b93-a0f7-4eb1-8eb8-d3e4333421f4"
+          }
+        ],
+        "outbox": [
+          {
+            "kind": "schedule",
+            "status": "dispatched",
+            "expected_state_version": 1,
+            "provider_receipt_id": "sched:60d43b93-a0f7-4eb1-8eb8-d3e4333421f4"
+          }
+        ],
+        "notifications": [],
+        "leases": 0,
+        "breaches": 0
+      },
+      "request_started": "2026-10-21T08:05:11.752222+00:00",
+      "response_received": "2026-10-21T08:05:11.809933+00:00",
+      "action": {
+        "request": {
+          "idempotency_key": "621a7a73-10f5-4eb8-8cfe-4c8ea96ba996"
+        },
+        "response": {
+          "status": 200,
+          "body": {
+            "code": 0,
+            "data": {
+              "task_id": "60d43b93-a0f7-4eb1-8eb8-d3e4333421f4",
+              "state": "cancel_pending",
+              "duplicate": false
+            },
+            "msg": "ok",
+            "error": null,
+            "request_id": "5a658bdf-9b72-45df-803e-9d9d036ee4fb"
+          }
+        }
+      },
+      "sql_committed": {
+        "pg_time": "2026-10-21T08:05:11.930656+00:00",
+        "task": {
+          "id": "60d43b93-a0f7-4eb1-8eb8-d3e4333421f4",
+          "state": "cancel_pending",
+          "state_version": 3,
+          "source_approval_id": "450ac229-878a-4612-aedd-af98f31a8a3b",
+          "schedule_receipt": "sched:60d43b93-a0f7-4eb1-8eb8-d3e4333421f4",
+          "fire_at_utc": "2026-10-21T08:08:00+00:00",
+          "wall_time": "2026-10-21 16:08",
+          "timezone_id": "Asia/Shanghai",
+          "tzdb_version": "fixture-v1"
+        },
+        "events": [
+          {
+            "type": "created",
+            "state_version": 1,
+            "recorded_at_utc": "2026-10-21T08:04:48.140206+00:00",
+            "evidence_ref": "local"
+          },
+          {
+            "type": "scheduled",
+            "state_version": 2,
+            "recorded_at_utc": "2026-10-21T08:04:48.223666+00:00",
+            "evidence_ref": "sched:60d43b93-a0f7-4eb1-8eb8-d3e4333421f4"
+          },
+          {
+            "type": "cancel_requested",
+            "state_version": 3,
+            "recorded_at_utc": "2026-10-21T08:05:11.784253+00:00",
+            "evidence_ref": "local"
+          }
+        ],
+        "outbox": [
+          {
+            "kind": "schedule",
+            "status": "superseded",
+            "expected_state_version": 1,
+            "provider_receipt_id": "sched:60d43b93-a0f7-4eb1-8eb8-d3e4333421f4"
+          },
+          {
+            "kind": "cancel",
+            "status": "pending",
+            "expected_state_version": 3,
+            "provider_receipt_id": null
+          }
+        ],
+        "notifications": [],
+        "leases": 0,
+        "breaches": 0
+      },
+      "original_fire_at": "2026-10-21T08:08:00+00:00",
+      "sql_terminal": {
+        "pg_time": "2026-10-21T08:06:09.18039+00:00",
+        "task": {
+          "id": "60d43b93-a0f7-4eb1-8eb8-d3e4333421f4",
+          "state": "cancelled",
+          "state_version": 4,
+          "source_approval_id": "450ac229-878a-4612-aedd-af98f31a8a3b",
+          "schedule_receipt": "sched:60d43b93-a0f7-4eb1-8eb8-d3e4333421f4",
+          "fire_at_utc": "2026-10-21T08:08:00+00:00",
+          "wall_time": "2026-10-21 16:08",
+          "timezone_id": "Asia/Shanghai",
+          "tzdb_version": "fixture-v1"
+        },
+        "events": [
+          {
+            "type": "created",
+            "state_version": 1,
+            "recorded_at_utc": "2026-10-21T08:04:48.140206+00:00",
+            "evidence_ref": "local"
+          },
+          {
+            "type": "scheduled",
+            "state_version": 2,
+            "recorded_at_utc": "2026-10-21T08:04:48.223666+00:00",
+            "evidence_ref": "sched:60d43b93-a0f7-4eb1-8eb8-d3e4333421f4"
+          },
+          {
+            "type": "cancel_requested",
+            "state_version": 3,
+            "recorded_at_utc": "2026-10-21T08:05:11.784253+00:00",
+            "evidence_ref": "local"
+          },
+          {
+            "type": "cancelled",
+            "state_version": 4,
+            "recorded_at_utc": "2026-10-21T08:05:18.219266+00:00",
+            "evidence_ref": "pg-cancel:388a4aac-78cf-48e1-930f-fa42bfac80c1:3"
+          }
+        ],
+        "outbox": [
+          {
+            "kind": "schedule",
+            "status": "superseded",
+            "expected_state_version": 1,
+            "provider_receipt_id": "sched:60d43b93-a0f7-4eb1-8eb8-d3e4333421f4"
+          },
+          {
+            "kind": "cancel",
+            "status": "dispatched",
+            "expected_state_version": 3,
+            "provider_receipt_id": "pg-cancel:388a4aac-78cf-48e1-930f-fa42bfac80c1:3"
+          }
+        ],
+        "notifications": [],
+        "leases": 0,
+        "breaches": 0
+      },
+      "page_text_terminal": "Along\n今日\n对话\n确认\n任务\n活动\n任务 60d43b93\n\ncancelled · 2026-10-21 16:08（Asia/Shanghai）\n\n登记回执\nsched:60d43b93-a0f7-4eb1-8eb8-d3e4333421f4\n状态版本\n4\n创建时间\n2026-10-21T08:04:48.140Z\n取消这条提醒\n站内通知\n\n以下仅为站内通知记录，不表示用户收到或看过。\n\n暂无站内通知记录\n\n事件账\n类型\t记录时间（UTC）\t证据\ncreated\t2026-10-21T08:04:48.140Z\tlocal\nscheduled\t2026-10-21T08:04:48.223Z\tsched:60d43b93-a0f7-4eb1-8eb8-d3e4333421f4\ncancel_requested\t2026-10-21T08:05:11.784Z\tlocal\ncancelled\t2026-10-21T08:05:18.219Z\tpg-cancel:388a4aac-78cf-48e1-930f-fa42bfac80c1:3",
+      "final_sql": {
+        "pg_time": "2026-10-21T08:24:46.22709+00:00",
+        "task": {
+          "id": "60d43b93-a0f7-4eb1-8eb8-d3e4333421f4",
+          "state": "cancelled",
+          "state_version": 4,
+          "source_approval_id": "450ac229-878a-4612-aedd-af98f31a8a3b",
+          "schedule_receipt": "sched:60d43b93-a0f7-4eb1-8eb8-d3e4333421f4",
+          "fire_at_utc": "2026-10-21T08:08:00+00:00",
+          "wall_time": "2026-10-21 16:08",
+          "timezone_id": "Asia/Shanghai",
+          "tzdb_version": "fixture-v1"
+        },
+        "events": [
+          {
+            "type": "created",
+            "state_version": 1,
+            "recorded_at_utc": "2026-10-21T08:04:48.140206+00:00",
+            "evidence_ref": "local"
+          },
+          {
+            "type": "scheduled",
+            "state_version": 2,
+            "recorded_at_utc": "2026-10-21T08:04:48.223666+00:00",
+            "evidence_ref": "sched:60d43b93-a0f7-4eb1-8eb8-d3e4333421f4"
+          },
+          {
+            "type": "cancel_requested",
+            "state_version": 3,
+            "recorded_at_utc": "2026-10-21T08:05:11.784253+00:00",
+            "evidence_ref": "local"
+          },
+          {
+            "type": "cancelled",
+            "state_version": 4,
+            "recorded_at_utc": "2026-10-21T08:05:18.219266+00:00",
+            "evidence_ref": "pg-cancel:388a4aac-78cf-48e1-930f-fa42bfac80c1:3"
+          }
+        ],
+        "outbox": [
+          {
+            "kind": "schedule",
+            "status": "superseded",
+            "expected_state_version": 1,
+            "provider_receipt_id": "sched:60d43b93-a0f7-4eb1-8eb8-d3e4333421f4"
+          },
+          {
+            "kind": "cancel",
+            "status": "dispatched",
+            "expected_state_version": 3,
+            "provider_receipt_id": "pg-cancel:388a4aac-78cf-48e1-930f-fa42bfac80c1:3"
+          }
+        ],
+        "notifications": [],
+        "leases": 0,
+        "breaches": 0
+      },
+      "final_page_text": "Along\n今日\n对话\n确认\n任务\n活动\n任务 60d43b93\n\ncancelled · 2026-10-21 16:08（Asia/Shanghai）\n\n登记回执\nsched:60d43b93-a0f7-4eb1-8eb8-d3e4333421f4\n状态版本\n4\n创建时间\n2026-10-21T08:04:48.140Z\n取消这条提醒\n站内通知\n\n以下仅为站内通知记录，不表示用户收到或看过。\n\n暂无站内通知记录\n\n事件账\n类型\t记录时间（UTC）\t证据\ncreated\t2026-10-21T08:04:48.140Z\tlocal\nscheduled\t2026-10-21T08:04:48.223Z\tsched:60d43b93-a0f7-4eb1-8eb8-d3e4333421f4\ncancel_requested\t2026-10-21T08:05:11.784Z\tlocal\ncancelled\t2026-10-21T08:05:18.219Z\tpg-cancel:388a4aac-78cf-48e1-930f-fa42bfac80c1:3",
+      "grace_end": "2026-10-21T08:23:00+00:00",
+      "minimum_observe_until": "2026-10-21T08:24:00+00:00",
+      "readonly_samples": [
+        {
+          "pg_time": "2026-10-21T08:08:44.96031+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:09:00.17903+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:09:15.329725+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:09:30.465836+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:09:45.632158+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:10:00.80491+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:10:15.962699+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:10:31.146416+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:10:46.300824+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:11:01.461502+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:11:16.607388+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:11:31.751823+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:11:46.893929+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:12:02.046538+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:12:17.204045+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:12:32.384933+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:12:47.554577+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:13:02.681865+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:13:17.837121+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:13:32.985396+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:13:48.152078+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:14:03.323698+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:14:18.461342+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": "2026-10-21T08:14:18.237141+00:00",
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:14:33.609792+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:14:48.781837+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": "2026-10-21T08:14:48.239159+00:00",
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:15:03.964459+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:15:19.118167+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": "2026-10-21T08:15:18.238288+00:00",
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:15:34.277925+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:15:49.424451+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": "2026-10-21T08:15:48.236594+00:00",
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:16:04.576258+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:16:19.726499+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": "2026-10-21T08:16:18.238277+00:00",
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:16:34.870931+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:16:50.028831+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": "2026-10-21T08:16:48.23775+00:00",
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:17:05.184094+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:17:20.342617+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": "2026-10-21T08:17:18.236991+00:00",
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:17:35.498695+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:17:50.661802+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": "2026-10-21T08:17:48.237931+00:00",
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:18:05.828793+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:18:20.996339+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": "2026-10-21T08:18:18.238538+00:00",
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:18:36.139441+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:18:51.266452+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": "2026-10-21T08:18:48.236942+00:00",
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:19:06.430703+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:19:21.58442+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": "2026-10-21T08:19:18.23743+00:00",
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:19:36.75612+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:19:51.906031+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": "2026-10-21T08:19:48.236681+00:00",
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:20:07.106296+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:20:22.256882+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": "2026-10-21T08:20:18.238394+00:00",
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:20:37.399384+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:20:52.575902+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": "2026-10-21T08:20:48.235506+00:00",
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:21:07.745539+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:21:22.881569+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": "2026-10-21T08:21:18.237248+00:00",
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:21:38.039619+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:21:53.201603+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": "2026-10-21T08:21:48.23641+00:00",
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:22:08.332661+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:22:23.486484+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": "2026-10-21T08:22:18.235714+00:00",
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:22:38.644626+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:22:53.784307+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": "2026-10-21T08:22:48.236481+00:00",
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:23:08.935595+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:23:24.107231+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": "2026-10-21T08:23:18.236598+00:00",
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:23:39.253592+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:23:54.405299+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": "2026-10-21T08:23:48.235132+00:00",
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        },
+        {
+          "pg_time": "2026-10-21T08:24:00.122246+00:00",
+          "state": "cancelled",
+          "notices": 0,
+          "fired": 0,
+          "breaches": 0,
+          "pending_non_cancel": 0,
+          "last_tick_at": null,
+          "cancel_provider_calls": 0,
+          "positive_provider_calls": 1,
+          "api_alive": true
+        }
+      ],
+      "effective_tick_samples": [
+        {
+          "pg_time": "2026-10-21T08:22:40.108626+00:00",
+          "matching_ticks": []
+        },
+        {
+          "pg_time": "2026-10-21T08:22:45.265886+00:00",
+          "matching_ticks": []
+        },
+        {
+          "pg_time": "2026-10-21T08:22:50.420378+00:00",
+          "matching_ticks": [
+            {
+              "backend_pid": 31238,
+              "query_started_at": "2026-10-21T08:22:48.236481+00:00",
+              "state": "idle"
+            }
+          ]
+        },
+        {
+          "pg_time": "2026-10-21T08:22:55.579413+00:00",
+          "matching_ticks": [
+            {
+              "backend_pid": 31238,
+              "query_started_at": "2026-10-21T08:22:48.236481+00:00",
+              "state": "idle"
+            }
+          ]
+        },
+        {
+          "pg_time": "2026-10-21T08:23:00.740681+00:00",
+          "matching_ticks": []
+        },
+        {
+          "pg_time": "2026-10-21T08:23:05.866425+00:00",
+          "matching_ticks": []
+        },
+        {
+          "pg_time": "2026-10-21T08:23:10.999446+00:00",
+          "matching_ticks": []
+        },
+        {
+          "pg_time": "2026-10-21T08:23:16.138865+00:00",
+          "matching_ticks": []
+        },
+        {
+          "pg_time": "2026-10-21T08:23:21.298881+00:00",
+          "matching_ticks": [
+            {
+              "backend_pid": 31494,
+              "query_started_at": "2026-10-21T08:23:18.236598+00:00",
+              "state": "idle"
+            }
+          ]
+        },
+        {
+          "pg_time": "2026-10-21T08:23:26.430714+00:00",
+          "matching_ticks": [
+            {
+              "backend_pid": 31494,
+              "query_started_at": "2026-10-21T08:23:18.236598+00:00",
+              "state": "idle"
+            }
+          ]
+        },
+        {
+          "pg_time": "2026-10-21T08:23:31.587281+00:00",
+          "matching_ticks": []
+        },
+        {
+          "pg_time": "2026-10-21T08:23:36.752447+00:00",
+          "matching_ticks": []
+        },
+        {
+          "pg_time": "2026-10-21T08:23:41.909524+00:00",
+          "matching_ticks": []
+        },
+        {
+          "pg_time": "2026-10-21T08:23:47.074123+00:00",
+          "matching_ticks": []
+        },
+        {
+          "pg_time": "2026-10-21T08:23:52.229479+00:00",
+          "matching_ticks": [
+            {
+              "backend_pid": 31749,
+              "query_started_at": "2026-10-21T08:23:48.235132+00:00",
+              "state": "idle"
+            }
+          ]
+        },
+        {
+          "pg_time": "2026-10-21T08:23:57.383312+00:00",
+          "matching_ticks": [
+            {
+              "backend_pid": 31749,
+              "query_started_at": "2026-10-21T08:23:48.235132+00:00",
+              "state": "idle"
+            }
+          ]
+        },
+        {
+          "pg_time": "2026-10-21T08:24:00.122271+00:00",
+          "matching_ticks": []
+        }
+      ],
+      "effective_ticks_after_grace": [
+        "2026-10-21T08:23:18.236598+00:00",
+        "2026-10-21T08:23:48.235132+00:00"
+      ],
+      "window_errors": [],
+      "tick_errors": []
+    }
+  },
+  "runtime": {
+    "versions": {
+      "bun": "1.4.2",
+      "postgres": "postgres (PostgreSQL) 16.15",
+      "node": "v24.21.0"
+    },
+    "api_pid": 26380,
+    "api_role": "all",
+    "api_base": "http://127.0.0.1:3000",
+    "web_base": "http://127.0.0.1:3100",
+    "mode": "production build, no watch",
+    "environment_alias": "along-issue26-pg / along_smoke",
+    "test_database_alias": "along_tests (separate, no worker)",
+    "session": "real credential session and CSRF, values omitted",
+    "owner": "synthetic, no real reminders",
+    "ruleset_id": "FIXTURE_V1",
+    "no_env_files_read_or_changed": true
+  },
+  "aliases": {
+    "P0": "1e0d461d-0bdf-4820-bccc-b163e690b577",
+    "P_fire": "2eeca8c8-7c6e-4691-9628-1249f4f0232b",
+    "T_fire": "37e32d67-8bc4-47df-bed9-128da2d4d279",
+    "P_cancel": "450ac229-878a-4612-aedd-af98f31a8a3b",
+    "T_cancel": "60d43b93-a0f7-4eb1-8eb8-d3e4333421f4"
+  },
+  "provider_observer": {
+    "events": [
+      {
+        "kind": "observer_ready",
+        "pid": 26380,
+        "started_at": "2026-10-21T07:46:18.112Z"
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T07:46:48.113Z",
+        "calls": 0
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T07:47:18.114Z",
+        "calls": 0
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T07:47:48.114Z",
+        "calls": 0
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T07:48:18.114Z",
+        "calls": 0
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T07:48:48.114Z",
+        "calls": 0
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T07:49:18.115Z",
+        "calls": 0
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T07:49:48.115Z",
+        "calls": 0
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T07:50:18.115Z",
+        "calls": 0
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T07:50:48.115Z",
+        "calls": 0
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T07:51:18.116Z",
+        "calls": 0
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T07:51:48.117Z",
+        "calls": 0
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T07:52:18.117Z",
+        "calls": 0
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T07:52:48.117Z",
+        "calls": 0
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T07:53:18.118Z",
+        "calls": 0
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T07:53:48.119Z",
+        "calls": 0
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T07:54:18.119Z",
+        "calls": 0
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T07:54:48.120Z",
+        "calls": 0
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T07:55:18.119Z",
+        "calls": 0
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T07:55:48.120Z",
+        "calls": 0
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T07:56:18.120Z",
+        "calls": 0
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T07:56:48.120Z",
+        "calls": 0
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T07:57:18.120Z",
+        "calls": 0
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T07:57:48.119Z",
+        "calls": 0
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T07:58:18.120Z",
+        "calls": 0
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T07:58:48.119Z",
+        "calls": 0
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T07:59:18.120Z",
+        "calls": 0
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T07:59:48.120Z",
+        "calls": 0
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:00:18.121Z",
+        "calls": 0
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:00:48.120Z",
+        "calls": 0
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:01:18.120Z",
+        "calls": 0
+      },
+      {
+        "kind": "provider_call",
+        "pid": 26380,
+        "task_id": "37e32d67-8bc4-47df-bed9-128da2d4d279",
+        "observed_at": "2026-10-21T08:01:18.261Z",
+        "sequence": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:01:48.121Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:02:18.122Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:02:48.122Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:03:18.122Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:03:48.123Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:04:18.124Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:04:48.124Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:05:18.124Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:05:48.124Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:06:18.125Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:06:48.124Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:07:18.124Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:07:48.125Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:08:18.126Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:08:48.126Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:09:18.126Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:09:48.126Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:10:18.126Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:10:48.126Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:11:18.126Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:11:48.127Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:12:18.127Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:12:48.128Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:13:18.128Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:13:48.127Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:14:18.127Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:14:48.127Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:15:18.127Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:15:48.127Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:16:18.127Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:16:48.126Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:17:18.126Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:17:48.126Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:18:18.126Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:18:48.126Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:19:18.125Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:19:48.125Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:20:18.125Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:20:48.124Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:21:18.124Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:21:48.124Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:22:18.124Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:22:48.125Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:23:18.124Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:23:48.125Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:24:18.125Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:24:48.125Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:25:18.125Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:25:48.125Z",
+        "calls": 1
+      },
+      {
+        "kind": "observer_heartbeat",
+        "pid": 26380,
+        "observed_at": "2026-10-21T08:26:18.125Z",
+        "calls": 1
+      }
+    ],
+    "expected_pid": 26380,
+    "actual_positive_calls": 1,
+    "actual_cancel_calls": 0,
+    "provider_replaced": false,
+    "metadata_only": true
+  },
+  "source_ci": {
+    "run_id": 39567342047,
+    "jobs": [
+      {
+        "completed_at": "2026-10-21T08:12:14Z",
+        "conclusion": "success",
+        "name": "static",
+        "started_at": "2026-10-21T08:10:59Z",
+        "status": "completed"
+      },
+      {
+        "completed_at": "2026-10-21T08:13:33Z",
+        "conclusion": "success",
+        "name": "compose-smoke",
+        "started_at": "2026-10-21T08:12:16Z",
+        "status": "completed"
+      },
+      {
+        "completed_at": "2026-10-21T08:12:38Z",
+        "conclusion": "success",
+        "name": "contracts-dual",
+        "started_at": "2026-10-21T08:12:16Z",
+        "status": "completed"
+      },
+      {
+        "completed_at": "2026-10-21T08:13:12Z",
+        "conclusion": "success",
+        "name": "migration-scan",
+        "started_at": "2026-10-21T08:12:16Z",
+        "status": "completed"
+      },
+      {
+        "completed_at": "2026-10-21T08:13:07Z",
+        "conclusion": "success",
+        "name": "scheduler-fault",
+        "started_at": "2026-10-21T08:12:16Z",
+        "status": "completed"
+      }
+    ]
+  },
+  "verification_limit": {
+    "visual": "Screenshots captured; DOM/network/API/SQL checked. Pixel interpretation unavailable: active model has no image input and configured vision reader returned model-not-found.",
+    "coverage": "Representative seven-step only; not full A2 supersession, A3 kill/resume, A4 temporal-error contract."
+  },
+  "execution_result": "seven-step representative smoke passed",
+  "collection_method": {
+    "window_readonly_sql": "SELECT json_build_object(\n 'pg_time',now(),\n 'state',(SELECT state FROM tasks WHERE id='60d43b93-a0f7-4eb1-8eb8-d3e4333421f4'::uuid AND owner_id='SYNTHETIC_OWNER'::uuid),\n 'notices',(SELECT count(*) FROM notifications WHERE task_id='60d43b93-a0f7-4eb1-8eb8-d3e4333421f4'::uuid AND owner_id='SYNTHETIC_OWNER'::uuid),\n 'fired',(SELECT count(*) FROM task_events WHERE task_id='60d43b93-a0f7-4eb1-8eb8-d3e4333421f4'::uuid AND owner_id='SYNTHETIC_OWNER'::uuid AND type='fired'),\n 'breaches',(SELECT count(*) FROM security_events WHERE task_id='60d43b93-a0f7-4eb1-8eb8-d3e4333421f4'::uuid AND owner_id='SYNTHETIC_OWNER'::uuid AND type='cancel_breach'),\n 'pending_non_cancel',(SELECT count(*) FROM outbox WHERE task_id='60d43b93-a0f7-4eb1-8eb8-d3e4333421f4'::uuid AND owner_id='SYNTHETIC_OWNER'::uuid AND command->>'kind'<>'cancel' AND status IN ('pending','dispatched','acked_unknown')),\n 'last_tick_at',(SELECT max(query_start) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND query LIKE 'SELECT id, owner_id, state, state_version, fire_at_utc, wall_time,%' AND query LIKE '%fire_at_utc < now() - interval%' AND query LIKE '%15 minutes%')\n);",
+    "effective_tick_sql": "SELECT json_build_object('pg_time',now(),'matching_ticks',COALESCE(json_agg(json_build_object('backend_pid',pid,'query_started_at',query_start,'state',state)) FILTER (WHERE query LIKE 'SELECT id, owner_id, state, state_version, fire_at_utc, wall_time,%' AND query LIKE '%fire_at_utc < now() - interval%' AND query LIKE '%15 minutes%'),'[]'::json)) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid();",
+    "window_cadence_seconds": 15,
+    "final_tick_cadence_seconds": 5,
+    "source_query": "scheduler/scheduler-repository.ts:listMissedCandidates",
+    "note": "Owner alias in saved SQL is redacted; supply real scoped owner when reproducing. Prefix predicate excludes observer SELECT json_build_object queries. These query timestamps prove the last phase was reached, not absence of every internal phase error."
+  },
+  "independent_evidence_review": {
+    "reviewer": "ReviewSmokeEvidence26",
+    "decision": "approve",
+    "confidence": 0.9,
+    "findings": [],
+    "limits": [
+      "Missing original first confirm response body; original request reconstructed, not raw capture.",
+      "Consumed replay proves idempotency, not a second seen-content/hash check.",
+      "SSE capture has Chinese decoding corruption; Chinese fidelity checked from approval/request and notification SQL/API/DOM.",
+      "No pixel-level image interpretation.",
+      "Not full A2/A3/A4."
+    ]
+  }
+}

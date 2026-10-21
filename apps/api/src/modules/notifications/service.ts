@@ -3,8 +3,36 @@
 // original_note); never converts time. INSERT ... ON CONFLICT
 // (idempotency_key) DO NOTHING returns the existing row's receipt so retries
 // share one notice (kill -9 resume fires exactly once).
+import { channel } from 'node:diagnostics_channel';
 import type { PoolClient } from 'pg';
 import { noticeCopyFor } from '@along/notifier-core';
+import { listTaskNotices } from './repository.js';
+
+const inAppProviderCalls = channel('along.notifications.provider-call');
+
+export interface TaskNotification {
+  id: string;
+  title: string;
+  body: string;
+  status: 'pending' | 'sent' | 'failed';
+  sent_at: string | null;
+}
+
+/** Read stored notices only; task existence and authorization belong to tasks. */
+export async function getTaskNotifications(
+  client: PoolClient,
+  ownerId: string,
+  taskId: string,
+): Promise<TaskNotification[]> {
+  const rows = await listTaskNotices(client, ownerId, taskId);
+  return rows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    body: row.body,
+    status: row.status,
+    sent_at: row.sent_at?.toISOString() ?? null,
+  }));
+}
 
 export interface InAppNotice {
   ownerId: string;
@@ -46,6 +74,9 @@ export async function deliverInApp(
   provider: InAppProvider = null,
 ): Promise<InAppDelivery> {
   const effective = provider ?? localInAppProvider;
+  if (inAppProviderCalls.hasSubscribers) {
+    inAppProviderCalls.publish({ taskId: notice.taskId });
+  }
   const result = await effective(notice);
   const copy = noticeCopyFor({
     wallTime: notice.wallTime,

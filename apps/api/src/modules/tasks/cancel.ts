@@ -1,12 +1,6 @@
-// Cancel path: POST /tasks/{id}/actions/cancel. Two steps in one transaction:
-//  1. requestCancel: row lock -> terminal-state guard -> cancel_pending +
-//     cancel_requested event + cancel outbox command. Cancel wins over
-//     everything queued: pending/dispatched/acked_unknown sibling rows for
-//     this task are superseded (the cancel row itself is excluded).
-//  2. revoke step: only with a local registry cancel receipt does the task
-//     move cancel_pending -> cancelled (+ cancelled event). Without the
-//     receipt the task stays cancel_pending ("取消确认中"), and the gate
-//     keeps blocking sends.
+// Cancel submission commits cancel_pending, its event and a durable command.
+// Old queued work is fenced immediately. Only a persisted PG queue-revocation
+// receipt can finish cancellation; otherwise the production worker does it.
 //
 // No token plaintext is stored; the idempotency key is the caller's uuid.
 import { randomUUID } from 'node:crypto';
@@ -21,8 +15,11 @@ import {
   validationError,
   type HttpError,
 } from '../../http/errors.js';
-import { appendTaskEvent, supersedeQueuedOutboxForTask } from './scheduler/scheduler-repository.js';
-import { hasCancelReceipt } from './scheduler/registry.js';
+import {
+  appendTaskEvent,
+  completeCancelFromReceipt,
+  supersedeStaleTaskWork,
+} from './scheduler/scheduler-repository.js';
 import { findCancelRowByKey, insertCancelCommand, lockTaskForCancel } from './cancel-repository.js';
 
 export const CancelBodySchema = z.object({
@@ -46,15 +43,11 @@ function cancelKey(ownerId: string, taskId: string, key: string): string {
   return `cancel:${ownerId}:${taskId}:${key}`;
 }
 
-/** Revoke hook for tests: returns true when the provider confirms revoke. */
-export type RevokeCheck = (taskId: string) => boolean;
-
 export interface CancelWithinTxArgs {
   ownerId: string;
   taskId: string;
   reason: string | null;
   idempotencyKey: string;
-  revokeCheck?: RevokeCheck;
 }
 
 // The cancel state transition without opening a transaction. Used by
@@ -95,13 +88,7 @@ export async function cancelTaskWithinTransaction(
         reason: args.reason,
       });
     }
-    const result = await finishCancelStep(
-      client,
-      args.ownerId,
-      row.id,
-      row.state_version,
-      args.revokeCheck ?? hasCancelReceipt,
-    );
+    const result = await finishCancelStep(client, args.ownerId, row.id, row.state_version);
     return existing ? { ...result, duplicate: true } : result;
   }
 
@@ -122,8 +109,11 @@ export async function cancelTaskWithinTransaction(
     type: 'cancel_requested',
     evidenceRef: 'local',
   });
-  // Cancel wins: supersede every queued sibling row for this task.
-  await supersedeQueuedOutboxForTask(client, row.id);
+  await supersedeStaleTaskWork(client, {
+    ownerId: args.ownerId,
+    taskId: row.id,
+    expectedVersion: moved[0].state_version,
+  });
   // Fire time is frozen on the task row; read it for the command payload.
   const { rows: fireRows } = await client.query<{ fire_at_utc: Date }>(
     'SELECT fire_at_utc FROM tasks WHERE id = $1',
@@ -138,13 +128,7 @@ export async function cancelTaskWithinTransaction(
     idempotencyKey: args.idempotencyKey,
     reason: args.reason,
   });
-  return finishCancelStep(
-    client,
-    args.ownerId,
-    row.id,
-    moved[0].state_version,
-    args.revokeCheck ?? hasCancelReceipt,
-  );
+  return finishCancelStep(client, args.ownerId, row.id, moved[0].state_version);
 }
 
 export async function requestCancel(
@@ -152,7 +136,6 @@ export async function requestCancel(
   ownerId: string,
   taskId: string,
   body: unknown,
-  revokeCheck: RevokeCheck = hasCancelReceipt,
 ): Promise<CancelResult> {
   const parsed = CancelBodySchema.safeParse(body);
   if (!parsed.success) throw validationError('invalid cancel body');
@@ -166,12 +149,12 @@ export async function requestCancel(
       const again = await lockTaskForCancel(client, taskId);
       if (!again) throw notFound('task not found');
       if (again.owner_id !== ownerId) throw forbidden('task not found');
-      if (again.state === 'cancel_pending' || again.state === 'cancelled') {
-        return {
-          task_id: again.id,
-          state: again.state,
-          duplicate: true,
-        };
+      if (again.state === 'cancel_pending') {
+        const result = await finishCancelStep(client, ownerId, again.id, again.state_version);
+        return { ...result, duplicate: true };
+      }
+      if (again.state === 'cancelled') {
+        return { task_id: again.id, state: again.state, duplicate: true };
       }
     }
     return cancelTaskWithinTransaction(client, {
@@ -179,7 +162,6 @@ export async function requestCancel(
       taskId,
       reason: parsed.data.reason ?? null,
       idempotencyKey: key,
-      revokeCheck,
     });
   });
 }
@@ -189,30 +171,17 @@ async function finishCancelStep(
   ownerId: string,
   taskId: string,
   version: number,
-  revokeCheck: RevokeCheck,
 ): Promise<CancelResult> {
-  // Step 2: only with a revoke receipt does the task reach cancelled.
-  if (!revokeCheck(taskId)) {
-    return { task_id: taskId, state: 'cancel_pending', duplicate: false };
-  }
-  const { rows: moved } = await client.query<{ state_version: number }>(
-    `UPDATE tasks SET state = 'cancelled', state_version = state_version + 1
-     WHERE id = $1 AND state_version = $2 AND state = 'cancel_pending'
-     RETURNING state_version`,
-    [taskId, version],
-  );
-  if (!moved[0]) {
-    return { task_id: taskId, state: 'cancel_pending', duplicate: false };
-  }
-  await appendTaskEvent(client, {
+  const completed = await completeCancelFromReceipt(client, {
     ownerId,
     taskId,
-    stateVersion: moved[0].state_version,
-    type: 'cancelled',
-    evidenceRef: `cancel:${taskId}`,
+    expectedVersion: version,
   });
-  await supersedeQueuedOutboxForTask(client, taskId);
-  return { task_id: taskId, state: 'cancelled', duplicate: false };
+  return {
+    task_id: taskId,
+    state: completed ? 'cancelled' : 'cancel_pending',
+    duplicate: false,
+  };
 }
 
 export { randomUUID };

@@ -1,4 +1,4 @@
-// Notifications repository: read-only lookups for the worker send path.
+// Notifications repository: lookups for task details and the worker send path.
 import type { PoolClient } from 'pg';
 
 export interface NoticeLookup {
@@ -17,4 +17,25 @@ export async function findNoticeByKey(
     [idempotencyKey],
   );
   return rows[0] ?? null;
+}
+
+export interface TaskNoticeRow {
+  id: string;
+  title: string;
+  body: string;
+  status: 'pending' | 'sent' | 'failed';
+  sent_at: Date | null;
+}
+
+export async function listTaskNotices(
+  client: PoolClient,
+  ownerId: string,
+  taskId: string,
+): Promise<TaskNoticeRow[]> {
+  const { rows } = await client.query<TaskNoticeRow>(
+    `SELECT id, title, body, status, sent_at FROM notifications
+     WHERE owner_id = $1 AND task_id = $2 ORDER BY created_at, id`,
+    [ownerId, taskId],
+  );
+  return rows;
 }

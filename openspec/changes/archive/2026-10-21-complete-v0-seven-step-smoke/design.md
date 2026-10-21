@@ -1,10 +1,10 @@
 # Design：既有任务详情承载站内通知
 
-## 结论与现状
+## 结论与规划基线
 
 本 change 只新增通知读取合同；七步与取消安全要求引用既有合同，不另定义取消状态机。字段与接口真源见 `docs/design/03-v0-vertical-slice.md` §3.1–§3.2、`docs/api/tasks/tasks_routes.md` §2.1；本文件解释实现边界，不表示代码已实现或验收通过。
 
-Observed：`tasks/service.ts#getTaskDetail` 已做 task 存在性与 owner 校验，只返回任务字段；`notifications/service.ts#deliverInApp` 调用本地 provider 后写通知，`0007_commitments_notifications.sql` 已有通知数据；Web 当前无通知记录展示。`registry.ts` 的取消回执是内存 Set，`cancel-phase.ts` 仅检查它；不能把该检查本身视为实际撤销或持久凭据。
+Observed（规划研究基线 `e98f29f`，非实现实时状态）：`tasks/service.ts#getTaskDetail` 只返回任务字段；通知已持久化而 Web 无通知面。`registry.ts` 用内存 Set，取消 worker 仅检查它，无生产回执来源。这个缺口解释下述读取增量与实际撤销要求；实施及验收事实保存在 tasks 和独立运行记录中。
 
 ## 通知读取与 DTO
 

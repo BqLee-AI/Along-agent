@@ -1,7 +1,6 @@
-// Send phase:门禁 + Notifier.send. Runs under one transaction per outbox row:
-// lock send row -> lock task -> gate three checks -> Notifier.send (local,
-// in-app) -> notifications INSERT ... ON CONFLICT DO NOTHING -> task fired +
-// fired event, or retry/ack_unknown/failed_deadline bookkeeping.
+// Send phase: task lock -> outbox lock -> gate -> provider call, all in one
+// transaction. Holding the task lock throughout the provider call serializes
+// it with cancel_pending commit, which is the cancellation timing boundary.
 //
 // Breach guard (design/07 §3): when the gate finds the task cancel-committed
 // (cancel_pending/cancelled) the row is superseded; if it already fired, the
@@ -82,12 +81,20 @@ async function sendOne(
   nowMs: number,
 ): Promise<keyof Omit<SendSummary, 'scanned'>> {
   const parsed = parseSendCommand(row);
-  if (!parsed || parsed.taskId !== row.task_id) {
+  if (
+    !parsed ||
+    parsed.taskId !== row.task_id ||
+    parsed.expectedStateVersion !== row.expected_state_version
+  ) {
     await markOutboxSuperseded(client, row.id);
     return 'superseded';
   }
   const task = await lockTaskRow(client, parsed.taskId);
-  if (!task) {
+  if (
+    !task ||
+    task.owner_id !== row.owner_id ||
+    parsed.fireAtIso !== task.fire_at_utc.toISOString()
+  ) {
     await markOutboxSuperseded(client, row.id);
     return 'superseded';
   }
@@ -130,10 +137,8 @@ async function sendOne(
   const outcome = outcomeOf({ delivered: delivery.delivered, answered: delivery.answered });
 
   if (outcome === 'sent') {
-    // Cancel race: re-read the task state inside this transaction. A cancel
-    // committed after our gate but before this commit turned the task away
-    // from scheduled — record one breach row for human review and do NOT
-    // mark fired (design/07 §3:分不清先后按违规计).
+    // Defensive reconciliation: ordinary cross-process cancellation cannot
+    // commit while this transaction holds the task row lock.
     const { rows } = await client.query<{ state: string }>(
       'SELECT state FROM tasks WHERE id = $1',
       [task.id],

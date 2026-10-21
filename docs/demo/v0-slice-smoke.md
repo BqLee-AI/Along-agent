@@ -1,6 +1,6 @@
 # v0 切片冒烟：干净单次提醒闭环
 
-> 状态：[#26](https://github.com/BqLee-AI/Along-agent/issues/26) 已获用户授权执行的**操作手册，不是验收记录**。本轮先独立 spec PR，经独立 review、五门绿及合并资格 CLEAN 后合并，再实现并真实执行。当前尚缺通知详情投影/Web 展示、生产取消回执与实际 provider 调用证据；仅改本文不能宣称七步已通过。完整计划与 A1–A4 边界见 [收口计划](v0-smoke-closeout-plan.md)。
+> 本文是 [#26](https://github.com/BqLee-AI/Along-agent/issues/26) 的操作手册，不是验收记录。通知详情合同见 design/03 §3.1 与 tasks API §2.1；实施、审查与实际运行结果见对应 OpenSpec tasks 和 [2026-10-21 验收记录](v0-smoke-evidence-2026-10-21.md)。完整计划与 A1–A4 边界见 [收口计划](v0-smoke-closeout-plan.md)。
 
 范围：同一受控环境、同一合成 owner、真实 Web 单端七步。不重开 brief，不扩展 CI、外部推送或通用 E2E 框架；D1–D10、五门、按钮确认、冻结展示、回执门均不变。正常主链只经对话/按钮写业务数据；SQL 仅只读取证，不手注任务、时间、通知或取消回执。
 
@@ -8,15 +8,15 @@
 
 ### 必须先落地的依赖
 
-- **通知可见面（待实施）：** 独立 spec PR 合并后，实现 `GET /api/v1/tasks/{id}` 的只读 `data.notifications` 数组及任务详情展示。空态 `[]`；每项仅投影现有 `id/title/body/status/sent_at`，`status` 为 `pending | sent | failed`，`sent_at` 可为 `null`。沿用详情的 owner 校验：不存在 404，跨 owner 403；不向任务列表加字段，不新增 `/notifications` 路由，不产生读副作用。查询由 notifications 公共 service 拥有，tasks 按 task ID 调用，禁止跨模块读表。当前源码尚无该数组/面板，下面步 5/6 是实施后的验收目标。
-- **取消回执（待实施）：** 正常 worker 必须在实际本地队列撤销和 fencing 核对完成后持久化回执，再将 `cancel_pending` 推进为 `cancelled`。当前生产路径只检查内存 Set，未生产回执；不能把测试 `recordCancelReceipt`、SQL 改终态或内存标记当真实闭环。不改已合并迁移；无回执必须保持 `cancel_pending`。
+- **通知可见面：** `GET /api/v1/tasks/{id}` 提供只读 `data.notifications` 数组，任务详情展示存储记录或空态。每项仅投影现有 `id/title/body/status/sent_at`，`status` 为 `pending | sent | failed`，`sent_at` 可为 `null`。沿用详情 owner 校验：不存在 404，跨 owner 403；不向任务列表加字段，不新增通知路由或读取副作用。查询归 notifications 公共 service，tasks 按 owner/task ID 调用，禁止跨模块读表。实际运行前先核对版本与依赖，不能把合同描述当作部署成功证据。
+- **取消回执：** 正常 worker 在任务锁与版本栅栏下撤销 PG outbox 的旧版本 work 和 lease，核对无活跃余单后，持久化本地回执并在同事务追加 `cancelled` 事件。不能用 SQL 改终态、手注回执或内存标记替代真实撤销；不改已合并迁移，无回执仍保持 `cancel_pending`。
 - **调用观察（先配置）：** §4 的真实 provider 调用证据必须在正向任务到点前接通；无法可靠观察时，先在该边界落实最小、无内容的调用证据，不拿零通知/零 fired 代替。
 
 ### 独占环境与启动
 
 1. 固定 Bun **1.4.2**、本地 OpenSpec **1.3.1**、Postgres **16**；执行者记录当前 commit、相关源码差异、进程/环境所有权和版本。保留用户改动。使用专属新 PG 数据库/项目及卷，确认无其他 worker 共用它；不清空用户库、不杀用户进程。
 2. 所有凭据仅由执行器/私密终端的**进程环境**注入；不读取、source、复制或改写 `.env*`，不在命令、截图、证据文件中展开 DSN/secret。API、seed 使用同一 `DATABASE_URL` 和 `BETTER_AUTH_SECRET`；只读 psql 使用指向同库的 `PGHOST/PGPORT/PGDATABASE/PGUSER/PGPASSWORD` 等进程环境，不输出它们。API 的 `ROLE=all`、`PORT=3000`、`TZDB_VERSION=fixture-v1`，Web 的 `API_BASE=http://127.0.0.1:3000` 也从进程环境明确注入；不能继承 `ROLE=api` 而漏启 worker。
-3. 在已明确独占的**空新库**上，仓根执行下列现有入口。它们是后续真实执行命令，本次文档修订未运行：
+3. 在已明确独占的**空新库**上，仓根执行下列现有入口；运行记录另行保存，不能仅凭本命令清单认定通过：
 
    ```sh
    bun install --frozen-lockfile
@@ -217,6 +217,8 @@ COMMIT;
 
 优先在受控单 worker 上于该调用行设置**非暂停 debug logpoint**，仅记录固定标记、`notice.taskId`、调用时刻和本次观察的序号；禁止展开整个 notice（含提醒内容）、cookie 或环境。确认调试客户端实际支持持续 logpoint 且不暂停/拖延可信钟；不支持或无法保存完整记录时，先实现同一边界最小无内容证据，不建遥测框架或新测试 API。
 
+同一调用边界也提供 Node 内置诊断通道 `along.notifications.provider-call`：只有订阅者存在时，才在调用实际 provider 紧邻之前发布 `{ taskId }`，默认不产生日志、不展开提醒或身份。可用独占启动器的 Bun `--preload` 观察脚本订阅，记录进程 ID、序号、时间与 task ID，并保存连续心跳；观察脚本不得替换 provider、修改请求或业务数据。它不是发送成功回执，通知与终态仍需分别核对。Bun 调试器不能可靠提供非暂停 logpoint 时，采用该边界观察，不用轮询通知行充当调用数。
+
 观察从 `T_fire` 到点前开始，`T_fire` 的一次实际调用是正控制，再无中断延续到取消窗口结束。给 `T_cancel` 汇总提交后的调用数并保留原始脱敏观察；没有正控制、漏接进程或观察空档时，写“缺证据”，不得写零。
 
 `cancel_requested.recorded_at_utc` 是事务内写入时间，不等于 commit。记录取消请求开始、HTTP 成功返回及事务已可读的时间，以成功返回后的调用证明提交后违规；开始至响应之间的调用若无法与提交排序，按既有“分不清先后按违规计”交人复核，不自行排除。调用破零即变红，即便数据库通知/fired 都为零。
@@ -229,7 +231,7 @@ COMMIT;
 | `/me` 401、POST CSRF 403                                  | 核同 host、cookie Path/完整签名、API 与 seed 的同一 secret、有效 session 及最新 `/me` CSRF；不关闭鉴权 |
 | `/readyz` TZDB 错误或业务规则不可用                       | 停止新归一/排期，修受控环境；readyz 绿不代替真实业务/规则证据                                          |
 | `PRESENTATION_MISMATCH` / expired / superseded            | 保留错误 envelope；重新生成有效 approval 并以实际全文确认，不改 hash/业务表绕过                        |
-| 通知数组/面板缺失、一直 cancel_pending、没有可靠调用观察  | 明确对应 #26 尚未实施或证据依赖未满足，不能宣称七步完成                                                |
+| 通知数组/面板缺失、一直 cancel_pending、没有可靠调用观察  | 排查部署版本、实际撤销与取证依赖；未满足前不能宣称七步完成                                             |
 | 时间余量不足、worker 无 tick、正向 missed                 | 本次未通过/未完成；保留现场，在修复原因后重新生成近未来任务，不 SQL 回拨                               |
 | 活动页空白/事件 GET 失败、日志中断、取消后调用>0/时序不清 | 保留脱敏证据，停止收口；不将错误当空态或按零通知放行                                                   |
 

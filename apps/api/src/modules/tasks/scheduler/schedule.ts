@@ -1,6 +1,6 @@
-// Schedule phase:登记 (registration). Consumes outbox kind=schedule rows:
-// row lock -> version/state check -> local registry receipt -> same
-// transaction: tasks -> scheduled + receipt + scheduled event.
+// Schedule phase: consumes durable PG schedule commands. Under task/outbox
+// locks, the transaction stores the schedule receipt, state and event; PG is
+// the schedule registry and survives worker process restarts.
 import { FIRE_WINDOW_MS, isPastFireWindow, scheduleReceiptFor } from '@along/scheduler-core';
 import type { Pool, PoolClient } from 'pg';
 import { withTransaction } from '../../../db/transaction.js';
@@ -15,7 +15,6 @@ import {
   transitionTask,
   type OutboxRow,
 } from './scheduler-repository.js';
-import { issueScheduleReceipt } from './registry.js';
 
 export const SCHEDULE_BATCH_LIMIT = 50;
 
@@ -48,13 +47,17 @@ export async function scheduleOne(
   row: OutboxRow,
 ): Promise<'scheduled' | 'superseded' | 'failed_deadline' | 'skipped'> {
   const parsed = parseScheduleCommand(row);
-  if (!parsed || parsed.taskId !== row.task_id) {
+  if (
+    !parsed ||
+    parsed.taskId !== row.task_id ||
+    parsed.expectedStateVersion !== row.expected_state_version
+  ) {
     // Command does not bind to this row: supersede, never deliver.
     await markOutboxSuperseded(client, row.id);
     return 'superseded';
   }
   const task = await lockTaskRow(client, parsed.taskId);
-  if (!task) {
+  if (!task || task.owner_id !== row.owner_id) {
     await markOutboxSuperseded(client, row.id);
     return 'superseded';
   }
@@ -78,7 +81,6 @@ export async function scheduleOne(
   }
   void FIRE_WINDOW_MS;
   const receipt = scheduleReceiptFor(task.id);
-  issueScheduleReceipt(task.id);
   const moved = await transitionTask(client, {
     taskId: task.id,
     fromStates: ['saved', 'pending_schedule'],
