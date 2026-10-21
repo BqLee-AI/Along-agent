@@ -11,9 +11,14 @@ import { confirmApproval } from '../../src/modules/approvals/confirm.js';
 import { getApprovalDetail } from '../../src/modules/approvals/service.js';
 import { getTaskDetail } from '../../src/modules/tasks/service.js';
 import { runSchedulePhase } from '../../src/modules/tasks/scheduler/schedule.js';
-import { runClaimPhase } from '../../src/modules/tasks/scheduler/claim.js';
 import { runSendPhase } from '../../src/modules/tasks/scheduler/send.js';
-import { databaseUrl, requirePool, seedApproval } from './setup.js';
+import {
+  createIntegrationDatabase,
+  databaseUrl,
+  type IntegrationDatabase,
+  seedApproval,
+} from './setup.js';
+import { driveClaimUntilLeased, driveSendUntilFired } from './scheduler-drivers.js';
 
 const maybe = databaseUrl ? describe : describe.skip;
 
@@ -31,47 +36,8 @@ async function confirmTask(
   return { taskId: result.task_id, ownerId: seed.ownerId };
 }
 
-// Own-row drivers: keep pressing phases until OUR task settles. Parallel
-// test files contend through SKIP LOCKED whole-list scans, so a single pass
-// may skip our row while global summaries count other tasks. Global phase
-// summaries must never gate own-task assertions.
-export async function driveClaimUntilLeased(
-  pool: Pool,
-  taskId: string,
-  workerId: string,
-  attempts = 15,
-): Promise<void> {
-  for (let i = 0; i < attempts; i += 1) {
-    await runClaimPhase(pool, workerId);
-    const { rows } = await pool.query('SELECT lease_owner FROM task_leases WHERE task_id = $1', [
-      taskId,
-    ]);
-    if (rows[0]) return;
-  }
-  const { rows } = await pool.query('SELECT lease_owner FROM task_leases WHERE task_id = $1', [
-    taskId,
-  ]);
-  expect(rows[0]).toBeTruthy();
-}
-
-export async function driveSendUntilFired(
-  pool: Pool,
-  taskId: string,
-  ownerId: string,
-  attempts = 15,
-): Promise<void> {
-  for (let i = 0; i < attempts; i += 1) {
-    await runSendPhase(pool);
-    const detail = await getTaskDetail({ pool }, ownerId, taskId);
-    if (detail.state === 'fired') return;
-  }
-  const detail = await getTaskDetail({ pool }, ownerId, taskId);
-  expect(detail.state).toBe('fired');
-}
-
-// Phase scans lock every due row in one tick transaction; parallel test
-// files contend through SKIP LOCKED, so a single pass may skip our row while
-// the global summary counts other tasks. Retry our own task until it settles.
+// Assert this task's outcome rather than a whole-phase summary, which can
+// include other tasks created earlier in this file's fixture.
 async function runScheduleUntil(
   pool: Pool,
   taskId: string,
@@ -93,12 +59,14 @@ async function runScheduleUntil(
   expect(detail.state).toBe('scheduled');
 }
 maybe('scheduler schedule/claim/send', () => {
+  let database: IntegrationDatabase;
   let pool: Pool;
-  beforeAll(() => {
-    pool = requirePool();
+  beforeAll(async () => {
+    database = await createIntegrationDatabase();
+    pool = database.pool;
   });
   afterAll(async () => {
-    await pool.end();
+    await database?.close();
   });
 
   it('registers, claims and fires exactly one notice', async () => {
@@ -139,8 +107,7 @@ maybe('scheduler schedule/claim/send', () => {
     );
     expect(events.map((e) => e.type)).toEqual(['created', 'scheduled', 'fired']);
 
-    // Resume (second send pass) does not double-fire: task-scoped check
-    // (phase summaries are global; parallel files share one DB).
+    // Resume (second send pass) does not double-fire.
     await runSendPhase(pool);
     const { rows: firedAgain } = await pool.query(
       "SELECT count(*) AS n FROM task_events WHERE task_id = $1 AND type = 'fired'",
@@ -161,9 +128,7 @@ maybe('scheduler schedule/claim/send', () => {
       "UPDATE tasks SET state_version = state_version + 1, state = 'pending_schedule' WHERE id = $1",
       [taskId],
     );
-    // Parallel test files share one DB and any worker's schedule pass may
-    // process this row first: assert the task-scoped outcome, not the
-    // global phase summary.
+    // Assert the task-scoped outcome, not the global phase summary.
     for (let i = 0; i < 10; i += 1) {
       await runSchedulePhase(pool);
       const { rows: probe } = await pool.query(

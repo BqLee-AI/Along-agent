@@ -76,6 +76,8 @@
 - 同次 `verify` 仅在 `typecheck` 成功后，让后续单元步骤复用其已构建的共享 packages，省去重复构建；失败即停，不消费失败构建。共享包构建保留依赖拓扑，其后的 workspace 类型检查用 `--sequential` 串行执行，不省略源码、测试或 Next route typegen。独立 `bun run test:unit` 或 `verify --skip typecheck` 仍先构建包，不以旧 `dist/`、跨次运行标记或其他 job 的产物代替准备。
 - 红例含义：`lint/typecheck` 红=代码或类型坏；`depcruise` 红=越 D1 依赖边界；治理脚本红=门清单/执行证据/冻结名/文案断言坏（看输出行）；`test:unit` 红=单元坏；`openspec validate` 红=change 的 proposal/tasks/spec 不一致；`format:check` 红=跑 `bun run format` 后重提，不能作为非阻塞警告放行。
 - 测试统一使用 `bun:test`，通过文件级并行提速，保留文件状态隔离与 mock/spy/时钟恢复；不把有共享状态的用例改成文件内 concurrent。单元入口排除数据库集，契约入口不能只跑契约包而漏掉 API 两种传输。数据库与调度故障入口使用真实 PostgreSQL 16、原迁移和明确测试环境，不跳过唯一性、只追加或取消窗口断言。
+- PostgreSQL 集成测试每文件用 `createIntegrationDatabase()` 创建随机独立 schema，并在其中应用原始迁移；连接的 `search_path` 不回退 public，worker 不能消费其他文件的夹具。新连接用该句柄的 `connect()`，子进程显式继承该句柄的连接串；结束时 `close()` 只清理本文件创建的 schema。测试角色需有数据库 CREATE 权限。
+- 共享调度驱动放在非 `.test.ts` helper；测试文件不得互相导入来复用函数，避免重复注册套件。数据库夹具与临时故障注入只验证测试边界，不替代生产 Web、真实到点与强杀验收。
 
 ### D1 依赖边界与变红证据
 

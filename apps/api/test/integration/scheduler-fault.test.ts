@@ -13,14 +13,19 @@ import { requestCancel } from '../../src/modules/tasks/cancel.js';
 import { runSchedulePhase } from '../../src/modules/tasks/scheduler/schedule.js';
 import { runSendPhase } from '../../src/modules/tasks/scheduler/send.js';
 import { runMissedPhase } from '../../src/modules/tasks/scheduler/missed.js';
-import { driveClaimUntilLeased, driveSendUntilFired } from './scheduler-schedule.test.js';
+import { driveClaimUntilLeased, driveSendUntilFired } from './scheduler-drivers.js';
 import { recordCancelBreach } from '../../src/modules/tasks/scheduler/scheduler-repository.js';
 import { runCancelPhase } from '../../src/modules/tasks/scheduler/cancel-phase.js';
 import { runClaimPhase } from '../../src/modules/tasks/scheduler/claim.js';
 import { runAckPhase } from '../../src/modules/tasks/scheduler/ack.js';
 import { localInAppProvider } from '../../src/modules/notifications/service.js';
 import type { InAppNotice } from '../../src/modules/notifications/service.js';
-import { databaseUrl, requirePool, seedApproval } from './setup.js';
+import {
+  createIntegrationDatabase,
+  databaseUrl,
+  type IntegrationDatabase,
+  seedApproval,
+} from './setup.js';
 
 const maybe = databaseUrl ? describe : describe.skip;
 
@@ -60,12 +65,14 @@ async function scheduleAndArm(pool: Pool, taskId: string, ownerId: string): Prom
 }
 
 maybe('scheduler fault injection (F1/F2, D9)', () => {
+  let database: IntegrationDatabase;
   let pool: Pool;
-  beforeAll(() => {
-    pool = requirePool();
+  beforeAll(async () => {
+    database = await createIntegrationDatabase();
+    pool = database.pool;
   });
   afterAll(async () => {
-    await pool.end();
+    await database?.close();
   });
 
   it('F1 kill -9 resume: exactly one notice, exactly one fired event', async () => {
