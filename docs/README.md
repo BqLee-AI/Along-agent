@@ -26,7 +26,7 @@
 | 05   | [time-core 时间层](design/05-time-core.md)                               | 纯函数 normalize、有限真实规则上下文、typed 时间失败、fold 候选与实际 readiness              |
 | 06   | [approvals 确认门](design/06-approvals-confirmation-gate.md)             | 副作用承诺持久对象、状态机、presentation_hash 幂等消费                                       |
 | 07   | [task_events 事件账](design/07-task-events-ledger.md)                    | 只追加账本、取消优先、活动页读模型                                                           |
-| 08   | [调度与投递](design/08-scheduler-and-delivery.md)                        | worker 角色、PG lease+fencing、outbox、Notifier 投递                                         |
+| 08   | [调度与投递](design/08-scheduler-and-delivery.md)                        | 一次性调用许可、独立本地接收、未知不重发、取消栅栏及真实崩溃恢复边界                         |
 | 09   | [AgentRuntime 与 checkpoint](design/09-agent-runtime-and-checkpoint.md)  | TsAgentRuntime 主实现、run/attempt/checkpoint、预算权威                                      |
 | 10   | [API 与流式通道](design/10-api-and-stream-design.md)                     | REST 真源、envelope、SSE 版本化、WS 延后                                                     |
 | 11   | [CangjieMagic spike 与灰度](design/11-cangjie-runtime-spike.md)          | 第二实现验证 S1–S3、灰度与结案条件                                                           |
@@ -66,15 +66,16 @@
 | 6    | [对话运行与预算](agent/05-chat-runtime-flow-and-budget.md)  | conversation/run/attempt/trace、状态机、双预算     |
 | 7    | [评测夹具](agent/06-eval-fixtures.md)                       | 50 条时间表达集、200 卡片集版本化、指标口径        |
 
-## 六、Demo、收口规划与验收记录（5 篇）
+## 六、Demo、收口规划与验收记录（6 篇）
 
-| 序号 | 文档                                                                | 作用                                                                   |
-| ---- | ------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| 1    | [v0 全链路 smoke](demo/v0-slice-smoke.md)                           | 7 步复现、断言取消后触发数=0                                           |
-| 2    | [time-core 黄金用例](demo/time-core-golden-cases.md)                | 4 基准+DST+50 表达，fixture 可被测试消费                               |
-| 3    | [故障注入 smoke](demo/fault-injection-smoke.md)                     | kill worker/取消竞争/tzdb 缺失，断言恰好一次                           |
-| 4    | [v0 七步 smoke 收口计划](demo/v0-smoke-closeout-plan.md)            | 真实链路缺口、最小实施顺序、七步证据与完整 v0 验收边界                 |
-| 5    | [2026-10-21 七步真实验收记录](demo/v0-smoke-evidence-2026-10-21.md) | 浏览器/通知/取消真实时窗、调用正控制与零调用、脱敏原始证据及未覆盖边界 |
+| 序号 | 文档                                                                | 作用                                                                      |
+| ---- | ------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| 1    | [v0 全链路 smoke](demo/v0-slice-smoke.md)                           | 7 步复现、断言取消后触发数=0                                              |
+| 2    | [time-core 黄金用例](demo/time-core-golden-cases.md)                | 4 基准+DST+50 表达，fixture 可被测试消费                                  |
+| 3    | [故障注入 smoke](demo/fault-injection-smoke.md)                     | kill worker/取消竞争/tzdb 缺失，断言恰好一次                              |
+| 4    | [v0 七步 smoke 收口计划](demo/v0-smoke-closeout-plan.md)            | 真实链路缺口、最小实施顺序、七步证据与完整 v0 验收边界                    |
+| 5    | [2026-10-21 七步真实验收记录](demo/v0-smoke-evidence-2026-10-21.md) | 浏览器/通知/取消真实时窗、调用正控制与零调用、脱敏原始证据及未覆盖边界    |
+| 6    | [v0 完整收口计划](demo/v0-closeout-plan.md)                         | A2 原子替代、A3 崩溃恢复与不确定窗口、A4 时间合同、镜像部署及完整验收门槛 |
 
 ## 七、References（3 篇）
 
