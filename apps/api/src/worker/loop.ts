@@ -5,7 +5,7 @@
 // this loop owns a separate, single-connection notification receive pool.
 import { randomUUID } from 'node:crypto';
 import { channel } from 'node:diagnostics_channel';
-import { Pool } from 'pg';
+import { createPool, type Pool } from '../db/pool.js';
 import { OUTBOX_POLL_INTERVAL_MS } from '@along/scheduler-core';
 import { runCancelPhase } from '../modules/tasks/scheduler/cancel-phase.js';
 import { runSchedulePhase } from '../modules/tasks/scheduler/schedule.js';
@@ -37,7 +37,7 @@ export function startWorkerLoop(options: WorkerLoopOptions = {}): WorkerLoopHand
   const onError = options.onError ?? (() => undefined);
   // pg hides explicit passwords from enumeration on Pool.options.
   const receivePool = pool
-    ? new Pool({ ...pool.options, password: pool.options.password, max: 1 })
+    ? createPool({ ...pool.options, password: pool.options.password, max: 1 })
     : null;
   const provider = receivePool ? createLocalInAppProvider(receivePool) : null;
   let activeTick: Promise<void> | null = null;

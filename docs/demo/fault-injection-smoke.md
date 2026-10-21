@@ -10,6 +10,7 @@
 - 实际演练 SQL 只读，不改 fire_at、lease、outbox、receipt、通知或事件。测试夹具中的改钟/填状态仅为隔离回归，不能当真实故障证据。
 - 优先 Linux 镜像内真实 SIGKILL，记录目标 PID 与退出证据。Windows强制终止需如实说明方式，不能声称执行了 kill -9。worker 恢复靠 PG 扫描，不是 AgentRuntime 的 resume_from/checkpoint。
 - 故障时可用同镜像 api/worker 分角色保留观察面；这不替代最终同镜像 ROLE=all+Compose+真实 Web 的业务验收。
+- 规则资源与 PostgreSQL 分别断开、同时断开并恢复。主池和独立接收池的闲置/借出连接错误只使相关查询失败并记录连接故障，不应使 API 进程退出；`/healthz` 仍 200，`/readyz` 优先报规则不可用，其次报数据库不可用，恢复后用真实查询转绿。
 
 ## F1 真正强杀与未知回答（A3）
 

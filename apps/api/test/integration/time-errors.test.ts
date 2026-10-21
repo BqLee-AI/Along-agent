@@ -110,6 +110,48 @@ maybe('A4 real HTTP and database boundaries', () => {
     await database?.close();
   });
 
+  for (const state of ['idle', 'checked_out'] as const) {
+    it(`survives a real ${state} backend disconnect and reconnects`, async () => {
+      const source = `
+        import { createPool } from ${JSON.stringify(new URL('../../src/db/pool.ts', import.meta.url).href)};
+        const target = createPool();
+        const control = createPool();
+        const client = await target.connect();
+        const before = (await client.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+        const { promise: ended, resolve } = Promise.withResolvers();
+        client.once('end', resolve);
+        if (${JSON.stringify(state)} === 'idle') client.release();
+        const terminated = (await control.query('SELECT pg_terminate_backend($1) AS terminated', [before])).rows[0].terminated;
+        if (!terminated) throw new Error('owned backend was not terminated');
+        await ended;
+        if (${JSON.stringify(state)} === 'checked_out') client.release();
+        const after = (await target.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+        console.log(JSON.stringify({ before, after, terminated }));
+        await target.end();
+        await control.end();
+      `;
+      const child = Bun.spawn([process.execPath, '--eval', source], {
+        env: { ...process.env, DATABASE_URL: database.connectionString },
+        signal: AbortSignal.timeout(3_000),
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const [stdout, stderr, exitCode] = await Promise.all([
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+        child.exited,
+      ]);
+      if (exitCode !== 0) throw new Error(stderr);
+      const result = JSON.parse(stdout) as {
+        before: number;
+        after: number;
+        terminated: boolean;
+      };
+      expect(result.terminated).toBe(true);
+      expect(result.after).not.toBe(result.before);
+    });
+  }
+
   it('bad rules reject before every new audit/commitment row and leave the key reusable', async () => {
     await withApi(pool, async (base, deps, ownerId) => {
       deps.timeContext = unavailable;
