@@ -76,24 +76,25 @@
 | 8 触发         | [Required] fired/missed 事件；Notifier 回执号                                                                              | ACK_UNKNOWN 只核对不重发（见 08）                                                   |
 | 取消           | [Required] cancel_pending→cancelled；cancel_requested 事件                                                                 | 无撤销回执 → 停 cancel_pending，不谎称已取消                                        |
 
-## 3. v0 端点清单（约 12 + 2 探针，不新增）
+## 3. v0 端点清单（13 业务端点 + 2 探针）
 
-| 方法 | 路径                              | 说明                                                    |
-| ---- | --------------------------------- | ------------------------------------------------------- |
-| GET  | `/me`                             | 当前用户快照（鉴权 Deferred，字段不展开）               |
-| GET  | `/brief`                          | 今日简报 + 卡片（只读聚合）                             |
-| POST | `/conversations/messages`         | 发送消息，SSE 回流（思考/澄清/确认卡引用，不直返 task） |
-| GET  | `/conversations/{id}`             | 会话详情（含消息 + 关联 approval/task id 引用）         |
-| GET  | `/approvals`                      | 待确认队列                                              |
-| GET  | `/approvals/{id}`                 | 确认单详情 + 快照                                       |
-| POST | `/approvals/{id}/actions/confirm` | 确认（单事务建 task），见 06                            |
-| POST | `/approvals/{id}/actions/reject`  | 拒绝（pending→rejected）                                |
-| GET  | `/tasks`                          | 任务列表                                                |
-| GET  | `/tasks/{id}`                     | 任务详情，含站内通知只读投影（§3.1）                    |
-| POST | `/tasks/{id}/actions/cancel`      | 取消（cancel_pending→cancelled）                        |
-| GET  | `/tasks/{id}/events`              | 只追加事件账只读（见 07）                               |
-| GET  | `/healthz`                        | 存活探针，不依赖 DB                                     |
-| GET  | `/readyz`                         | 就绪探针；类型化错误，不降级（见 05 tzdb 门）           |
+| 方法 | 路径                              | 说明                                                                    |
+| ---- | --------------------------------- | ----------------------------------------------------------------------- |
+| GET  | `/me`                             | 当前用户快照（鉴权 Deferred，字段不展开）                               |
+| GET  | `/brief`                          | 今日简报 + 卡片（只读聚合）                                             |
+| POST | `/conversations/messages`         | 发送消息，SSE 回流（思考/澄清/确认卡引用，不直返 task）                 |
+| GET  | `/conversations/{id}`             | 会话详情（含消息 + 关联 approval/task id 引用）                         |
+| GET  | `/approvals`                      | 待确认队列                                                              |
+| GET  | `/approvals/{id}`                 | 确认单详情 + 快照                                                       |
+| POST | `/approvals/{id}/actions/confirm` | 确认（单事务建 task），见 06                                            |
+| POST | `/approvals/{id}/actions/reject`  | 拒绝（pending→rejected）                                                |
+| GET  | `/tasks`                          | 任务列表                                                                |
+| GET  | `/tasks/{id}`                     | 任务详情，含站内通知只读投影（§3.1）                                    |
+| POST | `/tasks/{id}/actions/cancel`      | 取消（cancel_pending→cancelled）                                        |
+| GET  | `/tasks/{id}/events`              | 只追加事件账只读（见 07）                                               |
+| POST | `/approvals/{id}/actions/revise`  | 显式修改指定 pending 提议，新详情重回显且须重新按钮确认（design/06 §9） |
+| GET  | `/healthz`                        | 存活探针，不依赖 DB                                                     |
+| GET  | `/readyz`                         | 就绪探针；类型化错误，不降级（见 05 tzdb 门）                           |
 
 - [Required] v0 不新增以上之外的端点；WS + ws-ticket 自 P2 起，Web Push 仅兜底，均不在 v0。
 - [Required] 全链路 `request_id` + 幂等键；POST confirm/cancel 连点只回同一结果。

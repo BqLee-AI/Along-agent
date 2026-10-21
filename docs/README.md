@@ -24,7 +24,7 @@
 | 03   | [v0 垂直切片](design/03-v0-vertical-slice.md)                            | 简报→卡片→对话→按钮确认→调度→站内通知详情投影→活动账；真实取消回执与七步证据边界             |
 | 04   | [五缝契约](design/04-five-seams-contract.md)                             | AgentRuntime/ToolGateway/Scheduler/Notifier/ConnectorVault 端口契约                          |
 | 05   | [time-core 时间层](design/05-time-core.md)                               | 纯函数 normalize、有限真实规则上下文、typed 时间失败、fold 候选与实际 readiness              |
-| 06   | [approvals 确认门](design/06-approvals-confirmation-gate.md)             | 副作用承诺持久对象、状态机、presentation_hash 幂等消费                                       |
+| 06   | [approvals 确认门](design/06-approvals-confirmation-gate.md)             | 显式完整修改、单一后继、持久幂等、锁后有效期及按钮重新确认                                   |
 | 07   | [task_events 事件账](design/07-task-events-ledger.md)                    | 只追加账本、取消优先、活动页读模型                                                           |
 | 08   | [调度与投递](design/08-scheduler-and-delivery.md)                        | 一次性调用许可、独立本地接收、未知不重发、取消栅栏及真实崩溃恢复边界                         |
 | 09   | [AgentRuntime 与 checkpoint](design/09-agent-runtime-and-checkpoint.md)  | TsAgentRuntime 主实现、run/attempt/checkpoint、预算权威                                      |
@@ -37,11 +37,11 @@
 
 | 序号 | 文档                                                    | 作用                                                          |
 | ---- | ------------------------------------------------------- | ------------------------------------------------------------- |
-| 1    | [API 索引与约定](api/README.md)                         | 12 业务端点 + 2 探针全表、envelope、幂等、错误码总表          |
+| 1    | [API 索引与约定](api/README.md)                         | 13 业务端点 + 2 探针全表、envelope、幂等、错误码总表          |
 | 2    | [auth 与 me](api/auth/auth_routes.md)                   | 鉴权 Deferred 二选一、GET /me、401/403                        |
 | 3    | [brief 简报与卡片](api/brief/brief_routes.md)           | GET /brief、card schema_version                               |
 | 4    | [对话与 SSE](api/conversations/conversations_routes.md) | POST messages SSE、GET 恢复、approval_required 带 approval_id |
-| 5    | [确认门](api/approvals/approvals_routes.md)             | 列表/详情/confirm\|reject、presentation_hash、重复确认 200    |
+| 5    | [确认门](api/approvals/approvals_routes.md)             | 列表/详情/confirm\|reject\|revise、持久修改重放、重新确认     |
 | 6    | [任务与事件](api/tasks/tasks_routes.md)                 | 列表/详情/cancel 幂等/events 只读按 recorded_at               |
 
 ## 四、Schema（5 篇）
@@ -51,7 +51,7 @@
 | 1    | [Schema 索引](schema/README.md)                      | 落地顺序、enum text+check、append-only、owner_id、敏感约定                        |
 | 2    | [身份与租户](schema/identity-schema.md)              | users、sessions（随鉴权 Deferred）                                                |
 | 3    | [对话与运行](schema/conversation-and-runs-schema.md) | conversations/messages、agent_runs/run_attempts/run_checkpoints、revisions 不可变 |
-| 4    | [承诺与账本](schema/commitments-schema.md)           | approvals/tasks/task_events/outbox/notifications 全字段                           |
+| 4    | [承诺与账本](schema/commitments-schema.md)           | approvals/修改预约/tasks/task_events/outbox/notifications 全字段                  |
 | 5    | [简报与卡片](schema/content-schema.md)               | briefs/cards 含 schema_version                                                    |
 
 ## 五、Agent（7 篇）
