@@ -12,12 +12,7 @@ import {
   validationError,
   type HttpError,
 } from '../../http/errors.js';
-import {
-  computePresentationHash,
-  PRESENTATION_VERSION_V1,
-  shortNoOf,
-  validateSeenContent,
-} from './presentation.js';
+import { computePresentationHash, shortNoOf, validateSeenContent } from './presentation.js';
 import {
   findOutboxTaskByKey,
   findSuccessorId,
@@ -65,6 +60,7 @@ function snapshotOf(row: {
   timezone_id: string;
   fold: number;
   resolved_utc_offset_seconds: number;
+  presentation_version: string;
 }) {
   return {
     originalText: row.original_text ?? '',
@@ -73,7 +69,7 @@ function snapshotOf(row: {
     fold: (row.fold === 1 ? 1 : 0) as 0 | 1,
     offsetSeconds: row.resolved_utc_offset_seconds,
     occurrence: 'single' as const,
-    presentationVersion: PRESENTATION_VERSION_V1,
+    presentationVersion: row.presentation_version,
   };
 }
 

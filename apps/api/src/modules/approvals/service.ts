@@ -15,7 +15,7 @@ import {
   PRESENTATION_VERSION_V1,
   renderEchoCancelV1,
   renderEchoV1,
-  renderEchoV1Second,
+  renderCreateTaskEcho,
   shortNoOf,
 } from './presentation.js';
 import { ApprovalListQuerySchema } from './schemas.js';
@@ -101,14 +101,12 @@ export function detailOf(
     fold: (row.fold === 1 ? 1 : 0) as 0 | 1,
     offsetSeconds: row.resolved_utc_offset_seconds,
     occurrence: 'single' as const,
-    presentationVersion: PRESENTATION_VERSION_V1,
+    presentationVersion: row.presentation_version,
   };
   const echo =
     row.kind === 'cancel_task'
       ? renderEchoCancelV1(snapshot, shortNoOf(row.id))
-      : row.fold === 1
-        ? renderEchoV1Second(snapshot)
-        : renderEchoV1(snapshot, shortNoOf(row.id));
+      : renderCreateTaskEcho(snapshot, shortNoOf(row.id));
   return {
     approval_id: row.id,
     kind: row.kind ?? 'create_task',

@@ -24,7 +24,7 @@
 | 03   | [v0 垂直切片](design/03-v0-vertical-slice.md)                            | 简报→卡片→对话→按钮确认→调度→站内通知详情投影→活动账；真实取消回执与七步证据边界             |
 | 04   | [五缝契约](design/04-five-seams-contract.md)                             | AgentRuntime/ToolGateway/Scheduler/Notifier/ConnectorVault 端口契约                          |
 | 05   | [time-core 时间层](design/05-time-core.md)                               | 纯函数 normalize、有限真实规则上下文、typed 时间失败、fold 候选与实际 readiness              |
-| 06   | [approvals 确认门](design/06-approvals-confirmation-gate.md)             | 显式完整修改、单一后继、持久幂等、锁后有效期及按钮重新确认                                   |
+| 06   | [approvals 确认门](design/06-approvals-confirmation-gate.md)             | first 版本化冻结回显、显式完整修改、单一后继、持久幂等与按钮重新确认                         |
 | 07   | [task_events 事件账](design/07-task-events-ledger.md)                    | 只追加账本、取消优先、活动页读模型                                                           |
 | 08   | [调度与投递](design/08-scheduler-and-delivery.md)                        | 一次性调用许可、独立本地接收、未知不重发、取消栅栏及真实崩溃恢复边界                         |
 | 09   | [AgentRuntime 与 checkpoint](design/09-agent-runtime-and-checkpoint.md)  | TsAgentRuntime 主实现、run/attempt/checkpoint、预算权威                                      |

@@ -13,8 +13,7 @@ import {
 } from '../approvals/create.js';
 import {
   renderEchoCancelV1,
-  renderEchoV1,
-  renderEchoV1Second,
+  renderCreateTaskEcho,
   shortNoOf,
   type PresentationSnapshot,
 } from '../approvals/presentation.js';
@@ -148,6 +147,7 @@ function approvalSnapshot(input: {
   timezoneId: string;
   fold: 0 | 1;
   offsetSeconds: number;
+  presentationVersion: string;
 }): PresentationSnapshot {
   return {
     originalText: input.originalText,
@@ -156,7 +156,7 @@ function approvalSnapshot(input: {
     fold: input.fold,
     offsetSeconds: input.offsetSeconds,
     occurrence: 'single',
-    presentationVersion: 'v1',
+    presentationVersion: input.presentationVersion,
   };
 }
 
@@ -217,6 +217,7 @@ async function runProposeTask(
     wallTime,
     timezoneId: result.timezone_id,
     fold,
+    foldChoice: ctx.foldChoice,
     offsetSeconds: normalized.offset_seconds,
     fireAtUtc: normalized.fire_at_utc,
     tzdbVersion: result.tzdb_version,
@@ -227,11 +228,9 @@ async function runProposeTask(
     timezoneId: approval.timezoneId,
     fold: approval.fold,
     offsetSeconds: approval.offsetSeconds,
+    presentationVersion: approval.presentationVersion,
   });
-  const echo =
-    fold === 1
-      ? renderEchoV1Second(snapshot)
-      : renderEchoV1(snapshot, shortNoOf(approval.approvalId));
+  const echo = renderCreateTaskEcho(snapshot, shortNoOf(approval.approvalId));
   return {
     payload: {
       kind: 'approval',
@@ -329,6 +328,7 @@ async function runRequestCancelTask(
       timezoneId: approval.timezoneId,
       fold: approval.fold,
       offsetSeconds: approval.offsetSeconds,
+      presentationVersion: approval.presentationVersion,
     }),
     shortNoOf(approval.approvalId),
   );

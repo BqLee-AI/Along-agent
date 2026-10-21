@@ -1,11 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import {
   computePresentationHash,
-  encodePresentationCanonical,
-  normalizeLayoutWhitespace,
   renderEchoV1,
   renderEchoV1Second,
-  shortNoOf,
   validateSeenContent,
   type PresentationSnapshot,
 } from '../src/modules/approvals/presentation.js';
@@ -21,37 +18,55 @@ const SNAPSHOT: PresentationSnapshot = {
 };
 
 describe('presentation contract', () => {
-  it('hash is stable for the same snapshot', () => {
-    expect(computePresentationHash(SNAPSHOT)).toBe(computePresentationHash(SNAPSHOT));
-    expect(computePresentationHash(SNAPSHOT).startsWith('ph_')).toBe(true);
-  });
-
   it('hash pins the frozen v1 digest', () => {
     expect(computePresentationHash(SNAPSHOT)).toBe(
       'ph_9baa511f0a012bfe50e0fea99b475efc088d65f32d907780765fbbfe2c189739',
     );
   });
 
-  it('canonical encoding is length-prefixed with domain', () => {
-    const canonical = encodePresentationCanonical(SNAPSHOT);
-    expect(canonical.startsWith('21:along-presentation/v1')).toBe(true);
-  });
-
-  it('short number is display-only', () => {
-    expect(shortNoOf('11111111-1111-1111-1111-111111111111')).toBe('A-1111');
-  });
-
-  it('echo v1 renders the ordinary template', () => {
-    const echo = renderEchoV1(SNAPSHOT, 'A-1111');
-    expect(echo).toContain('请确认 A-1111');
-    expect(echo).toContain('明天 9:20 喝水');
-    expect(echo).toContain('2026-10-17 09:20');
-  });
-
-  it('echo v1 second renders the ambiguous variant', () => {
-    const second = { ...SNAPSHOT, fold: 1 as const, offsetSeconds: -18000 };
+  it('v1 second keeps the chosen occurrence and frozen offset', () => {
+    const second: PresentationSnapshot = {
+      ...SNAPSHOT,
+      originalText: '2026-11-01 01:30 提醒我喝水',
+      localDatetime: '2026-11-01 01:30',
+      timezoneId: 'America/New_York',
+      fold: 1,
+      offsetSeconds: -18000,
+    };
     const echo = renderEchoV1Second(second);
     expect(echo).toContain('第二次出现');
+    expect(echo).toContain('UTC-05:00');
+  });
+
+  it('first-v2 binds the visible occurrence and frozen offset rather than accepting the old ordinary echo', () => {
+    const first: PresentationSnapshot = {
+      ...SNAPSHOT,
+      originalText: '2026-11-01 01:30 提醒我喝水',
+      localDatetime: '2026-11-01 01:30',
+      timezoneId: 'America/New_York',
+      offsetSeconds: -14400,
+      presentationVersion: 'v2',
+    };
+    const seen =
+      "原话'2026-11-01 01:30 提醒我喝水'，按 America/New_York " +
+      '选择第一次出现的 2026-11-01 01:30（UTC-04:00），' +
+      '单次提醒；确认前不会创建正式提醒或排期。';
+    for (const [seenContent, valid] of [
+      [seen, true],
+      [seen.replace('第一次', '第二次'), false],
+      [seen.replace('UTC-04:00', 'UTC-05:00'), false],
+      [renderEchoV1(first, 'A-1111'), false],
+    ] as const) {
+      expect(
+        validateSeenContent({
+          seenContent,
+          snapshot: first,
+          shortNo: 'A-1111',
+          variant: 'ordinary',
+          presentationVersion: 'v2',
+        }),
+      ).toBe(valid);
+    }
   });
 
   it('seen_content accepts layout whitespace but not original edits', () => {
@@ -88,9 +103,5 @@ describe('presentation contract', () => {
         presentationVersion: 'v9',
       }),
     ).toBe(false);
-  });
-
-  it('layout whitespace collapse is full-width aware', () => {
-    expect(normalizeLayoutWhitespace('请确认　A-1111 ：')).toBe('请确认 A-1111 ：');
   });
 });

@@ -64,6 +64,7 @@
 ```
 
 - 展示层只读呈现冻结字段，不换算、不推断、不改写 [Required]。
+- `presentation_version` 是冻结字符串。普通、第二次与取消提议使用各自既有 v1 模板；显式 first 且结果 `fold=0` 的新提议使用 v2，`echo_text` 明确“第一次出现”和冻结 `UTC±HH:MM` 偏移。客户端直接展示详情和提交所见正文，不自行重建模板或把旧 v1 正文配上 v2 hash；模板版本参与既有规范 hash，未知版本不予确认（design/06 §2、§5）。
 - 不存在/他人资源：`404` / `403`。
 
 ## 4. POST confirm / reject [Required]

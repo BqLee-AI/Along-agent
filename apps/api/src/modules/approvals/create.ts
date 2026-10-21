@@ -4,7 +4,11 @@
 // confirm.ts (single sanctioned cross-module transaction).
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
-import { computePresentationHash, PRESENTATION_VERSION_V1 } from './presentation.js';
+import {
+  computePresentationHash,
+  PRESENTATION_VERSION_FIRST_V2,
+  PRESENTATION_VERSION_V1,
+} from './presentation.js';
 
 const APPROVAL_TTL_HOURS = 24;
 
@@ -15,6 +19,7 @@ export interface CreateTaskApprovalInput {
   wallTime: string; // "YYYY-MM-DD HH:mm" (minute precision, frozen)
   timezoneId: string;
   fold: 0 | 1;
+  foldChoice: 'first' | 'second' | 'none';
   offsetSeconds: number;
   fireAtUtc: string; // ISO-8601 UTC
   tzdbVersion: string;
@@ -47,13 +52,16 @@ export interface CreatedApproval {
   fireAtUtc: string;
 }
 
-function snapshotOf(input: {
-  originalText: string;
-  wallTime: string;
-  timezoneId: string;
-  fold: 0 | 1;
-  offsetSeconds: number;
-}) {
+function snapshotOf(
+  input: {
+    originalText: string;
+    wallTime: string;
+    timezoneId: string;
+    fold: 0 | 1;
+    offsetSeconds: number;
+  },
+  presentationVersion: string,
+) {
   return {
     originalText: input.originalText,
     localDatetime: input.wallTime,
@@ -61,7 +69,7 @@ function snapshotOf(input: {
     fold: input.fold,
     offsetSeconds: input.offsetSeconds,
     occurrence: 'single' as const,
-    presentationVersion: PRESENTATION_VERSION_V1,
+    presentationVersion,
   };
 }
 
@@ -76,7 +84,11 @@ export async function createTaskApproval(
   input: CreateTaskApprovalInput,
 ): Promise<CreatedApproval> {
   const approvalId = randomUUID();
-  const presentationHash = computePresentationHash(snapshotOf(input));
+  const presentationVersion =
+    input.fold === 0 && input.foldChoice === 'first'
+      ? PRESENTATION_VERSION_FIRST_V2
+      : PRESENTATION_VERSION_V1;
+  const presentationHash = computePresentationHash(snapshotOf(input, presentationVersion));
   const { rows } = await client.query<{ expires_at: Date }>(
     `INSERT INTO approvals (id, owner_id, conversation_id, original_text,
        fire_at_utc, wall_time, timezone_id, fold, resolved_utc_offset_seconds,
@@ -97,7 +109,7 @@ export async function createTaskApproval(
       input.offsetSeconds,
       input.tzdbVersion,
       presentationHash,
-      PRESENTATION_VERSION_V1,
+      presentationVersion,
       String(APPROVAL_TTL_HOURS),
     ],
   );
@@ -107,7 +119,7 @@ export async function createTaskApproval(
     approvalId,
     originalText: input.originalText,
     presentationHash,
-    presentationVersion: PRESENTATION_VERSION_V1,
+    presentationVersion,
     expiresAt: expiresAt.toISOString(),
     wallTime: input.wallTime,
     timezoneId: input.timezoneId,
@@ -161,7 +173,7 @@ export async function createCancelTaskApproval(
   }
 
   const approvalId = randomUUID();
-  const presentationHash = computePresentationHash(snapshotOf(input));
+  const presentationHash = computePresentationHash(snapshotOf(input, PRESENTATION_VERSION_V1));
   const { rows } = await client.query<{ expires_at: Date }>(
     `INSERT INTO approvals (id, owner_id, conversation_id, original_text,
        fire_at_utc, wall_time, timezone_id, fold, resolved_utc_offset_seconds,

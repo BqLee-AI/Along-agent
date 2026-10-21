@@ -424,8 +424,8 @@ maybe('A4 real HTTP and database boundaries', () => {
       }
     });
   });
-  it('first/second HTTP re-proposals freeze the selected UTC/offset without confirming or moving the conversation anchor', async () => {
-    await withApi(pool, async (base, _deps, ownerId) => {
+  it('first/second HTTP re-proposals freeze the selected occurrence, UTC and offset without confirming or moving the conversation anchor', async () => {
+    await withApi(pool, async (base, deps, ownerId) => {
       const key = randomUUID();
       const original = await post(base, proposal, key);
       const failed = frames(await original.text());
@@ -446,6 +446,23 @@ maybe('A4 real HTTP and database boundaries', () => {
         expect(events.at(-1)?.type).toBe('thread.completed');
         const required = events.find((event) => event.type === 'approval_required');
         if (required?.type !== 'approval_required') throw new Error('pending approval missing');
+        const occurrence = fold === 0 ? '第一次出现' : '第二次出现';
+        const frozenOffset = fold === 0 ? 'UTC-04:00' : 'UTC-05:00';
+        const message = events
+          .filter((event) => event.type === 'message.delta')
+          .map((event) => event.payload.delta)
+          .join('');
+        expect(message).toContain(occurrence);
+        expect(message).toContain(frozenOffset);
+        deps.timeContext = unavailable;
+        const detailResponse = await fetch(
+          `${base}/api/v1/approvals/${required.payload.approval_id}`,
+        );
+        expect(detailResponse.status).toBe(200);
+        const detail = (await detailResponse.json()) as { data: { echo_text: string } };
+        expect(detail.data.echo_text).toContain(occurrence);
+        expect(detail.data.echo_text).toContain(frozenOffset);
+        deps.timeContext = healthy;
         const { rows } = await pool.query(
           'SELECT state, timezone_id, fold, resolved_utc_offset_seconds, fire_at_utc FROM approvals WHERE id = $1',
           [required.payload.approval_id],

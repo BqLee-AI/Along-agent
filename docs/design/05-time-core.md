@@ -74,6 +74,7 @@ normalize(wall_time, timezone_id, fold_choice, ruleset) -> Result
 
 - 不存在时刻（如 `2027-03-14 02:30 America/New_York`）→ NONEXISTENT_LOCAL_TIME：“当地并不存在；不猜、不存、不排，请重定。”不返回快照。
 - 出现两次（如 `2027-11-07 01:30`）→ `fold_choice=none` 时 AMBIGUOUS_LOCAL_TIME 并带两候选（first/偏移/UTC、second/偏移/UTC），必须摆偏移（缩写会撞、偏移不会）。输入/候选的 `fold_choice` 是 `first | second | none`；成功结果与现有 approval 快照的 `fold` 是 `0 | 1`，分别表示较早/较晚瞬间，不虚构持久化 `fold_choice` 列。用户选择语义与偏移共同冻结进回显/快照，缺一样即解释不清，作废重来。
+- 首次出现的选定语义由创建入口连同 `fold=0` 传给审批创建器，新 first 回显冻结 `presentation_version=v2`，明确“第一次出现”及 `UTC±HH:MM` 数值偏移；second 保留既有 v1 第二次模板。详情、SSE 与确认校验读取该冻结版本和偏移，不靠当前规则或墙上时间重新判断歧义。模板与旧提议处理见 design/06 §2。
 
 ## 5. tzdb + readyz [Required]
 
