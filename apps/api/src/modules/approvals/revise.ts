@@ -208,6 +208,7 @@ export async function reviseApproval(
         wallTime: wallTextOf(time.wall_time),
         timezoneId: time.timezone_id,
         fold: time.normalized.fold,
+        foldChoice: input.fold_choice,
         offsetSeconds: time.normalized.offset_seconds,
         fireAtUtc: time.normalized.fire_at_utc,
         tzdbVersion: time.tzdb_version,

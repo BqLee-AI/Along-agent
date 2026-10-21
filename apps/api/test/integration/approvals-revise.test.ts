@@ -409,7 +409,7 @@ maybe('approval revise durable PostgreSQL behavior', () => {
     expect((await state(pool, cancel.approvalId)).state).toBe('pending');
   });
 
-  it('ambiguous choice uses a new request key and freezes the selected shared candidate', async () => {
+  it('ambiguous choice uses a new key and confirms only the selected occurrence and frozen offset', async () => {
     for (const fold of ['first', 'second'] as const) {
       const old = await seedApproval(pool, {});
       const input = { ...body('2026-11-01 01:30 喝水'), confirmed_timezone: 'America/New_York' };
@@ -430,6 +430,31 @@ maybe('approval revise durable PostgreSQL behavior', () => {
       expect(row.fire_at_utc.toISOString()).toBe(
         fold === 'first' ? '2026-11-01T05:30:00.000Z' : '2026-11-01T06:30:00.000Z',
       );
+      const { detail } = await getApprovalDetail({ pool }, old.ownerId, next.successor_approval_id);
+      expect(detail.echo_text).toContain(fold === 'first' ? '第一次出现' : '第二次出现');
+      const offset = fold === 'first' ? 'UTC-04:00' : 'UTC-05:00';
+      const otherOffset = fold === 'first' ? 'UTC-05:00' : 'UTC-04:00';
+      expect(detail.echo_text).toContain(offset);
+      await expect(
+        confirmApproval({ pool }, old.ownerId, next.successor_approval_id, {
+          presentation_hash: detail.presentation_hash,
+          seen_content: detail.echo_text.replace(offset, otherOffset),
+          idempotency_key: randomUUID(),
+        }),
+      ).rejects.toMatchObject({ errorCode: 'PRESENTATION_MISMATCH' });
+      expect((await counts(pool, old.ownerId)).tasks).toBe(0);
+      await confirmApproval(
+        { pool },
+        old.ownerId,
+        next.successor_approval_id,
+        await confirmBody(pool, old.ownerId, next.successor_approval_id),
+      );
+      expect(await counts(pool, old.ownerId)).toMatchObject({
+        tasks: 1,
+        task_events: 1,
+        outbox: 1,
+        notifications: 0,
+      });
     }
   });
 
@@ -533,6 +558,7 @@ maybe('approval revise durable PostgreSQL behavior', () => {
       wallTime: '2026-11-02 09:20',
       timezoneId: 'Asia/Shanghai',
       fold: 0,
+      foldChoice: 'none',
       offsetSeconds: 28800,
       fireAtUtc: '2026-11-02T01:20:00Z',
       tzdbVersion: 'fixture-v1',
