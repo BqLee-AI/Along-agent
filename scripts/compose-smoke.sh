@@ -40,7 +40,7 @@ echo "ok /readyz (no TZDB) -> 503 TZDB_UNAVAILABLE"
 
 echo "== reboot with TZDB_VERSION =="
 $COMPOSE down -v >/dev/null 2>&1 || true
-TZDB_VERSION=2024a $COMPOSE up -d --build
+TZDB_VERSION=fixture-v1 $COMPOSE up -d --build
 
 for _ in $(seq 1 30); do
   curl -sf "$BASE/healthz" >/dev/null 2>&1 && break

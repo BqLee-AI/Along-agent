@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { classifyEntry } from '../src/entry.js';
+import { ALIAS_TABLE_V1, classifyEntry } from '../src/entry.js';
 import { FIXTURE_V1 } from '../src/fixtures/fixture-v1.js';
 import { normalize } from '../src/normalize.js';
 import { TIME_EXPRESSIONS_V1 } from './fixtures/time-expressions-v1.js';
@@ -45,6 +45,7 @@ describe('M1 50 expressions', () => {
     let okTotal = 0;
     for (const row of TIME_EXPRESSIONS_V1) {
       const c = classifyEntry({
+        aliases: ALIAS_TABLE_V1,
         text: row.text,
         anchorReceivedAtUtc: row.anchor_received_at_utc,
         receivedAtUtc: row.received_at_utc,
@@ -75,7 +76,7 @@ describe('M1 50 expressions', () => {
         expect(c.reason, row.expr_id).toBe(row.expect_detail.reason);
       }
     }
-    expect(okTotal).toBe(22);
-    expect(okFire).toBe(19);
+    expect(okTotal).toBe(21);
+    expect(okFire).toBe(18);
   });
 });

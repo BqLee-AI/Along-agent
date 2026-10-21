@@ -18,11 +18,13 @@ import {
 import { verifyCsrf, type ActorResolver } from '../../http/auth.js';
 import type { ThreadEvent } from '@along/stream-protocol';
 import { executeRun, getConversationDetail, startConversationRun } from './service.js';
+import type { TimeContext } from '../time/context.js';
 
 export interface RouteDeps {
   pool: Pool | null;
   resolveActor: ActorResolver;
   body?: unknown;
+  timeContext: TimeContext;
 }
 
 function queryOf(url: URL): Record<string, string | string[] | undefined> {

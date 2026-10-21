@@ -4,14 +4,8 @@
 // It never creates/updates tasks; high-risk tools only insert approvals.
 import { createHash } from 'node:crypto';
 import type { Pool } from 'pg';
-import {
-  ALIAS_TABLE_V1,
-  FIXTURE_V1,
-  classifyEntry,
-  normalize,
-  type AmbiguousCandidate,
-  type NormalizeErrorCode,
-} from '@along/time-core';
+import type { TimeContext } from '../time/context.js';
+import { normalizeTime, type TimeFailure } from '../time/normalize.js';
 import {
   createCancelTaskApproval,
   createTaskApproval,
@@ -37,6 +31,7 @@ export interface ToolContext {
   anchorReceivedAtUtc: string;
   receivedAtUtc: string;
   foldChoice: 'first' | 'second' | 'none';
+  timeContext: TimeContext;
 }
 
 export interface ApprovalPayload {
@@ -52,6 +47,11 @@ export interface ClarifyPayload {
   reason: string;
   phrase_key: string;
   text: string;
+}
+
+export interface TimeErrorPayload {
+  kind: 'time_error';
+  error: TimeFailure;
 }
 
 export interface ListTasksPayload {
@@ -91,6 +91,7 @@ export interface PrefsPayload {
 export type ToolPayload =
   | ApprovalPayload
   | ClarifyPayload
+  | TimeErrorPayload
   | ListTasksPayload
   | BriefPayload
   | PrefsPayload;
@@ -105,33 +106,11 @@ const CLARIFY_TEXT: Record<string, string> = {
   ASK_TIMEZONE_ALIAS: '这个时区别名认不出来；请给规范 IANA 时区，如 Asia/Shanghai。',
   ASK_DAYPART: '请明确是上午 09:00 还是晚上 21:00？（差半天，不能替选）',
   ASK_DATE_RECONFIRM: '跨天了，请重新给具体日期。',
+  ASK_FOLD: '结构化选择与原文冲突，请明确第一次或第二次并重新选择。',
   RANGE_UNSUPPORTED: '范围无法唯一排触发点，请给准确时刻；v0 不支持范围提醒。',
   NO_CALENDAR: 'v0 不读日历不监测空闲，这次不保存；请给明确日期时间时区。',
   ASK_EXACT_TIME: '请给准确的日期和时间；v0 不支持“尽快/晚点”。',
 };
-
-const TIME_ERROR_TEXT: Record<NormalizeErrorCode, string> = {
-  NONEXISTENT_LOCAL_TIME: '当地并不存在这个时刻；不猜、不存、不排，请重定。',
-  AMBIGUOUS_LOCAL_TIME: '这个本地时间出现了两次，请选择第一次或第二次。',
-  TZDB_UNAVAILABLE: '时区规则库暂不可用，现在无法排期，请稍后再试。',
-  UNKNOWN_TIMEZONE: '这个时区别名认不出来；请给规范 IANA 时区，如 Asia/Shanghai。',
-};
-
-// "第一次 UTC−04:00（05:30 UTC），第二次 UTC−05:00（06:30 UTC），你要哪一次？"
-// Offsets disambiguate; abbreviations would collide (docs/agent/04).
-function ambiguousText(candidates: AmbiguousCandidate[]): string {
-  if (candidates.length === 0) return TIME_ERROR_TEXT.AMBIGUOUS_LOCAL_TIME;
-  const parts = candidates.map((candidate) => {
-    const minutes = Math.abs(candidate.offset_seconds) / 60;
-    const sign = candidate.offset_seconds < 0 ? '−' : '+';
-    const hh = String(Math.floor(minutes / 60)).padStart(2, '0');
-    const mm = String(minutes % 60).padStart(2, '0');
-    const utc = candidate.fire_at_utc.slice(11, 16);
-    const label = candidate.fold_choice === 'first' ? '第一次' : '第二次';
-    return `${label} UTC${sign}${hh}:${mm}（${utc} UTC）`;
-  });
-  return `出现了两次：${parts.join('，')}，你要哪一次？`;
-}
 
 // Deterministic canonical form for args_hash: sorted object keys, arrays in
 // order. Only the hash is stored (tool_calls never keeps raw args).
@@ -200,17 +179,22 @@ async function runProposeTask(
     };
   }
   const input = parsed.data;
-  const tz = input.timezone_hint ?? ctx.confirmedTimezone ?? '';
-
-  const classified = classifyEntry({
-    text: input.raw_time_text,
+  const result = normalizeTime(ctx.timeContext, {
+    raw_text: input.raw_time_text,
     anchorReceivedAtUtc: ctx.anchorReceivedAtUtc,
-    confirmedTz: tz,
+    confirmedTimezone: input.timezone_hint ?? ctx.confirmedTimezone,
     receivedAtUtc: ctx.receivedAtUtc,
-    fold: ctx.foldChoice,
-    ruleset: FIXTURE_V1,
+    foldChoice: ctx.foldChoice,
   });
-  if (classified.class !== 'normalize_ok' || !classified.wall_time || !classified.timezone_id) {
+  if (result.kind === 'error') {
+    return {
+      payload: { kind: 'time_error', error: result.error },
+      approvalId: null,
+      errorCode: result.error.code,
+    };
+  }
+  if (result.kind === 'clarify') {
+    const classified = result.classified;
     const phrase = classified.phrase_key ?? 'ASK_EXACT_TIME';
     return {
       payload: {
@@ -223,40 +207,19 @@ async function runProposeTask(
       errorCode: null,
     };
   }
-  const normalized = normalize(
-    classified.wall_time,
-    classified.timezone_id,
-    classified.fold ?? 'none',
-    FIXTURE_V1,
-  );
-  if (normalized.kind === 'error') {
-    const code = normalized.error;
-    return {
-      payload: {
-        kind: 'clarify',
-        reason: code,
-        phrase_key: code,
-        text:
-          code === 'AMBIGUOUS_LOCAL_TIME'
-            ? ambiguousText(normalized.candidates ?? [])
-            : TIME_ERROR_TEXT[code],
-      },
-      approvalId: null,
-      errorCode: null,
-    };
-  }
-  const wallTime = `${classified.wall_time.slice(0, 10)} ${classified.wall_time.slice(11, 16)}`;
+  const normalized = result.normalized;
+  const wallTime = `${result.wall_time.slice(0, 10)} ${result.wall_time.slice(11, 16)}`;
   const fold: 0 | 1 = normalized.fold;
   const approval = await createTaskApproval(pool, {
     ownerId: ctx.ownerId,
     conversationId: ctx.conversationId,
     originalText: input.note,
     wallTime,
-    timezoneId: classified.timezone_id,
+    timezoneId: result.timezone_id,
     fold,
     offsetSeconds: normalized.offset_seconds,
     fireAtUtc: normalized.fire_at_utc,
-    tzdbVersion: FIXTURE_V1.tzdb_version,
+    tzdbVersion: result.tzdb_version,
   });
   const snapshot = approvalSnapshot({
     originalText: approval.originalText,
@@ -497,7 +460,7 @@ async function runGetUserPrefs(
     payload: {
       kind: 'prefs',
       timezone_id: rows[0]?.timezone_id ?? null,
-      alias_version: ALIAS_TABLE_V1.version,
+      alias_version: ctx.timeContext.available ? ctx.timeContext.aliases.version : 'unavailable',
       quiet_hours: null,
       locale: null,
     },

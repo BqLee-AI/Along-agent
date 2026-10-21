@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { handleRequest } from '../src/http/app.js';
+import type { Pool } from 'pg';
+import { createTimeContext } from '../src/modules/time/context.js';
 
 interface FakeResponse extends ServerResponse {
   status: number;
@@ -54,10 +56,46 @@ describe('app', () => {
     });
   });
 
-  it('GET /readyz with TZDB_VERSION returns 200', async () => {
-    const { req, res } = fakePair('GET', '/readyz');
-    await handleRequest(req, res, { tzdbVersion: '2024a' });
+  it('GET /readyz requires matching actual rules and a reachable DB', async () => {
+    const { req, res, body } = fakePair('GET', '/readyz');
+    const pool = { query: async () => ({ rows: [{ '?column?': 1 }] }) } as unknown as Pool;
+    await handleRequest(req, res, { tzdbVersion: 'fixture-v1', pool });
     expect(res.status).toBe(200);
+    expect(body()).toEqual({ status: 'ok' });
+  });
+
+  it('GET /readyz rejects an arbitrary nonempty version', async () => {
+    const { req, res, body } = fakePair('GET', '/readyz');
+    await handleRequest(req, res, { tzdbVersion: '2024a' });
+    expect(res.status).toBe(503);
+    expect(body()).toEqual({ status: 'not_ready', reason: 'TZDB_UNAVAILABLE' });
+  });
+
+  it('DB failure only changes readiness, not liveness', async () => {
+    const pool = {
+      query: async () => {
+        throw new Error('connection refused');
+      },
+    } as unknown as Pool;
+    for (const path of ['/readyz', '/healthz']) {
+      const { req, res, body } = fakePair('GET', path);
+      await handleRequest(req, res, { tzdbVersion: 'fixture-v1', pool });
+      expect(res.status).toBe(path === '/readyz' ? 503 : 200);
+      expect(body()).toEqual(
+        path === '/readyz' ? { status: 'not_ready', reason: 'NOT_READY' } : { status: 'ok' },
+      );
+    }
+  });
+
+  it('bad actual rules take priority over an unavailable database', async () => {
+    const { req, res, body } = fakePair('GET', '/readyz');
+    await handleRequest(req, res, {
+      pool: null,
+      tzdbVersion: 'fixture-v1',
+      timeContext: createTimeContext('fixture-v1', null, null),
+    });
+    expect(res.status).toBe(503);
+    expect(body()).toEqual({ status: 'not_ready', reason: 'TZDB_UNAVAILABLE' });
   });
 
   it('guarded routes return 401 UNAUTHENTICATED envelope', async () => {

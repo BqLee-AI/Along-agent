@@ -70,6 +70,34 @@ export const ThreadCompletedPayloadSchema = z
   })
   .strict();
 
+export const AmbiguousTimeDetailsSchema = z
+  .object({
+    wall_time: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/),
+    timezone_id: z.string().min(1).max(100),
+    ruleset_id: z.string().min(1).max(200),
+    candidates: z.tuple([
+      z
+        .object({
+          fold_choice: z.literal('first'),
+          offset_seconds: z.number().int().min(-86400).max(86400),
+          fire_at_utc: z.string().datetime({ precision: 0 }),
+        })
+        .strict(),
+      z
+        .object({
+          fold_choice: z.literal('second'),
+          offset_seconds: z.number().int().min(-86400).max(86400),
+          fire_at_utc: z.string().datetime({ precision: 0 }),
+        })
+        .strict(),
+    ]),
+  })
+  .strict()
+  .refine((details) => details.candidates[0].fire_at_utc < details.candidates[1].fire_at_utc, {
+    message: 'candidates must be in strictly ascending UTC order',
+    path: ['candidates'],
+  });
+
 export const ThreadFailedErrorSchema = z
   .object({
     code: z.string().min(1).max(100),
@@ -77,7 +105,36 @@ export const ThreadFailedErrorSchema = z
     http_status: z.number().int().min(400).max(599),
     details: z.unknown().optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((error, ctx) => {
+    if (error.code === 'AMBIGUOUS_LOCAL_TIME') {
+      const details = AmbiguousTimeDetailsSchema.safeParse(error.details);
+      if (!details.success) {
+        for (const issue of details.error.issues) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: issue.message,
+            path: ['details', ...issue.path],
+          });
+        }
+      }
+    }
+    const expectedStatus =
+      error.code === 'TZDB_UNAVAILABLE'
+        ? 503
+        : ['AMBIGUOUS_LOCAL_TIME', 'NONEXISTENT_LOCAL_TIME', 'UNKNOWN_TIMEZONE'].includes(
+              error.code,
+            )
+          ? 422
+          : null;
+    if (expectedStatus !== null && error.http_status !== expectedStatus) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'incorrect time error HTTP status',
+        path: ['http_status'],
+      });
+    }
+  });
 
 export const ThreadFailedPayloadSchema = z
   .object({

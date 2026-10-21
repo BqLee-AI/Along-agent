@@ -1,0 +1,10 @@
+{
+  "version": "ALIAS_TABLE_V1",
+  "aliases": {
+    "北京时间": "Asia/Shanghai",
+    "上海时间": "Asia/Shanghai",
+    "纽约时间": "America/New_York",
+    "美东时间": "America/New_York",
+    "基里巴斯时间": "Pacific/Kiritimati"
+  }
+}

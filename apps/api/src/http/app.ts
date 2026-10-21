@@ -13,11 +13,13 @@ import { handleApprovalRoute } from '../modules/approvals/routes.js';
 import { handleConversationRoute } from '../modules/conversations/routes.js';
 import { handleTaskRoute } from '../modules/tasks/routes.js';
 import { handleBriefRoute } from '../modules/brief/routes.js';
+import { loadTimeContext, type TimeContext } from '../modules/time/context.js';
 
 export interface AppDeps {
   pool: Pool | null;
   resolveActor?: ActorResolver;
   tzdbVersion?: string;
+  timeContext?: TimeContext;
 }
 
 interface TzdbOnlyOpts {
@@ -60,6 +62,7 @@ export async function handleRequest(
   const { pathname } = url;
   const deps: AppDeps = isAppDeps(opts) ? opts : { pool: null, tzdbVersion: opts.tzdbVersion };
   const tzdbVersion = deps.tzdbVersion;
+  const timeContext = deps.timeContext ?? loadTimeContext(tzdbVersion);
   const resolveActor = deps.resolveActor ?? createActorResolver({ pool: deps.pool });
 
   if (req.method === 'GET' && pathname === '/healthz') {
@@ -68,17 +71,24 @@ export async function handleRequest(
   }
 
   if (req.method === 'GET' && pathname === '/readyz') {
-    if (!tzdbVersion) {
+    if (!timeContext.available) {
       sendJson(
         res,
         503,
         {
           status: 'not_ready',
           reason: 'TZDB_UNAVAILABLE',
-          details: { missing: ['TZDB_VERSION'] },
+          ...(timeContext.missing.length ? { details: { missing: timeContext.missing } } : {}),
         },
         requestId,
       );
+      return;
+    }
+    try {
+      if (!deps.pool) throw new Error('database unavailable');
+      await deps.pool.query('SELECT 1');
+    } catch {
+      sendJson(res, 503, { status: 'not_ready', reason: 'NOT_READY' }, requestId);
       return;
     }
     sendJson(res, 200, { status: 'ok' }, requestId);
@@ -150,6 +160,7 @@ export async function handleRequest(
         pool: deps.pool,
         resolveActor,
         body,
+        timeContext,
       });
       if (handled) return;
     }

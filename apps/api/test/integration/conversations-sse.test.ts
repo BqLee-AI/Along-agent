@@ -1,5 +1,5 @@
 // Issue #9: conversation SSE contract — deterministic triage, approval
-// cards, clarify-only normalize failures, budget, idempotent replay,
+// cards, typed time failures, budget, idempotent replay,
 // after_seq cursor, disconnect cancellation, cancel approvals via tool call.
 import { beforeAll, afterAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
@@ -24,6 +24,9 @@ import {
   type IntegrationDatabase,
   seedApproval,
 } from './setup.js';
+import { loadTimeContext } from '../../src/modules/time/context.js';
+
+const timeContext = loadTimeContext('fixture-v1');
 
 const maybe = databaseUrl ? describe : describe.skip;
 
@@ -49,6 +52,7 @@ function toolContext(ownerId: string, runId: string, allowlist: string[]): ToolC
     anchorReceivedAtUtc: new Date().toISOString(),
     receivedAtUtc: new Date().toISOString(),
     foldChoice: 'none',
+    timeContext,
   };
 }
 
@@ -59,7 +63,7 @@ async function collect(
 ): Promise<ThreadEvent[]> {
   const events: ThreadEvent[] = [];
   if (!started.context) throw new Error('expected a fresh run');
-  await executeRun({ pool }, started.context, async (event) => {
+  await executeRun({ pool, timeContext }, started.context, async (event) => {
     events.push(event);
     return events.length < stopAfter;
   });
@@ -80,7 +84,7 @@ maybe('conversation runtime', () => {
   it('reminder path proposes an approval card and never creates a task', async () => {
     const ownerId = await seedUser(pool);
     const started = await startConversationRun(
-      { pool },
+      { pool, timeContext },
       ownerId,
       randomUUID(),
       { raw_text: '明天 9:20 提醒我喝水', confirmed_timezone: 'Asia/Shanghai' },
@@ -133,7 +137,7 @@ maybe('conversation runtime', () => {
   it('missing date/time clarifies instead of failing', async () => {
     const ownerId = await seedUser(pool);
     const started = await startConversationRun(
-      { pool },
+      { pool, timeContext },
       ownerId,
       randomUUID(),
       { raw_text: '提醒我喝水', confirmed_timezone: 'Asia/Shanghai' },
@@ -157,26 +161,39 @@ maybe('conversation runtime', () => {
     expect(rows[0]?.n).toBe(0);
   });
 
-  it('ambiguous local time clarifies with fold guidance and no approval', async () => {
+  it('ambiguous local time fails with ordered structured candidates and no approval', async () => {
     const ownerId = await seedUser(pool);
     const started = await startConversationRun(
-      { pool },
+      { pool, timeContext },
       ownerId,
       randomUUID(),
       { raw_text: '2026-11-01 01:30 提醒我喝水', confirmed_timezone: 'America/New_York' },
       randomUUID(),
     );
     const events = await collect(pool, started);
-    expect(events.map((e) => e.type)).toEqual([
-      'thread.started',
-      'message.delta',
-      'thread.completed',
-    ]);
-    const delta = events[1];
-    if (!delta || delta.type !== 'message.delta') {
-      throw new Error('message.delta missing');
-    }
-    expect(delta.payload.delta).toMatch(/第一次|第二次|时间/);
+    expect(events.map((e) => e.type)).toEqual(['thread.started', 'thread.failed']);
+    expect(events[1]).toMatchObject({
+      type: 'thread.failed',
+      payload: {
+        error: {
+          code: 'AMBIGUOUS_LOCAL_TIME',
+          http_status: 422,
+          details: {
+            wall_time: '2026-11-01T01:30:00',
+            timezone_id: 'America/New_York',
+            ruleset_id: 'FIXTURE_V1',
+            candidates: [
+              { fold_choice: 'first', offset_seconds: -14400, fire_at_utc: '2026-11-01T05:30:00Z' },
+              {
+                fold_choice: 'second',
+                offset_seconds: -18000,
+                fire_at_utc: '2026-11-01T06:30:00Z',
+              },
+            ],
+          },
+        },
+      },
+    });
     const { rows } = await pool.query(
       'SELECT count(*)::int AS n FROM approvals WHERE owner_id = $1',
       [ownerId],
@@ -184,26 +201,21 @@ maybe('conversation runtime', () => {
     expect(rows[0]?.n).toBe(0);
   });
 
-  it('nonexistent local time clarifies without creating an approval', async () => {
+  it('nonexistent local time fails without creating an approval', async () => {
     const ownerId = await seedUser(pool);
     const started = await startConversationRun(
-      { pool },
+      { pool, timeContext },
       ownerId,
       randomUUID(),
       { raw_text: '2027-03-14 02:30 提醒我喝水', confirmed_timezone: 'America/New_York' },
       randomUUID(),
     );
     const events = await collect(pool, started);
-    expect(events.map((e) => e.type)).toEqual([
-      'thread.started',
-      'message.delta',
-      'thread.completed',
-    ]);
-    const delta = events[1];
-    if (!delta || delta.type !== 'message.delta') {
-      throw new Error('message.delta missing');
-    }
-    expect(delta.payload.delta).toContain('不存在');
+    expect(events.map((e) => e.type)).toEqual(['thread.started', 'thread.failed']);
+    expect(events[1]).toMatchObject({
+      type: 'thread.failed',
+      payload: { error: { code: 'NONEXISTENT_LOCAL_TIME', http_status: 422 } },
+    });
     const { rows } = await pool.query(
       'SELECT count(*)::int AS n FROM approvals WHERE owner_id = $1',
       [ownerId],
@@ -214,7 +226,7 @@ maybe('conversation runtime', () => {
   it('fold_choice=first resolves an ambiguous wall time into an approval', async () => {
     const ownerId = await seedUser(pool);
     const started = await startConversationRun(
-      { pool },
+      { pool, timeContext },
       ownerId,
       randomUUID(),
       {
@@ -246,7 +258,7 @@ maybe('conversation runtime', () => {
   it('fold_choice=second uses the second-occurrence echo and confirms', async () => {
     const ownerId = await seedUser(pool);
     const started = await startConversationRun(
-      { pool },
+      { pool, timeContext },
       ownerId,
       randomUUID(),
       {
@@ -284,7 +296,7 @@ maybe('conversation runtime', () => {
   it('over-budget input fails the stream with BUDGET_EXCEEDED 429', async () => {
     const ownerId = await seedUser(pool);
     const started = await startConversationRun(
-      { pool },
+      { pool, timeContext },
       ownerId,
       randomUUID(),
       { raw_text: `提醒${'水'.repeat(8000)}`, confirmed_timezone: 'Asia/Shanghai' },
@@ -310,12 +322,24 @@ maybe('conversation runtime', () => {
     const ownerId = await seedUser(pool);
     const key = randomUUID();
     const body = { raw_text: '明天 9:20 提醒我喝水', confirmed_timezone: 'Asia/Shanghai' };
-    const first = await startConversationRun({ pool }, ownerId, randomUUID(), body, key);
+    const first = await startConversationRun(
+      { pool, timeContext },
+      ownerId,
+      randomUUID(),
+      body,
+      key,
+    );
     const firstEvents = await collect(pool, first);
-    const replay = await startConversationRun({ pool }, ownerId, randomUUID(), body, key);
+    const replay = await startConversationRun(
+      { pool, timeContext },
+      ownerId,
+      randomUUID(),
+      body,
+      key,
+    );
     expect(replay.replay).toEqual(firstEvents);
     const mismatch = startConversationRun(
-      { pool },
+      { pool, timeContext },
       ownerId,
       randomUUID(),
       { ...body, raw_text: '明天 10:20 提醒我喝水' },
@@ -328,12 +352,24 @@ maybe('conversation runtime', () => {
     const ownerId = await seedUser(pool);
     const key = randomUUID();
     const body = { raw_text: '明天 9:20 提醒我喝水', confirmed_timezone: 'Asia/Shanghai' };
-    const first = await startConversationRun({ pool }, ownerId, randomUUID(), body, key);
+    const first = await startConversationRun(
+      { pool, timeContext },
+      ownerId,
+      randomUUID(),
+      body,
+      key,
+    );
     await pool.query(
       "UPDATE conversation_idempotency SET expires_at = now() - interval '1 hour' WHERE owner_id = $1 AND idempotency_key = $2",
       [ownerId, key],
     );
-    const second = await startConversationRun({ pool }, ownerId, randomUUID(), body, key);
+    const second = await startConversationRun(
+      { pool, timeContext },
+      ownerId,
+      randomUUID(),
+      body,
+      key,
+    );
     expect(second.replay).toBeNull();
     expect(second.runId).not.toBe(first.runId);
     expect(second.conversationId).not.toBe(first.conversationId);
@@ -344,8 +380,8 @@ maybe('conversation runtime', () => {
     const key = randomUUID();
     const body = { raw_text: '明天 9:20 提醒我喝水', confirmed_timezone: 'Asia/Shanghai' };
     const settled = await Promise.allSettled([
-      startConversationRun({ pool }, ownerId, randomUUID(), body, key),
-      startConversationRun({ pool }, ownerId, randomUUID(), body, key),
+      startConversationRun({ pool, timeContext }, ownerId, randomUUID(), body, key),
+      startConversationRun({ pool, timeContext }, ownerId, randomUUID(), body, key),
     ]);
     const winners = settled.filter(
       (entry): entry is PromiseFulfilledResult<StartResult> => entry.status === 'fulfilled',
@@ -359,7 +395,13 @@ maybe('conversation runtime', () => {
     if (!winner) throw new Error('expected one winner');
     const events = await collect(pool, winner.value);
     expect(events.at(-1)?.type).toBe('thread.completed');
-    const replay = await startConversationRun({ pool }, ownerId, randomUUID(), body, key);
+    const replay = await startConversationRun(
+      { pool, timeContext },
+      ownerId,
+      randomUUID(),
+      body,
+      key,
+    );
     expect(replay.replay).toEqual(events);
   });
 
@@ -367,8 +409,14 @@ maybe('conversation runtime', () => {
     const ownerId = await seedUser(pool);
     const key = randomUUID();
     const body = { raw_text: '明天 9:20 提醒我喝水', confirmed_timezone: 'Asia/Shanghai' };
-    const first = await startConversationRun({ pool }, ownerId, randomUUID(), body, key);
-    const retry = startConversationRun({ pool }, ownerId, randomUUID(), body, key);
+    const first = await startConversationRun(
+      { pool, timeContext },
+      ownerId,
+      randomUUID(),
+      body,
+      key,
+    );
+    const retry = startConversationRun({ pool, timeContext }, ownerId, randomUUID(), body, key);
     await expect(retry).rejects.toMatchObject({ httpStatus: 409 });
     const { rows } = await pool.query('SELECT status FROM agent_runs WHERE id = $1', [first.runId]);
     expect(rows[0]?.status).toBe('running');
@@ -409,6 +457,7 @@ maybe('conversation runtime', () => {
     } as unknown as ServerResponse;
     await handleConversationRoute(req, res, new URL(req.url ?? '/', 'http://localhost'), {
       pool,
+      timeContext,
       resolveActor: async () => ({
         ownerId,
         sessionId: null,
@@ -435,7 +484,7 @@ maybe('conversation runtime', () => {
     });
 
     const first = await startConversationRun(
-      { pool },
+      { pool, timeContext },
       ownerId,
       randomUUID(),
       { raw_text: `取消任务 ${confirmed.task_id}`, confirmed_timezone: 'Asia/Shanghai' },
@@ -448,7 +497,7 @@ maybe('conversation runtime', () => {
     }
 
     const second = await startConversationRun(
-      { pool },
+      { pool, timeContext },
       ownerId,
       randomUUID(),
       {
@@ -481,14 +530,14 @@ maybe('conversation runtime', () => {
   it('a writer failure after the stream opens still ends the run as failed', async () => {
     const ownerId = await seedUser(pool);
     const started = await startConversationRun(
-      { pool },
+      { pool, timeContext },
       ownerId,
       randomUUID(),
       { raw_text: '明天 9:20 提醒我喝水', confirmed_timezone: 'Asia/Shanghai' },
       randomUUID(),
     );
     if (!started.context) throw new Error('expected fresh run');
-    await executeRun({ pool }, started.context, async () => {
+    await executeRun({ pool, timeContext }, started.context, async () => {
       const stored = await listRunEvents(pool, ownerId, started.runId);
       if (stored.some((event) => event.type === 'thread.started')) {
         throw new Error('socket gone');
@@ -506,7 +555,7 @@ maybe('conversation runtime', () => {
   it('GET after_seq resumes from the global event cursor', async () => {
     const ownerId = await seedUser(pool);
     const started = await startConversationRun(
-      { pool },
+      { pool, timeContext },
       ownerId,
       randomUUID(),
       { raw_text: '明天 9:20 提醒我喝水', confirmed_timezone: 'Asia/Shanghai' },
@@ -514,10 +563,15 @@ maybe('conversation runtime', () => {
     );
     const events = await collect(pool, started);
     const firstSeq = events[0]?.seq ?? 0;
-    const detail = await getConversationDetail({ pool }, ownerId, started.conversationId, {
-      after_seq: String(firstSeq),
-      limit: '10',
-    });
+    const detail = await getConversationDetail(
+      { pool, timeContext },
+      ownerId,
+      started.conversationId,
+      {
+        after_seq: String(firstSeq),
+        limit: '10',
+      },
+    );
     expect(detail.events).toEqual(events.slice(1));
     expect<number | null | undefined>(detail.next_after_seq).toBe(events.at(-1)?.seq);
   });
@@ -525,7 +579,7 @@ maybe('conversation runtime', () => {
   it('disconnect persists thread.cancelled and marks the run cancelled', async () => {
     const ownerId = await seedUser(pool);
     const started = await startConversationRun(
-      { pool },
+      { pool, timeContext },
       ownerId,
       randomUUID(),
       { raw_text: '明天 9:20 提醒我喝水', confirmed_timezone: 'Asia/Shanghai' },
@@ -561,7 +615,7 @@ maybe('conversation runtime', () => {
     });
 
     const started = await startConversationRun(
-      { pool },
+      { pool, timeContext },
       ownerId,
       randomUUID(),
       { raw_text: `取消任务 ${confirmed.task_id}`, confirmed_timezone: 'Asia/Shanghai' },
@@ -603,7 +657,7 @@ maybe('conversation runtime', () => {
   it('gateway denies tools outside the run allowlist and audits the denial', async () => {
     const ownerId = await seedUser(pool);
     const started = await startConversationRun(
-      { pool },
+      { pool, timeContext },
       ownerId,
       randomUUID(),
       { raw_text: '你好', confirmed_timezone: 'Asia/Shanghai' },
@@ -626,7 +680,7 @@ maybe('conversation runtime', () => {
   it('GET route replays history for the owner and hides other owners', async () => {
     const ownerId = await seedUser(pool);
     const started = await startConversationRun(
-      { pool },
+      { pool, timeContext },
       ownerId,
       randomUUID(),
       { raw_text: '明天 9:20 提醒我喝水', confirmed_timezone: 'Asia/Shanghai' },
@@ -669,6 +723,7 @@ maybe('conversation runtime', () => {
       new URL(own.req.url ?? '/', 'http://localhost'),
       {
         pool,
+        timeContext,
         resolveActor: async () => ({
           ownerId: own.actorId,
           sessionId: null,
@@ -692,6 +747,7 @@ maybe('conversation runtime', () => {
       new URL(other.req.url ?? '/', 'http://localhost'),
       {
         pool,
+        timeContext,
         resolveActor: async () => ({
           ownerId: other.actorId,
           sessionId: null,
@@ -748,6 +804,7 @@ maybe('conversation runtime', () => {
       new URL(req.url ?? '/', 'http://localhost'),
       {
         pool,
+        timeContext,
         resolveActor: async () => ({
           ownerId,
           sessionId: null,
