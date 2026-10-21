@@ -32,7 +32,7 @@
 ## 非目标（v0 明确不做）
 
 - [Required] 不做本机提醒器：06 喝水提醒降级为调度子用例（task.kind=notify_only），不走 LLM 先验调度 + time-core 归一之外的任何本机钟表逻辑。
-- [Required] v0 只做约 12 个业务端点 + 2 探针；工具侧 v0 仅 ToolGateway 白名单 + zod 校验 + Fake 实现。
+- [Required] v0 只做 13 个业务端点 + 2 探针（含显式修改 pending approval）；工具侧 v0 仅 ToolGateway 白名单 + zod 校验 + Fake 实现。
 - [Required] v0 不做 RAG、沙箱、多 Agent：知识库检索、代码执行隔离、多智能体协同全部进 v1 盒子（B06 §11）。
 - [Required] v0 不做重复任务、日历忙闲授权、条件触发、跨路数据冻结；改期用"取消旧 + 建新"（recreated_from 指回旧 task，唯一约束，不继承确认）。
 - [Required] v0 不做 D/网关投递对账、巡检、独立审计库：只靠 Postgres 本库 + 用户打开应用时对账发现（诚实口径见 03）。

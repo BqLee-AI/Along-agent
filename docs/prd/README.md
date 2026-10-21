@@ -13,7 +13,7 @@
 ## Required 列表（PRD 层硬约束）
 
 - [Required] v0 切片 = 简报→卡片→对话→确认→调度→触发→通知→活动页，Web 单端；06 喝水提醒降级为调度子用例（task.kind=notify_only，不走 LLM 先验调度 + time-core）。
-- [Required] v0 业务端点约 12 个：GET /me；GET /brief；POST /conversations/messages（SSE）；GET /conversations/{id}；GET /approvals；GET /approvals/{id}；POST /approvals/{id}/actions/confirm；POST …/reject；GET /tasks；GET /tasks/{id}；POST /tasks/{id}/actions/cancel；GET /tasks/{id}/events；另有探针 /healthz、/readyz（路由细节见 api）。
+- [Required] v0 业务端点 13 个：GET /me；GET /brief；POST /conversations/messages（SSE）；GET /conversations/{id}；GET /approvals；GET /approvals/{id}；POST /approvals/{id}/actions/confirm；POST …/reject；POST …/revise（显式修改 pending 提议）；GET /tasks；GET /tasks/{id}；POST /tasks/{id}/actions/cancel；GET /tasks/{id}/events；另有探针 /healthz、/readyz（路由细节见 api）。
 - [Required] task 状态机：saved→pending_schedule→scheduled（回执）→fired|missed，→cancel_pending→cancelled；approval：pending→consumed|rejected|expired|superseded。
 - [Required] task_events 只追加（DB 禁 UPDATE/DELETE）；UNIQUE(task_id,fire_at)；recreated_from 唯一。
 - [Required] 时间由服务端 time-core 纯函数 normalize 唯一确定；LLM 不算时间，展示层不换算；"明天" = 服务端首次接收时刻 + 已确认时区并冻结。

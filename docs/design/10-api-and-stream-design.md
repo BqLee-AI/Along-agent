@@ -3,7 +3,7 @@
 ## 文档状态
 
 - **状态**：草案 v0.1（本篇为 REST 真源；`contracts/openapi` 生成物跟随本篇）
-- **范围**：v0 约 12 端点路由表、envelope、资源 actions、幂等/request_id、SSE 版本化、断线恢复、WS 延后、错误码 40xxxx
+- **范围**：v0 13 业务端点路由表、envelope、资源 actions、幂等/request_id、SSE 版本化、断线恢复、WS 延后、错误码 40xxxx
 - **不包含**：表字段 DDL（见 schema 组）、AgentEvent 语义（见 09）、Spike 标准（见 11）
 - **阶段标签**：v0 全链路；P1 起五缝全接口化后本篇增补接口但不改 v0 语义
 
@@ -17,11 +17,11 @@ Observed / Required / Proposed / Deferred 同 01。
 
 - Base path：`/api/v1`（探针除外：`/healthz`、`/readyz`）。
 - Envelope（成功/失败统一）：`{ code, data, msg, error? }`；`error={ code, message, request_id, details? }`。
-- `request_id`：全链路透传（调用方生成 UUIDv7/UUIDv4；网关缺失则生成并回写 `X-Request-Id`）。所有写操作同时接受 `Idempotency-Key`（缺失则服务端按 `request_id` 充当）。
+- 默认写操作沿用既有 `Idempotency-Key`/request_id 约定；**revise 例外**：body `idempotency_key` 必填，header/request_id 不补缺或覆盖，`(owner, revise, key)` 及持久保留期仅按 approvals API §6/design06 §9，不按24h清理。其他既有动作语义不变。
 - 认证：v0 `GET /me` 外全部需 Better Auth session（模式 Deferred，P0 定）；写操作 CSRF（SameSite cookie + `X-CSRF-Token`，对标 QuantAgent api 约定 Observed）。
 - 版本化：破坏性变更走 `/api/v2`；SSE 事件带 `protocol_version`（见 §4）。
 
-## 2. v0 路由表（Required，约 12 端点）
+## 2. v0 路由表（Required，13 业务端点 + 2 探针）
 
 | #   | 方法 | 路径                                     | 说明                                                                        | 幂等/约束                                                 |
 | --- | ---- | ---------------------------------------- | --------------------------------------------------------------------------- | --------------------------------------------------------- |
@@ -37,6 +37,7 @@ Observed / Required / Proposed / Deferred 同 01。
 | 10  | GET  | `/api/v1/tasks/{id}`                     | 任务详情（含 `fire_at_utc`、`schedule_receipt`、`state_version`）           | 读                                                        |
 | 11  | POST | `/api/v1/tasks/{id}/actions/cancel`      | 取消：`→cancel_pending→cancelled`（有撤销回执才终态）                       | 写；幂等；取消后触发数=0 一级指标                         |
 | 12  | GET  | `/api/v1/tasks/{id}/events`              | 只追加事件账（`task_events` 投影）                                          | 读；`?after_seq=`                                         |
+| 13  | POST | `/api/v1/approvals/{id}/actions/revise`  | 显式完整修改本人 pending create_task，旧项 superseded、新项重回显           | 持久幂等、修改不建 task；合同见 approvals API §6          |
 | —   | GET  | `/healthz`                               | 存活（不依赖 DB）                                                           | 读                                                        |
 | —   | GET  | `/readyz`                                | 就绪：DB + TZDB 规则就绪；失败返回类型化错误，不降级（见 §6）               | 读                                                        |
 

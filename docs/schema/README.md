@@ -8,7 +8,7 @@
 
 1. Identity 表（`users`、`sessions`，随 Better Auth Deferred 方案二选一 P0 定）。
 2. Conversation / Runs 表（`conversations`、`messages`、`agent_runs`、`run_attempts`、`run_checkpoints`、`conversation_idempotency`、`tool_calls`、`agent_revisions`、`prompt_versions`）。
-3. Commitments 表（`approvals`、`tasks`、`task_events`、`outbox`、`notifications`、`task_leases`、`security_events`；S0 #14 冻结：统一 `outbox` 名，新增后两表）。
+3. Commitments 表（`approvals`、`approval_revision_requests`、`tasks`、`task_events`、`outbox`、`notifications`、`task_leases`、`security_events`；统一 `outbox` 名，修改预约归 approvals）。
 
 Content 表（`briefs`、`cards`）为 v1 / Deferred，移出 v0 落地顺序（S0 #14 冻结：v0 简报为只读投影，不建表；详见 [content-schema.md](content-schema.md)）。
 
@@ -22,7 +22,7 @@ Content 表（`briefs`、`cards`）为 v1 / Deferred，移出 v0 落地顺序（
 | --------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Identity                          | [identity-schema.md](identity-schema.md)                           | `users`、`sessions`                                                                                                                                          |
 | Conversation / Runs               | [conversation-and-runs-schema.md](conversation-and-runs-schema.md) | `conversations`、`messages`、`agent_runs`、`run_attempts`、`run_checkpoints`、`conversation_idempotency`、`tool_calls`、`agent_revisions`、`prompt_versions` |
-| Commitments                       | [commitments-schema.md](commitments-schema.md)                     | `approvals`、`tasks`、`task_events`、`outbox`、`notifications`、`task_leases`、`security_events`                                                             |
+| Commitments                       | [commitments-schema.md](commitments-schema.md)                     | `approvals`、`approval_revision_requests`、`tasks`、`task_events`、`outbox`、`notifications`、`task_leases`、`security_events`                               |
 | Content（v1 / Deferred，移出 v0） | [content-schema.md](content-schema.md)                             | `briefs`、`cards`                                                                                                                                            |
 
 引用：落地顺序对应 B03 微服务下沉原则与 B06 建表顺序（P3 vertical 切片）[B03][B06]。

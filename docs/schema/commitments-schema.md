@@ -1,6 +1,6 @@
 # Commitments Schema 设计
 
-> 状态：v0 可开工。范围：`approvals`、`tasks`、`task_events`、`outbox`、`notifications` 全字段。不包含：重复提醒、日历授权、投递对账网关（v1 盒子）。阶段标签：v0 MVP 全链路。
+> 状态：v0 schema 合同。范围：`approvals`、`approval_revision_requests`、`tasks`、`task_events`、`outbox`、`notifications`；合同不表示迁移或真实验收已执行。不包含：重复提醒、日历授权、投递对账网关（v1 盒子）。阶段标签：v0。
 
 ## 设计依据
 
@@ -29,7 +29,7 @@ tasks 1 ── 0..1 tasks       (recreated_from_task_id 自引用)
 
 ### 用途
 
-[Required] 确认门一等公民。回显绑定此行；只有整句确认或点确认按钮才消费。
+[Required] 确认门一等公民。回显绑定此行；v0 只有点确认按钮才消费（S0 #14）。
 
 ### 字段
 
@@ -68,8 +68,49 @@ tasks 1 ── 0..1 tasks       (recreated_from_task_id 自引用)
 - [Required] 状态流 `pending → consumed | rejected | expired | superseded`；消费与建 task 同事务。
 - [Required] 消费后冻结全行；重复确认回原 task（“这是重复确认，没有新建第二条”）。
 - [Required] 服务端按快照重建预期比对 `presentation_hash`，对不上停在待核对（`PRESENTATION_MISMATCH`）。
-- [Required] 过期顺路清（启动/读取/确认时），不另养后台进程；过期清内容留号 30 天。
+- [Required] GET 只读投影过期，不落库；确认/拒绝顺路持久化过期，不另养后台进程。过期清内容留号 30 天为既有设计提议，不代表已实现清理。
 - 快照自检（墙上+时区+偏移推不出 UTC）→ 待修复，不怪用户，修好换新 approval 重来。
+
+## 审批修改持久化增量 [Required，#31]
+
+只新增迁移，不修改已合并迁移；合同与迁移执行证据分开。行为真源见 `docs/design/06-approvals-confirmation-gate.md` §9，API见 `docs/api/approvals/approvals_routes.md` §6。
+
+### `approvals` 最小增量
+
+- 继续使用 0003 已有 `supersedes_approval_id`（新行→旧行），不增 `superseded_by`、版本链表、task字段或其他模块存储。
+- 新增唯一索引 `approvals_supersedes_approval_id_uniq`：`UNIQUE (supersedes_approval_id) WHERE supersedes_approval_id IS NOT NULL`，每个前驱最多一个直接后继，不以 `findSuccessorId LIMIT 1` 代替数据库唯一性。独立会话新建的该列仍 NULL，不受影响。
+- revise新行 `kind=create_task`、`target_task_id=NULL`、`expected_state_version=NULL`、`consumed_task_id=NULL`；同owner、可继承旧conversation_id、旧项为有效pending，新项指旧项且旧项原子superseded。后继可再改形成单链，不能自指/循环或从同会话猜前驱。
+- 新快照按现有列与hash算法冻结；runtime `ruleset_id` 不是当前 approvals 持久列，不在本次顺便新增。旧行仅改state，插入新行与填写预约结果同事务；修改本身零task/事件/outbox/通知。
+
+### `approval_revision_requests`（approvals所有）
+
+固定只表示 revise；操作已由表名限定，不增加通用operation/status/request_json/response_json框架。UUID键复用范围为owner+revise，不把target放进主键；body约束/默认值与规范摘要见API §6.1及design/06 §9.3。
+
+| 字段                     | 类型          | 约束                                                          | 说明                                     |
+| ------------------------ | ------------- | ------------------------------------------------------------- | ---------------------------------------- |
+| `owner_id`               | `uuid`        | not null，复合主键第1列                                       | 当前actor；不得跨owner重放               |
+| `idempotency_key`        | `uuid`        | not null，复合主键第2列                                       | body必填UUID，数据库值天然规范化         |
+| `target_approval_id`     | `uuid`        | not null，references approvals(id) on delete restrict         | 路径旧目标；不进主键，同键跨目标冲突     |
+| `request_hash`           | `text`        | not null，check为64位小写hex                                  | SHA-256规范请求摘要，无正文副本          |
+| `anchor_received_at_utc` | `timestamptz` | not null，首次INSERT取DB clock_timestamp()                    | 首次持久接收线性化时间；预约提交后不可变 |
+| `successor_approval_id`  | `uuid`        | nullable，unique，references approvals(id) on delete restrict | NULL=仅预约未完成；非NULL=已提交结果     |
+
+`PRIMARY KEY(owner_id,idempotency_key)`；增加check `successor_approval_id IS NULL OR successor_approval_id <> target_approval_id`。FK限同模块审批，不引用users/conversations/outbox；同owner、目标kind/状态、successor.supersedes关联由approvals用例在同事务行锁内检验（不是声称单列FK能保证owner）。unique successor防一项结果被两个预约冒领。除首次由NULL填successor外，映射各列不可改写；不增时间TTL/后台清理/缓存。
+
+先验actor/CSRF/body/UUID及目标owner，短事务插入/匹配预约并提交；这一步不改变审批状态。随后事务按预约→目标的顺序锁定；完成结果直接重放。未完成则锁后校验、共享A4归一、重查实时有效期，再原子INSERT新审批/UPDATE旧state/填successor。故障全回滚这三项但不删除已提交预约，重启同键沿原anchor恢复；无内存状态作为事实源。详情仍只读，不在GET写表。目标锁后发现到期时正常提交expired再向外返回410，不用抛错回滚掉expired。
+
+预约与审批标识在v0服务数据生命周期内保留，不自动清除；未来正文墓碑清理不能删除映射或它引用的标识，不保留正文副本。任何未来删除/账号清理须先修订幂等保留合同及FK处理，不以定时删除释放键。
+
+### 新迁移与版本失败
+
+新增迁移编号按合入顺序分配，不改0003/0011，不预占A3/A4编号。受控停写、备份及只读预检先于迁移：
+
+1. 检测非NULL前驱重复、前驱缺失/自指/跨owner、前驱非superseded、链循环或不合法create_task关联；发现即中止发布，保留行与检查证据。无自动删行、随机取后继或改owner/state的数据修复。
+2. 干净库在同一迁移事务建立唯一索引/预约表；任一失败全回滚，不出现仅半套schema。新库按完整迁移序列建立，同样验证索引与检查生效。
+3. schema成功后才发布新API/Web，不混跑旧新修改写者；schema失败则不暴露revise。版本发布失败保留additive表/索引及已有结果，不执行删表回滚或把修改降级为独立新建。
+4. 恢复旧版本前核对锁后到期与owner修正仍满足新合同；不能满足则停写前滚修复，不允许旧confirm在到期窗口消费。恢复后用持久映射重放，不重建后继。
+
+对应待验收：design/06 §9.6 R4/R5（持久幂等）、R6/R7（串行/时钟）、R9（回滚/唯一）、R10（干净/脏库及发布失败）。本契约PR不创建SQL迁移文件、不运行迁移演练。
 
 ## `tasks`
 

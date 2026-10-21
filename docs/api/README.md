@@ -9,11 +9,11 @@
 ## 1. Base Path 与路由总数 [Required]
 
 - Base Path：`/api/v1`。下文路由表省略该前缀，如 `GET /me` 即 `GET /api/v1/me`。
-- v0 对外端点共 12 个业务端点 + 2 个探针，与 design/03 路由数一致：
+- v0 对外端点共 13 个业务端点 + 2 个探针（含 approvals 显式 revise 契约增量），与 design/03 路由数一致：
   - auth：`GET /me`（1）。
   - brief：`GET /brief`（1）。
   - conversations：`POST /conversations/messages`（SSE）、`GET /conversations/{id}`（2）。
-  - approvals：`GET /approvals`、`GET /approvals/{id}`、`POST /approvals/{id}/actions/confirm`、`POST /approvals/{id}/actions/reject`（4）。
+  - approvals：`GET /approvals`、`GET /approvals/{id}`、`POST /approvals/{id}/actions/confirm`、`POST /approvals/{id}/actions/reject`、`POST /approvals/{id}/actions/revise`（5；revise 见 approvals §6）。
   - tasks：`GET /tasks`、`GET /tasks/{id}`、`POST /tasks/{id}/actions/cancel`、`GET /tasks/{id}/events`（4）。
 - 探针：`GET /healthz`、`GET /readyz`（不计入业务端点，不走 envelope，见 §6）。
 - Web 单端为 v0 唯一客户端；Electron 套壳后复用同一份路由，不新增端点 [Deferred：移动端/公开 OpenAPI 未定]。
@@ -64,7 +64,7 @@
 - [Deferred] 鉴权方案二选一（自建 vs OIDC）在 P0 确定，见 auth/auth_routes.md。v0 文档只定以下行为，不猜字段：
   - 未定字段一律不写：token 形态、cookie 名、session 有效期、OIDC provider、注册/登录流程均不在 v0 API 契约内。
 - [Required] 已定行为：
-  - `GET /me` 之外的 11 个业务端点均为受保护路由，需有效会话；无有效会话返回 `401`（见 §5）。
+  - `GET /me` 之外的 12 个业务端点均为受保护路由，需有效会话；无有效会话返回 `401`（见 §5）。
   - 有会话但无权访问他人资源返回 `403`（多租户隔离，服务端按 `owner_id` 强制过滤，不依赖客户端传参）。
   - 所有 `POST` 写操作需要 CSRF 防护。默认机制：Cookie session + `X-CSRF-Token` 请求头（token 来源见 `GET /me`，方案确定前为 [Proposed]，字段名可换但“写操作必校验”不变）。
   - `GET` 与探针不要求 CSRF。
@@ -72,7 +72,7 @@
 
 ## 4. 幂等与并发 [Required]
 
-- 写操作幂等键：客户端应在 `POST /conversations/messages`、`POST /approvals/{id}/actions/*`、`POST /tasks/{id}/actions/cancel` 上附带 `Idempotency-Key: <uuidv4>`。服务端按（用户，幂等键）去重，24h 内重复提交返回首次结果，不产生副作用。
+- 写操作幂等键的默认通用约定：客户端在 `POST /conversations/messages`、既有 confirm/reject、`POST /tasks/{id}/actions/cancel` 上附带 `Idempotency-Key: <uuidv4>`，按既有端点合同去重。**revise 例外**：只认必填 body `idempotency_key`，不以 header/request_id 补缺或覆盖；按 `(owner, revise, key)` 持久保留预约/结果，不作24h自动清理，跨目标/异body冲突见 approvals §6。不能把默认通用键空间或保留期套在 revise。
 - `request_id` 去重只用于链路追踪，不替代幂等键。
 - 确认消费与建 Task 在同一事务内完成（唯一跨模块事务），重复确认返回 `200` + 原 task，不新建（见 approvals 文档）。
 - 取消幂等：重复取消同一 task 返回 `200` + 当前状态（见 tasks 文档）。
@@ -129,6 +129,7 @@
 | 10  | GET  | `/tasks/{id}`                     | 是           | 否   | —      | 任务详情                                     | tasks/tasks_routes.md                 |
 | 11  | POST | `/tasks/{id}/actions/cancel`      | 是           | 是   | 是     | 取消（幂等）                                 | tasks/tasks_routes.md                 |
 | 12  | GET  | `/tasks/{id}/events`              | 是           | 否   | —      | 只追加事件账（按 recorded_at）               | tasks/tasks_routes.md                 |
+| 13  | POST | `/approvals/{id}/actions/revise`  | 是           | 是   | 是     | 显式完整修改，返回旧/新 ID，再读新详情确认   | approvals/approvals_routes.md §6      |
 
 ## 8. 维护方式
 

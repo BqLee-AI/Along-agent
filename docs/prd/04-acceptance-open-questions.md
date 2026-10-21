@@ -5,7 +5,7 @@
 ## v0 验收（四条，全部按自家可测指标）
 
 - [Required] A1 喝水恰好一次：输入"明天 9:20 提醒我喝水"（已确认时区）→ 回显冻结 → 确认 → 建单次 task → 登记回执 → 到点 15 分钟内应用内通知恰好一次；task_events 含 scheduled（含回执号）→ fired 全链；对外只说已记录步骤。
-- [Required] A2 重复确认单任务：同一 approval 连点两次确认，只回同一个 task（"这是重复确认，没有新建第二条"）；改字段后重回显，旧 approval 作废（superseded），确认旧键被挡（APPROVAL_SUPERSEDED）。
+- [Required] A2 重复确认单任务：同一 approval 重复确认只回同 task。明确修改本人有效 pending create_task，按完整输入及首次持久 anchor 重新归一，原子保存旧 superseded、唯一新 pending 与幂等结果；修改及重放不建 task。旧确认 409 APPROVAL_SUPERSEDED，新详情重新回显再按钮确认。覆盖同键重放/异 body 与跨目标冲突、响应丢失/重启、改与 confirm/reject 竞争、锁后到期及失败回滚；真实 Web/HTTP/只读 SQL 关联证据见 design/06 §9，不把预置 superseded 当完整修改链。
 - [Required] A3 崩溃恢复安全优先：确定尚未获调用许可的项可恢复正常一次；独立接收已提交的项 kill/resume 后只核对收尾，跨进程实际调用累计 1、receipt 1、通知 1、fired 1。许可后无接收事实的项不盲重发，允许待核对或超窗未完成，不承诺任意崩溃点都严格一次且完成；实际调用可为 0/1，但不得重复。取消已提交后实际调用仍为 0。真实故障阶段、绑定与迁移见 design/08 §7–§9；唯一通知行不替代调用证据。
 - [Required] A4 时间错误：不存在本地时刻、重复未选、未知时区/显式别名分别 typed 422 失败；两候选由服务端提供，Web保留完整输入/时区，以 first/second 与新键重提议，不算 UTC、不当作确认。缺信息/模糊仍澄清。三 zone 的有限 2026–2027 本地区间及精确 UTC 边缘见 design/05 §5；范围外/规则不可用为 TZDB_UNAVAILABLE，未知别名不得因已有确认时区被忽略。认证/结构等边界后、SSE与新 run 前预检规则；已开流故障唯一失败终结，承诺零写/零调用。readyz共享实际规则/alias/版本与DB可达判断，不接受任意非空版本；真实缺失装载与旧冻结读取/确认/取消/执行隔离需取证，不能以mock代替（design/05 §9–§10、API §6）。
 - [Required] 验收环境：单镜像 all 角色 + compose 冒烟；Postgres 唯一事实源；Redis 缺席不得影响验收（Redis 已延后）。
