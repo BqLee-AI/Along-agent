@@ -13,6 +13,8 @@
 | POST | `/tasks/{id}/actions/cancel` | 是   | 是   | 是     | 取消（幂等） |
 | GET  | `/tasks/{id}/events`         | 是   | 否   | —      | 只追加事件账 |
 
+以上业务路径统一带 `/api/v1` 前缀；通知复用 `GET /api/v1/tasks/{id}`，不增加独立通知路由。
+
 ## 2. GET /tasks 与 GET /tasks/{id} [Required]
 
 - `GET /tasks` 查询参数：`status=pending_schedule|scheduled|fired|missed|cancel_pending|cancelled|all`（默认 `all`）、`cursor/limit`（默认 20，上限 50）。只返回本人数据，按 `fire_at_utc` 升序；列表项含 `schedule_receipt`，前端据此显示“有/无登记回执”。
@@ -29,7 +31,8 @@
   "source_approval_id": "apr_01J…",
   "recreated_from": null,
   "schedule_receipt": "sched_…",
-  "created_at": "…"
+  "created_at": "…",
+  "notifications": []
 }
 ```
 
@@ -38,6 +41,24 @@
 - 口径天花板：详情只报告系统记录到的状态（已保存/已排期/已触发/已错过），不声称用户已读/必达 [Required]。
 - 不存在/他人资源：`404` / `403`。
 
+### 2.1 任务详情通知数组 [Required]
+
+`GET /api/v1/tasks/{id}` 成功响应的 `data.notifications` 必有且为只读数组；任务列表不增加该字段。任务尚无持久通知记录时为 `[]`，不是 `null`，也不根据 `fired` 事件补造记录。每项仅包含：
+
+| 字段      | 类型                          | 来源与语义                          |
+| --------- | ----------------------------- | ----------------------------------- |
+| `id`      | UUID 字符串                   | `notifications.id`                  |
+| `title`   | 字符串                        | 已存标题原文                        |
+| `body`    | 字符串                        | 已存正文原文，不重算其中的时间      |
+| `status`  | `pending` / `sent` / `failed` | `notifications.status` 的实际约束域 |
+| `sent_at` | ISO 8601 字符串或 `null`      | `notifications.sent_at`；空值不补造 |
+
+字段与空值基于既有迁移 `0007_commitments_notifications.sql` 及 schema 的 `notifications` 节；不新增表字段。详情先校验 task 的 owner，再经 notifications 公开 service 查询相同 owner/task 的记录；通知表查询只在通知模块内部，不让 tasks 或 Web 直读。
+
+沿用详情错误：未认证 `401`，不存在/非 UUID `404`，跨 owner `403`；错误不转换成成功空态，查询失败不隐藏为 `[]`。GET 不发送通知、不重试、不标已读，不写 task、通知、事件或 outbox。Web 直接展示存储值与“暂无站内通知记录”空态，不改写正文的冻结时间；`sent` 与 `sent_at` 不表示设备送达、响铃或用户已读（D1/D2/D8/D10、A1）。
+
+`notifications` 仍为内部表，无独立公开路由，仅可经任务详情投影。写入继续使用既有 `send:<taskId>:<fireAtIso>` 幂等键与 `INSERT … ON CONFLICT DO NOTHING`，本读取增量不改变发送、取消或崩溃恢复合同（design/03 §3.1–§3.2）。
+
 ## 3. POST /tasks/{id}/actions/cancel [Required]
 
 请求体：`{"reason": "…"(可选), "idempotency_key": "…"}`。
@@ -45,7 +66,6 @@
 - 状态流转：`saved|pending_schedule|scheduled → cancel_pending → cancelled`（仅本地撤销回执到才终态 `cancelled`；无回执停 `cancel_pending`，前端展示“取消确认中”）。`fired|missed` 为终态：取消返回 `409 STATE_CONFLICT` + `details.current_state`（“已触发/已错过，不可取消，请新建”）。不存在/非 uuid → `404`；跨 owner → `403`；CSRF 缺失 → `403 CSRF_MISMATCH`。
 - 幂等：同一 `idempotency_key` 重复取消返回 `200` + 当前状态，`data.duplicate=true`；`cancelled` 行重复取消恒回 `duplicate=true`；`cancel_pending` 行新 key 补一条 cancel 命令行（旧行由 supersede 清理）。取消提交（`cancel_pending` 落定）后排队重试全作废（`superseded`），取消后触发数=0 为一级指标（破 0 记 `security_events.cancel_breach`，人复核）。
 - 无回执不谎称：撤销回执未到前状态停 `cancel_pending`，前端展示“取消确认中”，不展示“已取消”；触发门禁照拦（“本机拦截本次触发，系统排期是否撤掉仍无法确认”）。
-- `notifications` 为内部表（v0 无公开路由）：站内信一行一 `idempotency_key`（`send:<taskId>:<fireAtIso>`），`INSERT … ON CONFLICT DO NOTHING` 保证 kill-9 resume 恰好一次；标题/正文只读冻结字段（`wall_time/timezone_id/original_note`），禁时间换算；口径只说“已记录”，不承诺送达/已读。
 
 ```json
 {
