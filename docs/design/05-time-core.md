@@ -4,7 +4,7 @@
 
 - **状态**：设计真源（design 为真源，prd 跟随）
 - **范围**：归一签名、可归一 vs 必问、模糊词拒绝、锚点冻结、normalize 语义、DST 两天、tzdb + readyz、4 基准、单次语义
-- **不包含**：LLM 提示词写法、客户端日期控件、具体 tzdb 版本号、SQL 建表；实现代码
+- **不包含**：LLM 提示词写法、SQL 建表、全 IANA tzdb、实现代码；客户端仅规定候选选择契约
 - **阶段标签**：v0 / P0（P1 起为三差异化之一常驻）
 
 ## 引用
@@ -17,6 +17,8 @@
 - [Required] “明天” = 服务端首次接收时刻 + 已确认时区，解析一次即冻结，之后不再重算。
 - [Required] 单次语义：按确认时那只钟对应的**瞬间**触发；出差换城市不改。
 - [Proposed] 24h / 15min / 1min / 30s 等起步值全标待校准，以自家可测指标为准。
+- [Observed] `FIXTURE_V1` 只有三个 zone 与纽约 2026/2027 四次转换，现实现会向区间外沿用末偏移，不能据此宣称全 IANA 或任意年份正确。
+- [Required · #30] 失败帧、有限覆盖、应用规则上下文与 Web 选择均按本篇及安全 spec；合同不是运行证据。冻结安全 spec Requirement 1/Scenario 1.2 为权威，不改成 `completed` 迎合实现。
 
 ## 1. 归一签名（字段到名，不写代码）
 
@@ -71,13 +73,71 @@ normalize(wall_time, timezone_id, fold_choice, ruleset) -> Result
 ## 4. DST 两天（例外也是契约）[Required]
 
 - 不存在时刻（如 `2027-03-14 02:30 America/New_York`）→ NONEXISTENT_LOCAL_TIME：“当地并不存在；不猜、不存、不排，请重定。”不返回快照。
-- 出现两次（如 `2027-11-07 01:30`）→ fold=none 时 AMBIGUOUS_LOCAL_TIME 并带两候选（first/偏移/UTC、second/偏移/UTC），必须摆偏移（缩写会撞、偏移不会）；用户选定后 `fold_choice` + 偏移双冻结进快照，缺一样即解释不清，作废重来。
+- 出现两次（如 `2027-11-07 01:30`）→ `fold_choice=none` 时 AMBIGUOUS_LOCAL_TIME 并带两候选（first/偏移/UTC、second/偏移/UTC），必须摆偏移（缩写会撞、偏移不会）。输入/候选的 `fold_choice` 是 `first | second | none`；成功结果与现有 approval 快照的 `fold` 是 `0 | 1`，分别表示较早/较晚瞬间，不虚构持久化 `fold_choice` 列。用户选择语义与偏移共同冻结进回显/快照，缺一样即解释不清，作废重来。
 
 ## 5. tzdb + readyz [Required]
 
 - 规则缺失 → 服务不就绪：`/readyz` 返回类型化错误（TZDB_UNAVAILABLE），不降级、不猜。
 - 入口调用前先报 TZDB_UNAVAILABLE，连归一都不叫。
-- 快照自带 `tzdb_version + ruleset_id`；旧快照用旧规则解释，不悄悄替换。
+- 归一结果携 `ruleset_id`，现有 approval/task 冻结 `tzdb_version` 与墙上时间/时区/fold/偏移/UTC；SSE 开始帧已有 `ruleset_id/tzdb_version`。不把设计中的规则溯源要求误称现有表已存 `ruleset_id` 列。旧快照按已冻结值解释，不依赖当前规则重算或悄悄替换。
+
+### 5.1 实际规则与有限承诺 [Observed / Required · #30]
+
+Observed 来源为 `packages/time-core/src/fixtures/fixture-v1.ts`：`ruleset_id=FIXTURE_V1`、`tzdb_version=fixture-v1`；`Asia/Shanghai` 固定 `28800` 秒、`Pacific/Kiritimati` 固定 `50400` 秒，均无转换；`America/New_York` 基础偏移 `-18000` 秒，转换如下（转换瞬间即使用新偏移）：
+
+| UTC 转换瞬间         | 新偏移（秒） | 对应本地边界             |
+| -------------------- | ------------ | ------------------------ |
+| 2026-03-08T07:00:00Z | -14400       | 01:59:59 后跳到 03:00:00 |
+| 2026-11-01T06:00:00Z | -18000       | 01:59:59 后回到 01:00:00 |
+| 2027-03-14T07:00:00Z | -14400       | 01:59:59 后跳到 03:00:00 |
+| 2027-11-07T06:00:00Z | -18000       | 01:59:59 后回到 01:00:00 |
+
+Required：v0 对三个 zone **仅承诺本地墙上时间半开区间 `[2026-01-01T00:00:00, 2028-01-01T00:00:00)`**，精确到秒。这覆盖 2026 黄金、2027 DST 与范围内近未来/次日用例；不向固定偏移 zone 承诺历史或任意未来年份。下界包含，上界排除，`2027-12-31 24:00` 规范化后已越界；不能凭日期年号或末偏移放行。
+
+| zone               | 对应可用 UTC 半开区间（亦用于该 zone 的相对表达锚点） |
+| ------------------ | ----------------------------------------------------- |
+| Asia/Shanghai      | `[2025-12-31T16:00:00Z, 2027-12-31T16:00:00Z)`        |
+| Pacific/Kiritimati | `[2025-12-31T10:00:00Z, 2027-12-31T10:00:00Z)`        |
+| America/New_York   | `[2026-01-01T05:00:00Z, 2028-01-01T05:00:00Z)`        |
+
+入口先校验规范墙上时间范围，再用完整规则判断 gap/fold；成功的 UTC（重复时刻则所有候选）也必须在该 zone 对应区间内。纽约下/上界均为冬令偏移 `-18000`，不能拿夏令偏移算年界。相对表达需要的首次接收锚点及跨日判定用到的服务端时刻，也须在所选 zone 的 UTC 区间内，解析出的目标仍独立检查墙上范围；任一越界为 `TZDB_UNAVAILABLE`，不是不存在时刻。绝对完整输入不因无关的当前年月越界而重写日期，但到期与确认有效期仍按既有规则检查。
+
+这是静态有限生产 profile，不是完整 IANA 发布物；扩区/扩年须先取得实际规则、补边缘与转换证据、修订声明再启用，不能只改环境版本或上界。本轮不引入在线 tzdb 下载、自动更新或新的健康平台。
+
+### 5.2 单一规则上下文与可用性结论 [Required · #30]
+
+API 应用装配边界拥有一份不可变规则上下文：实际规则内容、实际别名表、二者标识、声明支持的三个 zone/上述覆盖区间及校验结论。`/readyz` 与所有**新时间归一**入口（conversation propose_task、后续获批的 revise）消费同一份结论；SSE `thread.started.ruleset_id/tzdb_version` 也从同一上下文取值，不在 gateway 再导入另一常量。上下文不是新的 HTTP DTO、数据库表或 time-core 全局单例；相对锚点仍由调用用例提供，规则包没有时钟所有权。
+
+应用读取环境并装载/校验实际输入；time-core 只接收不可变值、确定性校验覆盖与转换并返回结果，不读 env/时钟/文件/网络，不依赖 API、DB 或 Web。入口别名解析仍是纯值运算。应用可以复用纯校验函数，但不得在 readyz、handler、gateway 各写一份有效性判断，也不得用 `pool` 存在、版本非空或一次黄金结果替代完整性判断。
+
+公共归一用例接收调用方显式 UTC 首次接收锚点、用于跨日判定的接收时刻、原输入、已确认时区及 `fold_choice`，只返回澄清/typed时间失败/归一结果值；不创建 approval/task、不拥有幂等表或事务。conversation 继续使用会话冻结锚点及本轮接收时刻；获批的 revise 使用 approvals 持久冻结的首次接收 anchor，按其合同将两个接收参数固定为该 anchor，当前是否过期另由 approvals 锁后 DB clock 判定。公共用例不代替 owner/CSRF/行锁/有效期，不读当前时钟“修正”anchor；A2只适配输入/事务与错误传输，不另建 fixture 或候选形状。
+
+可用需同时满足：
+
+1. `TZDB_VERSION` 存在且精确等于实际 `fixture-v1`；实际 `ruleset_id=FIXTURE_V1`。实际内容须与该不可变版本声明一致（上述三个 zone、偏移、四转换及有界覆盖），不能只验标签。
+2. zone 集合完整，偏移为有效整数，转换时间有效且严格升序、无重复冲突；不得靠排序/跳过损坏项使坏包“可用”。声明 zone 丢失、错偏移、缺转换、坏内容均不可用。
+3. 实际别名表 `ALIAS_TABLE_V1` 完整：北京时间/上海时间→Asia/Shanghai，纽约时间/美东时间→America/New_York，基里巴斯时间→Pacific/Kiritimati；版本、条目及目标与声明一致。缺表、缺条目、未知目标或标识/内容不符是服务规则故障，不是用户未知时区。
+
+错误分界：
+
+| 情形                                                          | 结论                                                                                |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| 上述包、alias、环境版本、声明 zone 规则缺失/损坏/不匹配       | 上下文不可用，`TZDB_UNAVAILABLE 503`；readyz 非就绪                                 |
+| 健康上下文中用户给了本 profile 不认识的规范 ID 或未知显式别名 | `UNKNOWN_TIMEZONE 422`，不是服务规则故障；不令整个 readyz 变红                      |
+| 已支持 zone 但输入墙上时间/所需锚点越界                       | 该请求 `TZDB_UNAVAILABLE 503`；健康包的 readyz 仍可为 200，不按单次输入污染全局状态 |
+| 支持且范围内的 gap / fold 未选                                | `NONEXISTENT_LOCAL_TIME / AMBIGUOUS_LOCAL_TIME 422`                                 |
+
+一个合法但未在三 zone profile 内的 IANA ID，也属于“本版本不认识”而非宣称全球非法；不得假借缺规则向用户报服务损坏。相反，声明支持的纽约丢失规则绝不能报 UNKNOWN。包级不可用的预检先于本轮时间判定，不能以用户输入掩盖真实坏包。
+
+### 5.3 readyz、预检与旧冻结对象 [Required · #30]
+
+探针沿用 `docs/api/README.md §6` 的**非 envelope**形状：成功 `200 {"status":"ok"}`；失败 `503 {"status":"not_ready","reason":"…"}`，可带既有 `details.missing[]`（至少缺 `TZDB_VERSION` 仍按原键报告）。规则故障 `reason=TZDB_UNAVAILABLE` 优先；仅规则可用而 DB 不可达则 `reason=NOT_READY`。二者同时失败也只返回一个 reason，不新增组合错误或探针端点；实现需做最小真实 DB 可达探测，不能要求全新 D7 库已有业务迁移才就绪。`/healthz` 继续不依赖 DB。
+
+新归一请求先走认证/CSRF、请求结构及既有 owner/资源/幂等只读边界，再在任何新 conversation/message/run/attempt/idempotency 写入与 SSE 头之前检查规则上下文。已知不可用返回业务 `503 TZDB_UNAVAILABLE` 通用 envelope，连 normalize 都不调用；没有新 run，也不预占幂等结果。流已建立后才发现范围外或执行中的规则故障，则走 §9 的 failed503，允许失败审计，不允许承诺写入。
+
+这不是全站 readiness 中间件：旧冻结 approval/task 的读取、已有快照的按钮确认、task 取消/撤销与 worker 执行按既有权限/有效期/回执/冻结 UTC 继续，不重新 normalize，也不被新规则门拦住。对话读取、只读聊天或仅取消旧任务等不作新时间归一的操作不因规则坏包被统一拒绝。同键同请求重放已存终结帧不需要新归一，不造新 run；同键异体/原 run 仍执行仍为既有409，不能借故障重执行。
+
+D7 兼容要求：保留两轮全新卷、缺版本503含 TZDB_UNAVAILABLE、有真规则且 DB 可达200、healthz200及未认证业务401。Observed `scripts/compose-smoke.sh` 的有版本轮写 `2024a`，与实际 `fixture-v1` 不符；后续实施应改为实际加载版本并同步相关 fixture，不为保留旧假版本而放宽校验，不在本契约 PR 改脚本/CI。五门名称及 D1–D10 不变。
 
 ## 6. 四个基准测例（先路通再钉墙）[Required]
 
@@ -106,3 +166,47 @@ normalize(wall_time, timezone_id, fold_choice, ruleset) -> Result
 | AMBIGUOUS_LOCAL_TIME（带两候选） | 422  | 出现了两次，请选第一次/第二次（含偏移） |
 | UNKNOWN_TIMEZONE                 | 422  | 请给规范时区或重选                      |
 | TZDB_UNAVAILABLE                 | 503  | 时间规则不可用，暂不开张（readyz 同码） |
+
+## 9. A4 端到端失败与选择 [Required · #30]
+
+### 9.1 失败不是成功澄清
+
+Required：安全 spec Scenario 1.2 的 typed `thread.failed` 是验收真源。信息缺失（年份/时区/时段）、模糊范围仍按 §2 返回澄清文本，不建 approval，允许 `thread.completed`；已经判定的不存在/重复未选/未知时区不能被降为这类普通澄清。给出“请重定/请选择”话术不等于 run 成功。
+
+Required：SSE 已建立则外层始终 HTTP200；`payload.error.code` 使用既有符号名，`http_status` 为前三错422、`TZDB_UNAVAILABLE`503。可以先有解释 delta，但每个 run 只能落一个终结帧；typed失败后不再发 completed/cancelled/approval_required/card.proposed。回放同一事件序列，不因断连或失败审计写入异常再追加第二终结。
+
+`AMBIGUOUS_LOCAL_TIME` 的 `error.details` 使用以下合同结构，专用 schema 约束此结构；其余外层事件字段不变。schema 实施和运行验证另行留证：
+
+```json
+{
+  "wall_time": "2026-11-01T01:30:00",
+  "timezone_id": "America/New_York",
+  "ruleset_id": "FIXTURE_V1",
+  "candidates": [
+    { "fold_choice": "first", "offset_seconds": -14400, "fire_at_utc": "2026-11-01T05:30:00Z" },
+    { "fold_choice": "second", "offset_seconds": -18000, "fire_at_utc": "2026-11-01T06:30:00Z" }
+  ]
+}
+```
+
+候选恰好两个，按 UTC 从早到晚对应 first/second；不得只有中文、时区缩写、缺偏移或由客户端合成。`fold_choice` 是请求枚举，不是输出 `fold`；first→0、second→1（仅重复时刻），非重复成功仍 fold=0。原话“第一次/第二次”不覆盖结构化 `fold_choice`，未提供字段按 none；有相互冲突的自由文字选择则问清而不偷偷另选，不能让 Web 猜词提交。
+
+“不存不排/零业务写”在这里精确定义为失败不创建或改写 approval、task、task_events、outbox、notification，不调用发送 provider。允许既有 conversation/message/agent_runs/run_attempts/run_checkpoints/tool_calls 失败审计；它们不是承诺。规则预检拒绝比这更严格：上述新 run 等写入也为零。时间校验和范围校验必须在创建 approval 之前完成，不能先建 pending 再发 failed 当作回滚。
+
+### 9.2 显式时区优先级与 Web 再提交
+
+Required：保留既有请求兼容字段的实际优先级：`confirmed_timezone_id ?? confirmed_timezone` 是请求已确认值（schema 两字段均已有），不新增 `timezone` 字段。解析优先处理原文中显式时间时区指示：**一个已知别名/规范 ID 高于请求已确认值；本次请求已确认值高于会话原冻结默认值；仍无值才是缺时区澄清**。这只决定本轮意图，不改旧 approval/task 或用户 profile，也不覆写会话首次接收锚点。重复的同义别名去重；多个不同的显式有效时区则澄清，不按表遍历顺序选首项。
+
+未知显式时区（如“火星时间”或未知规范 ID）无论是否已有 Shanghai、是否同时出现已知别名，都必须 `UNKNOWN_TIMEZONE`；不能无视它回落 confirmed timezone。无显式原文指示而请求确认值未知也失败；缺表/别名映射目标丢失按 §5.2 的服务错误，不混为用户错误。普通缺信息/范围词仍澄清，但不得以此静默接受未知指示。
+
+Web 在 failed422 AMBIGUOUS 后保存本次原输入、服务端明确的 wall_time/timezone_id 和两个候选，显示“第一次/第二次 + 数值偏移”操作。点击只是以 `fold_choice=first|second` **新请求**重新提议，不是 confirm，不直接建 task；保留原输入及显式日期/所选规范时区（不得重新拿 `/me` Shanghai 覆盖纽约），使用新幂等键。保留旧会话锚点并遵守跨午夜/延迟追问，不能把“明天”重新以点击时刻重算。若输入/日期/时区改动，应清除旧候选选择重新校验，不能套用旧 fold。
+
+客户端只展示服务端候选/偏移，不用 Date/Intl/UTC 算术生成目标；服务端再归一，不信客户端提交的候选 UTC。既有API不接受客户端 `fire_at_utc` 作为排期输入。成功后才显示新的 pending 回显及按钮确认门，仍验 hash/seen_content/有效期；失败时不能留上一项的确认入口造成误确认。
+
+## 10. 回归与实际取证边界 [Required · #30]
+
+- 保留有效的 time-core golden/DST/reverse-clock 与表达入口回归，只更新受影响断言。新增规则完整性/范围/alias、HTTP preflight、HTTP200 failed422/503、PG零承诺、回放唯一终结和 Web 双选择回归；mock坏规则仅证明分支，不是部署演练。
+- 每 zone 覆盖本地 `2025-12-31T23:59:59`拒绝、`2026-01-01T00:00:00`包含、`2027-12-31T23:59:59`包含、`2028-01-01T00:00:00`拒绝，核对各自 UTC 边缘与锚点边界；相对次日跨上界拒绝。纽约四次转换各测转换前一秒/瞬间/后一秒，春季整段 gap 与秋季双候选/fold 映射均保留。
+- 在独占真实部署装载源分别制造缺version、缺/坏规则、缺alias、标识内容不匹配，再重启同一生产装载链；记录源码/镜像、实际输入来源及变更、readyz与请求HTTP/SSE、request/run关联、SQL前后差异和恢复。静态打包资源若无可移除来源，须在实施中提供最小真实装载边界或受控移除实际构建资源，不能只注入测试对象声称真实缺规则，也不为此做通用故障平台。
+- 真实规则坏包场景先冻结有效旧 task，故障期间证明详情/取消或自然到点仍走冻结结果，无重算/新承诺；DB断开单独证明readyz503且healthz200，不宣称DB坏时业务还能读写。复用不受影响的既有取消/通知证据，不重开#26。
+- A4未来绝对DST输入可立即验归一，不需等DST日；已过的2026黄金日期只作计算/错误回归，不能确认过期approval伪造生产通过。真实first/second选用仍未来的2026-11-01或2027-11-07。D1/D2/D7/D8/D10及五门保留，实施、真实验收、独立证据审查和archive均尚未执行。

@@ -7,7 +7,7 @@
 - [Required] A1 喝水恰好一次：输入"明天 9:20 提醒我喝水"（已确认时区）→ 回显冻结 → 确认 → 建单次 task → 登记回执 → 到点 15 分钟内应用内通知恰好一次；task_events 含 scheduled（含回执号）→ fired 全链；对外只说已记录步骤。
 - [Required] A2 重复确认单任务：同一 approval 连点两次确认，只回同一个 task（"这是重复确认，没有新建第二条"）；改字段后重回显，旧 approval 作废（superseded），确认旧键被挡（APPROVAL_SUPERSEDED）。
 - [Required] A3 kill 后恰好一次：worker kill -9 后 resume，副作用（触发请求）恰好一次：lease + fencing 保证单 claim；发了没回只核对不重发；取消已提交后触发数 = 0。
-- [Required] A4 DST 追问：不存在的本地时刻拒收（NONEXISTENT_LOCAL_TIME，不猜不存不排）；出现两次的时刻必须追问两候选（AMBIGUOUS_LOCAL_TIME 带 first/second + 偏移）；未知时区别名报 UNKNOWN_TIMEZONE；规则缺失报 TZDB_UNAVAILABLE 且服务不就绪。
+- [Required] A4 时间错误：不存在本地时刻、重复未选、未知时区/显式别名分别 typed 422 失败；两候选由服务端提供，Web保留完整输入/时区，以 first/second 与新键重提议，不算 UTC、不当作确认。缺信息/模糊仍澄清。三 zone 的有限 2026–2027 本地区间及精确 UTC 边缘见 design/05 §5；范围外/规则不可用为 TZDB_UNAVAILABLE，未知别名不得因已有确认时区被忽略。认证/结构等边界后、SSE与新 run 前预检规则；已开流故障唯一失败终结，承诺零写/零调用。readyz共享实际规则/alias/版本与DB可达判断，不接受任意非空版本；真实缺失装载与旧冻结读取/确认/取消/执行隔离需取证，不能以mock代替（design/05 §9–§10、API §6）。
 - [Required] 验收环境：单镜像 all 角色 + compose 冒烟；Postgres 唯一事实源；Redis 缺席不得影响验收（Redis 已延后）。
 - [Required] CI 合并门：`static` 通过后，迁移约束、调度故障、契约双跑与 `compose-smoke` 四条下游只依赖 static、各自隔离并行；static 失败则全部下游不运行。五个 job 必须全部成功才允许合并，人工保护约定与 D1–D10 语义不变；Compose 可在其他下游失败前已消耗资源，但不共享用户数据或可变数据库（见 design/13 §3–§4、ADR 0007）。
 - [Required] 工具链验收遵循 Bun 1.4.2 冻结安装、Oxlint 1.89.0、Oxfmt 0.74.0 与 `bun:test`；`bun run verify` 是本地与 static 的共同阻塞入口。依赖优先构建后串行执行全部 workspace 类型检查，保留源码、测试与 Next route typegen。文件级并行保留隔离及 mock/时钟恢复；只有只读边界 fixture 可最多两个真实 CLI 并行，逐项拒绝断言、绿例两种扫描和清理前等待均须保留。`test:contracts` 包含 API 两种传输及契约包，`test:integration` 覆盖全部 9 个真实 PostgreSQL 16 文件，`test:scheduler` 保留 D9 指定集。D1/D2 原边界与断言不因工具或调度改变（见 design/01 §5、design/13 §3–§4、ADR 0006、0008）。

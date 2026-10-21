@@ -23,7 +23,7 @@
 | 02   | [模块化单体与拆分触发](design/02-modular-monolith-and-split-triggers.md) | 模块清单、所有权、拆分判据 a–d、B03 十服务裁决                                               |
 | 03   | [v0 垂直切片](design/03-v0-vertical-slice.md)                            | 简报→卡片→对话→按钮确认→调度→站内通知详情投影→活动账；真实取消回执与七步证据边界             |
 | 04   | [五缝契约](design/04-five-seams-contract.md)                             | AgentRuntime/ToolGateway/Scheduler/Notifier/ConnectorVault 端口契约                          |
-| 05   | [time-core 时间层](design/05-time-core.md)                               | 服务端纯函数 normalize；LLM 不算时间，展示层不换算                                           |
+| 05   | [time-core 时间层](design/05-time-core.md)                               | 纯函数 normalize、有限真实规则上下文、typed 时间失败、fold 候选与实际 readiness              |
 | 06   | [approvals 确认门](design/06-approvals-confirmation-gate.md)             | 副作用承诺持久对象、状态机、presentation_hash 幂等消费                                       |
 | 07   | [task_events 事件账](design/07-task-events-ledger.md)                    | 只追加账本、取消优先、活动页读模型                                                           |
 | 08   | [调度与投递](design/08-scheduler-and-delivery.md)                        | worker 角色、PG lease+fencing、outbox、Notifier 投递                                         |
