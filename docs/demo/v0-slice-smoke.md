@@ -1,65 +1,238 @@
 # v0 切片冒烟：干净单次提醒闭环
 
-> 状态：v0 可复现。范围：Web 单端 7 步全链路冒烟。不包含：自动化脚本、多用户并发、性能压测。阶段标签：v0 MVP。前置：服务端就绪（`/healthz`、`readyz` 绿）、已确认时区 `Asia/Shanghai`、服务端可信钟可用。
+> 状态：[#26](https://github.com/BqLee-AI/Along-agent/issues/26) 已获用户授权执行的**操作手册，不是验收记录**。本轮先独立 spec PR，经独立 review、五门绿及合并资格 CLEAN 后合并，再实现并真实执行。当前尚缺通知详情投影/Web 展示、生产取消回执与实际 provider 调用证据；仅改本文不能宣称七步已通过。完整计划与 A1–A4 边界见 [收口计划](v0-smoke-closeout-plan.md)。
 
-## 前置
+范围：同一受控环境、同一合成 owner、真实 Web 单端七步。不重开 brief，不扩展 CI、外部推送或通用 E2E 框架；D1–D10、五门、按钮确认、冻结展示、回执门均不变。正常主链只经对话/按钮写业务数据；SQL 仅只读取证，不手注任务、时间、通知或取消回执。
 
-- 服务 `/healthz` 返回 `ok`；`/readyz` 无类型化错误（tzdb 缺失则停，不降级）。
-- 准备用户 A（`owner_id` 已注入），浏览器打开 Web 对话页与任务页。
-- 时钟：服务端可信钟与正确 tzdb 版本（`tzdb_version` 记录在案）。
+## 1. 执行前置与实施依赖
 
-## 步骤
+### 必须先落地的依赖
+
+- **通知可见面（待实施）：** 独立 spec PR 合并后，实现 `GET /api/v1/tasks/{id}` 的只读 `data.notifications` 数组及任务详情展示。空态 `[]`；每项仅投影现有 `id/title/body/status/sent_at`，`status` 为 `pending | sent | failed`，`sent_at` 可为 `null`。沿用详情的 owner 校验：不存在 404，跨 owner 403；不向任务列表加字段，不新增 `/notifications` 路由，不产生读副作用。查询由 notifications 公共 service 拥有，tasks 按 task ID 调用，禁止跨模块读表。当前源码尚无该数组/面板，下面步 5/6 是实施后的验收目标。
+- **取消回执（待实施）：** 正常 worker 必须在实际本地队列撤销和 fencing 核对完成后持久化回执，再将 `cancel_pending` 推进为 `cancelled`。当前生产路径只检查内存 Set，未生产回执；不能把测试 `recordCancelReceipt`、SQL 改终态或内存标记当真实闭环。不改已合并迁移；无回执必须保持 `cancel_pending`。
+- **调用观察（先配置）：** §4 的真实 provider 调用证据必须在正向任务到点前接通；无法可靠观察时，先在该边界落实最小、无内容的调用证据，不拿零通知/零 fired 代替。
+
+### 独占环境与启动
+
+1. 固定 Bun **1.4.2**、本地 OpenSpec **1.3.1**、Postgres **16**；执行者记录当前 commit、相关源码差异、进程/环境所有权和版本。保留用户改动。使用专属新 PG 数据库/项目及卷，确认无其他 worker 共用它；不清空用户库、不杀用户进程。
+2. 所有凭据仅由执行器/私密终端的**进程环境**注入；不读取、source、复制或改写 `.env*`，不在命令、截图、证据文件中展开 DSN/secret。API、seed 使用同一 `DATABASE_URL` 和 `BETTER_AUTH_SECRET`；只读 psql 使用指向同库的 `PGHOST/PGPORT/PGDATABASE/PGUSER/PGPASSWORD` 等进程环境，不输出它们。API 的 `ROLE=all`、`PORT=3000`、`TZDB_VERSION=fixture-v1`，Web 的 `API_BASE=http://127.0.0.1:3000` 也从进程环境明确注入；不能继承 `ROLE=api` 而漏启 worker。
+3. 在已明确独占的**空新库**上，仓根执行下列现有入口。它们是后续真实执行命令，本次文档修订未运行：
+
+   ```sh
+   bun install --frozen-lockfile
+   sh scripts/db/apply.sh
+   bun run --filter @along/api seed:session
+   bun run dev
+   ```
+
+   `apply.sh` 需要 POSIX shell 与宿主 `psql`，按顺序一次应用当前 0001–0011；不是可安全反复用于已有库的迁移 runner。必须注入专属 `DATABASE_URL`，不能意外走它的默认 DSN。根 `dev` 会构建共享包，再启动 API 3000、Web 3100；没有根 `db:migrate` 命令。若调试器需要不同启动方式，沿用相同源码/配置和单 worker，先构建共享包，记录实际启动命令；不得同时再运行另一套 all/worker。
+
+4. 也可使用已拥有的 PG 编排，但现有 `infra/compose/compose.yaml` 仅含 PG 和 all API，镜像不含 Web，未自动迁移也未向 API 注入 `BETTER_AUTH_SECRET`。不能把 Compose readiness smoke 当作本手册环境；不得启动 Compose all API 后又启动指向同库的宿主 all。
+5. API 直接探针：`http://127.0.0.1:3000/healthz` 返回 `ok`，`/readyz` 无类型化错误。注意 readiness 当前仅查 `TZDB_VERSION` 非空，不探 PG/完整规则；还要以真实 `/me`、业务请求与只读 SQL 确认路径。现归一使用 `FIXTURE_V1`、实际 tzdb `fixture-v1`，不是完整 IANA 库；记录环境声明值及 SSE 实际 `ruleset_id/tzdb_version`，不能把任意版本字符串当完整规则证明。
+
+### 真实 session、CSRF 与 Next
+
+- seed CLI 正常创建身份/session（不是业务 SQL 注入），默认用户时区 `Asia/Shanghai`；输出 `user=...`、签名 cookie `better-auth.session_token=...` 和 CSRF。只在不录屏的私密终端使用这些值，不保留 seed 原始输出。
+- 打开 `http://127.0.0.1:3100`。在浏览器 Application/Storage 的该主机下设置 cookie `better-auth.session_token`，值为 seed 的完整签名值，Path `/`；不要混用 `localhost` 与 `127.0.0.1`。在同源访问 `/api/v1/me`，核 `data.user.id` 为本次 owner、`data.confirmed_timezone=Asia/Shanghai`，取 `data.csrf_token` 仅供临时请求使用。
+- 浏览器写请求带 cookie、`content-type: application/json` 与 `x-csrf-token`，均经 Web 同源 `/api/v1/*` 的 Next 代理到 API；不直连 API 端口完成业务串链，不用 `ALLOW_DEV_AUTH`、假 actor 或测试认证接口代替。SSE 另带 `accept: text/event-stream`。
+- 页面 GET 可能由 RSC 在服务端转发 cookie，不一定出现在浏览器 Network；另取同源 API 响应与页面对照即可。`/healthz`、`/readyz` 只走 API 根路径，不存在 `/api/v1/readyz`。
+
+## 2. 数据、时间与证据准备
+
+- 为同一 owner 记录初始 task ID/approval ID 集合及相关 outbox 基线（§3）；只比较本次 ID 的差量，不假设全库/首页 tasks 为空。分页列表必须读完有关页，不拿首页条数代替 SQL。
+- 新环境无简报卡片时，先在 `/conversations` 用真实近未来输入生成一个**不确认**的准备 approval `P0`，记入基线。它只供步 1/2 的只读展示，不建立第三个 task。
+- 两个正式任务分别为 `P_fire → T_fire`、`P_cancel → T_cancel`。**每次创建时重新**以可信当前钟选择约 3–5 分钟后的整分钟，输入 `YYYY-MM-DD HH:mm 提醒我喝水（北京时间）`，填写当次真实年份/日期/时间。`T_cancel` 在步 6 之后再建，不能复用已 fired 的任务。避免秒精度输入和明天固定时间，保证有时间确认/排期/取消又能有界等待。
+- 记录服务端可信时间、PG `now()`、owner 时区及各任务原始 `fire_at_utc`；业务展示只核冻结 `wall_time/fire_at_local + timezone_id`，不在 Web 换算 UTC。不要用 SQL 回拨时间、修改 `fire_at_utc` 或手动调用 worker phase 加速正常链。
+- 在正向到点前开始 §4 观察，整个运行保持同一个单 worker；记录器失联、代码热重载/进程重启或日志丢失均使该段“零调用”证据失效，不能续接为连续观察。
+
+## 3. 七步操作与最低断言
 
 ### 步 1 简报
 
-- 命令：`GET /brief`。
-- 预期 JSON：`{"date": "<本地日期>", "timezone_id": "Asia/Shanghai", "summary": {"pending_count": 1, "fired_count": 0}, "cards": [...]}`（S0 #14 冻结：只读投影，不建 `briefs` 表，无 `unique(owner,brief_date)` 落库断言）。
-- 断言：`date` 为已确认时区本地日期；重复 GET 同一天返回同一投影（读 tasks/approvals 当前态，不做落库幂等断言）。
+打开 Web `/`，同源 GET `/api/v1/brief`。成功响应为统一 envelope：
 
-### 步 2 卡片
+```json
+{
+  "code": 0,
+  "data": {
+    "date": "<owner 本地日期>",
+    "timezone_id": "Asia/Shanghai",
+    "summary": { "pending_count": 0, "fired_count": 0 },
+    "cards": [],
+    "meta": {
+      "brief_state": "empty",
+      "timezone_note": null
+    }
+  },
+  "msg": "ok",
+  "error": null,
+  "request_id": "<request id>"
+}
+```
 
-- 命令：打开简报页，查看任务卡片（`kind=task/approval`；旧 `task_progress/info` 作废）。
-- 预期：卡片含 `schema_version`（如 `card.v1`），时间展示为冻结墙上时间 + 时区，不换算。
-- 断言：卡片只读投影；点卡片不产生 task（须走确认门）。
+此 JSON **只是空态结构示例**，准备 P0 后实际 counts/cards/meta 按当次业务状态记录，不固定 `pending_count=1` 或上述空值。无其他写入时重复 GET 比较业务投影，忽略 request_id；brief 是 tasks/approvals 当前态投影，不建 `briefs` 表，不断言落库幂等。
 
-### 步 3 对话
+### 步 2 只读卡片
 
-- 命令：`POST /conversations/messages`（SSE）正文 `{"conversation_id": "<cid>", "message": "明天 9:20 提醒我喝水。"}`。
-- 预期 SSE：`thread.started` → `message.delta`（含 `请确认 A-xxxx：你说"明天 9:20"，我将它归一为 <次日> 09:20（Asia/Shanghai），设为单次提醒；确认前不会创建正式提醒，也不会排期。`）→ `approval_required` → `thread.completed`（S0 #14 冻结：旧 `thinking/done` 为 AgentEvent 内部名，对外只认 thread 系）。
-- 断言：`GET /approvals/{id}` 为 `pending`；`GET /tasks` 为空（没点头不进钟）。
+从简报点击 P0 卡片到 `/approvals/{id}`，保存脱敏页面与 `GET /api/v1/approvals/{id}` 的 `data.echo_text/presentation_hash/status`。brief 的卡片 `kind=task | approval`、`schema_version=1`（**数字**），不是 `card.v1`；approval 卡片不要求拥有 task 全部字段。点击前后按 P0 与 owner 查 task/outbox，无新增，冻结回显不变；点只读卡片不等于确认。
 
-### 步 4 确认
+### 步 3 对话 SSE
 
-- 命令：点确认按钮 → `POST /approvals/{id}/actions/confirm` 正文 `{"presentation_hash": "<回显看到的哈希>", "seen_content": "<当时看到的完整回显原文>", "idempotency_key": "<uuid>"}`（S0 #14 冻结：`approval_id` 取自路径，不在 body 重复；v0 只认按钮）。
-- 预期 JSON：`{"task_id": "<tid>", "state": "saved"}`；重复确认返回同一 `task_id`（“这是重复确认，没有新建第二条”）。
-- 断言：`GET /approvals/{id}` 为 `consumed` 且 `consumed_task_id = <tid>`；哈希对不上返回 `PRESENTATION_MISMATCH` 且不建 task。
+在 `/conversations` 输入本次正向近未来时间。核浏览器实际 POST `/api/v1/conversations/messages`，不是旧 `message` 字段：
 
-### 步 5 到点
+```json
+{
+  "raw_text": "<本次 YYYY-MM-DD HH:mm 提醒我喝水（北京时间）>",
+  "confirmed_timezone": "Asia/Shanghai",
+  "idempotency_key": "<uuid>"
+}
+```
 
-- 命令：等待 `fire_at_utc`（测试可用近未来时间重走步 3–4）；到点后 `GET /tasks/{id}` 与 `GET /tasks/{id}/events`。
-- 预期：15 分钟内 `state=fired` + 事件账 `fired`（`evidence_ref` 为回执号或 `local`）；应用内通知到达（`GET` 通知列表可见）。
-- 断言：超 15 分钟只标 `missed` 不补发；口径只说已记录步骤。
+首轮 `conversation_id` 可省略；后续由 `thread.started.payload.conversation_id` 延续。保存脱敏 SSE `data:` JSON：`thread.started → message.delta → card.proposed → approval_required → thread.completed`（delta 可多帧；该成功运行终结事件唯一）。每帧 `protocol_version="v1"`、递增 `seq`、`request_id`；payload 中关联 cid/run_id。`card.proposed.payload.schema_version="v1"`（**字符串，与 brief 数字 1 不同**），含冻结 `wall_time/timezone_id`；`approval_required.payload.approval_id=P_fire`。外部不是旧 `thinking/done`。
 
-### 步 6 活动页
+取 approval 详情核 `data.status=pending`，只读 SQL 核审批表 `state=pending`，该 owner 的 `source_approval_id=P_fire` 对应 task 数为 0、关联 outbox 为 0；不能用“全库空”替代。记录回显告知“确认前不会创建正式提醒或排期”。这里不要求自然语言确认有效，v0 只走按钮。
 
-- 命令：打开任务活动页（`GET /tasks/{id}` + `GET /tasks/{id}/events` 渲染）。
-- 预期：状态时间线（`saved → pending_schedule → scheduled → fired`）与事件账（`created → scheduled → fired`，S0 #14 冻结：账本无 saved 中间态）逐行一致。
-- 断言：任一步失败保持未完成并可重试，不报成功。
+### 步 4 按钮确认与重复请求
 
-### 步 7 取消
+进入 `/approvals/P_fire`，核页面完整 `echo_text` 与存档 hash，一次点击确认。实际 POST `/api/v1/approvals/P_fire/actions/confirm`：
 
-- 命令：另建一个未来 task（重走步 3–4），随后 `POST /tasks/{id}/actions/cancel`。
-- 预期 JSON：`{"state": "cancel_pending"}` → 回执到后 `{"state": "cancelled"}`；无回执停在 `cancel_pending`，不谎称已取消。
-- 断言（一级指标）：取消提交后触发请求数 = 0（查 `task_events` 无 `fired`，`outbox` 余单全 `superseded`）。
+```json
+{
+  "presentation_hash": "<实际看到的哈希>",
+  "seen_content": "<实际页面完整 echo_text，不能截断/自行重拼>",
+  "idempotency_key": "<uuid>"
+}
+```
 
-## 常见问题
+成功响应不是 `{state:"saved"}`，而是：
 
-| 现象                              | 原因                  | 处理                                         |
-| --------------------------------- | --------------------- | -------------------------------------------- |
-| 确认返回 `PRESENTATION_MISMATCH`  | 回显与快照对不上      | 停在待核对，重回显新 approval，旧键作废      |
-| 确认返回 `APPROVAL_EXPIRED (410)` | 超 24h 或目标已过     | 旧确认作废，重走对话                         |
-| 确认返回 `APPROVAL_SUPERSEDED`    | 改字段已出新 approval | 用新 approval 确认                           |
-| 归一返回 `NONEXISTENT_LOCAL_TIME` | 当地不存在的时刻      | 不猜不存，请重定                             |
-| 归一返回 `AMBIGUOUS_LOCAL_TIME`   | 重复时刻未选          | 出两候选（各带偏移），用户选 first/second    |
-| `/readyz` 报 `TZDB_UNAVAILABLE`   | 时区库缺失            | 不开张，先补 tzdb，不降级                    |
-| 取消后仍收到触发                  | 并发竞争              | 按违规计（分不清先后按违规计），查证据人复核 |
+```json
+{
+  "code": 0,
+  "data": {
+    "approval_id": "<P_fire>",
+    "status": "consumed",
+    "task_id": "<T_fire>",
+    "duplicate": false
+  },
+  "msg": "ok",
+  "error": null,
+  "request_id": "<request id>"
+}
+```
+
+按钮成功会跳任务页且禁双击。以 Network 的已提交请求在**同源**重发一次原 body/幂等键（保留有效 CSRF，仅本地使用），核同一 `task_id`、`duplicate=true`，不要假装 UI 自动做了双次确认。approval 详情为 `data.status=consumed`，SQL `state=consumed/consumed_task_id=T_fire`；与确认前差量核 1 task、1 `created`、1 schedule 命令，无第二 task。worker 可能已改变 outbox status，不固定其为 pending。`PRESENTATION_MISMATCH` 等非成功立即保留现场，不省略所见校验绕过门。
+
+### 步 5 真实到点与通知
+
+保持 all worker 运行，先核 task `schedule_receipt=sched:<T_fire>`，再等待原 `fire_at_utc`。到点后取同源 `GET /api/v1/tasks/T_fire`、`/api/v1/tasks/T_fire/events`，核 `state=fired`、一条 `fired` 事件、默认本地 `evidence_ref=inapp:<sendKey>`，SQL 通知恰好一行；§4 真实 provider 调用恰好一次作正控制。至少再跨两个完整 30s tick，复取计数保持一次；只等 60s 但 worker 未工作不算两个有效 tick。
+
+**待通知实施完成后**，详情 `data.notifications` 中恰好对应本次站内记录，Web `/tasks/T_fire` 显示相同 `id/title/body/status/sent_at`。body 按存储冻结文案原样展示，不重新算时间；站内 `sent` 与本地回执只证明服务端记录/本地接收，不证明设备送达、准时响铃或人已读。不请求不存在的通知列表路由。
+
+超过原到点 15 分钟只应 missed、不补发；但本次正向任务若 missed，应判本轮 A1 失败，不能以符合 missed 分支替代到点成功。
+
+### 步 6 任务详情与活动账
+
+刷新 `/tasks/T_fire` 和 `/activity`，与同次详情/事件 API、SQL 对齐：事件 `created → scheduled → fired`、`state_version/recorded_at_utc/evidence_ref` 一致。task 可以 `saved → scheduled → fired`，不强求抓到 `pending_schedule`，不合成 `saved` 事件。通知面与事件账分别取证，不能把 fired 文案充当通知正文。
+
+活动页目前仅查前 50 个 tasks、每 task 前 50 个 events；使用小规模合成数据。超出时用任务详情与分页事件 API，不误判丢账。API 失败、页面空白或事件页读取失败不能算“无事件”。
+
+### 步 7 另建任务并真实取消
+
+1. 重新选约 3–5 分钟后整分钟，经步 3/4 创建 `P_cancel → T_cancel`，记录其原始 `fire_at_utc`。先核真实 `schedule_receipt=sched:<T_cancel>`，保证不是未排期任务的空测；不足取消余量时另建新任务并完整说明，不改 DB 时间。
+2. 从 `/tasks/T_cancel` 点击取消；实际 POST `/api/v1/tasks/T_cancel/actions/cancel` body 为 `{"idempotency_key":"<uuid>"}`（可选 `reason`），带 CSRF。响应统一 envelope，`data={task_id:"<T_cancel>",state:"cancel_pending",duplicate:false}`；以实际响应为准，重放可 duplicate，若已有真实回执也可能直接返回 cancelled。HTTP 成功返回与随后可读事务事实共同作为“已提交”证据。
+3. 观察真实本地撤销/fencing 核对后的**持久回执**及 `cancelled` 事件、task 终态；cancel outbox 的 `provider_receipt_id` 与事件 `evidence_ref` 可对照。无回执必须停 `cancel_pending`，不口头算成功、不手调测试函数/SQL 补齐回执。仅内存 Set 命中也不算持久证据。
+4. worker/调用观察保持连续运行，跨过 `T_cancel` 的**原到点 + 15 分钟窗口结束**，再覆盖至少两个有效 30s tick；即观察终点不早于 `original_fire_at_utc + 15min + 60s`，且确认这期间 worker 实际工作。记录原到点、窗口终点、实际观察终点与 tick 证据。
+5. 主指标：从取消提交起实际 provider 调用数 **0**（§4）。辅证分别为通知 **0**、`fired` **0**、`cancel_breach` **0**、待处理非 cancel 余单 **0**。历史完成 outbox 不要求全部 superseded；cancel 命令可在等待时 pending，完成后 dispatched。
+
+## 4. 只读 SQL 与实际调用取证
+
+### SQL 快照
+
+在同一个受控库执行 `psql -X -v ON_ERROR_STOP=1`（连接凭据已从进程环境注入，不将 DSN 拼入命令）。在私密交互会话设置以下**非凭据**变量为实际 UUID；占位符不可原样执行。每个检查点重新运行只读事务，记录基线/确认前/确认后/到点后/取消后/窗口结束后差量：
+
+```sql
+\set owner '<本次 /me 的 user.id>'
+\set approval '<当前 P0、P_fire 或 P_cancel>'
+BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY;
+SELECT now() AS observed_at_utc;
+SELECT id FROM tasks WHERE owner_id = :'owner'::uuid ORDER BY id;
+SELECT id, state, consumed_task_id, presentation_hash, wall_time,
+       timezone_id, tzdb_version
+FROM approvals
+WHERE owner_id = :'owner'::uuid AND id = :'approval'::uuid;
+SELECT count(*) AS approval_tasks
+FROM tasks WHERE owner_id = :'owner'::uuid
+  AND source_approval_id = :'approval'::uuid;
+SELECT count(*) AS approval_outbox
+FROM outbox o JOIN tasks t ON t.id = o.task_id AND t.owner_id = o.owner_id
+WHERE o.owner_id = :'owner'::uuid AND t.source_approval_id = :'approval'::uuid;
+COMMIT;
+```
+
+取得 task ID 后，再为当前 `T_fire` 或 `T_cancel` 运行以下快照；所有表均按 owner 和本次 ID 限定，不导出全库或完整 outbox command：
+
+```sql
+\set task '<当前 T_fire 或 T_cancel>'
+BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY;
+SELECT now() AS observed_at_utc;
+SELECT id, source_approval_id, state, state_version, schedule_receipt,
+       fire_at_utc, wall_time, timezone_id, tzdb_version
+FROM tasks WHERE owner_id = :'owner'::uuid AND id = :'task'::uuid;
+SELECT id, type, state_version, recorded_at_utc, evidence_ref
+FROM task_events
+WHERE owner_id = :'owner'::uuid AND task_id = :'task'::uuid
+ORDER BY recorded_at_utc, id;
+SELECT id, command->>'kind' AS kind, status, attempt_no, provider_receipt_id
+FROM outbox
+WHERE owner_id = :'owner'::uuid AND task_id = :'task'::uuid
+ORDER BY created_at, id;
+SELECT id, title, body, idempotency_key, status, sent_at
+FROM notifications
+WHERE owner_id = :'owner'::uuid AND task_id = :'task'::uuid
+ORDER BY created_at, id;
+SELECT count(*) AS created_events FROM task_events
+WHERE owner_id = :'owner'::uuid AND task_id = :'task'::uuid AND type = 'created';
+SELECT count(*) AS schedule_commands FROM outbox
+WHERE owner_id = :'owner'::uuid AND task_id = :'task'::uuid
+  AND command->>'kind' = 'schedule';
+SELECT count(*) AS notices FROM notifications
+WHERE owner_id = :'owner'::uuid AND task_id = :'task'::uuid;
+SELECT count(*) AS fired_events FROM task_events
+WHERE owner_id = :'owner'::uuid AND task_id = :'task'::uuid AND type = 'fired';
+SELECT count(*) AS pending_non_cancel FROM outbox
+WHERE owner_id = :'owner'::uuid AND task_id = :'task'::uuid
+  AND command->>'kind' <> 'cancel'
+  AND status IN ('pending', 'dispatched', 'acked_unknown');
+SELECT count(*) AS cancel_breaches FROM security_events
+WHERE owner_id = :'owner'::uuid AND task_id = :'task'::uuid AND type = 'cancel_breach';
+COMMIT;
+```
+
+`pending_non_cancel=0` 是取消任务的断言，不是对所有 task 的通用要求。安全事件单独取证；取消回执除其持久字段外，还需实施后的实际撤销/fencing 路径证据，不能仅凭一个手填字符串认定真实完成。保存合成通知内容即可；不向证据包输出身份凭据、授权头或真实提醒。
+
+### provider 调用：独立于 SQL 的主指标
+
+当前真实边界为 `apps/api/src/modules/notifications/service.ts#deliverInApp` 的 `await effective(notice)`。计数的是该 provider 调用瞬间，即使事务回滚/幂等插入无新增也算一次；不是 runSendPhase 扫描、SendSummary.fired、唯一通知行或网络包数（本地 provider 没有外网请求）。
+
+优先在受控单 worker 上于该调用行设置**非暂停 debug logpoint**，仅记录固定标记、`notice.taskId`、调用时刻和本次观察的序号；禁止展开整个 notice（含提醒内容）、cookie 或环境。确认调试客户端实际支持持续 logpoint 且不暂停/拖延可信钟；不支持或无法保存完整记录时，先实现同一边界最小无内容证据，不建遥测框架或新测试 API。
+
+观察从 `T_fire` 到点前开始，`T_fire` 的一次实际调用是正控制，再无中断延续到取消窗口结束。给 `T_cancel` 汇总提交后的调用数并保留原始脱敏观察；没有正控制、漏接进程或观察空档时，写“缺证据”，不得写零。
+
+`cancel_requested.recorded_at_utc` 是事务内写入时间，不等于 commit。记录取消请求开始、HTTP 成功返回及事务已可读的时间，以成功返回后的调用证明提交后违规；开始至响应之间的调用若无法与提交排序，按既有“分不清先后按违规计”交人复核，不自行排除。调用破零即变红，即便数据库通知/fired 都为零。
+
+## 5. 普通障碍、停止与交付口径
+
+| 现象                                                      | 处理/边界                                                                                              |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Windows 缺 POSIX shell/psql、PG/端口冲突、PG 所有权不明   | 补齐工具或选择自己拥有的新环境；所有权不明即停止，不删库/抢端口/杀用户进程                             |
+| `/me` 401、POST CSRF 403                                  | 核同 host、cookie Path/完整签名、API 与 seed 的同一 secret、有效 session 及最新 `/me` CSRF；不关闭鉴权 |
+| `/readyz` TZDB 错误或业务规则不可用                       | 停止新归一/排期，修受控环境；readyz 绿不代替真实业务/规则证据                                          |
+| `PRESENTATION_MISMATCH` / expired / superseded            | 保留错误 envelope；重新生成有效 approval 并以实际全文确认，不改 hash/业务表绕过                        |
+| 通知数组/面板缺失、一直 cancel_pending、没有可靠调用观察  | 明确对应 #26 尚未实施或证据依赖未满足，不能宣称七步完成                                                |
+| 时间余量不足、worker 无 tick、正向 missed                 | 本次未通过/未完成；保留现场，在修复原因后重新生成近未来任务，不 SQL 回拨                               |
+| 活动页空白/事件 GET 失败、日志中断、取消后调用>0/时序不清 | 保留脱敏证据，停止收口；不将错误当空态或按零通知放行                                                   |
+
+真实记录需逐步填写预期/实际/证据/执行者/复核者，附开始结束、版本/源码状态、环境别名及所有权、ROLE、时钟/实际规则、关联 ID/request_id、脱敏 SSE/API/SQL/页面与调用观察。所有本手册示例均非已观测结果，不填完成勾选，不造截图。HAR 必须先去除 cookie/CSRF/授权头/个人内容再留存。
+
+七步证据齐备后，只能据实报告其覆盖：重复确认不是完整 A2 supersession；正常取消不是完整 A3 kill/resume；Shanghai 正向运行不是完整 A4 DST/规则故障。完整 A2/A3/A4 及时间错误合同冲突仍按收口计划另列，不自动纳入 P4，不宣称“v0 全验收通过”。

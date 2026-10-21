@@ -21,7 +21,7 @@
 | ---- | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
 | 01   | [技术栈与仓库结构](design/01-tech-stack-and-repo-structure.md)           | TS 模块化单体、Bun workspaces、依赖优先构建、依赖方向、复用优先                              |
 | 02   | [模块化单体与拆分触发](design/02-modular-monolith-and-split-triggers.md) | 模块清单、所有权、拆分判据 a–d、B03 十服务裁决                                               |
-| 03   | [v0 垂直切片](design/03-v0-vertical-slice.md)                            | 简报→卡片→对话→确认→调度→触发→通知→活动页端到端                                              |
+| 03   | [v0 垂直切片](design/03-v0-vertical-slice.md)                            | 简报→卡片→对话→按钮确认→调度→站内通知详情投影→活动账；真实取消回执与七步证据边界             |
 | 04   | [五缝契约](design/04-five-seams-contract.md)                             | AgentRuntime/ToolGateway/Scheduler/Notifier/ConnectorVault 端口契约                          |
 | 05   | [time-core 时间层](design/05-time-core.md)                               | 服务端纯函数 normalize；LLM 不算时间，展示层不换算                                           |
 | 06   | [approvals 确认门](design/06-approvals-confirmation-gate.md)             | 副作用承诺持久对象、状态机、presentation_hash 幂等消费                                       |
@@ -66,13 +66,14 @@
 | 6    | [对话运行与预算](agent/05-chat-runtime-flow-and-budget.md)  | conversation/run/attempt/trace、状态机、双预算     |
 | 7    | [评测夹具](agent/06-eval-fixtures.md)                       | 50 条时间表达集、200 卡片集版本化、指标口径        |
 
-## 六、Demo（3 篇）
+## 六、Demo 与收口规划（4 篇）
 
-| 序号 | 文档                                                 | 作用                                         |
-| ---- | ---------------------------------------------------- | -------------------------------------------- |
-| 1    | [v0 全链路 smoke](demo/v0-slice-smoke.md)            | 7 步复现、断言取消后触发数=0                 |
-| 2    | [time-core 黄金用例](demo/time-core-golden-cases.md) | 4 基准+DST+50 表达，fixture 可被测试消费     |
-| 3    | [故障注入 smoke](demo/fault-injection-smoke.md)      | kill worker/取消竞争/tzdb 缺失，断言恰好一次 |
+| 序号 | 文档                                                     | 作用                                                   |
+| ---- | -------------------------------------------------------- | ------------------------------------------------------ |
+| 1    | [v0 全链路 smoke](demo/v0-slice-smoke.md)                | 7 步复现、断言取消后触发数=0                           |
+| 2    | [time-core 黄金用例](demo/time-core-golden-cases.md)     | 4 基准+DST+50 表达，fixture 可被测试消费               |
+| 3    | [故障注入 smoke](demo/fault-injection-smoke.md)          | kill worker/取消竞争/tzdb 缺失，断言恰好一次           |
+| 4    | [v0 七步 smoke 收口计划](demo/v0-smoke-closeout-plan.md) | 真实链路缺口、最小实施顺序、七步证据与完整 v0 验收边界 |
 
 ## 七、References（3 篇）
 

@@ -27,15 +27,15 @@
 
 ### 1.1 取（7 不变量，原样迁云端）
 
-| #   | B06 不变量                      | 云端落点                                                    |
-| --- | ------------------------------- | ----------------------------------------------------------- |
-| 1   | 没点头不进钟                    | approval pending 前 task 不存在；confirm 单事务建 task      |
-| 2   | 没把握就说没把握                | time-core 归一失败只回澄清，不建 approval                   |
-| 3   | 对不上就停                      | presentation_hash 对不上 → PRESENTATION_MISMATCH，不建 task |
-| 4   | 只追加不涂改                    | task_events 只追加；改时间走新 task（recreated_from）       |
-| 5   | 能量什么说什么                  | Notifier 只认回执；无回执只说“已记录”，不说“已送达用户”     |
-| 6   | 确认绑定整句或按钮，“好/嗯”不算 | 见 06；v0 不做语义放宽                                      |
-| 7   | 取消优先，取消后触发数 = 0      | cancel 置 cancel_pending→cancelled；触发门禁先查取消态      |
+| #   | B06 不变量                 | 云端落点                                                    |
+| --- | -------------------------- | ----------------------------------------------------------- |
+| 1   | 没点头不进钟               | approval pending 前 task 不存在；confirm 单事务建 task      |
+| 2   | 没把握就说没把握           | time-core 归一失败只回澄清，不建 approval                   |
+| 3   | 对不上就停                 | presentation_hash 对不上 → PRESENTATION_MISMATCH，不建 task |
+| 4   | 只追加不涂改               | task_events 只追加；改时间走新 task（recreated_from）       |
+| 5   | 能量什么说什么             | Notifier 只认回执；无回执只说“已记录”，不说“已送达用户”     |
+| 6   | 确认必须明确绑定按钮       | 见 06；v0 只认按钮确认，不做语义放宽                        |
+| 7   | 取消优先，取消后触发数 = 0 | cancel 置 cancel_pending→cancelled；触发门禁先查取消态      |
 
 ### 1.2 舍（2 本机假设，明确不迁）
 
@@ -56,7 +56,7 @@
 3 propose_task（含 wall_time + timezone_id + 原话）→ 调 time-core.normalize
 4a 归一成功 → 建 approval(pending) + 确认卡（冻结快照，见 06）
 4b 归一失败 → 回澄清（NONEXISTENT / AMBIGUOUS+两候选 / UNKNOWN_TIMEZONE / TZDB_UNAVAILABLE），不建 approval
-5 用户点确认（整句“确认 A-XXXX”或按钮）→ POST /approvals/{id}/actions/confirm
+5 用户点确认按钮 → POST /approvals/{id}/actions/confirm
 6 confirm 单事务：验 approval → 建 task(saved→pending_schedule) → 写 task_events.created → 写 outbox → approval→consumed
 7 Scheduler.schedule 登记 → 回执 → task→scheduled（有 receipt 才标 scheduled，否则停 pending_schedule）
 8 到点 worker lease 认领 → 触发门禁三查 → Notifier.send → 回执写 fired；超 15min 写 missed 不补发
@@ -89,7 +89,7 @@
 | POST | `/approvals/{id}/actions/confirm` | 确认（单事务建 task），见 06                            |
 | POST | `/approvals/{id}/actions/reject`  | 拒绝（pending→rejected）                                |
 | GET  | `/tasks`                          | 任务列表                                                |
-| GET  | `/tasks/{id}`                     | 任务详情                                                |
+| GET  | `/tasks/{id}`                     | 任务详情，含站内通知只读投影（§3.1）                    |
 | POST | `/tasks/{id}/actions/cancel`      | 取消（cancel_pending→cancelled）                        |
 | GET  | `/tasks/{id}/events`              | 只追加事件账只读（见 07）                               |
 | GET  | `/healthz`                        | 存活探针，不依赖 DB                                     |
@@ -97,6 +97,32 @@
 
 - [Required] v0 不新增以上之外的端点；WS + ws-ticket 自 P2 起，Web Push 仅兜底，均不在 v0。
 - [Required] 全链路 `request_id` + 幂等键；POST confirm/cancel 连点只回同一结果。
+
+### 3.1 任务详情的站内通知投影 [Required，#26 契约增量]
+
+**行为与范围。** 既有 `GET /api/v1/tasks/{id}` 的 `data` 包含必有的 `notifications` 数组，任务详情页展示通知模块持久化的真实站内通知。没有记录时返回 `[]`，不以 `fired` 事件合成通知，不改变任务列表、事件账或任何写接口。#26 的实施与真实验收记录见 closeout plan 和对应 OpenSpec tasks。
+
+每项仅投影 `notifications` 表已有字段（真源：`docs/schema/commitments-schema.md` 的 `notifications` 节、迁移 `0007_commitments_notifications.sql`）：
+
+| 字段      | DTO 类型                      | 含义                                  |
+| --------- | ----------------------------- | ------------------------------------- |
+| `id`      | UUID 字符串                   | 已持久化的通知 ID                     |
+| `title`   | 字符串                        | 存储的标题原文                        |
+| `body`    | 字符串                        | 存储的正文原文                        |
+| `status`  | `pending` / `sent` / `failed` | 数据库通知状态，不是 task/outbox 状态 |
+| `sent_at` | ISO 8601 字符串或 `null`      | 存储的发送时间；未记录则原样为 `null` |
+
+**读取路径与所有权。** tasks 先沿用详情的身份与 owner 校验，再把当前 `owner_id`、`task_id` 传给 notifications 的公开 service；通知查询由 notifications 自己的 repository 执行，并同时限定这两个 ID。tasks 不引用通知 repository/schema、不直读或 join 通知表；Web 只经既有 HTTP 详情读取，不引用 API 源码或访问数据库。复用既有 tasks→notifications/service 依赖方向，不扩大 design/02 的跨模块读例外。
+
+不存在或非 UUID 沿用详情 `404`，跨 owner 沿用 `403`，未认证沿用 `401`；不会为这些情况返回成功空数组或泄漏通知。正常查询失败沿用详情错误通路，不能伪装成“没有通知”。数组不附带 owner、幂等键、provider 回执或额外通知元数据，不新增分页/排序接口。
+
+**只读与展示。** GET 不发送、不重试、不确认已读，不写通知、任务、事件或 outbox。Web 原样展示已存 `title/body/status/sent_at`，不重算正文中的冻结时间，不用当前 UTC、浏览器时区或当前任务状态重造文案。`sent`/`sent_at` 只说明站内通知的记录，不证明设备送达、响铃或用户已读；无通知时明确显示空态。`notifications` 仍是内部表，只经任务详情投影；不新增 `/notifications` 或任务下的独立通知路由。
+
+### 3.2 七步 smoke 与既有安全合同的关系
+
+#26 先独立合并通知契约，再实现并按 `docs/demo/v0-slice-smoke.md` 在同一受控环境执行七步；证据与收口边界见 `docs/demo/v0-smoke-closeout-plan.md`。取消计时点、回执门与竞争终局继续以 `openspec/specs/v0-safety-contract/spec.md` Requirement 5 及 design/07 §3 为准，不新增或放宽取消行为：实际完成本地排队撤销与 fencing 核对后持久化撤销回执，才可进入 `cancelled`；不能用内存 Set、测试手注回执或直接改终态冒充生产闭环。
+
+取消已提交后的 provider 实际调用数必须单独取证，通知行数与 `fired` 数为零仅为辅助证据；优先使用受控、非暂停 debug logpoint，必要时仅增加无内容的最小调用证据，不建设遥测框架。七步不得代替 A2 的完整替代确认、A3 的真实 kill/resume 或 A4 时间错误/规则缺失合同验收；本次不修这些额外缺口，不宣称完整 v0 通过。D1–D10、五门、按钮确认和冻结展示保持原义。
 
 ## 4. task 对象与状态机（字段到名，不写 SQL）
 
