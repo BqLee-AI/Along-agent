@@ -98,6 +98,7 @@
 | 503  | NOT_READY              | /readyz 类型化错误，不降级（见 §6；旧名 SERVICE_NOT_READY 作废）         | 探针                     |
 
 - [Required] numeric `40xxxx` 映射见 `docs/design/10-api-and-stream-design.md §6`；HTTP 状态以本表为准（S0 #14 冻结）。
+- 时间业务失败的顶层 `code` 为既有 numeric，`error.code` 为符号名；SSE 中放在 `thread.failed.payload.error`，外层已建立的流仍 HTTP 200、唯一失败终结。`AMBIGUOUS_LOCAL_TIME` 的两候选结构与纯归一边界见 design/05 §9.1，不能混用 numeric 与符号名。
 
 对外展示的触发/通知一律用“已记录/未记录到”口径，不使用成功保证类文案 [Required]。
 
@@ -109,6 +110,8 @@
 | GET  | `/readyz`  | 无   | 否   | 就绪探针；未就绪返回 `503` + 类型化错误（不支持组合/降级，缺 time-core ruleset 或 DB 不可达即非就绪） |
 
 探针不走 §2 envelope，直接返回 `{"status":"ok"}` 或 `{"status":"not_ready","reason":"…"}`。
+
+规则上下文、alias、标识与支持范围见 design/05 §5、§10。`readyz` 先检查同一份实际规则上下文：缺规则/alias或标识不匹配时唯一 `reason:"TZDB_UNAVAILABLE"`；规则健康但真实 DB 探测失败时 `reason:"NOT_READY"`；均健康才 200，不接受任意非空版本标签。DB 探测只要求连通，不要求新库已迁移。两者同时失败不拼组合 reason、不降级。健康规则下某个用户输入范围外可 503 拒绝，但不使全局 readiness 变坏。旧冻结读取/确认/取消/执行不套新归一门；healthz 保持存活语义。
 
 ## 7. 全路由表 [Required]
 

@@ -3,6 +3,8 @@
 > 状态：草稿，可评审。范围：`POST /conversations/messages`（SSE）+ `GET /conversations/{id}` 恢复 + 取消中断 + 预算。阶段标签：v0。
 >
 > 蓝图引用：B06（对话→确认；“明天”=服务端首次接收时刻+已确认时区并冻结；06 喝水用例）；B03（实时对话 SSE；WS+ws-ticket P2 起；packages/stream-protocol 版本化 zod，事件名开工对照 thread-stream.schema.json）。
+>
+> 时间失败、有限真实规则与 Web 候选选择按 #30 合同；安全 spec Scenario 1.2 的 typed failed 不得改成 completed。合同与实际验收记录分开。
 
 ## 1. 路由
 
@@ -29,8 +31,8 @@
 - `conversation_id`：缺省则服务端新建并在首个 SSE 事件返回；传入则续写（跨用户 id 返回 `403`）。
 - `card_ref`：可选，围绕某卡片追问时带；服务端只做关联，不做授权旁路。
 - `raw_text`：用户原话，按不可信输入解析，原样进回显引用。
-- `confirmed_timezone`：本次确认使用的时区；缺失则服务端按“时区缺失必须问”回澄清，不猜（B06 §3.3）。
-- `fold_choice`：`first | second | none`，默认 `none`；歧义时刻未选时服务端回 `AMBIGUOUS_LOCAL_TIME` 而非默认。
+- `confirmed_timezone` / `confirmed_timezone_id`：schema 均已有、可空，取 `confirmed_timezone_id ?? confirmed_timezone`；未给本轮值可使用会话先前明确冻结值，仍缺失则澄清，不猜。原文单个明确已知别名/规范 ID 优先于本轮确认值，本轮确认值优先于会话默认值；未知显式别名即使已有 Shanghai 也失败，多个不同已知时区则澄清，完整优先级见 design/05 §9.2。
+- `fold_choice`：`first | second | none`，默认 `none`；只有结构化字段决定选择，原话“第一次/第二次”不自动覆盖。歧义未选为 `AMBIGUOUS_LOCAL_TIME`；候选字段仍是 fold_choice，成功的现有归一结果与快照 `fold` 为 `0 | 1`，不混为字符串列。
 - “明天”锚定：服务端首次接收时刻 + 已确认时区解析一次并冻结，后续不再重算（跨午夜追问具体日期；延迟线 1min/15min 语义见 design time-core）。
 
 响应：`Content-Type: text/event-stream`，`200` 建连；首事件必为 `thread.started`（含 `conversation_id` + `stream_protocol_version`），尾事件为 `thread.completed | thread.failed | thread.cancelled` 之一。每行 `data: {protocol_version, seq, type, payload, request_id}`（design/10 §4），`seq` 即 `run_checkpoints.event_seq`，用于 `?after_seq=` 补全。事件名与字段以 `packages/stream-protocol` 的 `thread-stream.schema.json` 为准，本文只列 v0 必需子集（S0 #14 冻结：`design/09` AgentEvent→本篇 SSE 为投影关系，不各写一套；`approval_proposed→approval_required`、`answer/done→message.delta+thread.completed`、`run_failed→thread.failed`、`thinking/tool_call/tool_result→message.delta/tool.status`）：
@@ -59,6 +61,10 @@ data: {"protocol_version":"v1","seq":12,"type":"approval_required","payload":{"c
 
 ## 4. 错误（HTTP 建连层 + 流内层）
 
-- 建连失败走通用 envelope：`401` / `403` / `404`（conversation_id 不存在或跨用户）/ `400 VALIDATION_ERROR`（zod 失败）/ `409 STATE_CONFLICT`（幂等键复用但请求体不同，或同键原 run 仍在执行；后者 `details` 带 `run_id`，客户端改用 GET `after_seq` 补全）。
-- 建连成功后传输层错误走流内 `thread.failed`；v0 只有 `BUDGET_EXCEEDED`（429 语义）与内部错误。时间归一失败（`NONEXISTENT_LOCAL_TIME` / `AMBIGUOUS_LOCAL_TIME` / `UNKNOWN_TIMEZONE` / `TZDB_UNAVAILABLE`）按 docs/agent/04 映射为澄清话术：`message.delta` + `thread.completed`，不建 approval，不重问已给信息；歧义时刻的澄清文本必须摆出两次出现的偏移与 UTC 时间。
-- 时间归一由服务端 time-core 纯函数执行，LLM 不算时间，展示层不换算 [Required]。
+- 建连失败走通用 envelope：`401` / `403`（含CSRF不符、他人conversation）/ `404`（conversation不存在）/ `400 VALIDATION_ERROR`（zod 失败）/ `409 STATE_CONFLICT`（幂等键复用但请求体不同，或同键原 run 仍在执行；后者 `details` 带 `run_id`，客户端改用 GET `after_seq` 补全）。
+- [Required · #30] 对拟作新时间归一的请求，认证、CSRF、结构及既有owner/幂等只读边界在先；应用规则上下文不可用时，在任何新 conversation/message/run/attempt/幂等写入与SSE头之前拒绝，返回HTTP503通用 envelope（顶层 `code=400006`、`data=null`、`error.code=TZDB_UNAVAILABLE`，沿既有 request_id/msg/message 形状）。不建新 run、不调用normalize、不预占新幂等结果。同键已存结果重放不新归一；不把规则门做成阻断旧冻结读取/确认/取消/执行的全站门。
+- [Required] 已建流仍为HTTP200；`NONEXISTENT_LOCAL_TIME / AMBIGUOUS_LOCAL_TIME / UNKNOWN_TIMEZONE` 按冻结安全spec为 `thread.failed`，`payload.error.http_status=422`，`error.code` 为对应符号名；不是 delta+completed。缺年份/时区/时段、模糊范围等普通澄清仍可completed且不建approval。
+- [Required · #30] 已建流之后发现 `TZDB_UNAVAILABLE`（包括支持zone但所需目标/锚点范围外），以 `thread.failed`、`http_status=503` 终结；不改外层200，不写JSON envelope到SSE。时间失败run恰好一个终结，解释delta可有，不能再completed/cancelled或发新approval。GET恢复重放相同帧；失败审计允许保留conversation/message/run/checkpoint/tool_calls，但approval/task/task_events/outbox/notification及发送调用为零；预检拒绝则连新审计run都没有。
+- [Required · #30] AMBIGUOUS必须带 `error.details={wall_time,timezone_id,ruleset_id,candidates}`，候选恰好两个，按UTC早晚给 `fold_choice=first|second`、`offset_seconds`、`fire_at_utc`，唯一形状见design/05 §9.1。2026-11-01 01:30纽约分别为05:30Z/-14400、06:30Z/-18000；不得只拼中文文本或让客户端造候选。
+- [Required · #30] Web保留原输入与服务端wall_time/timezone_id，展示两候选+数值偏移；点击first/second只以新幂等键、新请求和相应fold_choice重提议，保留纽约不能回退/me上海，日期/时区修改须清除旧候选。服务端重归一并沿既有锚点/跨午夜规则，不接受客户端UTC作为权威；成功pending后仍须按钮三件套确认，选择候选不等于建task。
+- 时间归一由服务端 time-core 纯函数执行，LLM 不算时间，展示层不换算 [Required]。真实三zone/2026–2027有限覆盖、未知用户时区与缺规则区分、readyz/DB及D7兼容见design/05 §5；真实回归/部署缺失取证见§10，不把mock故障当部署演练。

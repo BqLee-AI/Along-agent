@@ -22,7 +22,7 @@
 ## 当前结论
 
 - [Required] LLM 只提议，不决定。LLM 产出自然语言提议与结构化参数草案；`fire_at_utc` 唯一由服务端 time-core 纯函数 `normalize(wall_time, timezone_id, fold_choice, ruleset)` 计算（B06 §4；design/09）。LLM 不算时间、不直接定触发瞬间。
-- [Required] 时间校验与排期走确定性层。展示层不换算时间，只读冻结字段固定格式呈现；"明天"=服务端首次接收时刻+已确认时区并冻结（B06 §3.5）。归一失败只走澄清，不猜测、不重写、不报成功。
+- [Required] 时间校验与排期走确定性层。展示层不换算时间，只读冻结字段固定格式呈现；"明天"=服务端首次接收时刻+已确认时区并冻结（B06 §3.5）。缺信息/模糊表达仍澄清；已判定时间错误按安全spec typed `thread.failed`，不猜测、不重写、不以completed冒充成功。规则门、结构化候选与Web选择见design/05 §5/§9及本组04话术合同；合同不等于部署验收。
 - [Required] 工具走白名单网关。Agent 可见工具=运行时按 allowlist 注入的子集；网关做白名单校验+zod 参数校验+风险分级+审计；`extra=forbid`，越权调用拒绝并审计。v0 仅 5 工具（见 02），副作用工具只产 approval，不直接建 task/cancel task。
 - [Required] 确认门是唯一承诺入口。确认前不创建正式 task、不排期（B06 总闸 1）。Approval 消费+建 Task 同事务是唯一跨模块事务；`presentation_hash` 对不上即停（PRESENTATION_MISMATCH）。
 - [Required] 只追加事件账。`task_events` 只追加，DB 禁 UPDATE/DELETE；取消后触发数=0 为一级指标；超 15min 标 missed 不补发。

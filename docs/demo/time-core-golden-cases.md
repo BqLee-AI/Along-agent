@@ -7,6 +7,7 @@
 - 调用 time-core 纯函数（TS 服务端，不读系统时钟、不看当前时区库，规则内容由 fixture 注入）。
 - 入口已把人话翻成精确到秒的 `wall_time` + 规范 IANA `timezone_id` + `fold_choice ∈ {first, second, none}`。
 - 别名（“北京时间”）由入口版本化别名表查完再递规范值，不进本函数。
+- [Observed] 真实fixture只含Shanghai(+08)、Kiritimati(+14)、New York(2026/2027四转换)，不是全IANA或任意年份库。三zone本地 `[2026-01-01T00:00:00,2028-01-01T00:00:00)`、逐zone UTC 边缘、上下文门及取证要求见 `docs/design/05-time-core.md §5/§10`。既有纯函数测例可复用，但不能证明生产真实装载/HTTP/SSE/Web已通过。
 
 ## 基准 4 例
 
@@ -20,19 +21,19 @@
 
 - 命令：`normalize("2026-03-08T02:30:00", "America/New_York", "none", FIXTURE_V1)`。
 - 预期 JSON：`{"error": "NONEXISTENT_LOCAL_TIME"}`，不返回快照。
-- 断言：不猜、不存、不排；上游回澄清“当地不存在，请重定”。
+- 断言：不猜、不存、不排；上游呈现“当地不存在，请重定”并按冻结spec `thread.failed`422终结（SSE外层HTTP200），不是completed；纯函数结果本身不证明这条传输断言。
 
 ### B3 重复时刻未选
 
 - 命令：`normalize("2026-11-01T01:30:00", "America/New_York", "none", FIXTURE_V1)`。
 - 预期 JSON：`{"error": "AMBIGUOUS_LOCAL_TIME", "candidates": [{"fold_choice": "first", "offset_seconds": -14400, "fire_at_utc": "<05:30Z>"}, {"fold_choice": "second", "offset_seconds": -18000, "fire_at_utc": "<06:30Z>"}]}`。
-- 断言：带两个候选且各带偏移（缩写会撞，偏移不会）；不上屏 UTC 以外信息缺一不可。
+- 断言：带两个候选且各带偏移（缩写会撞、偏移不会），经 `error.details` 原样传结构化候选及明确日期/时区（design/05 §9.1），Web不自行算UTC。纯函数候选不是HTTP/Web已验收的证明。
 
 ### B4 重复时刻已选
 
 - 命令：`normalize("2026-11-01T01:30:00", "America/New_York", "second", FIXTURE_V1)`。
 - 预期 JSON：`{"fire_at_utc": "<06:30Z>", "offset_seconds": -18000, "fold": 1, "ruleset_id": "FIXTURE_V1"}`。
-- 断言：approval 冻结 `fold_choice=second` + 偏移；缺一样就解释不清选了哪个。
+- 断言：输入 `fold_choice=second` 对应成功结果及现有approval快照 `fold=1`，连偏移共同冻结、回显明确第二次；不虚构 `fold_choice` 数据库列。Web first/second 新请求与确认三件套为#30待实施/待验收项。
 
 ## DST 边界 2 例
 
@@ -70,12 +71,12 @@
 
 ## 错误出口
 
-| 错误                     | 何时                               | 上游动作               |
-| ------------------------ | ---------------------------------- | ---------------------- |
-| `NONEXISTENT_LOCAL_TIME` | 时刻不存在                         | 澄清重定               |
-| `AMBIGUOUS_LOCAL_TIME`   | 重复未选（带两候选）               | 出候选让用户选         |
-| `TZDB_UNAVAILABLE`       | 规则缺失（调用前报，连归一都不叫） | 服务不就绪             |
-| `UNKNOWN_TIMEZONE`       | 非规范/未知 IANA                   | 别名表查完仍未知则澄清 |
+| 错误                     | 何时                      | 上游动作                        |
+| ------------------------ | ------------------------- | ------------------------------- |
+| `NONEXISTENT_LOCAL_TIME` | 时刻不存在                | typed failed422，呈现重定话术   |
+| `AMBIGUOUS_LOCAL_TIME`   | 重复未选（带两候选）      | typed failed422，结构化候选供选 |
+| `TZDB_UNAVAILABLE`       | 规则缺失或所需范围外      | 预检503拒绝或流内failed503      |
+| `UNKNOWN_TIMEZONE`       | 本版本未知规范ID/显式别名 | typed failed422，不静默fallback |
 
 ## 常见问题
 
