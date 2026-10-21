@@ -1,12 +1,18 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import type { Pool, PoolClient } from 'pg';
+import { Pool, type PoolClient } from 'pg';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { sendKeyFor } from '@along/scheduler-core';
 import { handleRequest } from '../../src/http/app.js';
 import type { ActorResolver } from '../../src/http/auth.js';
 import { TaskDetailSchema } from '../../src/modules/tasks/schemas.js';
-import { deliverInApp, getTaskNotifications } from '../../src/modules/notifications/service.js';
+import {
+  createLocalInAppProvider,
+  deliverInApp,
+  getTaskNotifications,
+  type InAppProvider,
+} from '../../src/modules/notifications/service.js';
 import {
   getTaskDetail,
   getTaskEvents,
@@ -35,12 +41,20 @@ async function seedTask(pool: Pool, ownerId: string): Promise<string> {
 maybe('tasks read routes', () => {
   let database: IntegrationDatabase;
   let pool: Pool;
+  let receivePool: Pool;
+  let provider: InAppProvider;
   beforeAll(async () => {
     database = await createIntegrationDatabase();
     pool = database.pool;
+    receivePool = new Pool({ ...pool.options, max: 1 });
+    provider = createLocalInAppProvider(receivePool);
   });
   afterAll(async () => {
-    await database?.close();
+    try {
+      await receivePool?.end();
+    } finally {
+      await database?.close();
+    }
   });
 
   it('lists tasks ordered by fire_at with keyset pagination', async () => {
@@ -212,19 +226,20 @@ maybe('tasks read routes', () => {
     const owner = randomUUID();
     const taskId = await seedTask(pool, owner);
     expect((await getTaskDetail({ pool }, owner, taskId)).notifications).toEqual([]);
-    const client = await pool.connect();
-    try {
-      await deliverInApp(client, {
+    // This SQL fixture supplies a frozen, registered task to real intake.
+    const { rows: frozen } = await pool.query<{ fire_at_utc: Date }>(
+      `UPDATE tasks SET state = 'scheduled', state_version = state_version + 1, schedule_receipt = $2
+       WHERE id = $1 RETURNING fire_at_utc`,
+      [taskId, `sched:${taskId}`],
+    );
+    await deliverInApp(
+      {
         ownerId: owner,
         taskId,
-        wallTime: '2026-10-17 09:20',
-        timezoneId: 'Asia/Shanghai',
-        originalNote: '喝水',
-        idempotencyKey: `read-test:${taskId}`,
-      });
-    } finally {
-      client.release();
-    }
+        idempotencyKey: sendKeyFor(taskId, frozen[0]!.fire_at_utc.toISOString()),
+      },
+      provider,
+    );
     const detail = await getTaskDetail({ pool }, owner, taskId);
     expect(detail.notifications).toHaveLength(1);
     expect(detail.notifications[0]?.status).toBe('sent');

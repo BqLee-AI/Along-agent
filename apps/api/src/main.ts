@@ -5,14 +5,31 @@ import { createPool } from './db/pool.js';
 
 const role = parseRole(process.env.ROLE);
 
-// One pool per process: main builds it, the worker loop borrows it.
+// Main owns the request/scheduler pool; the worker owns its receive pool.
 const pool = createPool();
+const server =
+  role === 'api' || role === 'all' ? serve({ port: Number(process.env.PORT ?? 3000), pool }) : null;
+const worker = role === 'worker' || role === 'all' ? startWorkerLoop({ pool }) : null;
 
-if (role === 'api' || role === 'all') {
-  const port = Number(process.env.PORT ?? 3000);
-  serve({ port, pool });
+let shuttingDown = false;
+function shutdown(): void {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  // Preserve the service's existing upper bound, including open SSE clients.
+  setTimeout(() => process.exit(0), 5000).unref();
+  const serverClosed = new Promise<void>((resolve) => {
+    if (server) server.close(() => resolve());
+    else resolve();
+  });
+  void (async () => {
+    try {
+      await Promise.all([serverClosed, worker?.stop().catch(() => undefined)]);
+    } finally {
+      await pool?.end().catch(() => undefined);
+      process.exit(0);
+    }
+  })();
 }
 
-if (role === 'worker' || role === 'all') {
-  startWorkerLoop({ pool });
-}
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);

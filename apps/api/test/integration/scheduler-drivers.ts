@@ -3,6 +3,7 @@ import type { Pool } from 'pg';
 import { getTaskDetail } from '../../src/modules/tasks/service.js';
 import { runClaimPhase } from '../../src/modules/tasks/scheduler/claim.js';
 import { runSendPhase } from '../../src/modules/tasks/scheduler/send.js';
+import type { InAppProvider } from '../../src/modules/notifications/service.js';
 
 // Drive and assert only the requested task: phase summaries can include other
 // tasks created earlier in the same file's isolated fixture.
@@ -27,12 +28,13 @@ export async function driveClaimUntilLeased(
 
 export async function driveSendUntilFired(
   pool: Pool,
+  provider: InAppProvider,
   taskId: string,
   ownerId: string,
   attempts = 15,
 ): Promise<void> {
   for (let i = 0; i < attempts; i += 1) {
-    await runSendPhase(pool);
+    await runSendPhase(pool, provider);
     const detail = await getTaskDetail({ pool }, ownerId, taskId);
     if (detail.state === 'fired') return;
   }

@@ -1,14 +1,14 @@
-// Notifications: read-only frozen task fields -> in-app notice rows.
-// Only ever reads tasks' frozen display fields (wall_time, timezone_id,
-// original_note); never converts time. INSERT ... ON CONFLICT
-// (idempotency_key) DO NOTHING returns the existing row's receipt so retries
-// share one notice (kill -9 resume fires exactly once).
+// Local intake commits independently of the worker's task/outbox transaction.
 import { channel } from 'node:diagnostics_channel';
-import type { PoolClient } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { noticeCopyFor } from '@along/notifier-core';
-import { listTaskNotices } from './repository.js';
+import { sendKeyFor } from '@along/scheduler-core';
+import { withTransaction } from '../../db/transaction.js';
+import { getTaskNotificationSource } from '../tasks/notification-source.js';
+import { findReceivedNotice, insertReceivedNotice, listTaskNotices } from './repository.js';
 
 const inAppProviderCalls = channel('along.notifications.provider-call');
+const inAppReceived = channel('along.notifications.received');
 
 export interface TaskNotification {
   id: string;
@@ -37,9 +37,6 @@ export async function getTaskNotifications(
 export interface InAppNotice {
   ownerId: string;
   taskId: string;
-  wallTime: string;
-  timezoneId: string;
-  originalNote: string | null;
   idempotencyKey: string;
 }
 
@@ -49,64 +46,86 @@ export interface InAppDelivery {
   providerReceiptId: string | null;
 }
 
-export type InAppProvider = ((notice: InAppNotice) => Promise<InAppDelivery>) | null;
+export type InAppProvider = (notice: InAppNotice) => Promise<InAppDelivery>;
 
-export interface StoredNotice {
-  id: string;
-  idempotencyKey: string;
-  status: string;
-  sentAt: Date | null;
+export interface ReceivedInApp {
+  notificationId: string;
+  receiptId: `inapp:${string}`;
+  fireAtUtc: string;
+  expectedStateVersion: number;
 }
 
-/** Local in-app provider: records intake, proves nothing about the user. */
-export async function localInAppProvider(notice: InAppNotice): Promise<InAppDelivery> {
-  void notice;
-  return { delivered: true, answered: true, providerReceiptId: null };
+/** Read intake evidence only; the caller still owns the task/outbox fence. */
+export async function getReceivedInApp(
+  client: PoolClient,
+  ownerId: string,
+  taskId: string,
+  idempotencyKey: string,
+): Promise<ReceivedInApp | null> {
+  const row = await findReceivedNotice(client, ownerId, taskId, idempotencyKey);
+  if (!row) return null;
+  const fireAtUtc = row.fireAtUtc.toISOString();
+  if (idempotencyKey !== sendKeyFor(taskId, fireAtUtc)) return null;
+  return {
+    notificationId: row.id,
+    receiptId: `inapp:${row.id}`,
+    fireAtUtc,
+    expectedStateVersion: row.expectedStateVersion,
+  };
 }
 
 /**
- * Deliver one in-app notice. The provider result decides the receipt; the
- * row write is idempotent on idempotency_key. Returns the stored row.
+ * The worker owns this dedicated receive pool's lifetime. Intake never takes
+ * a task lock or writes task/outbox state, so the worker can keep its fence.
  */
-export async function deliverInApp(
-  client: PoolClient,
-  notice: InAppNotice,
-  provider: InAppProvider = null,
-): Promise<InAppDelivery> {
-  const effective = provider ?? localInAppProvider;
-  if (inAppProviderCalls.hasSubscribers) {
-    inAppProviderCalls.publish({ taskId: notice.taskId });
-  }
-  const result = await effective(notice);
-  const copy = noticeCopyFor({
-    wallTime: notice.wallTime,
-    timezoneId: notice.timezoneId,
-    originalNote: notice.originalNote,
-  });
-  const status = result.delivered ? 'sent' : 'pending';
-  const { rows } = await client.query<StoredNotice>(
-    `INSERT INTO notifications (id, owner_id, task_id, channel, title, body,
-       idempotency_key, status, sent_at)
-     VALUES (gen_random_uuid(), $1, $2, 'inapp', $3, $4, $5, $6,
-       CASE WHEN $6 = 'sent' THEN now() ELSE NULL END)
-     ON CONFLICT (idempotency_key) DO NOTHING
-     RETURNING id, idempotency_key, status, sent_at`,
-    [notice.ownerId, notice.taskId, copy.title, copy.body, notice.idempotencyKey, status],
-  );
-  const stored = rows[0] ?? null;
-  if (!stored) {
-    // Duplicate key: the earlier attempt owns the notice; replay its receipt.
-    const existing = await client.query<StoredNotice>(
-      `SELECT id, idempotency_key, status, sent_at FROM notifications
-       WHERE idempotency_key = $1`,
-      [notice.idempotencyKey],
-    );
-    const row = existing.rows[0];
-    void row;
-  }
-  return {
-    delivered: result.delivered,
-    answered: result.answered,
-    providerReceiptId: result.providerReceiptId ?? `inapp:${notice.idempotencyKey}`,
+export function createLocalInAppProvider(receivePool: Pool): InAppProvider {
+  return async (notice) => {
+    if (inAppProviderCalls.hasSubscribers) {
+      inAppProviderCalls.publish({ taskId: notice.taskId });
+    }
+    const notificationId = await withTransaction(receivePool, async (client) => {
+      const source = await getTaskNotificationSource(client, notice.ownerId, notice.taskId);
+      if (
+        !source ||
+        source.state !== 'scheduled' ||
+        !source.scheduleReceipt ||
+        notice.idempotencyKey !== sendKeyFor(notice.taskId, source.fireAtUtc)
+      ) {
+        throw new Error('inapp intake task binding mismatch');
+      }
+      const copy = noticeCopyFor({
+        wallTime: source.wallTime,
+        timezoneId: source.timezoneId,
+        originalNote: source.originalNote,
+      });
+      const id = await insertReceivedNotice(client, {
+        ownerId: notice.ownerId,
+        taskId: notice.taskId,
+        idempotencyKey: notice.idempotencyKey,
+        fireAtUtc: source.fireAtUtc,
+        expectedStateVersion: source.stateVersion,
+        title: copy.title,
+        body: copy.body,
+      });
+      if (!id) throw new Error('inapp intake idempotency binding conflict');
+      return id;
+    });
+    // withTransaction has committed before this answer-loss checkpoint.
+    if (inAppReceived.hasSubscribers) {
+      inAppReceived.publish({ taskId: notice.taskId, notificationId });
+    }
+    return {
+      delivered: true,
+      answered: true,
+      providerReceiptId: `inapp:${notificationId}`,
+    };
   };
+}
+
+/** Dispatch only; the provider, not the worker transaction, records intake. */
+export async function deliverInApp(
+  notice: InAppNotice,
+  provider: InAppProvider,
+): Promise<InAppDelivery> {
+  return provider(notice);
 }

@@ -6,12 +6,16 @@
 // sleep, no flakiness).
 import { beforeAll, afterAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import type { Pool } from 'pg';
+import { Pool } from 'pg';
 import { confirmApproval } from '../../src/modules/approvals/confirm.js';
 import { getApprovalDetail } from '../../src/modules/approvals/service.js';
 import { getTaskDetail } from '../../src/modules/tasks/service.js';
 import { runSchedulePhase } from '../../src/modules/tasks/scheduler/schedule.js';
 import { runSendPhase } from '../../src/modules/tasks/scheduler/send.js';
+import {
+  createLocalInAppProvider,
+  type InAppProvider,
+} from '../../src/modules/notifications/service.js';
 import {
   createIntegrationDatabase,
   databaseUrl,
@@ -61,12 +65,20 @@ async function runScheduleUntil(
 maybe('scheduler schedule/claim/send', () => {
   let database: IntegrationDatabase;
   let pool: Pool;
+  let receivePool: Pool;
+  let provider: InAppProvider;
   beforeAll(async () => {
     database = await createIntegrationDatabase();
     pool = database.pool;
+    receivePool = new Pool({ ...pool.options, max: 1 });
+    provider = createLocalInAppProvider(receivePool);
   });
   afterAll(async () => {
-    await database?.close();
+    try {
+      await receivePool?.end();
+    } finally {
+      await database?.close();
+    }
   });
 
   it('registers, claims and fires exactly one notice', async () => {
@@ -92,7 +104,7 @@ maybe('scheduler schedule/claim/send', () => {
     expect(leases[0]?.lease_owner).toBe('worker-test-1');
 
     // Send: gate passes, one notice, task fired + fired event.
-    await driveSendUntilFired(pool, taskId, ownerId);
+    await driveSendUntilFired(pool, provider, taskId, ownerId);
     detail = await getTaskDetail({ pool }, ownerId, taskId);
     expect(detail.state).toBe('fired');
 
@@ -107,8 +119,8 @@ maybe('scheduler schedule/claim/send', () => {
     );
     expect(events.map((e) => e.type)).toEqual(['created', 'scheduled', 'fired']);
 
-    // Resume (second send pass) does not double-fire.
-    await runSendPhase(pool);
+    // A repeated send scan does not double-fire.
+    await runSendPhase(pool, provider);
     const { rows: firedAgain } = await pool.query(
       "SELECT count(*) AS n FROM task_events WHERE task_id = $1 AND type = 'fired'",
       [taskId],
