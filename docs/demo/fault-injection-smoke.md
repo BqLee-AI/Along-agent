@@ -1,48 +1,52 @@
 # 故障注入冒烟
 
-> 状态：v0 可复现。范围：kill worker、取消竞争、tzdb 缺失三类故障。不包含：混沌工程全矩阵、网络分区、多可用区。阶段标签：v0 MVP（S2 级“恰好一次”先行验证）。前置：v0 smoke 步 3–4 已跑通，`task_events` 可查。
+> 状态：验收规程，不是执行证据。范围：真实 worker 强杀/恢复、取消竞争、规则缺失；保证边界以 design/08 §7–§9、design/05 和安全 spec 为准。不包含：混沌工程全矩阵、外部推送、网络分区、多可用区。阶段：v0。
 
-## 前置
+## 前置与证据边界
 
-- 正常链路先绿（简报→确认→task `scheduled`）。
-- 准备可观测手段：`GET /tasks/{id}/events`、`outbox` 扫描日志、worker 进程号。
-- 取消用例准备一个未来 task（`fire_at_utc` 距今 ≥ 10 分钟）。本地确定性替代：用 DB 时间戳强制过期/改 fire_at（`UPDATE tasks SET fire_at_utc = now() - interval '…'`、`UPDATE task_leases SET lease_expires_at = now() - interval '1 minute'`），不用 sleep，避免 CI 抖动。
-- `run_attempts` 为 #9 表，本仓库断言以 `notifications` 同 `idempotency_key` 一行 + `task_events` 仅一条 `fired` 为准。
+- 独占 PostgreSQL 16、真实服务端镜像，先经真实 Web/session/CSRF/SSE/按钮走通登记回执；每个故障项使用自己的 approval/task，不复用已终态任务冒充新路径。
+- 保存 source/image、角色、规则标识、原始输入、请求/approval/task/send key、receipt、数据库时间及事件。凭据不进记录。
+- **实际 provider 入口调用、独立接收、通知、fired 分开计数**，跨重启累计，有正常调用正控制；不能用零通知、唯一行、心跳或无日志推断零调用。
+- 实际演练 SQL 只读，不改 fire_at、lease、outbox、receipt、通知或事件。测试夹具中的改钟/填状态仅为隔离回归，不能当真实故障证据。
+- 优先 Linux 镜像内真实 SIGKILL，记录目标 PID 与退出证据。Windows强制终止需如实说明方式，不能声称执行了 kill -9。worker 恢复靠 PG 扫描，不是 AgentRuntime 的 resume_from/checkpoint。
+- 故障时可用同镜像 api/worker 分角色保留观察面；这不替代最终同镜像 ROLE=all+Compose+真实 Web 的业务验收。
 
-## F1 kill worker（resume 副作用恰好一次）
+## F1 真正强杀与未知回答（A3）
 
-- 命令：
-  1. task `scheduled` 后，对 worker 进程 `kill -9`。
-  2. 重启 worker（同镜像 `worker` 角色），触发 resume（`resume_from` 上一 checkpoint）。
-  3. 到点观察通知与事件账。
-- 预期 JSON：`GET /tasks/{id}/events` 仅一条 `fired`；通知列表仅一条（同 `idempotency_key`）。`run_attempts` 为 #9 表，不在本仓库断言。
-- 断言：副作用恰好一次（通知去重键唯一，无双发）。
-- 本地确定性命令（`scheduler-fault.test.ts` “F1”）：`UPDATE tasks SET fire_at_utc = now() - interval '10 seconds'` 后依次跑 claim（worker-f1-a）→ send → send（resume），不断言 sleep。
+使用生产路径可证明的检查点，分别建立任务，不能一次无阶段强杀包办全部窗口。检查点暂停只证明相应故障阶段，不当作常态连续运行证据。
 
-## F2 取消竞争（取消 vs 到点同时发生）
+| 故障窗口                      | 恢复行为与判据                                                                              |
+| ----------------------------- | ------------------------------------------------------------------------------------------- |
+| claim 已提交，调用许可未提交  | 尚无调用；恢复领取一次许可，实际调用累计1、接收1、通知1、fired1                             |
+| 许可已提交，尚未调用          | 可能调用项只核对；实际调用可0，不产生伪接收/通知/fired，可未知或超窗未完成                  |
+| provider 已进入，接收尚未提交 | 实际调用累计1，无接收事实只核对，禁止第二次调用；可未知或超窗未完成                         |
+| 接收已提交，回答丢失          | 独立接收跨worker死亡存活；恢复只查询并收尾，实际调用累计1、接收1、通知1、fired1             |
+| 接收已提交，worker结果未提交  | 杀后task/事件/outbox结果可回滚，已提交的通知接收不回滚；恢复只核对后幂等收尾，累计仍1/1/1/1 |
+| fired终态提交后               | 重启不新增调用、接收、通知或fired                                                           |
 
-- 命令：
-  1. 在 `fire_at_utc` 前 30 秒内并发发出 `POST /tasks/{id}/actions/cancel` 与等待触发。
-  2. 记录两者返回顺序与事件账。
-- 预期：两种终局之一，不出现中间态：
-  - 取消先提交：`state=cancelled`，之后无 `fired`，余单 `superseded`。
-  - 触发先提交：`state=fired`，取消返回“已触发，无法取消”（按 API 篇错误码）。
-- 断言：取消已提交后触发请求数 = 0（D9 权威断言在 `scheduler-fault.test.ts` “F2”：cancel 提交后 firing 窗口 `fired` 数=0 + `security_events.cancel_breach` 可记）；分不清先后按违规计，但明说“不等于认定确在取消后发出”，证据留人复核。
-- 本地确定性命令（`scheduler-fault.test.ts` “F2”）：requestCancel（无回执→`cancel_pending`）→ send（门禁拦，零触发）→ 租约过期改 `task_leases.lease_expires_at` 测 resume 恰好一次，全程无 sleep。
+“回答丢失”必须在**生产接收事务已提交**后中断实际回答：不能让假 provider 返回某组 delivered/answered、填表或改状态来替代。无事实时不推断从未调用。用户选定安全优先：不承诺任意崩溃空隙均严格一次且完成，不用通知去重把这个限制藏起来。
 
-## F3 tzdb 缺失（服务不就绪，不降级）
+核对恢复必须验证 owner/task/fire/version/send key；旧版本、错绑定、取消后事实不允许触发。原到点+15min 后不发新请求；已存在有效接收事实可只核对历史收尾。missed前在task锁内查事实，无事实才终止为不确定未完成；终态后迟到事实保留供核对、不复活旧任务。
 
-- 命令：
-  1. 移除/损坏 tzdb 规则内容后重启服务端。
-  2. `GET /readyz`；再试 `POST /conversations/messages`（“明天 9:20 提醒我喝水”）。
-- 预期 JSON：`/readyz` 返回类型化错误 `{"code": "TZDB_UNAVAILABLE", "retryable": false}`；对话请求被拒（同样错误，不进归一）。
-- 断言：不支持组合失败而非降级（a13n 落点）；归一函数连调用都不进；旧 task 不受影响（冻结快照照常触发）。
-- 常见问题：`UNKNOWN_TIMEZONE` 与 `TZDB_UNAVAILABLE` 混淆 → 前者是单个时区名非法，后者是整库不可用。
+## F2 取消与发送竞争（A3/D9）
 
-## 断言总表
+1. 通过实际页面创建足够未来的任务并确认 scheduled及登记回执，记录原 fire。
+2. 分别覆盖许可前取消、许可后/调用前取消、调用进行中取消和 fired后取消，保存请求返回与数据库COMMIT时间，不以响应发出时间代替提交边界。
+3. 取消先提交：后续实际 provider调用0；生产撤销核验并持久化回执后才 cancelled，无回执保持 cancel_pending。不得注入撤销回执。
+4. 调用已持task锁：取消等待；fired先提交则取消409。worker在结果前死亡时，历史接收是否存在分别核对，不能授权取消后再次调用。
+5. 从cancel_pending COMMIT连续观察到原fire+15min后至少两个**实际worker tick**；只读观察任务/receipt/outbox/lease/通知/事件，取消后实际调用0，观察器同期正常任务调用1。中间断档或只测心跳必须声明不足。
 
-| 故障        | 恰好一次  | 零触发（取消后）     | 不降级                           |
-| ----------- | --------- | -------------------- | -------------------------------- |
-| kill worker | 通知 1 条 | —                    | —                                |
-| 取消竞争    | —         | 取消提交后触发数 = 0 | —                                |
-| tzdb 缺失   | —         | —                    | `/readyz` 类型化错误，拒绝新归一 |
+fired行数及cancel_breach仅作补充，不能替代调用时间证据。#26旧证据仅复用仍未变范围；发送/核对协议改变后，此取消边界需新证据。
+
+## F3 实际规则缺失（A4）
+
+1. 在同一受控生产构建与装载链上移除/损坏**实际规则资源**，记录确切资源位置、镜像与处理方式，再重启。资源位置随A4实现记录；不得仅换版本标签或注入假不可用对象来声称规则缺失。
+2. GET /healthz保持200；GET /readyz返回503、非envelope `{"status":"not_ready","reason":"TZDB_UNAVAILABLE"}`。规则健康但真实DB不可达时reason为NOT_READY；同时失败优先规则reason，不组合/不降级。
+3. 经真实会话发起新归一：认证/CSRF/结构等既有边界后、SSE头与新业务记录之前503 TZDB_UNAVAILABLE，不能先建conversation/message/run再拒绝；已成功持久结果只读回放不套新规则门。
+4. 规则健康时不存在/重复未选/未知时区使用typed422；已建立SSE外层HTTP200，错误唯一thread.failed终结、承诺零写，不把错误伪装thread.completed澄清。普通缺信息/模糊仍澄清。
+5. 同环境先有的冻结task读取/确认/取消/执行仍按冻结事实工作；记录实际业务证据，不因新归一不就绪停止worker。healthz/readiness探针不能替代此业务检查。
+6. 恢复真实资源及匹配标识后重启，验证实际就绪与正常归一。DB探测只需连通，不要求D7全新库已迁移。
+
+## 交付证据
+
+记录每个窗口的到达证据、强杀/重启、调用累计、持久接收、API/Web/只读SQL、时间窗、正控制及未覆盖项。每项指定一个验证负责人，不为了身份重复演练。独立代码/证据审查、OpenSpec archive、精确最终head五门SUCCESS与CLEAN后才收口；规程、回归测试或规划本身不能标记A3/A4通过。

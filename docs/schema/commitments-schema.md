@@ -177,7 +177,7 @@ tasks 1 ── 0..1 tasks       (recreated_from_task_id 自引用)
 ### 写入规则
 
 - [Required] 最多 3 次重试（首次后 1min、再 5min），同一幂等键。
-- [Required] 发了没回记 `acked_unknown`，只核对不重发（30s/2min/5min 各核一次，还未知转持久对账 Deferred）。
+- [Required] 本地 inapp 在调用前持久化 `acked_unknown` 作为一次性许可；它表示可能已调用，不等于已接收。只核对不盲重发（30s/2min/5min，次数至 3 后保持并递延），超窗无接收事实为不确定未完成，见 design/08 §7–§9。
 - [Required] Mutable 列规则（0010 调度运维列）：`command` / `idempotency_key` / `task_id` / `expected_state_version` 建后冻结，调度器只改 `status` / `attempt_no` / `ack_check_no` / `last_attempt_at` / `provider_receipt_id` / `last_error`；`ack_check_no` 只增不减（0→3）；`last_error` 只写短原因，不进原文、不进 token 明文。
 
 ## `notifications`
@@ -188,18 +188,20 @@ tasks 1 ── 0..1 tasks       (recreated_from_task_id 自引用)
 
 ### 字段
 
-| 字段              | 类型          | 约束                                                | 说明                                |
-| ----------------- | ------------- | --------------------------------------------------- | ----------------------------------- |
-| `id`              | `uuid`        | primary key                                         | 通知 ID                             |
-| `owner_id`        | `uuid`        | not null                                            | 所属用户，查询必带                  |
-| `task_id`         | `uuid`        | not null, references `tasks(id)` on delete restrict | 来源 task                           |
-| `channel`         | `text`        | not null, default `'inapp'`                         | 按 `inapp` 约束（v0 仅站内）        |
-| `title`           | `text`        | not null                                            | 标题（由冻结快照生成，不重算时间）  |
-| `body`            | `text`        | not null                                            | 正文                                |
-| `idempotency_key` | `text`        | not null                                            | 幂等键（Notifier send 回执 + 幂等） |
-| `status`          | `text`        | not null, default `'pending'`                       | 按 `pending/sent/failed` 约束       |
-| `created_at`      | `timestamptz` | not null, default `now()`                           | 创建时间                            |
-| `sent_at`         | `timestamptz` | nullable                                            | 发送时间                            |
+| 字段                     | 类型          | 约束                                                | 说明                                   |
+| ------------------------ | ------------- | --------------------------------------------------- | -------------------------------------- |
+| `id`                     | `uuid`        | primary key                                         | 通知 ID                                |
+| `owner_id`               | `uuid`        | not null                                            | 所属用户，查询必带                     |
+| `task_id`                | `uuid`        | not null, references `tasks(id)` on delete restrict | 来源 task                              |
+| `channel`                | `text`        | not null, default `'inapp'`                         | 按 `inapp` 约束（v0 仅站内）           |
+| `title`                  | `text`        | not null                                            | 标题（由冻结快照生成，不重算时间）     |
+| `body`                   | `text`        | not null                                            | 正文                                   |
+| `idempotency_key`        | `text`        | not null                                            | 幂等键（Notifier send 回执 + 幂等）    |
+| `status`                 | `text`        | not null, default `'pending'`                       | 按 `pending/sent/failed` 约束          |
+| `created_at`             | `timestamptz` | not null, default `now()`                           | 创建时间                               |
+| `sent_at`                | `timestamptz` | nullable                                            | 发送时间                               |
+| `fire_at_utc`            | `timestamptz` | nullable，和 expected_state_version 同空/同非空     | 新协议接收绑定的冻结时刻；旧记录不回填 |
+| `expected_state_version` | `integer`     | nullable，非空时正整数                              | 新协议调用许可版本，不属于对外通知 DTO |
 
 ### 约束与索引
 
@@ -212,6 +214,8 @@ tasks 1 ── 0..1 tasks       (recreated_from_task_id 自引用)
 - [Required] 发送只认回执；无回执不标 `sent`。
 - [Required] 口径天花板：只说“已记录的步骤可核对”，不承诺必达、不声称用户已读。
 - [Required] payload 不得输出敏感值原文。
+- [Required] 新协议本地 provider 用专用独立连接/事务写 `sent` 及完整接收绑定，回执 `inapp:<id>`；查询验证 owner/task/send key/fire/version/status/sent_at。旧两列为空的记录不是接收证明，冲突记录不覆盖或假称匹配。
+- [Required] worker task 锁使用与 FK KEY SHARE 兼容的 FOR NO KEY UPDATE，仍阻止取消状态写；接收只经 notifications 自有事务，task/fired/outbox 另行原子收尾，不新增跨模块写事务。见 design/08 §7–§9。
 
 ## `task_leases`（S0 #14 冻结新增）
 
