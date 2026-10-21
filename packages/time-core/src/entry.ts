@@ -31,6 +31,7 @@ export interface EntryInput {
   fold?: FoldChoice;
   ruleset: TimeRuleset;
   aliases: AliasTable;
+  requireCompleteReminder?: boolean;
 }
 
 export const ALIAS_TABLE_V1: AliasTable = freezeValue({
@@ -97,10 +98,30 @@ function mapHour(raw: number, text: string, colonForm: boolean): number {
   return -1;
 }
 
-const REMINDER_DIRECTIVE = /提醒|叫我|通知我|记得|别忘了/;
+const REMINDER_DIRECTIVE = /提醒(?:我)?|叫我|通知我|记得|别忘了/;
+const RELATIVE_DATE = /明天|后天|今天|昨天/;
 
 export function findReminderDirective(text: string): number {
   return text.search(REMINDER_DIRECTIVE);
+}
+
+function withCompleteReminder(
+  input: EntryInput,
+  result: EntryClassifyResult,
+  timeText: string,
+  hasDate: boolean,
+): EntryClassifyResult {
+  if (!input.requireCompleteReminder) return result;
+  if (!hasDate)
+    return { class: 'clarify', reason: 'DATE_MISSING', phrase_key: 'ASK_DATE_RECONFIRM' };
+  let content = input.text.replace(timeText, '').replace(RELATIVE_DATE, '');
+  for (const alias in input.aliases.aliases) content = content.replaceAll(alias, '');
+  for (const zone in input.ruleset.zones) content = content.replaceAll(zone, '');
+  for (const daypart of DAYPARTS) content = content.replaceAll(daypart, '');
+  content = content.replace(REMINDER_DIRECTIVE, '').replace(/第一次|第二次|时区|timezone/gi, '');
+  if (!/[\p{L}\p{N}]/u.test(content))
+    return { class: 'clarify', reason: 'CONTENT_MISSING', phrase_key: 'ASK_REMINDER_CONTENT' };
+  return result;
 }
 
 function classifyEntryInner(input: EntryInput): EntryClassifyResult {
@@ -174,7 +195,12 @@ function classifyEntryInner(input: EntryInput): EntryClassifyResult {
     );
     if (next24 < anchor24.date)
       return { class: 'clarify', reason: 'YEAR_MISSING', phrase_key: 'ASK_YEAR' };
-    return { class: 'normalize_ok', wall_time: `${next24}T00:00:00`, timezone_id: tz, fold };
+    return withCompleteReminder(
+      input,
+      { class: 'normalize_ok', wall_time: `${next24}T00:00:00`, timezone_id: tz, fold },
+      md24[0],
+      false,
+    );
   }
 
   const hasClock = /(\d{1,2}):(\d{2})/.test(text) || /(\d{1,2})点/.test(text);
@@ -205,7 +231,7 @@ function classifyEntryInner(input: EntryInput): EntryClassifyResult {
     if (/明天/.test(text)) baseDate = shiftDate(anchor.date, 1);
     else if (/后天/.test(text)) baseDate = shiftDate(anchor.date, 2);
     else if (/昨天/.test(text)) baseDate = shiftDate(anchor.date, -1);
-    if (/明天|后天|今天|昨天/.test(text) && input.receivedAtUtc) {
+    if (RELATIVE_DATE.test(text) && input.receivedAtUtc) {
       const received = localDate(input.ruleset, tz, input.receivedAtUtc);
       if (!received || received.date !== anchor.date || received.epoch - anchor.epoch > 60) {
         return { class: 'clarify', reason: 'DATE_CHANGED', phrase_key: 'ASK_DATE_RECONFIRM' };
@@ -223,15 +249,20 @@ function classifyEntryInner(input: EntryInput): EntryClassifyResult {
     const h = hh < 10 ? `0${hh}` : `${hh}`;
     const m = mi < 10 ? `0${mi}` : `${mi}`;
     const s = ss < 10 ? `0${ss}` : `${ss}`;
-    return {
-      class: 'normalize_ok',
-      wall_time:
-        hh === 24 && parseWall(`${iso[1]}-${iso[2]}-${iso[3]}T00:00:00`) !== null
-          ? `${shiftDate(`${iso[1]}-${iso[2]}-${iso[3]}`, 1)}T00:00:00`
-          : `${iso[1]}-${iso[2]}-${iso[3]}T${h}:${m}:${s}`,
-      timezone_id: tz,
-      fold,
-    };
+    return withCompleteReminder(
+      input,
+      {
+        class: 'normalize_ok',
+        wall_time:
+          hh === 24 && parseWall(`${iso[1]}-${iso[2]}-${iso[3]}T00:00:00`) !== null
+            ? `${shiftDate(`${iso[1]}-${iso[2]}-${iso[3]}`, 1)}T00:00:00`
+            : `${iso[1]}-${iso[2]}-${iso[3]}T${h}:${m}:${s}`,
+        timezone_id: tz,
+        fold,
+      },
+      iso[0],
+      true,
+    );
   }
 
   const cn =
@@ -267,12 +298,17 @@ function classifyEntryInner(input: EntryInput): EntryClassifyResult {
     if (mapped < 0 || mapped > 23 || mi > 59) {
       return { class: 'clarify', reason: 'DAYPART_MISSING', phrase_key: 'ASK_DAYPART' };
     }
-    return {
-      class: 'normalize_ok',
-      wall_time: wallPartsToString({ y, mo, d, h: mapped, mi, s: 0 }),
-      timezone_id: tz,
-      fold,
-    };
+    return withCompleteReminder(
+      input,
+      {
+        class: 'normalize_ok',
+        wall_time: wallPartsToString({ y, mo, d, h: mapped, mi, s: 0 }),
+        timezone_id: tz,
+        fold,
+      },
+      cn[0],
+      true,
+    );
   }
 
   const hm = /(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(text);
@@ -292,12 +328,17 @@ function classifyEntryInner(input: EntryInput): EntryClassifyResult {
   if (h < 0 || h > 23 || mi > 59 || ss > 59) {
     return { class: 'clarify', reason: 'DAYPART_MISSING', phrase_key: 'ASK_DAYPART' };
   }
-  return {
-    class: 'normalize_ok',
-    wall_time: `${baseDate}T${h < 10 ? `0${h}` : `${h}`}:${mi < 10 ? `0${mi}` : `${mi}`}:${ss < 10 ? `0${ss}` : `${ss}`}`,
-    timezone_id: tz,
-    fold,
-  };
+  return withCompleteReminder(
+    input,
+    {
+      class: 'normalize_ok',
+      wall_time: `${baseDate}T${h < 10 ? `0${h}` : `${h}`}:${mi < 10 ? `0${mi}` : `${mi}`}:${ss < 10 ? `0${ss}` : `${ss}`}`,
+      timezone_id: tz,
+      fold,
+    },
+    (hm ?? dian)![0],
+    RELATIVE_DATE.test(text),
+  );
 }
 
 export function classifyEntry(input: EntryInput): EntryClassifyResult {

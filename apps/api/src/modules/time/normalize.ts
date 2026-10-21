@@ -14,6 +14,7 @@ export interface NormalizeTimeInput {
   receivedAtUtc: string;
   confirmedTimezone: string | null;
   foldChoice: FoldChoice;
+  requireCompleteReminder?: boolean;
 }
 
 export interface TimeFailure {
@@ -65,6 +66,7 @@ export function normalizeTime(
     fold: input.foldChoice,
     ruleset: context.ruleset,
     aliases: context.aliases,
+    requireCompleteReminder: input.requireCompleteReminder,
   });
   if (classified.class === 'error') {
     const code = classified.reason === 'UNKNOWN_TIMEZONE' ? 'UNKNOWN_TIMEZONE' : 'TZDB_UNAVAILABLE';

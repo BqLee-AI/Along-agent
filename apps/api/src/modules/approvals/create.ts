@@ -14,7 +14,7 @@ const APPROVAL_TTL_HOURS = 24;
 
 export interface CreateTaskApprovalInput {
   ownerId: string;
-  conversationId: string;
+  conversationId: string | null;
   originalText: string;
   wallTime: string; // "YYYY-MM-DD HH:mm" (minute precision, frozen)
   timezoneId: string;
@@ -23,6 +23,7 @@ export interface CreateTaskApprovalInput {
   offsetSeconds: number;
   fireAtUtc: string; // ISO-8601 UTC
   tzdbVersion: string;
+  supersedesApprovalId?: string;
 }
 
 export interface CancelTaskApprovalInput {
@@ -90,12 +91,13 @@ export async function createTaskApproval(
       : PRESENTATION_VERSION_V1;
   const presentationHash = computePresentationHash(snapshotOf(input, presentationVersion));
   const { rows } = await client.query<{ expires_at: Date }>(
-    `INSERT INTO approvals (id, owner_id, conversation_id, original_text,
+    `WITH creation AS (SELECT clock_timestamp() AS at)
+     INSERT INTO approvals (id, owner_id, conversation_id, original_text,
        fire_at_utc, wall_time, timezone_id, fold, resolved_utc_offset_seconds,
        tzdb_version, occurrence, presentation_hash, presentation_version,
-       state, expires_at, kind)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'single',$11,$12,'pending',
-       now() + ($13 || ' hours')::interval, 'create_task')
+       state, created_at, expires_at, kind, supersedes_approval_id)
+     SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'single',$11,$12,'pending',
+       at, at + ($13 || ' hours')::interval, 'create_task', $14 FROM creation
      RETURNING expires_at`,
     [
       approvalId,
@@ -111,6 +113,7 @@ export async function createTaskApproval(
       presentationHash,
       presentationVersion,
       String(APPROVAL_TTL_HOURS),
+      input.supersedesApprovalId ?? null,
     ],
   );
   const expiresAt = rows[0]?.expires_at;

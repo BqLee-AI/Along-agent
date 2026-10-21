@@ -45,9 +45,13 @@ export default async function ApprovalDetailPage({ params }: { params: Promise<{
         <div className="echo">{view.echo}</div>
       </div>
       <ApprovalActions
+        key={detail.approval_id}
         approvalId={detail.approval_id}
         presentationHash={detail.presentation_hash}
         echoText={detail.echo_text}
+        kind={detail.kind}
+        originalText={detail.original_text ?? ''}
+        timezone={detail.snapshot.timezone_id}
         csrfToken={meResult.ok ? meResult.data.csrf_token : null}
         actionable={actionable}
       />

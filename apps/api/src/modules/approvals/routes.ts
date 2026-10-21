@@ -14,10 +14,13 @@ import {
 import { verifyCsrf, type ActorResolver } from '../../http/auth.js';
 import { confirmApproval, rejectApproval } from './confirm.js';
 import { getApprovalDetail, listApprovalsForOwner } from './service.js';
+import { reviseApproval } from './revise.js';
+import type { TimeContext } from '../time/context.js';
 
 export interface RouteDeps {
   pool: Pool | null;
   resolveActor: ActorResolver;
+  timeContext?: TimeContext;
   // POST body, parsed by the app layer (node:http has no body parser).
   body?: unknown;
 }
@@ -95,6 +98,19 @@ export async function handleApprovalRoute(
         throw notFound('approval not found');
       }
       const result = await rejectApproval(deps, actor.ownerId, approvalId, deps.body);
+      sendJson(res, 200, okEnvelope(result, requestId), requestId);
+      return true;
+    }
+
+    const reviseMatch = /^\/api\/v1\/approvals\/([^/]+)\/actions\/revise$/.exec(pathname);
+    if (req.method === 'POST' && reviseMatch) {
+      if (!verifyCsrf(req, actor)) {
+        sendJson(res, 403, failEnvelope(csrfMismatch(), requestId), requestId);
+        return true;
+      }
+      const approvalId = reviseMatch[1] ?? '';
+      if (!isUuid(approvalId)) throw notFound('approval not found');
+      const result = await reviseApproval(deps, actor.ownerId, approvalId, deps.body);
       sendJson(res, 200, okEnvelope(result, requestId), requestId);
       return true;
     }
