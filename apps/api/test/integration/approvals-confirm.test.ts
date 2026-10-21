@@ -3,7 +3,12 @@ import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
 import { confirmApproval, rejectApproval } from '../../src/modules/approvals/confirm.js';
 import { getApprovalDetail } from '../../src/modules/approvals/service.js';
-import { databaseUrl, requirePool, seedApproval } from './setup.js';
+import {
+  createIntegrationDatabase,
+  databaseUrl,
+  type IntegrationDatabase,
+  seedApproval,
+} from './setup.js';
 
 const maybe = databaseUrl ? describe : describe.skip;
 
@@ -21,12 +26,14 @@ async function seenEcho(pool: Pool, ownerId: string, approvalId: string): Promis
 }
 
 maybe('approvals confirm transaction', () => {
+  let database: IntegrationDatabase;
   let pool: Pool;
-  beforeAll(() => {
-    pool = requirePool();
+  beforeAll(async () => {
+    database = await createIntegrationDatabase();
+    pool = database.pool;
   });
   afterAll(async () => {
-    await pool.end();
+    await database?.close();
   });
 
   it('confirms once: task(saved v1) + created event + outbox(pending) + consumed', async () => {

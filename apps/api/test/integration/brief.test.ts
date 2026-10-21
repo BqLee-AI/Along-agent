@@ -6,7 +6,7 @@ import type { Pool } from 'pg';
 import { handleRequest } from '../../src/http/app.js';
 import { getBrief } from '../../src/modules/brief/service.js';
 import { BriefResponseSchema } from '../../src/modules/brief/schemas.js';
-import { databaseUrl, requirePool } from './setup.js';
+import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 
 const maybe = databaseUrl ? describe : describe.skip;
 const NOW = new Date('2026-10-17T00:00:00Z');
@@ -80,12 +80,14 @@ function fakePair(method: string, url: string) {
 }
 
 maybe('brief', () => {
+  let database: IntegrationDatabase;
   let pool: Pool;
-  beforeAll(() => {
-    pool = requirePool();
+  beforeAll(async () => {
+    database = await createIntegrationDatabase();
+    pool = database.pool;
   });
   afterAll(async () => {
-    await pool.end();
+    await database?.close();
   });
 
   it('assembles the confirmed-timezone date deterministically from tasks + approvals', async () => {

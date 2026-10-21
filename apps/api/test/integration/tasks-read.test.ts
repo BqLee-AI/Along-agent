@@ -12,7 +12,7 @@ import {
   getTaskEvents,
   listTasksForOwner,
 } from '../../src/modules/tasks/service.js';
-import { databaseUrl, requirePool } from './setup.js';
+import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 
 const maybe = databaseUrl ? describe : describe.skip;
 
@@ -33,12 +33,14 @@ async function seedTask(pool: Pool, ownerId: string): Promise<string> {
 }
 
 maybe('tasks read routes', () => {
+  let database: IntegrationDatabase;
   let pool: Pool;
-  beforeAll(() => {
-    pool = requirePool();
+  beforeAll(async () => {
+    database = await createIntegrationDatabase();
+    pool = database.pool;
   });
   afterAll(async () => {
-    await pool.end();
+    await database?.close();
   });
 
   it('lists tasks ordered by fire_at with keyset pagination', async () => {

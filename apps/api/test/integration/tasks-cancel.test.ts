@@ -16,7 +16,12 @@ import {
 } from '../../src/modules/tasks/scheduler/scheduler-repository.js';
 import { withTransaction } from '../../src/db/transaction.js';
 import { runSchedulePhase } from '../../src/modules/tasks/scheduler/schedule.js';
-import { databaseUrl, requirePool, seedApproval } from './setup.js';
+import {
+  createIntegrationDatabase,
+  databaseUrl,
+  type IntegrationDatabase,
+  seedApproval,
+} from './setup.js';
 
 const maybe = databaseUrl ? describe : describe.skip;
 
@@ -53,12 +58,14 @@ async function finishCancel(pool: Pool, taskId: string, ownerId: string): Promis
 }
 
 maybe('tasks cancel', () => {
+  let database: IntegrationDatabase;
   let pool: Pool;
-  beforeAll(() => {
-    pool = requirePool();
+  beforeAll(async () => {
+    database = await createIntegrationDatabase();
+    pool = database.pool;
   });
   afterAll(async () => {
-    await pool.end();
+    await database?.close();
   });
 
   it('commits cancel_pending without a receipt; replay does not invent one', async () => {
@@ -115,15 +122,22 @@ maybe('tasks cancel', () => {
         `import { runCancelPhase } from ${JSON.stringify(
           new URL('../../src/modules/tasks/scheduler/cancel-phase.ts', import.meta.url).href,
         )};
-       import { requirePool } from ${JSON.stringify(new URL('./setup.ts', import.meta.url).href)};
-       const pool = requirePool();
+       import { createPool } from ${JSON.stringify(
+         new URL('../../src/db/pool.ts', import.meta.url).href,
+       )};
+       const pool = createPool(process.env.DATABASE_URL);
+       if (!pool) throw new Error('DATABASE_URL is required for the cancellation worker');
        try { for (let i = 0; i < 15; i += 1) await runCancelPhase(pool); }
        finally { await pool.end(); }`,
       ],
-      { stdout: 'ignore', stderr: 'inherit' },
+      {
+        env: { ...process.env, DATABASE_URL: database.connectionString },
+        stdout: 'ignore',
+        stderr: 'inherit',
+      },
     );
     expect(await child.exited).toBe(0);
-    const freshPool = requirePool();
+    const freshPool = database.connect();
     try {
       expect((await getTaskDetail({ pool: freshPool }, ownerId, taskId)).state).toBe('cancelled');
       await runCancelPhase(freshPool);
@@ -344,7 +358,7 @@ maybe('tasks cancel', () => {
         ),
       ).toBe(true);
     });
-    const freshPool = requirePool();
+    const freshPool = database.connect();
     try {
       expect(await requestCancel({ pool: freshPool }, ownerId, taskId, body)).toMatchObject({
         task_id: taskId,

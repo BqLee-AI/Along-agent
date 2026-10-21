@@ -5,7 +5,12 @@ import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
 import { handleRequest } from '../../src/http/app.js';
 import { createAuth } from '../../src/modules/identity/better-auth.js';
-import { databaseUrl, requirePool, seedApproval } from './setup.js';
+import {
+  createIntegrationDatabase,
+  databaseUrl,
+  type IntegrationDatabase,
+  seedApproval,
+} from './setup.js';
 import { seedSession } from '../../src/modules/identity/seed.js';
 import { getApprovalDetail } from '../../src/modules/approvals/service.js';
 const maybe = databaseUrl ? describe : describe.skip;
@@ -67,12 +72,14 @@ function errorOf(payload: Record<string, unknown>): { code: unknown; details: un
 }
 
 maybe('identity session + /me + CSRF', () => {
+  let database: IntegrationDatabase;
   let pool: Pool;
-  beforeAll(() => {
-    pool = requirePool();
+  beforeAll(async () => {
+    database = await createIntegrationDatabase();
+    pool = database.pool;
   });
   afterAll(async () => {
-    await pool.end();
+    await database?.close();
   });
 
   it('GET /me returns the actor snapshot with CSRF token and no-store', async () => {

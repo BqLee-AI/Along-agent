@@ -18,7 +18,12 @@ import { invokeTool, type ToolContext } from '../../src/modules/tools/gateway.js
 import { confirmApproval } from '../../src/modules/approvals/confirm.js';
 import { getApprovalDetail } from '../../src/modules/approvals/service.js';
 import { getTaskDetail } from '../../src/modules/tasks/service.js';
-import { databaseUrl, requirePool, seedApproval } from './setup.js';
+import {
+  createIntegrationDatabase,
+  databaseUrl,
+  type IntegrationDatabase,
+  seedApproval,
+} from './setup.js';
 
 const maybe = databaseUrl ? describe : describe.skip;
 
@@ -62,12 +67,14 @@ async function collect(
 }
 
 maybe('conversation runtime', () => {
+  let database: IntegrationDatabase;
   let pool: Pool;
-  beforeAll(() => {
-    pool = requirePool();
+  beforeAll(async () => {
+    database = await createIntegrationDatabase();
+    pool = database.pool;
   });
   afterAll(async () => {
-    await pool.end();
+    await database?.close();
   });
 
   it('reminder path proposes an approval card and never creates a task', async () => {
