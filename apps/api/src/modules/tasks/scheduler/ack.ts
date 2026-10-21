@@ -36,12 +36,24 @@ async function ackOne(
   nowMs: number,
 ): Promise<keyof Omit<AckSummary, 'scanned'>> {
   const command = row.command as Record<string, unknown> | null;
-  if (!command || command.kind !== 'send' || typeof command.task_id !== 'string') {
+  if (
+    !command ||
+    command.kind !== 'send' ||
+    typeof command.task_id !== 'string' ||
+    command.task_id !== row.task_id ||
+    command.expected_state_version !== row.expected_state_version
+  ) {
     await markOutboxSuperseded(client, row.id);
     return 'superseded';
   }
   const task = await lockTaskRow(client, command.task_id);
-  if (!task) {
+  if (
+    !task ||
+    task.owner_id !== row.owner_id ||
+    task.state_version !== row.expected_state_version ||
+    command.schedule_receipt !== task.schedule_receipt ||
+    command.fire_at_utc !== task.fire_at_utc.toISOString()
+  ) {
     await markOutboxSuperseded(client, row.id);
     return 'superseded';
   }

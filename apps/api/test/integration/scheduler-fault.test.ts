@@ -15,7 +15,11 @@ import { runSendPhase } from '../../src/modules/tasks/scheduler/send.js';
 import { runMissedPhase } from '../../src/modules/tasks/scheduler/missed.js';
 import { driveClaimUntilLeased, driveSendUntilFired } from './scheduler-schedule.test.js';
 import { recordCancelBreach } from '../../src/modules/tasks/scheduler/scheduler-repository.js';
-import { recordCancelReceipt } from '../../src/modules/tasks/scheduler/registry.js';
+import { runCancelPhase } from '../../src/modules/tasks/scheduler/cancel-phase.js';
+import { runClaimPhase } from '../../src/modules/tasks/scheduler/claim.js';
+import { runAckPhase } from '../../src/modules/tasks/scheduler/ack.js';
+import { localInAppProvider } from '../../src/modules/notifications/service.js';
+import type { InAppNotice } from '../../src/modules/notifications/service.js';
 import { databaseUrl, requirePool, seedApproval } from './setup.js';
 
 const maybe = databaseUrl ? describe : describe.skip;
@@ -92,23 +96,62 @@ maybe('scheduler fault injection (F1/F2, D9)', () => {
   });
 
   it('F2 cancel-before-fire: zero triggers after cancel commits', async () => {
+    const positive = await confirmTask(pool);
+    await scheduleAndArm(pool, positive.taskId, positive.ownerId);
+    await driveClaimUntilLeased(pool, positive.taskId, 'worker-f2-positive');
+    const calls = new Map<string, number>();
+    const observingProvider = async (notice: InAppNotice) => {
+      calls.set(notice.taskId, (calls.get(notice.taskId) ?? 0) + 1);
+      return localInAppProvider(notice);
+    };
+    for (let i = 0; i < 15; i += 1) {
+      await runSendPhase(pool, observingProvider);
+      if ((await getTaskDetail({ pool }, positive.ownerId, positive.taskId)).state === 'fired')
+        break;
+    }
+    // Positive control wraps the real local provider, not a canned response.
+    expect(calls.get(positive.taskId)).toBe(1);
+
     const { taskId, ownerId } = await confirmTask(pool);
     await scheduleAndArm(pool, taskId, ownerId);
-
-    // Cancel commits while the task is scheduled (no revoke receipt yet:
-    // stays cancel_pending, gate keeps blocking).
-    const cancel = await requestCancel(
-      { pool },
-      ownerId,
-      taskId,
-      { reason: 'changed mind', idempotency_key: randomUUID() },
-      () => false,
-    );
+    await driveClaimUntilLeased(pool, taskId, 'worker-f2-cancelled');
+    const cancel = await requestCancel({ pool }, ownerId, taskId, {
+      reason: 'changed mind',
+      idempotency_key: randomUUID(),
+    });
     expect(cancel.state).toBe('cancel_pending');
+    await runSendPhase(pool, observingProvider);
+    expect(calls.get(taskId) ?? 0).toBe(0);
 
-    // D9 authoritative: sends after cancel submission fire zero times.
-    const sent = await runSendPhase(pool);
-    expect(sent.fired).toBe(0);
+    for (let i = 0; i < 15; i += 1) {
+      await runCancelPhase(pool);
+      if ((await getTaskDetail({ pool }, ownerId, taskId)).state === 'cancelled') break;
+    }
+    expect((await getTaskDetail({ pool }, ownerId, taskId)).state).toBe('cancelled');
+    await runCancelPhase(pool);
+    await runClaimPhase(pool, 'worker-f2-after-cancel');
+    // Model old worker snapshots resurfacing after cancellation. Every entry
+    // point must re-check PG state/version, not trust its saved queue object.
+    await pool.query(
+      `UPDATE outbox SET status = 'pending', last_attempt_at = NULL
+       WHERE task_id = $1 AND command->>'kind' = 'schedule'`,
+      [taskId],
+    );
+    await runSchedulePhase(pool);
+    await pool.query(
+      `UPDATE outbox SET status = 'dispatched', last_attempt_at = NULL
+       WHERE task_id = $1 AND command->>'kind' = 'send'`,
+      [taskId],
+    );
+    await runSendPhase(pool, observingProvider);
+    await pool.query(
+      `UPDATE outbox SET status = 'acked_unknown', last_attempt_at = NULL
+       WHERE task_id = $1 AND command->>'kind' = 'send'`,
+      [taskId],
+    );
+    await runAckPhase(pool);
+    await runSendPhase(pool, observingProvider);
+    expect(calls.get(taskId) ?? 0).toBe(0);
     const { rows: notices } = await pool.query(
       'SELECT count(*) AS n FROM notifications WHERE task_id = $1',
       [taskId],
@@ -125,8 +168,8 @@ maybe('scheduler fault injection (F1/F2, D9)', () => {
     );
     expect(Number(windowFires[0]?.n)).toBe(0);
 
-    // Queued sibling rows are superseded (cancel wins). The cancel command
-    // row itself stays pending for the worker to drain, so exclude it.
+    // Every non-cancel command is non-executable after revocation, including
+    // the stale work reintroduced above.
     const { rows: queued } = await pool.query(
       `SELECT count(*) AS n FROM outbox WHERE task_id = $1
        AND command->>'kind' != 'cancel'
@@ -134,10 +177,25 @@ maybe('scheduler fault injection (F1/F2, D9)', () => {
       [taskId],
     );
     expect(Number(queued[0]?.n)).toBe(0);
-    // D9 breach ledger: drive the production writer (recordCancelBreach)
-    // directly — it is the same function sendOne calls when a cancel commits
-    // mid-send. A self-inserted probe row would prove nothing about the
-    // production path.
+    const { rows: receipts } = await pool.query(
+      `SELECT provider_receipt_id FROM outbox
+       WHERE task_id = $1 AND command->>'kind' = 'cancel' AND status = 'dispatched'`,
+      [taskId],
+    );
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0].provider_receipt_id).toBeTruthy();
+    const { rows: cancelledEvents } = await pool.query(
+      `SELECT evidence_ref FROM task_events WHERE task_id = $1 AND type = 'cancelled'`,
+      [taskId],
+    );
+    expect(cancelledEvents).toEqual([{ evidence_ref: receipts[0].provider_receipt_id }]);
+    const { rows: actualBreaches } = await pool.query(
+      "SELECT 1 FROM security_events WHERE task_id = $1 AND type = 'cancel_breach'",
+      [taskId],
+    );
+    expect(actualBreaches).toHaveLength(0);
+    // Preserve coverage of the production breach writer independently of the
+    // natural cancellation path (whose actual breach count above is zero).
     await recordCancelBreachVia(pool, ownerId, taskId);
     const { rows: breaches } = await pool.query(
       "SELECT count(*) AS n FROM security_events WHERE task_id = $1 AND type = 'cancel_breach'",
@@ -145,16 +203,96 @@ maybe('scheduler fault injection (F1/F2, D9)', () => {
     );
     expect(Number(breaches[0]?.n)).toBeGreaterThanOrEqual(1);
 
-    // Revoke receipt arrives: second step reaches cancelled.
-    recordCancelReceipt(taskId);
-    const done = await requestCancel(
-      { pool },
-      ownerId,
+    await pool.query("UPDATE tasks SET fire_at_utc = now() - interval '20 minutes' WHERE id = $1", [
       taskId,
-      { reason: 'changed mind', idempotency_key: randomUUID() },
-      () => true,
+    ]);
+    await runMissedPhase(pool);
+    await runClaimPhase(pool, 'worker-f2-past-window');
+    await runSendPhase(pool, observingProvider);
+    expect(calls.get(taskId) ?? 0).toBe(0);
+    expect((await getTaskDetail({ pool }, ownerId, taskId)).state).toBe('cancelled');
+  });
+
+  it('old-version send and ack work cannot invoke the provider or confirm fired', async () => {
+    const { taskId, ownerId } = await confirmTask(pool);
+    await scheduleAndArm(pool, taskId, ownerId);
+    await driveClaimUntilLeased(pool, taskId, 'worker-stale-version');
+    // Simulate a lost provider answer, then a subsequently reconciled receipt.
+    // Even with that persisted receipt, stale ack work must honor fencing.
+    let calls = 0;
+    const unknownAnswer = async (notice: InAppNotice) => {
+      if (notice.taskId === taskId) calls += 1;
+      const result = await localInAppProvider(notice);
+      return { ...result, delivered: false, answered: false };
+    };
+    for (let i = 0; i < 15; i += 1) {
+      await runSendPhase(pool, unknownAnswer);
+      const { rows } = await pool.query(
+        `SELECT status FROM outbox WHERE task_id = $1 AND command->>'kind' = 'send'`,
+        [taskId],
+      );
+      if (rows[0]?.status === 'acked_unknown') break;
+    }
+    expect(calls).toBe(1);
+    expect(
+      (
+        await pool.query(
+          `SELECT status FROM outbox WHERE task_id = $1 AND command->>'kind' = 'send'`,
+          [taskId],
+        )
+      ).rows,
+    ).toEqual([{ status: 'acked_unknown' }]);
+    await pool.query(
+      `UPDATE notifications SET status = 'sent', sent_at = now() WHERE task_id = $1`,
+      [taskId],
     );
-    expect(done.state).toBe('cancelled');
+    expect(
+      (await pool.query('SELECT status FROM notifications WHERE task_id = $1', [taskId])).rows,
+    ).toEqual([{ status: 'sent' }]);
+    await pool.query('UPDATE tasks SET state_version = state_version + 1 WHERE id = $1', [taskId]);
+    await pool.query(
+      `UPDATE outbox SET last_attempt_at = NULL
+       WHERE task_id = $1 AND command->>'kind' = 'send'`,
+      [taskId],
+    );
+    for (let i = 0; i < 15; i += 1) {
+      await runAckPhase(pool);
+      const { rows } = await pool.query(
+        `SELECT status FROM outbox WHERE task_id = $1 AND command->>'kind' = 'send'`,
+        [taskId],
+      );
+      if (rows[0]?.status === 'superseded') break;
+    }
+    expect((await getTaskDetail({ pool }, ownerId, taskId)).state).toBe('scheduled');
+    expect(
+      (
+        await pool.query("SELECT 1 FROM task_events WHERE task_id = $1 AND type = 'fired'", [
+          taskId,
+        ])
+      ).rows,
+    ).toHaveLength(0);
+    await pool.query(
+      `UPDATE outbox SET status = 'dispatched', last_attempt_at = NULL
+       WHERE task_id = $1 AND command->>'kind' = 'send'`,
+      [taskId],
+    );
+    for (let i = 0; i < 15; i += 1) {
+      await runSendPhase(pool, unknownAnswer);
+      const { rows } = await pool.query(
+        `SELECT status FROM outbox WHERE task_id = $1 AND command->>'kind' = 'send'`,
+        [taskId],
+      );
+      if (rows[0]?.status === 'superseded') break;
+    }
+    expect(calls).toBe(1);
+    expect(
+      (
+        await pool.query(
+          `SELECT status FROM outbox WHERE task_id = $1 AND command->>'kind' = 'send'`,
+          [taskId],
+        )
+      ).rows,
+    ).toEqual([{ status: 'superseded' }]);
   });
 
   it('lease expiry resume: a second worker resumes exactly once', async () => {

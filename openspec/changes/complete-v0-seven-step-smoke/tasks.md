@@ -7,16 +7,16 @@
 - [x] 1.1 核对既有 schema 与模块入口，完成 design/03 §3.1–§3.2、API tasks §2.1、PRD04、索引及本 change；通知只投影已存字段，实际状态域、owner、空态、错误与无副作用语义一致。
 - [x] 1.2 将七步手册/closeout plan 校正为真实请求、响应、通知观察入口与证据要求；标明通知/取消尚待实现，不把计划或静态测试写成通过。
 - [x] 1.3 主线程使用固定本地 OpenSpec 1.3.1 完成严格校验及既有格式/静态要求，由独立 reviewer 审查增量与范围；PR 仅 `Refs #26`。本地 140 tests/623 assertions、strict 3/3；格式的既有 CRLF 检出差异仅在工作区归一化，确认无内容 diff；ReviewSmokeSpec26 approve 0.93，无 findings。
-- [ ] 1.4 独立契约 PR 的 static、migration-scan、scheduler-fault、contracts-dual、compose-smoke 全绿，独立 review 通过且合并状态 CLEAN 后合并；此前不实现新增行为。
+- [x] 1.4 独立契约 PR #27 在精确 head `86aba44aa809487c066facbebbbbacb99f6ac7c7` 的 run `39560622469` 五门全部 SUCCESS、ReviewSmokeSpec26 approve 且 REST `mergeable_state=clean` 后 squash 合入 `94c3c0cf5506151a57dd1843c766cef8f30b3180`，之后才启动新增行为实现。CodeRabbit completed 不作为人工或平台强制批准。
 
 ## 2. 合同合并后的最小实现
 
-- [ ] 2.1 在 notifications 公开 service/自有 repository 增加 owner/task ID 限定的只读查询；tasks 详情 DTO/schema 调用该服务，返回必有 notifications 数组，不改任务列表、不直读通知表、不增加通知路由。
-- [ ] 2.2 Web 任务详情展示真实站内通知与空态；同步 Web DTO 与受影响调用点，保留冻结文本与口径，不用 fired 事件合成通知，不承诺设备送达或已读。
-- [ ] 2.3 按既有 safety Requirement 5 与 design/07 §3 补齐生产取消链：实际本地队列撤销和 fencing 核对后，持久化撤销回执再转 cancelled；无回执仍 pending。移除被替代的内存回执事实源/调用，不用测试手注回执或修改旧迁移。
-- [ ] 2.4 在真实 provider 调用边界准备受控非暂停 debug logpoint，正向任务作正控制；只有确需时才补无内容的最小调用证据及定向测试，不建立通用框架或测试 API。
-- [ ] 2.5 补齐任务读取、通知展示与取消回执相关测试：owner/404/403、空态、所有合法通知状态与 sent_at 空值、GET 无业务副作用、冻结正文、已持久通知可见、无回执仍 pending、持久回执可恢复/幂等、取消后实际 provider 零调用；复用既有测试入口，不以源码扫描或测试预置终态代替生产链。
-- [ ] 2.6 主线程统一运行相关既有单元/真实数据库/调度/契约与依赖门，独立 review 实现及测试证据；实现 PR 待同次真实 smoke、证据审查和 archive 完成后作为收口 PR 合并，不把实现完成等同于真实 smoke 完成。
+- [x] 2.1 notifications 自有 repository 按 owner/task ID 查询，公开 service 供先验 owner 的 tasks 详情组装必有数组；详情 HTTP/进程内、空态、隔离与查询失败测试通过，列表形状不变。
+- [x] 2.2 Web 任务详情新增真实通知/空态区域，原样标题正文、实际状态/可空发送时间与非收悉说明；生产构建通过。实际页面取证列在第 3 节，不以构建代替浏览器观察。
+- [x] 2.3 生产 worker 实际撤销旧版本 PG outbox/lease，核验后持久回执再原子 cancelled/event；移除 registry Map/Set、RevokeCheck 与调用。相同生产函数复现从修复前 pending 变为 cancelled，无手注回执；跨进程/回滚/重放测试通过，无旧迁移修改。
+- [ ] 2.4 调试设备未提供可核验的 Bun 非暂停 logpoint，已在实际 provider 调用紧邻前补原生诊断通道，仅订阅时发布 taskId，不含内容、默认无日志；Bun 1.4.2 通道能力 probe 通过。临时 preload 观察器不替换 provider；正向调用控制与连续零调用仍待第 3 节实际运行。
+- [x] 2.5 相关真实 PG16 测试最终 71 pass/9 文件/311 assertions，覆盖通知隔离、状态/null、冻结、无读副作用、HTTP 错误/成功、取消无回执/回滚/恢复及实际调用零的故障测试。新增旧版本 ack fixture 首次错误保留 delivered=true 导致真实 sent，已纠正为丢失回答+后续对账的测试输入，未改生产 outcomeOf 或削弱断言。
+- [x] 2.6 lint/typecheck/depcruise/治理门与后续 copy-claims/unit/strict/format 分段完成；unit 140/21 文件/623 assertions，契约双跑 14/4 文件/33 assertions，API/Web 生产构建通过。ReviewSmokeImpl26 approve 0.88，无 findings；仅 fixture 修正补审 approve 0.97。实现 PR 在同次真实 smoke、证据审查和 archive 后收口合并；不是实际七步完成证据。
 
 ## 3. 同一受控环境的真实七步
 

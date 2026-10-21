@@ -59,11 +59,20 @@ export interface TaskListItem {
   schedule_receipt: string | null;
 }
 
+export interface TaskNotification {
+  id: string;
+  title: string;
+  body: string;
+  status: 'pending' | 'sent' | 'failed';
+  sent_at: string | null;
+}
+
 export interface TaskDetail extends TaskListItem {
   kind: string;
   state_version: number;
   recreated_from: string | null;
   created_at: string;
+  notifications: TaskNotification[];
 }
 
 export interface TaskEventItem {

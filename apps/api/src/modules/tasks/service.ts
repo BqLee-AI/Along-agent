@@ -1,5 +1,6 @@
 import type { Pool, PoolClient } from 'pg';
 import { withClient } from '../../db/transaction.js';
+import { getTaskNotifications, type TaskNotification } from '../notifications/service.js';
 import {
   decodeCursor,
   encodeCursor,
@@ -39,6 +40,7 @@ export interface TaskDetail {
   recreated_from: string | null;
   schedule_receipt: string | null;
   created_at: string;
+  notifications: TaskNotification[];
 }
 
 export interface TaskEventItem {
@@ -122,6 +124,7 @@ export async function getTaskDetail(
     if (!lookup.found) throw notFound('task not found') as HttpError;
     if (lookup.forbidden) throw forbidden('task not found') as HttpError;
     const row = lookup.row;
+    const notifications = await getTaskNotifications(client, ownerId, taskId);
     return {
       task_id: row.id,
       kind: row.kind,
@@ -134,6 +137,7 @@ export async function getTaskDetail(
       recreated_from: row.recreated_from_task_id,
       schedule_receipt: row.schedule_receipt,
       created_at: row.created_at.toISOString(),
+      notifications,
     };
   });
 }

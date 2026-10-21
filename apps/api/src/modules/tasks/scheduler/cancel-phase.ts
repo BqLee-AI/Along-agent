@@ -1,25 +1,19 @@
-// Cancel worker phase: drains outbox kind=cancel rows. For each row:
-// lock row -> lock task -> if task already terminal, supersede; if the local
-// registry holds a cancel receipt, finish cancel_pending -> cancelled +
-// cancelled event (same txn); otherwise re-arm with backoff while attempts
-// remain (provider revoke pending), else leave cancel_pending in place.
+// Cancel worker: lock task before outbox, validate the cancellation fence,
+// revoke PG queue work/leases, verify it, persist a receipt, then append the
+// cancelled event and complete the command in the same transaction.
 import { backoffMsForAttempt } from '@along/scheduler-core';
 import type { Pool, PoolClient } from 'pg';
 import { withTransaction } from '../../../db/transaction.js';
 import {
-  appendTaskEvent,
   bumpOutboxAttempt,
+  completeCancelFromReceipt,
   listDueCancelRows,
   lockOutboxRow,
   lockTaskRow,
-  markOutboxDispatched,
-  markOutboxFailedDeadline,
   markOutboxSuperseded,
-  supersedeQueuedOutboxForTask,
-  transitionTask,
+  revokeLocalTaskQueue,
   type OutboxRow,
 } from './scheduler-repository.js';
-import { hasCancelReceipt } from './registry.js';
 
 export const CANCEL_BATCH_LIMIT = 50;
 
@@ -30,11 +24,14 @@ export interface CancelPhaseSummary {
   superseded: number;
 }
 
-function parseCancelCommand(row: OutboxRow): { taskId: string } | null {
+function parseCancelCommand(row: OutboxRow): { taskId: string; expectedVersion: number } | null {
   const command = row.command as Record<string, unknown> | null;
   if (!command || command.kind !== 'cancel') return null;
   if (typeof command.task_id !== 'string') return null;
-  return { taskId: command.task_id };
+  if (typeof command.expected_state_version !== 'number') return null;
+  if (!Number.isInteger(command.expected_state_version)) return null;
+  if (command.expected_state_version !== row.expected_state_version) return null;
+  return { taskId: command.task_id, expectedVersion: row.expected_state_version };
 }
 
 async function cancelOne(
@@ -42,59 +39,43 @@ async function cancelOne(
   row: OutboxRow,
   nowMs: number,
 ): Promise<keyof Omit<CancelPhaseSummary, 'scanned'>> {
-  void nowMs;
   const parsed = parseCancelCommand(row);
   if (!parsed || parsed.taskId !== row.task_id) {
     await markOutboxSuperseded(client, row.id);
     return 'superseded';
   }
   const task = await lockTaskRow(client, parsed.taskId);
-  if (!task) {
+  if (
+    !task ||
+    task.owner_id !== row.owner_id ||
+    task.state !== 'cancel_pending' ||
+    task.state_version !== parsed.expectedVersion
+  ) {
     await markOutboxSuperseded(client, row.id);
     return 'superseded';
   }
-  if (task.state === 'cancelled') {
-    await markOutboxDispatched(client, row.id, `cancel:${task.id}`);
-    return 'superseded';
-  }
-  if (task.state === 'fired' || task.state === 'missed') {
-    // Terminal the other way: the cancel command can never apply.
-    await markOutboxSuperseded(client, row.id);
-    return 'superseded';
-  }
-  if (task.state !== 'cancel_pending') return 'pending';
-  if (!hasCancelReceipt(task.id)) {
-    // Revoke receipt not yet observed: re-arm while attempts remain so the
-    // worker keeps polling; beyond that, leave the row pending (the task
-    // stays cancel_pending, gate keeps blocking — never lie cancelled).
-    const nextDelay = backoffMsForAttempt(row.attempt_no);
-    if (nextDelay === null) return 'pending';
-    await bumpOutboxAttempt(client, {
-      outboxId: row.id,
-      attemptNo: row.attempt_no + 1,
-      nextAttemptAt: new Date(Date.now() + nextDelay),
-      lastError: 'revoke receipt pending',
-    });
-    return 'pending';
-  }
-  const moved = await transitionTask(client, {
-    taskId: task.id,
-    fromStates: ['cancel_pending'],
-    toState: 'cancelled',
-    expectedVersion: task.state_version,
-  });
-  if (!moved) return 'pending';
-  await appendTaskEvent(client, {
+  const fence = {
     ownerId: task.owner_id,
     taskId: task.id,
-    stateVersion: task.state_version + 1,
-    type: 'cancelled',
-    evidenceRef: `cancel:${task.id}`,
+    expectedVersion: task.state_version,
+  };
+  if (
+    (await revokeLocalTaskQueue(client, fence, row.id)) &&
+    (await completeCancelFromReceipt(client, fence))
+  ) {
+    return 'cancelled';
+  }
+  // Cancellation has no send deadline: exhausting the finite send retry
+  // schedule must not strand a pending command forever. Keep polling at the
+  // maximum delay until durable revocation can actually be established.
+  const nextDelay = backoffMsForAttempt(row.attempt_no) ?? 300_000;
+  await bumpOutboxAttempt(client, {
+    outboxId: row.id,
+    attemptNo: Math.min(row.attempt_no + 1, 2_147_483_647),
+    nextAttemptAt: new Date(nowMs + nextDelay),
+    lastError: 'local queue revocation not confirmed',
   });
-  await supersedeQueuedOutboxForTask(client, task.id);
-  await markOutboxDispatched(client, row.id, `cancel:${task.id}`);
-  void markOutboxFailedDeadline;
-  return 'cancelled';
+  return 'pending';
 }
 
 export async function runCancelPhase(pool: Pool): Promise<CancelPhaseSummary> {

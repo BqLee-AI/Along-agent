@@ -53,6 +53,34 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
         state={task.state}
         csrfToken={meResult.ok ? meResult.data.csrf_token : null}
       />
+      <section aria-labelledby="notifications-heading">
+        <h2 id="notifications-heading">站内通知</h2>
+        <p className="muted">以下仅为站内通知记录，不表示用户收到或看过。</p>
+        {task.notifications.length === 0 ? (
+          <p className="muted">暂无站内通知记录</p>
+        ) : (
+          <ul>
+            {task.notifications.map((notice) => (
+              <li key={notice.id} className="panel" style={{ overflowWrap: 'anywhere' }}>
+                <h3 style={{ whiteSpace: 'pre-wrap' }}>{notice.title}</h3>
+                <p style={{ whiteSpace: 'pre-wrap' }}>{notice.body}</p>
+                <dl>
+                  <dt className="muted">记录状态</dt>
+                  <dd>{notice.status}</dd>
+                  <dt className="muted">发送时间（UTC）</dt>
+                  <dd>
+                    {notice.sent_at ? (
+                      <time dateTime={notice.sent_at}>{notice.sent_at}</time>
+                    ) : (
+                      '未记录'
+                    )}
+                  </dd>
+                </dl>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
       <h2>事件账</h2>
       {events.length === 0 ? (
         <p className="muted">还没有记录到事件。</p>

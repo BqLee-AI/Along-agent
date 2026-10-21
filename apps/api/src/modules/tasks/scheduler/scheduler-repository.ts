@@ -294,6 +294,117 @@ export async function supersedeQueuedOutboxForTask(
   return rows.length;
 }
 
+export interface CancelFence {
+  ownerId: string;
+  taskId: string;
+  expectedVersion: number;
+}
+
+/** Caller holds the task lock before touching its durable queue. */
+export async function supersedeStaleTaskWork(
+  client: PoolClient,
+  fence: CancelFence,
+): Promise<void> {
+  await client.query(
+    `UPDATE outbox SET status = 'superseded', updated_at = now()
+     WHERE task_id = $1 AND owner_id = $2 AND expected_state_version < $3
+       AND command->>'kind' IS DISTINCT FROM 'cancel'
+       AND status IN ('pending', 'dispatched', 'acked_unknown')`,
+    [fence.taskId, fence.ownerId, fence.expectedVersion],
+  );
+}
+
+async function isLocalQueueRevoked(client: PoolClient, fence: CancelFence): Promise<boolean> {
+  const { rows } = await client.query<{ revoked: boolean }>(
+    `SELECT NOT EXISTS (
+       SELECT 1 FROM outbox WHERE task_id = $1
+         AND command->>'kind' IS DISTINCT FROM 'cancel'
+         AND status IN ('pending', 'dispatched', 'acked_unknown')
+     ) AND NOT EXISTS (
+       SELECT 1 FROM task_leases WHERE task_id = $1
+     ) AS revoked`,
+    [fence.taskId],
+  );
+  return rows[0]?.revoked === true;
+}
+
+/**
+ * Revoke the actual PG queue, not a process-local registry. Task-before-outbox
+ * locking serializes this with claim/send/ack (including the provider call).
+ * Unexpected current/future-version work is not evidence of revocation.
+ */
+export async function revokeLocalTaskQueue(
+  client: PoolClient,
+  fence: CancelFence,
+  cancelRowId: string,
+): Promise<boolean> {
+  await supersedeStaleTaskWork(client, fence);
+  await client.query(
+    `DELETE FROM task_leases
+     WHERE task_id = $1 AND owner_id = $2 AND expected_state_version < $3`,
+    [fence.taskId, fence.ownerId, fence.expectedVersion],
+  );
+  if (!(await isLocalQueueRevoked(client, fence))) return false;
+  // The receipt is minted only after the durable queue mutations and checks.
+  // Its command ID and version bind the evidence to this cancellation fence.
+  const { rows } = await client.query<{ id: string }>(
+    `UPDATE outbox o
+     SET provider_receipt_id = COALESCE(o.provider_receipt_id,
+           'pg-cancel:' || o.id::text || ':' || o.expected_state_version::text),
+         updated_at = now()
+     FROM tasks t
+     WHERE o.id = $1 AND o.task_id = $2 AND o.owner_id = $3
+       AND o.status = 'pending' AND o.expected_state_version = $4
+       AND o.command->>'kind' = 'cancel' AND o.command->>'task_id' = t.id::text
+       AND o.command->'expected_state_version' = to_jsonb(o.expected_state_version)
+       AND t.id = o.task_id AND t.owner_id = o.owner_id
+       AND t.state = 'cancel_pending' AND t.state_version = $4
+     RETURNING o.id`,
+    [cancelRowId, fence.taskId, fence.ownerId, fence.expectedVersion],
+  );
+  return rows.length === 1;
+}
+
+/** API replay and fresh workers consume the same persisted receipt. */
+export async function completeCancelFromReceipt(
+  client: PoolClient,
+  fence: CancelFence,
+): Promise<boolean> {
+  const { rows } = await client.query<{ id: string; provider_receipt_id: string }>(
+    `SELECT id, provider_receipt_id FROM outbox
+     WHERE task_id = $1 AND owner_id = $2 AND expected_state_version = $3
+       AND command->>'kind' = 'cancel' AND command->>'task_id' = task_id::text
+       AND command->'expected_state_version' = to_jsonb(expected_state_version)
+       AND status IN ('pending', 'dispatched') AND provider_receipt_id IS NOT NULL
+     ORDER BY created_at, id LIMIT 1 FOR UPDATE`,
+    [fence.taskId, fence.ownerId, fence.expectedVersion],
+  );
+  const receipt = rows[0];
+  if (!receipt || !(await isLocalQueueRevoked(client, fence))) return false;
+  const moved = await transitionTask(client, {
+    taskId: fence.taskId,
+    fromStates: ['cancel_pending'],
+    toState: 'cancelled',
+    expectedVersion: fence.expectedVersion,
+  });
+  if (!moved) throw new Error('cancel fence changed while task lock held');
+  await appendTaskEvent(client, {
+    ownerId: fence.ownerId,
+    taskId: fence.taskId,
+    stateVersion: fence.expectedVersion + 1,
+    type: 'cancelled',
+    evidenceRef: receipt.provider_receipt_id,
+  });
+  await client.query(
+    `UPDATE outbox SET status = 'superseded', updated_at = now()
+     WHERE task_id = $1 AND command->>'kind' = 'cancel' AND id <> $2
+       AND status IN ('pending', 'dispatched', 'acked_unknown')`,
+    [fence.taskId, receipt.id],
+  );
+  await markOutboxDispatched(client, receipt.id, receipt.provider_receipt_id);
+  return true;
+}
+
 export async function transitionTask(
   client: PoolClient,
   args: {
