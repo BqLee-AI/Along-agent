@@ -94,10 +94,11 @@ describe('presentation contract', () => {
   });
 
   it('unknown presentation version fails closed', () => {
+    const unknown = { ...SNAPSHOT, presentationVersion: 'v9' };
     expect(
       validateSeenContent({
-        seenContent: 'anything',
-        snapshot: SNAPSHOT,
+        seenContent: renderEchoV1(unknown, 'A-1111'),
+        snapshot: unknown,
         shortNo: 'A-1111',
         variant: 'ordinary',
         presentationVersion: 'v9',
