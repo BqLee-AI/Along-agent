@@ -66,14 +66,15 @@
 | 6    | [对话运行与预算](agent/05-chat-runtime-flow-and-budget.md)  | conversation/run/attempt/trace、状态机、双预算     |
 | 7    | [评测夹具](agent/06-eval-fixtures.md)                       | 50 条时间表达集、200 卡片集版本化、指标口径        |
 
-## 六、Demo 与收口规划（4 篇）
+## 六、Demo、收口规划与验收记录（5 篇）
 
-| 序号 | 文档                                                     | 作用                                                   |
-| ---- | -------------------------------------------------------- | ------------------------------------------------------ |
-| 1    | [v0 全链路 smoke](demo/v0-slice-smoke.md)                | 7 步复现、断言取消后触发数=0                           |
-| 2    | [time-core 黄金用例](demo/time-core-golden-cases.md)     | 4 基准+DST+50 表达，fixture 可被测试消费               |
-| 3    | [故障注入 smoke](demo/fault-injection-smoke.md)          | kill worker/取消竞争/tzdb 缺失，断言恰好一次           |
-| 4    | [v0 七步 smoke 收口计划](demo/v0-smoke-closeout-plan.md) | 真实链路缺口、最小实施顺序、七步证据与完整 v0 验收边界 |
+| 序号 | 文档                                                                | 作用                                                                   |
+| ---- | ------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| 1    | [v0 全链路 smoke](demo/v0-slice-smoke.md)                           | 7 步复现、断言取消后触发数=0                                           |
+| 2    | [time-core 黄金用例](demo/time-core-golden-cases.md)                | 4 基准+DST+50 表达，fixture 可被测试消费                               |
+| 3    | [故障注入 smoke](demo/fault-injection-smoke.md)                     | kill worker/取消竞争/tzdb 缺失，断言恰好一次                           |
+| 4    | [v0 七步 smoke 收口计划](demo/v0-smoke-closeout-plan.md)            | 真实链路缺口、最小实施顺序、七步证据与完整 v0 验收边界                 |
+| 5    | [2026-10-21 七步真实验收记录](demo/v0-smoke-evidence-2026-10-21.md) | 浏览器/通知/取消真实时窗、调用正控制与零调用、脱敏原始证据及未覆盖边界 |
 
 ## 七、References（3 篇）
 

@@ -1,6 +1,6 @@
 # v0 切片冒烟：干净单次提醒闭环
 
-> 本文是 [#26](https://github.com/BqLee-AI/Along-agent/issues/26) 的操作手册，不是验收记录。通知详情合同见 design/03 §3.1 与 tasks API §2.1；实施、审查与实际运行结果单独记录在对应 OpenSpec tasks 和 smoke 证据中。完整计划与 A1–A4 边界见 [收口计划](v0-smoke-closeout-plan.md)。
+> 本文是 [#26](https://github.com/BqLee-AI/Along-agent/issues/26) 的操作手册，不是验收记录。通知详情合同见 design/03 §3.1 与 tasks API §2.1；实施、审查与实际运行结果见对应 OpenSpec tasks 和 [2026-10-21 验收记录](v0-smoke-evidence-2026-10-21.md)。完整计划与 A1–A4 边界见 [收口计划](v0-smoke-closeout-plan.md)。
 
 范围：同一受控环境、同一合成 owner、真实 Web 单端七步。不重开 brief，不扩展 CI、外部推送或通用 E2E 框架；D1–D10、五门、按钮确认、冻结展示、回执门均不变。正常主链只经对话/按钮写业务数据；SQL 仅只读取证，不手注任务、时间、通知或取消回执。
 
