@@ -9,6 +9,7 @@ export const EVENT_TYPES = [
   'reconciliation_run',
 ] as const;
 export { THREAD_EVENT_TYPES, THREAD_PROTOCOL_VERSION, ThreadEventSchema } from './thread-events.js';
+export { AmbiguousTimeDetailsSchema } from './thread-events.js';
 export type {
   ApprovalRequiredEvent,
   CardProposedEvent,

@@ -3,19 +3,30 @@
 export type FoldChoice = 'first' | 'second' | 'none';
 
 export interface ZoneTransition {
-  at_utc: string;
-  offset_seconds: number;
+  readonly at_utc: string;
+  readonly offset_seconds: number;
 }
 
 export interface ZoneRules {
-  base_offset_seconds: number;
-  transitions: ZoneTransition[];
+  readonly base_offset_seconds: number;
+  readonly transitions: readonly ZoneTransition[];
+  readonly coverage: {
+    readonly wall_start: string;
+    readonly wall_end: string;
+    readonly utc_start: string;
+    readonly utc_end: string;
+  };
+}
+
+export interface AliasTable {
+  readonly version: string;
+  readonly aliases: Readonly<Record<string, string>>;
 }
 
 export interface TimeRuleset {
-  ruleset_id: string;
-  tzdb_version: string;
-  zones: Record<string, ZoneRules>;
+  readonly ruleset_id: string;
+  readonly tzdb_version: string;
+  readonly zones: Readonly<Record<string, ZoneRules>>;
 }
 
 export interface AmbiguousCandidate {

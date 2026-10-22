@@ -42,7 +42,9 @@ Approval
 
 - [Required] 回显模板普通版：“请确认 A-0051：你说‘明天 9:20’，我将它归一为 2026-10-17 09:20（Asia/Shanghai），设为单次提醒；确认前不会创建正式提醒，也不会排期。”
 - [Required] 歧义选第二次版：“原话‘2027-11-07 01:30’，按 America/New_York 选择第二次出现的 01:30（UTC−05:00），单次提醒；确认前不会创建正式提醒或排期。”
+- [Required] 显式选第一次的新提议冻结 `presentation_version=v2`：“原话‘2026-11-01 01:30’，按 America/New_York 选择第一次出现的 2026-11-01 01:30（UTC−04:00），单次提醒；确认前不会创建正式提醒或排期。”创建器只在结构化 first 选择且归一结果 `fold=0` 时选用此模板；普通提议、第二次与取消仍冻结各自既有 v1 模板，不新增 `fold_choice` 持久列。
 - [Required] 模板带版本，approval 冻 `presentation_version`；旧 approval 用旧模板直到过期；语言是独立维度，切语言重生成重确认；旧模板有显示 bug → 作废旧 approval 重来，不悄悄替换。
+- [Required] 新 first 模板不套用于旧 v1 行。已确认有次数/偏移展示缺陷的旧提议须拒绝后重新提议，或按显式修改生成后继；保留旧冻结字段、版本及原回显，不用读取/部署过程悄悄补写。修复不重算已建 task。
 - [Required] 摆错了（回显 09:20、快照 10:00）→ 暂停待核对，不建不排；快照自洽不过（墙上+时区+偏移推不出 UTC）→ 待修复，换新 approval 重来，旧转墓碑。
 
 ## 3. 状态机 [Required]
@@ -80,6 +82,7 @@ presentation 输入
 - 字段按序取 `[domain, presentation_version, original_text, local_datetime, timezone_id, fold, offset_seconds, occurrence]`，其中 `domain = "along-presentation/v1"`，`local_datetime` 为 time-core 归一后的 `"YYYY-MM-DD HH:mm"`，`fold` 为 `"0"|"1"`，`offset_seconds` 为十进制秒数，`occurrence` 为 `"single"`。
 - 每字段做长度前缀 `len(bytes):bytes`（UTF-8 字节数），直接拼接（无分隔符）得 canonical。
 - `hash = "ph_" + sha256(canonical, hex)`。模板排版空白永不进 hash；`original_text` 逐字节精确。
+- first 的 v2 是回显内容版本，不另改规范编码域：仍用 `along-presentation/v1` 算法，第二字段按冻结值编码 `v2`。读取和确认均使用行内 `presentation_version`；不能拿当前默认 v1 重算新 first 的 hash，也不能接受缺少次数/偏移的旧普通模板作为 v2 的 `seen_content`。未知版本仍拒绝确认。
 
 ## 6. 同事务（唯一跨模块事务）[Required]
 

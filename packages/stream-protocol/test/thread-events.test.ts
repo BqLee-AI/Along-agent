@@ -185,4 +185,76 @@ describe('thread-events', () => {
       ].sort(),
     );
   });
+  it('requires exact ordered structured ambiguity details and time-error status', () => {
+    const details = {
+      wall_time: '2026-11-01T01:30:00',
+      timezone_id: 'America/New_York',
+      ruleset_id: 'FIXTURE_V1',
+      candidates: [
+        { fold_choice: 'first', offset_seconds: -14400, fire_at_utc: '2026-11-01T05:30:00Z' },
+        { fold_choice: 'second', offset_seconds: -18000, fire_at_utc: '2026-11-01T06:30:00Z' },
+      ],
+    };
+    const event = base('thread.failed', {
+      conversation_id: CONVERSATION_ID,
+      run_id: RUN_ID,
+      error: { code: 'AMBIGUOUS_LOCAL_TIME', message: '请选择', http_status: 422, details },
+    });
+    expect(ThreadEventSchema.safeParse(event).success).toBe(true);
+    for (const invalid of [
+      undefined,
+      '请选择第一次',
+      { ...details, candidates: details.candidates.slice(0, 1) },
+      { ...details, candidates: [...details.candidates, details.candidates[1]] },
+      { ...details, candidates: [...details.candidates].reverse() },
+      {
+        ...details,
+        candidates: [
+          { ...details.candidates[0], fire_at_utc: '2026-11-01T07:30:00Z' },
+          details.candidates[1],
+        ],
+      },
+      {
+        ...details,
+        candidates: [
+          { fold_choice: 'first', fire_at_utc: '2026-11-01T05:30:00Z' },
+          details.candidates[1],
+        ],
+      },
+      {
+        ...details,
+        candidates: [{ ...details.candidates[0], offset_seconds: -14400.5 }, details.candidates[1]],
+      },
+      { ...details, wall_time: '01:30' },
+      { ...details, extra: 'not on the wire' },
+    ]) {
+      expect(
+        ThreadEventSchema.safeParse({
+          ...event,
+          payload: {
+            ...event.payload,
+            error: {
+              code: 'AMBIGUOUS_LOCAL_TIME',
+              message: 'm',
+              http_status: 422,
+              details: invalid,
+            },
+          },
+        }).success,
+      ).toBe(false);
+    }
+    for (const [code, http_status] of [
+      ['TZDB_UNAVAILABLE', 422],
+      ['UNKNOWN_TIMEZONE', 503],
+      ['NONEXISTENT_LOCAL_TIME', 503],
+      ['AMBIGUOUS_LOCAL_TIME', 503],
+    ]) {
+      expect(
+        ThreadEventSchema.safeParse({
+          ...event,
+          payload: { ...event.payload, error: { code, message: 'm', http_status, details } },
+        }).success,
+      ).toBe(false);
+    }
+  });
 });

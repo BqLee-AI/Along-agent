@@ -1,9 +1,17 @@
 // Deterministic entry classifier (NOT LLM): text -> wall_time | clarify | reject.
-// Provisional placement in time-core; owner to confirm (see PR). Zero imports.
-import { civilFromEpoch, daysSinceEpoch, parseUtcEpoch, wallPartsToString } from './civil.js';
-import type { FoldChoice, TimeRuleset } from './types.js';
+// Shared pure parser; the API supplies its actual validated alias table.
+import {
+  civilFromEpoch,
+  daysSinceEpoch,
+  parseUtcEpoch,
+  parseWall,
+  wallPartsToString,
+} from './civil.js';
+import type { AliasTable, FoldChoice, TimeRuleset } from './types.js';
+import { freezeValue, sameValue } from './immutable.js';
+import { isSupportedRuleset, utcInCoverage } from './profile.js';
 
-export type EntryClass = 'normalize_ok' | 'clarify' | 'reject';
+export type EntryClass = 'normalize_ok' | 'clarify' | 'reject' | 'error';
 
 export interface EntryClassifyResult {
   class: EntryClass;
@@ -22,9 +30,10 @@ export interface EntryInput {
   receivedAtUtc?: string;
   fold?: FoldChoice;
   ruleset: TimeRuleset;
+  aliases: AliasTable;
 }
 
-export const ALIAS_TABLE_V1: { version: string; aliases: Record<string, string> } = {
+export const ALIAS_TABLE_V1: AliasTable = freezeValue({
   version: 'ALIAS_TABLE_V1',
   aliases: {
     北京时间: 'Asia/Shanghai',
@@ -33,7 +42,7 @@ export const ALIAS_TABLE_V1: { version: string; aliases: Record<string, string> 
     美东时间: 'America/New_York',
     基里巴斯时间: 'Pacific/Kiritimati',
   },
-};
+});
 
 const DAYPARTS = ['上午', '下午', '中午', '晚上', '凌晨', '早晨', '早上', '午夜', '半夜'];
 
@@ -41,8 +50,7 @@ function offsetAtUtc(ruleset: TimeRuleset, tz: string, epoch: number): number | 
   const zone = ruleset.zones[tz];
   if (!zone) return null;
   let offset = zone.base_offset_seconds;
-  const sorted = [...zone.transitions].sort((a, b) => (a.at_utc < b.at_utc ? -1 : 1));
-  for (const t of sorted) {
+  for (const t of zone.transitions) {
     const at = parseUtcEpoch(t.at_utc);
     if (at !== null && epoch >= at) offset = t.offset_seconds;
   }
@@ -89,9 +97,54 @@ function mapHour(raw: number, text: string, colonForm: boolean): number {
   return -1;
 }
 
+const REMINDER_DIRECTIVE = /提醒|叫我|通知我|记得|别忘了/;
+
+export function findReminderDirective(text: string): number {
+  return text.search(REMINDER_DIRECTIVE);
+}
+
 function classifyEntryInner(input: EntryInput): EntryClassifyResult {
   const text = input.text;
   const fold: FoldChoice = input.fold ?? 'none';
+
+  if (!isSupportedRuleset(input.ruleset)) return { class: 'error', reason: 'TZDB_UNAVAILABLE' };
+  const aliases = input.aliases;
+  if (!sameValue(aliases, ALIAS_TABLE_V1)) return { class: 'error', reason: 'TZDB_UNAVAILABLE' };
+  const explicitZones = new Set<string>();
+  // Remove recognized aliases before inspecting remaining explicit indicators.
+  let rest = text;
+  for (const [alias, zone] of Object.entries(aliases.aliases)) {
+    if (text.includes(alias)) {
+      explicitZones.add(zone);
+      rest = rest.split(alias).join(' ');
+    }
+  }
+  for (const match of rest.matchAll(/[A-Za-z_]+(?:\/[A-Za-z0-9_+-]+)+/g)) {
+    if (!Object.hasOwn(input.ruleset.zones, match[0]))
+      return { class: 'error', reason: 'UNKNOWN_TIMEZONE' };
+    explicitZones.add(match[0]);
+  }
+  const reminderAt = findReminderDirective(rest);
+  const unknownAliasAt = rest.search(/[\u4e00-\u9fa5]{1,12}时间/);
+  // Reminder content is not timezone metadata; parentheses and explicit
+  // timezone labels remain annotations even after the reminder directive.
+  if (
+    (unknownAliasAt >= 0 && (reminderAt < 0 || unknownAliasAt < reminderAt)) ||
+    /(?:[（(]\s*|时区\s*[:：]?\s*)[\u4e00-\u9fa5]{1,12}时间(?=\s*(?:[）)]|$))/.test(rest)
+  )
+    return { class: 'error', reason: 'UNKNOWN_TIMEZONE' };
+  if (explicitZones.size > 1)
+    return { class: 'clarify', reason: 'TIMEZONE_CONFLICT', phrase_key: 'ASK_TIMEZONE' };
+  const tz = explicitZones.values().next().value ?? input.confirmedTz;
+  if (tz && !Object.hasOwn(input.ruleset.zones, tz))
+    return { class: 'error', reason: 'UNKNOWN_TIMEZONE' };
+  if (
+    (fold === 'first' && /第二次/.test(text)) ||
+    (fold === 'second' && /第一次/.test(text)) ||
+    (/第一次/.test(text) && /第二次/.test(text))
+  ) {
+    return { class: 'clarify', reason: 'FOLD_CONFLICT', phrase_key: 'ASK_FOLD' };
+  }
 
   if (/左右|大概|上下|附近|尽快|早点|晚点|改天|有空|空闲|得空/.test(text)) {
     if (/有空|空闲|得空/.test(text)) {
@@ -103,26 +156,14 @@ function classifyEntryInner(input: EntryInput): EntryClassifyResult {
     return { class: 'reject', reason: 'FUZZY_RANGE', phrase_key: 'RANGE_UNSUPPORTED' };
   }
 
-  let tz = input.confirmedTz;
-  for (const [alias, zone] of Object.entries(ALIAS_TABLE_V1.aliases)) {
-    if (text.includes(alias)) {
-      tz = zone;
-      break;
-    }
-  }
-  if (!tz) {
-    const stray = /([\u4e00-\u9fa5]{1,6})时间/.exec(text);
-    if (stray)
-      return { class: 'clarify', reason: 'UNKNOWN_TIMEZONE', phrase_key: 'ASK_TIMEZONE_ALIAS' };
-    return { class: 'clarify', reason: 'TIMEZONE_MISSING', phrase_key: 'ASK_TIMEZONE' };
-  }
-  if (!input.ruleset.zones[tz]) {
-    return { class: 'clarify', reason: 'UNKNOWN_TIMEZONE', phrase_key: 'ASK_TIMEZONE_ALIAS' };
-  }
+  if (!tz) return { class: 'clarify', reason: 'TIMEZONE_MISSING', phrase_key: 'ASK_TIMEZONE' };
 
   if (text.includes('月') && !text.includes('年') && !/\d{4}-\d{2}-\d{2}/.test(text)) {
     const md24 = /(\d{1,2})月(\d{1,2})[日号]\s*24(?::00)?/.exec(text);
     if (!md24) return { class: 'clarify', reason: 'YEAR_MISSING', phrase_key: 'ASK_YEAR' };
+    if (!utcInCoverage(input.ruleset, tz, input.anchorReceivedAtUtc)) {
+      return { class: 'error', reason: 'TZDB_UNAVAILABLE' };
+    }
     const anchor24 = localDate(input.ruleset, tz, input.anchorReceivedAtUtc);
     if (!anchor24)
       return { class: 'clarify', reason: 'UNKNOWN_TIMEZONE', phrase_key: 'ASK_TIMEZONE_ALIAS' };
@@ -149,18 +190,26 @@ function classifyEntryInner(input: EntryInput): EntryClassifyResult {
     return { class: 'clarify', reason: 'DAYPART_MISSING', phrase_key: 'ASK_DAYPART' };
   }
 
-  const anchor = localDate(input.ruleset, tz, input.anchorReceivedAtUtc);
-  if (!anchor)
-    return { class: 'clarify', reason: 'UNKNOWN_TIMEZONE', phrase_key: 'ASK_TIMEZONE_ALIAS' };
-  let baseDate = anchor.date;
-  if (/明天/.test(text)) baseDate = shiftDate(anchor.date, 1);
-  else if (/后天/.test(text)) baseDate = shiftDate(anchor.date, 2);
-  else if (/昨天/.test(text)) baseDate = shiftDate(anchor.date, -1);
-
-  if (/明天|后天|今天|昨天/.test(text) && input.receivedAtUtc) {
-    const received = localDate(input.ruleset, tz, input.receivedAtUtc);
-    if (received && received.date !== anchor.date) {
-      return { class: 'clarify', reason: 'DATE_CHANGED', phrase_key: 'ASK_DATE_RECONFIRM' };
+  let baseDate = '';
+  const absoluteDate = /\d{4}-\d{2}-\d{2}|\d{4}年/.test(text);
+  if (!absoluteDate) {
+    if (
+      !utcInCoverage(input.ruleset, tz, input.anchorReceivedAtUtc) ||
+      (input.receivedAtUtc && !utcInCoverage(input.ruleset, tz, input.receivedAtUtc))
+    ) {
+      return { class: 'error', reason: 'TZDB_UNAVAILABLE' };
+    }
+    const anchor = localDate(input.ruleset, tz, input.anchorReceivedAtUtc);
+    if (!anchor) return { class: 'error', reason: 'TZDB_UNAVAILABLE' };
+    baseDate = anchor.date;
+    if (/明天/.test(text)) baseDate = shiftDate(anchor.date, 1);
+    else if (/后天/.test(text)) baseDate = shiftDate(anchor.date, 2);
+    else if (/昨天/.test(text)) baseDate = shiftDate(anchor.date, -1);
+    if (/明天|后天|今天|昨天/.test(text) && input.receivedAtUtc) {
+      const received = localDate(input.ruleset, tz, input.receivedAtUtc);
+      if (!received || received.date !== anchor.date || received.epoch - anchor.epoch > 60) {
+        return { class: 'clarify', reason: 'DATE_CHANGED', phrase_key: 'ASK_DATE_RECONFIRM' };
+      }
     }
   }
 
@@ -169,14 +218,17 @@ function classifyEntryInner(input: EntryInput): EntryClassifyResult {
     const hh = Number(iso[4]);
     const mi = Number(iso[5]);
     const ss = iso[6] ? Number(iso[6]) : 0;
-    if (hh > 23 || mi > 59 || ss > 59)
+    if (hh > 24 || (hh === 24 && (mi !== 0 || ss !== 0)) || mi > 59 || ss > 59)
       return { class: 'clarify', reason: 'DAYPART_MISSING', phrase_key: 'ASK_DAYPART' };
     const h = hh < 10 ? `0${hh}` : `${hh}`;
     const m = mi < 10 ? `0${mi}` : `${mi}`;
     const s = ss < 10 ? `0${ss}` : `${ss}`;
     return {
       class: 'normalize_ok',
-      wall_time: `${iso[1]}-${iso[2]}-${iso[3]}T${h}:${m}:${s}`,
+      wall_time:
+        hh === 24 && parseWall(`${iso[1]}-${iso[2]}-${iso[3]}T00:00:00`) !== null
+          ? `${shiftDate(`${iso[1]}-${iso[2]}-${iso[3]}`, 1)}T00:00:00`
+          : `${iso[1]}-${iso[2]}-${iso[3]}T${h}:${m}:${s}`,
       timezone_id: tz,
       fold,
     };
@@ -249,5 +301,5 @@ function classifyEntryInner(input: EntryInput): EntryClassifyResult {
 }
 
 export function classifyEntry(input: EntryInput): EntryClassifyResult {
-  return { ...classifyEntryInner(input), alias_table_version: ALIAS_TABLE_V1.version };
+  return { ...classifyEntryInner(input), alias_table_version: input.aliases?.version };
 }

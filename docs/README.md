@@ -24,7 +24,7 @@
 | 03   | [v0 垂直切片](design/03-v0-vertical-slice.md)                            | 简报→卡片→对话→按钮确认→调度→站内通知详情投影→活动账；真实取消回执与七步证据边界             |
 | 04   | [五缝契约](design/04-five-seams-contract.md)                             | AgentRuntime/ToolGateway/Scheduler/Notifier/ConnectorVault 端口契约                          |
 | 05   | [time-core 时间层](design/05-time-core.md)                               | 纯函数 normalize、有限真实规则上下文、typed 时间失败、fold 候选与实际 readiness              |
-| 06   | [approvals 确认门](design/06-approvals-confirmation-gate.md)             | 显式完整修改、单一后继、持久幂等、锁后有效期及按钮重新确认                                   |
+| 06   | [approvals 确认门](design/06-approvals-confirmation-gate.md)             | first 版本化冻结回显、显式完整修改、单一后继、持久幂等与按钮重新确认                         |
 | 07   | [task_events 事件账](design/07-task-events-ledger.md)                    | 只追加账本、取消优先、活动页读模型                                                           |
 | 08   | [调度与投递](design/08-scheduler-and-delivery.md)                        | 一次性调用许可、独立本地接收、未知不重发、取消栅栏及真实崩溃恢复边界                         |
 | 09   | [AgentRuntime 与 checkpoint](design/09-agent-runtime-and-checkpoint.md)  | TsAgentRuntime 主实现、run/attempt/checkpoint、预算权威                                      |
@@ -66,18 +66,19 @@
 | 6    | [对话运行与预算](agent/05-chat-runtime-flow-and-budget.md)  | conversation/run/attempt/trace、状态机、双预算     |
 | 7    | [评测夹具](agent/06-eval-fixtures.md)                       | 50 条时间表达集、200 卡片集版本化、指标口径        |
 
-## 六、Demo、收口规划与验收记录（8 篇）
+## 六、Demo、收口规划与验收记录（9 篇）
 
-| 序号 | 文档                                                                        | 作用                                                                      |
-| ---- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| 1    | [v0 全链路 smoke](demo/v0-slice-smoke.md)                                   | 7 步复现、断言取消后触发数=0                                              |
-| 2    | [time-core 黄金用例](demo/time-core-golden-cases.md)                        | 4 基准+DST+50 表达，fixture 可被测试消费                                  |
-| 3    | [故障注入 smoke](demo/fault-injection-smoke.md)                             | 真实强杀、取消竞争及规则故障；分别计数实际调用与持久结果                  |
-| 4    | [v0 七步 smoke 收口计划](demo/v0-smoke-closeout-plan.md)                    | 真实链路缺口、最小实施顺序、七步证据与完整 v0 验收边界                    |
-| 5    | [2026-10-21 七步真实验收记录](demo/v0-smoke-evidence-2026-10-21.md)         | 浏览器/通知/取消真实时窗、调用正控制与零调用、脱敏原始证据及未覆盖边界    |
-| 6    | [v0 完整收口计划](demo/v0-closeout-plan.md)                                 | A2 原子替代、A3 崩溃恢复与不确定窗口、A4 时间合同、镜像部署及完整验收门槛 |
-| 7    | [2026-10-21 A3 崩溃恢复验收](demo/v0-crash-recovery-evidence-2026-10-21.md) | 六个真实强杀窗口、取消 COMMIT 后零调用、完整宽限与组合镜像适用边界        |
-| 8    | [2026-10-22 A1 失败与部署恢复](demo/v0-a1-recovery-evidence-2026-10-22.md)  | 原始字面任务失败、新任务独立登记、重启策略实测与未完成自然到点门槛        |
+| 序号 | 文档                                                                           | 作用                                                                      |
+| ---- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
+| 1    | [v0 全链路 smoke](demo/v0-slice-smoke.md)                                      | 7 步复现、断言取消后触发数=0                                              |
+| 2    | [time-core 黄金用例](demo/time-core-golden-cases.md)                           | 4 基准+DST+50 表达，fixture 可被测试消费                                  |
+| 3    | [故障注入 smoke](demo/fault-injection-smoke.md)                                | 真实强杀、取消竞争及规则故障；分别计数实际调用与持久结果                  |
+| 4    | [v0 七步 smoke 收口计划](demo/v0-smoke-closeout-plan.md)                       | 真实链路缺口、最小实施顺序、七步证据与完整 v0 验收边界                    |
+| 5    | [2026-10-21 七步真实验收记录](demo/v0-smoke-evidence-2026-10-21.md)            | 浏览器/通知/取消真实时窗、调用正控制与零调用、脱敏原始证据及未覆盖边界    |
+| 6    | [v0 完整收口计划](demo/v0-closeout-plan.md)                                    | A2 原子替代、A3 崩溃恢复与不确定窗口、A4 时间合同、镜像部署及完整验收门槛 |
+| 7    | [2026-10-21 A3 崩溃恢复验收](demo/v0-crash-recovery-evidence-2026-10-21.md)    | 六个真实强杀窗口、取消 COMMIT 后零调用、完整宽限与组合镜像适用边界        |
+| 8    | [2026-10-22 A1 失败与部署恢复](demo/v0-a1-recovery-evidence-2026-10-22.md)     | 原始字面任务失败、新任务独立登记、重启策略实测与未完成自然到点门槛        |
+| 9    | [2026-10-21 A4 时间错误与规则就绪](demo/v0-time-errors-evidence-2026-10-21.md) | 真实资源故障、DB断开、未来DST错误及first-v2版本化修复与运行证据           |
 
 ## 七、References（3 篇）
 

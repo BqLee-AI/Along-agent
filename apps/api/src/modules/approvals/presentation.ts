@@ -14,6 +14,9 @@ import { createHash } from 'node:crypto';
 // whitespace is byte-exact.
 
 export const PRESENTATION_VERSION_V1 = 'v1';
+// The first-occurrence template has its own frozen version; v1 approvals
+// must keep their original ordinary/second/cancel presentation.
+export const PRESENTATION_VERSION_FIRST_V2 = 'v2';
 
 export interface PresentationSnapshot {
   originalText: string;
@@ -77,6 +80,17 @@ export function renderEchoV1Second(snapshot: PresentationSnapshot): string {
   );
 }
 
+export function renderCreateTaskEcho(snapshot: PresentationSnapshot, shortNo: string): string {
+  if (snapshot.presentationVersion === PRESENTATION_VERSION_FIRST_V2) {
+    return (
+      `原话'${snapshot.originalText}'，按 ${snapshot.timezoneId} ` +
+      `选择第一次出现的 ${snapshot.localDatetime}（${formatUtcOffset(snapshot.offsetSeconds)}），` +
+      `单次提醒；确认前不会创建正式提醒或排期。`
+    );
+  }
+  return snapshot.fold === 1 ? renderEchoV1Second(snapshot) : renderEchoV1(snapshot, shortNo);
+}
+
 // Cancel variant (issue #9, request_cancel_task). Same frozen snapshot fields
 // feed the hash; only the template sentence differs.
 export function renderEchoCancelV1(snapshot: PresentationSnapshot, shortNo: string): string {
@@ -114,9 +128,17 @@ export interface ValidateSeenInput {
 // segments compared layout-tolerant (normalizeLayoutWhitespace), the
 // original_text segment compared byte-exact. Unknown versions fail closed.
 export function validateSeenContent(input: ValidateSeenInput): boolean {
-  if (input.presentationVersion !== PRESENTATION_VERSION_V1) return false;
-  const expected =
-    input.variant === 'ordinary'
+  if (input.presentationVersion !== input.snapshot.presentationVersion) return false;
+  const first = input.presentationVersion === PRESENTATION_VERSION_FIRST_V2;
+  if (
+    first
+      ? input.snapshot.fold !== 0 || input.variant !== 'ordinary'
+      : input.presentationVersion !== PRESENTATION_VERSION_V1
+  )
+    return false;
+  const expected = first
+    ? renderCreateTaskEcho(input.snapshot, input.shortNo)
+    : input.variant === 'ordinary'
       ? renderEchoV1(input.snapshot, input.shortNo)
       : input.variant === 'second'
         ? renderEchoV1Second(input.snapshot)

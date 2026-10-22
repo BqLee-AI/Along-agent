@@ -4,7 +4,8 @@
 // replay (idempotent POST and GET after_seq) is exact.
 import { createHash, randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
-import { FIXTURE_V1 } from '@along/time-core';
+import { findReminderDirective } from '@along/time-core';
+import { requireTimeContext, type TimeContext } from '../time/context.js';
 import {
   THREAD_PROTOCOL_VERSION,
   ThreadEventSchema,
@@ -56,7 +57,6 @@ function utcSecondIso(date: Date): string {
   return date.toISOString().replace(/\.\d{3}Z$/, 'Z');
 }
 
-const REMINDER_INTENT = /提醒|叫我|通知我|记得|别忘了/;
 const CANCEL_INTENT = /取消|删掉|别再提醒/;
 const UUID_IN_TEXT = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
@@ -72,6 +72,7 @@ function pgErrorOf(err: unknown): { code?: string; constraint?: string } | null 
 
 export interface ConversationDeps {
   pool: Pool | null;
+  timeContext: TimeContext;
 }
 
 export interface RunContext {
@@ -87,6 +88,7 @@ export interface RunContext {
   foldChoice: 'first' | 'second' | 'none';
   maxIterations: number;
   maxTokens: number;
+  timeContext: TimeContext;
 }
 
 export interface StartResult {
@@ -165,18 +167,19 @@ export async function startConversationRun(
         };
       }
 
-      let conversation: ConversationRow;
+      let conversation: ConversationRow | null = null;
       if (input.conversation_id) {
         const found = await getConversation(client, input.conversation_id);
         if (!found) throw notFound('conversation not found') as HttpError;
-        if (found.owner_id !== ownerId) {
-          throw forbidden('conversation not found') as HttpError;
-        }
-        if (found.status !== 'open') {
-          throw stateConflict('conversation closed') as HttpError;
-        }
+        if (found.owner_id !== ownerId) throw forbidden('conversation not found') as HttpError;
+        if (found.status !== 'open') throw stateConflict('conversation closed') as HttpError;
         conversation = found;
-      } else {
+      }
+      // Only new proposal turns need rules. Reads, cancellation and stored
+      // idempotent results keep their own existing boundaries.
+      if (findReminderDirective(text) >= 0 && !CANCEL_INTENT.test(text))
+        requireTimeContext(deps.timeContext);
+      if (!conversation) {
         const anchorIso = (await client.query<{ now: Date }>('SELECT now() AS now')).rows[0]?.now;
         if (!anchorIso) throw new Error('database clock unavailable');
         conversation = await createConversation(client, {
@@ -186,8 +189,8 @@ export async function startConversationRun(
         });
       }
 
-      let confirmedTimezone = conversation.confirmed_timezone_id;
-      if (!confirmedTimezone && timezone) {
+      let confirmedTimezone = timezone ?? conversation.confirmed_timezone_id;
+      if (!conversation.confirmed_timezone_id && timezone) {
         await freezeConversationTimezone(client, conversation.id, timezone);
         confirmedTimezone = timezone;
       }
@@ -204,7 +207,7 @@ export async function startConversationRun(
       });
       const runId = randomUUID();
       const attemptId = randomUUID();
-      const mode = REMINDER_INTENT.test(text) || CANCEL_INTENT.test(text) ? 'task' : 'chat';
+      const mode = findReminderDirective(text) >= 0 || CANCEL_INTENT.test(text) ? 'task' : 'chat';
       await insertRun(client, {
         runId,
         ownerId,
@@ -247,6 +250,7 @@ export async function startConversationRun(
           foldChoice: input.fold_choice,
           maxIterations: MAX_ITERATIONS,
           maxTokens: MAX_TOKENS,
+          timeContext: deps.timeContext,
         },
       };
     });
@@ -271,14 +275,19 @@ export async function startConversationRun(
 
   if (started.replayRunId) {
     const status = await getRunStatus(pool, ownerId, started.replayRunId);
-    if (status === 'running' || status === null) {
+    const replay = await listRunEvents(pool, ownerId, started.replayRunId);
+    const terminal = replay.at(-1)?.type;
+    const hasTerminal =
+      terminal === 'thread.completed' ||
+      terminal === 'thread.failed' ||
+      terminal === 'thread.cancelled';
+    if ((status === 'running' || status === null) && !hasTerminal) {
       throw stateConflict('run still in progress', {
         conversation_id: started.conversationId,
         run_id: started.runId,
         status: status ?? 'missing',
       }) as HttpError;
     }
-    const replay = await listRunEvents(pool, ownerId, started.replayRunId);
     if (replay.length === 0) {
       throw stateConflict('run has no replayable events', {
         conversation_id: started.conversationId,
@@ -310,6 +319,7 @@ interface RunSession {
   iterations: number;
   assistantText: string;
   stopped: boolean;
+  terminal: boolean;
 }
 
 function envelopeOf(
@@ -336,6 +346,9 @@ async function persist(
   type: ThreadEvent['type'],
   payload: unknown,
 ): Promise<ThreadEvent> {
+  if (session.terminal) throw new Error('run already terminated');
+  // Validate before storage; the global sequence is assigned by the DB.
+  const event = envelopeOf(session, 1, type, payload);
   const eventSeq = await appendCheckpoint(pool, {
     ownerId: session.context.ownerId,
     attemptId: session.context.attemptId,
@@ -344,8 +357,12 @@ async function persist(
     payload,
     requestId: session.context.requestId,
   });
+  if (type === 'thread.completed' || type === 'thread.failed' || type === 'thread.cancelled') {
+    session.terminal = true;
+  }
   session.seq += 1;
-  return envelopeOf(session, eventSeq, type, payload);
+  event.seq = eventSeq;
+  return event;
 }
 
 async function emit(
@@ -377,6 +394,7 @@ function toolContextOf(session: RunSession, allowlist: readonly string[]): ToolC
     anchorReceivedAtUtc: session.context.anchorReceivedAtUtc,
     receivedAtUtc: session.context.receivedAtUtc,
     foldChoice: session.context.foldChoice,
+    timeContext: session.context.timeContext,
   };
 }
 
@@ -385,8 +403,8 @@ function startPayload(session: RunSession) {
     conversation_id: session.context.conversationId,
     run_id: session.context.runId,
     stream_protocol_version: THREAD_PROTOCOL_VERSION,
-    ruleset_id: FIXTURE_V1.ruleset_id,
-    tzdb_version: FIXTURE_V1.tzdb_version,
+    ruleset_id: session.context.timeContext.ruleset_id,
+    tzdb_version: session.context.timeContext.tzdb_version,
   };
 }
 
@@ -403,19 +421,24 @@ async function finish(
   session: RunSession,
   status: 'done' | 'failed' | 'cancelled',
 ): Promise<void> {
-  // Message first: if this fails the run stays running so the caller can
-  // still emit thread.failed instead of a completed-then-failed double end.
-  if (session.assistantText.length > 0) {
-    await insertMessage(pool, {
-      ownerId: session.context.ownerId,
-      conversationId: session.context.conversationId,
-      role: 'assistant',
-      content: session.assistantText,
-      requestId: null,
-    });
+  // A terminal checkpoint is authoritative even when later audit writes fail.
+  try {
+    if (session.assistantText.length > 0) {
+      await insertMessage(pool, {
+        ownerId: session.context.ownerId,
+        conversationId: session.context.conversationId,
+        role: 'assistant',
+        content: session.assistantText,
+        requestId: null,
+      });
+    }
+  } finally {
+    try {
+      await finishAttempt(pool, session.context.attemptId, status === 'done' ? 'done' : 'failed');
+    } finally {
+      await finishRun(pool, session.context.runId, status);
+    }
   }
-  await finishAttempt(pool, session.context.attemptId, status === 'done' ? 'done' : 'failed');
-  await finishRun(pool, session.context.runId, status);
 }
 
 async function failWith(
@@ -424,18 +447,23 @@ async function failWith(
   write: EventWriter,
   error: { code: string; message: string; http_status: number; details?: unknown },
 ): Promise<void> {
+  if (session.terminal) return;
   if (session.assistantText.length === 0) session.assistantText = error.message;
-  await emit(pool, session, write, 'thread.failed', {
-    conversation_id: session.context.conversationId,
-    run_id: session.context.runId,
-    error,
-  });
-  await finish(pool, session, 'failed');
+  try {
+    await emit(pool, session, write, 'thread.failed', {
+      conversation_id: session.context.conversationId,
+      run_id: session.context.runId,
+      error,
+    });
+  } finally {
+    if (session.terminal) await finish(pool, session, 'failed');
+  }
 }
 
 // Client is gone: persist the terminal event for replay, then mark the run
 // cancelled. Nothing is written to the dead socket.
 async function cancelRun(pool: Pool, session: RunSession): Promise<void> {
+  if (session.terminal) return;
   await persist(pool, session, 'thread.cancelled', {
     conversation_id: session.context.conversationId,
     run_id: session.context.runId,
@@ -456,16 +484,15 @@ async function completeClarify(
     await cancelRun(pool, session);
     return;
   }
-  const completed = await emit(pool, session, write, 'thread.completed', {
-    conversation_id: session.context.conversationId,
-    run_id: session.context.runId,
-    approval_id: null,
-  });
-  if (!completed) {
-    await cancelRun(pool, session);
-    return;
+  try {
+    await emit(pool, session, write, 'thread.completed', {
+      conversation_id: session.context.conversationId,
+      run_id: session.context.runId,
+      approval_id: null,
+    });
+  } finally {
+    if (session.terminal) await finish(pool, session, 'done');
   }
-  await finish(pool, session, 'done');
 }
 
 async function completeApproval(
@@ -510,16 +537,15 @@ async function completeApproval(
     await cancelRun(pool, session);
     return;
   }
-  const completed = await emit(pool, session, write, 'thread.completed', {
-    conversation_id: session.context.conversationId,
-    run_id: session.context.runId,
-    approval_id: payload.approval.approvalId,
-  });
-  if (!completed) {
-    await cancelRun(pool, session);
-    return;
+  try {
+    await emit(pool, session, write, 'thread.completed', {
+      conversation_id: session.context.conversationId,
+      run_id: session.context.runId,
+      approval_id: payload.approval.approvalId,
+    });
+  } finally {
+    if (session.terminal) await finish(pool, session, 'done');
   }
-  await finish(pool, session, 'done');
 }
 
 function listSummary(payload: Extract<ToolPayload, { kind: 'list_tasks' }>): string {
@@ -557,7 +583,7 @@ async function runTurn(pool: Pool, session: RunSession, write: EventWriter): Pro
   }
 
   const text = session.context.inputText;
-  const wantsReminder = REMINDER_INTENT.test(text);
+  const wantsReminder = findReminderDirective(text) >= 0;
   const wantsCancel = CANCEL_INTENT.test(text);
 
   if (wantsReminder && wantsCancel) {
@@ -639,6 +665,10 @@ async function runTurn(pool: Pool, session: RunSession, write: EventWriter): Pro
       await completeApproval(pool, session, write, outcome.result);
       return;
     }
+    if (outcome.result.kind === 'time_error') {
+      await failWith(pool, session, write, outcome.result.error);
+      return;
+    }
     await completeClarify(pool, session, write, clarifyText(outcome.result));
     return;
   }
@@ -680,10 +710,12 @@ export async function executeRun(
     iterations: 0,
     assistantText: '',
     stopped: false,
+    terminal: false,
   };
   try {
     await runTurn(pool, session, write);
   } catch {
+    if (session.terminal) return;
     // Post-open failures must still end the stream; if even the terminal
     // checkpoint cannot be written, close without corrupting the JSON path.
     try {
@@ -693,6 +725,7 @@ export async function executeRun(
         http_status: 500,
       });
     } catch {
+      if (session.terminal) return;
       try {
         await finish(pool, session, 'failed');
       } catch {
