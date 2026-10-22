@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
-import { withClient, withTransaction } from '../../db/transaction.js';
+import { withTransaction } from '../../db/transaction.js';
 import {
   approvalExpired,
   approvalSuperseded,
@@ -86,11 +86,7 @@ export async function confirmApproval(
   if (!parsed.success) throw validationError('invalid confirm body');
   const { presentation_hash, seen_content, idempotency_key } = parsed.data;
   const pool = requirePool(deps);
-  // Phase 0 (outside the transaction): persist lazy expiry on the DB clock.
-  // A conditional UPDATE is idempotent, so concurrent confirms racing here
-  // is safe; the main transaction below re-reads state under the row lock.
-  await withClient(pool, (client: PoolClient) => persistExpiredIfDue(client, approvalId));
-  return withTransaction(pool, async (client: PoolClient) => {
+  const result = await withTransaction(pool, async (client: PoolClient) => {
     const row = await getApprovalForUpdate(client, approvalId);
     if (!row) throw notFound('approval not found') as HttpError;
     if (row.owner_id !== ownerId) throw forbidden('approval not found') as HttpError;
@@ -123,8 +119,7 @@ export async function confirmApproval(
     if (row.state === 'expired') {
       throw approvalExpired() as HttpError;
     }
-    // Expiry was already persisted in phase 0; no in-transaction check
-    // needed (the row lock above re-reads the persisted state).
+    if (await persistExpiredIfDue(client, row.id)) return null;
 
     // Frozen-snapshot comparison: recompute hash, then seen content.
     const snapshot = snapshotOf(row);
@@ -195,6 +190,8 @@ export async function confirmApproval(
       duplicate: false,
     };
   });
+  if (!result) throw approvalExpired();
+  return result;
 }
 
 // POST /approvals/{id}/actions/reject. Terminal rejected state; rejected
@@ -208,9 +205,7 @@ export async function rejectApproval(
   const parsed = RejectBodySchema.safeParse(body);
   if (!parsed.success) throw validationError('invalid reject body');
   const pool = requirePool(deps);
-  // Phase 0: persist lazy expiry (same rationale as confirm).
-  await withClient(pool, (client: PoolClient) => persistExpiredIfDue(client, approvalId));
-  return withTransaction(pool, async (client: PoolClient) => {
+  const result = await withTransaction(pool, async (client: PoolClient) => {
     const row = await getApprovalForUpdate(client, approvalId);
     if (!row) throw notFound('approval not found') as HttpError;
     if (row.owner_id !== ownerId) throw forbidden('approval not found') as HttpError;
@@ -230,8 +225,10 @@ export async function rejectApproval(
     if (row.state === 'expired') {
       throw approvalExpired() as HttpError;
     }
-    // Expiry already persisted in phase 0.
+    if (await persistExpiredIfDue(client, row.id)) return null;
     await markRejected(client, row.id);
     return { approval_id: row.id, status: 'rejected' as const, duplicate: false };
   });
+  if (!result) throw approvalExpired();
+  return result;
 }

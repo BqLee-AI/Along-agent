@@ -112,7 +112,7 @@ export async function findSuccessorId(
   approvalId: string,
 ): Promise<string | null> {
   const { rows } = await client.query<{ id: string }>(
-    'SELECT id FROM approvals WHERE supersedes_approval_id = $1 LIMIT 1',
+    'SELECT id FROM approvals WHERE supersedes_approval_id = $1',
     [approvalId],
   );
   return rows[0]?.id ?? null;
@@ -131,10 +131,8 @@ export async function getApprovalForUpdate(
   return rows[0] ?? null;
 }
 
-// Lazy expiry: persist pending -> expired on the DB clock. Idempotent
-// conditional write; runs OUTSIDE the confirm/reject transaction so the
-// stored state actually flips (the throwing path would roll an in-txn
-// UPDATE back). Design/06 §3 state machine: pending -> expired.
+// Caller must hold the target lock and have checked owner. Return a normal
+// transaction outcome on expiry, then raise 410 only after COMMIT.
 export async function persistExpiredIfDue(
   client: PoolClient,
   approvalId: string,
@@ -142,7 +140,7 @@ export async function persistExpiredIfDue(
   const { rowCount } = await client.query(
     `UPDATE approvals SET state = 'expired'
      WHERE id = $1 AND state = 'pending'
-       AND (expires_at <= now() OR fire_at_utc <= now())`,
+       AND (expires_at <= clock_timestamp() OR fire_at_utc <= clock_timestamp())`,
     [approvalId],
   );
   return (rowCount ?? 0) > 0;
@@ -151,7 +149,7 @@ export async function persistExpiredIfDue(
 // Read-only DB-clock expiry probe (for tests / diagnostics).
 export async function isExpiredByDbClock(client: PoolClient, approvalId: string): Promise<boolean> {
   const { rows } = await client.query<{ expired: boolean }>(
-    `SELECT (expires_at <= now() OR fire_at_utc <= now()) AS expired
+    `SELECT (expires_at <= clock_timestamp() OR fire_at_utc <= clock_timestamp()) AS expired
      FROM approvals WHERE id = $1`,
     [approvalId],
   );

@@ -137,6 +137,7 @@ export async function handleRequest(
         pool: deps.pool,
         resolveActor,
         body,
+        timeContext,
       });
       if (handled) return;
     } else {

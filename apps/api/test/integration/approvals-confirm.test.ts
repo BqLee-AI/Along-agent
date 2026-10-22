@@ -194,7 +194,7 @@ maybe('approvals confirm transaction', () => {
       errorCode: 'APPROVAL_EXPIRED',
     });
     expect(await taskCount(pool, seed.id)).toBe(0);
-    // Phase-0 persists the lazy expiry: stored state flips to expired.
+    // Locked-owner expiry is committed before the outer 410 is raised.
     const { rows } = await pool.query<{ state: string }>(
       'SELECT state FROM approvals WHERE id = $1',
       [seed.id],
@@ -296,5 +296,32 @@ maybe('approvals confirm transaction', () => {
       }),
     ).rejects.toMatchObject({ httpStatus: 409, code: 400010 });
     expect(await taskCount(pool, seed.id)).toBe(0);
+  });
+
+  it('terminal confirm/reject replays remain stable after frozen deadlines pass', async () => {
+    const consumed = await seedApproval(pool, {});
+    const body = {
+      presentation_hash: consumed.presentationHash,
+      seen_content: await seenEcho(pool, consumed.ownerId, consumed.id),
+      idempotency_key: randomUUID(),
+    };
+    const first = await confirmApproval({ pool }, consumed.ownerId, consumed.id, body);
+    const rejected = await seedApproval(pool, {});
+    await rejectApproval({ pool }, rejected.ownerId, rejected.id, {
+      idempotency_key: randomUUID(),
+    });
+    await pool.query(
+      "UPDATE approvals SET expires_at=clock_timestamp()-interval '1 hour', fire_at_utc=clock_timestamp()-interval '1 hour' WHERE id=ANY($1::uuid[])",
+      [[consumed.id, rejected.id]],
+    );
+    expect(await confirmApproval({ pool }, consumed.ownerId, consumed.id, body)).toEqual({
+      ...first,
+      duplicate: true,
+    });
+    expect(
+      await rejectApproval({ pool }, rejected.ownerId, rejected.id, {
+        idempotency_key: randomUUID(),
+      }),
+    ).toMatchObject({ status: 'rejected', duplicate: true });
   });
 });

@@ -61,3 +61,14 @@ export const RejectBodySchema = z.object({
 });
 
 export type RejectBody = z.infer<typeof RejectBodySchema>;
+
+export const ReviseBodySchema = z
+  .object({
+    raw_text: z.string().min(1).max(20000),
+    confirmed_timezone: z.string().min(1).max(100),
+    fold_choice: z.enum(['first', 'second', 'none']).default('none'),
+    idempotency_key: z.string().uuid(),
+  })
+  .strict();
+
+export type ReviseBody = z.infer<typeof ReviseBodySchema>;
