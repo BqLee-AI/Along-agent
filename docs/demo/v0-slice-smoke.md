@@ -28,6 +28,9 @@
    `apply.sh` 需要 POSIX shell 与宿主 `psql`，按顺序一次应用当前 0001–0011；不是可安全反复用于已有库的迁移 runner。必须注入专属 `DATABASE_URL`，不能意外走它的默认 DSN。根 `dev` 会构建共享包，再启动 API 3000、Web 3100；没有根 `db:migrate` 命令。若调试器需要不同启动方式，沿用相同源码/配置和单 worker，先构建共享包，记录实际启动命令；不得同时再运行另一套 all/worker。
 
 4. 也可使用已拥有的 PG 编排，但现有 `infra/compose/compose.yaml` 仅含 PG 和 all API，镜像不含 Web，未自动迁移也未向 API 注入 `BETTER_AUTH_SECRET`。不能把 Compose readiness smoke 当作本手册环境；不得启动 Compose all API 后又启动指向同库的宿主 all。
+
+   Compose 的 PostgreSQL/API 使用 `restart: unless-stopped`：进程异常退出或 Docker 引擎恢复后自动重启，显式停止的服务不会被重新拉起。该策略不启动 Docker Desktop，也不能阻止宿主关机、休眠或引擎停机。长时自然到点验收必须保持宿主与引擎运行，并保留观察中断；停机跨过到点宽限窗时按真实 `missed` 记录，不承诺补发。失败原任务保留不改，新一轮验收另建任务并分别报告。
+
 5. API 直接探针：`http://127.0.0.1:3000/healthz` 返回 `ok`，`/readyz` 无类型化错误。注意 readiness 当前仅查 `TZDB_VERSION` 非空，不探 PG/完整规则；还要以真实 `/me`、业务请求与只读 SQL 确认路径。现归一使用 `FIXTURE_V1`、实际 tzdb `fixture-v1`，不是完整 IANA 库；记录环境声明值及 SSE 实际 `ruleset_id/tzdb_version`，不能把任意版本字符串当完整规则证明。
 
 ### 真实 session、CSRF 与 Next

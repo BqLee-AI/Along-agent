@@ -29,17 +29,5 @@ export function serve(options: ServeOptions = {}): Server {
   });
   server.listen(port);
 
-  const shutdown = () => {
-    server.close(() => {
-      void (async () => {
-        await pool?.end().catch(() => undefined);
-        process.exit(0);
-      })();
-    });
-    setTimeout(() => process.exit(0), 5000).unref();
-  };
-  process.on('SIGTERM', shutdown);
-  process.on('SIGINT', shutdown);
-
   return server;
 }

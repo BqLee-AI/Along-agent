@@ -1,256 +1,172 @@
-// Send phase: task lock -> outbox lock -> gate -> provider call, all in one
-// transaction. Holding the task lock throughout the provider call serializes
-// it with cancel_pending commit, which is the cancellation timing boundary.
-//
-// Breach guard (design/07 §3): when the gate finds the task cancel-committed
-// (cancel_pending/cancelled) the row is superseded; if it already fired, the
-// send is a no-op — but a cancel submitted before this send committed and a
-// fired send afterwards records one cancel_breach row for human review.
-import {
-  ackDelayForCheck,
-  backoffMsForAttempt,
-  isPastFireWindow,
-  sendKeyFor,
-} from '@along/scheduler-core';
-import { outcomeOf } from '@along/notifier-core';
+// A committed CAS grants only this stack one call. Recovery of acked_unknown
+// reconciles independent receipts; it never recreates that permission.
+import { ACK_CHECK_DELAYS_MS, isPastFireWindow } from '@along/scheduler-core';
 import type { Pool, PoolClient } from 'pg';
 import { withTransaction } from '../../../db/transaction.js';
+import { deliverInApp, type InAppProvider } from '../../notifications/service.js';
 import {
-  appendTaskEvent,
-  bumpOutboxAttempt,
+  bindCurrentSend,
+  publishDeliveryCheckpoint,
+  reconcileReceivedSend,
+  sameSendBinding,
+  type SendBinding,
+} from './delivery.js';
+import {
+  commitSendPermit,
   listDueSendRows,
   lockOutboxRow,
   lockTaskRow,
   markOutboxAckUnknown,
-  markOutboxDispatched,
   markOutboxFailedDeadline,
   markOutboxSuperseded,
   recordCancelBreach,
-  supersedeQueuedOutboxForTask,
-  transitionTask,
   type OutboxRow,
 } from './scheduler-repository.js';
-import { decideSendGate } from './gate.js';
-import {
-  deliverInApp,
-  type InAppDelivery,
-  type InAppProvider,
-} from '../../notifications/service.js';
 
 export const SEND_BATCH_LIMIT = 50;
 
 export interface SendSummary {
   scanned: number;
   fired: number;
-  retried: number;
   ackUnknown: number;
   superseded: number;
   failedDeadline: number;
   breaches: number;
 }
 
-interface ParsedSendCommand {
-  taskId: string;
-  fireAtIso: string;
-  expectedStateVersion: number;
-  scheduleReceipt: string;
-}
-
-function parseSendCommand(row: OutboxRow): ParsedSendCommand | null {
-  const command = row.command as Record<string, unknown> | null;
-  if (!command || command.kind !== 'send') return null;
-  if (typeof command.task_id !== 'string') return null;
-  if (typeof command.fire_at_utc !== 'string') return null;
-  if (typeof command.schedule_receipt !== 'string') return null;
-  const expected =
-    typeof command.expected_state_version === 'number'
-      ? command.expected_state_version
-      : row.expected_state_version;
-  return {
-    taskId: command.task_id,
-    fireAtIso: command.fire_at_utc,
-    expectedStateVersion: expected,
-    scheduleReceipt: command.schedule_receipt,
-  };
-}
-
-async function sendOne(
-  client: PoolClient,
-  row: OutboxRow,
-  provider: InAppProvider,
-  nowMs: number,
-): Promise<keyof Omit<SendSummary, 'scanned'>> {
-  const parsed = parseSendCommand(row);
-  if (
-    !parsed ||
-    parsed.taskId !== row.task_id ||
-    parsed.expectedStateVersion !== row.expected_state_version
-  ) {
-    await markOutboxSuperseded(client, row.id);
-    return 'superseded';
-  }
-  const task = await lockTaskRow(client, parsed.taskId);
-  if (
-    !task ||
-    task.owner_id !== row.owner_id ||
-    parsed.fireAtIso !== task.fire_at_utc.toISOString()
-  ) {
-    await markOutboxSuperseded(client, row.id);
-    return 'superseded';
-  }
-  // Past the window at send time: terminal, never retry.
-  if (isPastFireWindow(task.fire_at_utc.getTime(), nowMs)) {
-    await markOutboxFailedDeadline(client, row.id, 'past fire window at send time');
-    return 'failedDeadline';
-  }
-  const gate = decideSendGate({
-    task,
-    expectedStateVersion: parsed.expectedStateVersion,
-    scheduleReceipt: parsed.scheduleReceipt,
-    nowMs,
-  });
-  if (!gate.allowed) {
-    if (gate.reason === 'CANCEL_PENDING' || gate.reason === 'CANCELLED') {
-      await markOutboxSuperseded(client, row.id);
-      return 'superseded';
-    }
-    if (gate.reason === 'MISSED') {
-      await markOutboxFailedDeadline(client, row.id, 'past fire window at gate');
-      return 'failedDeadline';
-    }
-    await markOutboxSuperseded(client, row.id);
-    return 'superseded';
-  }
-
-  const delivery: InAppDelivery = await deliverInApp(
-    client,
-    {
-      ownerId: task.owner_id,
-      taskId: task.id,
-      wallTime: task.wall_time,
-      timezoneId: task.timezone_id,
-      originalNote: task.original_note,
-      idempotencyKey: sendKeyFor(task.id, task.fire_at_utc.toISOString()),
-    },
-    provider,
-  );
-  const outcome = outcomeOf({ delivered: delivery.delivered, answered: delivery.answered });
-
-  if (outcome === 'sent') {
-    // Defensive reconciliation: ordinary cross-process cancellation cannot
-    // commit while this transaction holds the task row lock.
-    const { rows } = await client.query<{ state: string }>(
-      'SELECT state FROM tasks WHERE id = $1',
-      [task.id],
-    );
-    const current = rows[0]?.state ?? task.state;
-    if (current === 'cancel_pending' || current === 'cancelled') {
-      await recordCancelBreach(client, {
-        ownerId: task.owner_id,
-        taskId: task.id,
-        evidenceRef: delivery.providerReceiptId ?? row.idempotency_key,
-      });
-      await markOutboxSuperseded(client, row.id);
-      return 'breaches';
-    }
-    const moved = await transitionTask(client, {
-      taskId: task.id,
-      fromStates: ['scheduled'],
-      toState: 'fired',
-      expectedVersion: task.state_version,
-    });
-    if (!moved) {
-      await markOutboxSuperseded(client, row.id);
-      return 'superseded';
-    }
-    await appendTaskEvent(client, {
-      ownerId: task.owner_id,
-      taskId: task.id,
-      stateVersion: task.state_version + 1,
-      type: 'fired',
-      evidenceRef: delivery.providerReceiptId ?? row.idempotency_key,
-    });
-    await supersedeQueuedOutboxForTask(client, task.id);
-    await markOutboxDispatched(client, row.id, delivery.providerReceiptId);
-    return 'fired';
-  }
-
-  if (outcome === 'ack_unknown') {
-    const nextDelay = ackDelayForCheck(row.ack_check_no);
-    if (nextDelay === null) {
-      // Checks exhausted: persistent reconciliation marker (design/08 §4).
-      await markOutboxFailedDeadline(client, row.id, 'ack_unknown checks exhausted');
-      return 'failedDeadline';
-    }
-    await markOutboxAckUnknown(client, {
-      outboxId: row.id,
-      ackCheckNo: row.ack_check_no + 1,
-      nextCheckAt: new Date(nowMs + nextDelay),
-      lastError: 'ack_unknown',
-    });
-    return 'ackUnknown';
-  }
-
-  // Provider refused: retry with backoff while attempts remain.
-  const nextDelay = backoffMsForAttempt(row.attempt_no);
-  if (nextDelay === null) {
-    await markOutboxFailedDeadline(client, row.id, 'send attempts exhausted');
-    return 'failedDeadline';
-  }
-  await bumpOutboxAttempt(client, {
-    outboxId: row.id,
-    attemptNo: row.attempt_no + 1,
-    nextAttemptAt: new Date(nowMs + nextDelay),
-    lastError: 'provider refused',
-  });
-  return 'retried';
-}
+type SendDisposition = keyof Omit<SendSummary, 'scanned'>;
+type PermitResult = SendBinding | 'superseded' | 'failedDeadline' | null;
 
 export async function runSendPhase(
   pool: Pool,
-  provider?: InAppProvider,
-  nowMs: number = Date.now(),
+  provider: InAppProvider,
+  nowMs?: number,
 ): Promise<SendSummary> {
   const summary: SendSummary = {
     scanned: 0,
     fired: 0,
-    retried: 0,
     ackUnknown: 0,
     superseded: 0,
     failedDeadline: 0,
     breaches: 0,
   };
   const rows = await collectDueSend(pool);
-  for (const row of rows) {
-    const disposition = await withTransaction(pool, async (client: PoolClient) => {
-      // Lock order (task before outbox): first verify the task is still
-      // claimable without locking, then take the task lock, and only then
-      // lock the outbox row. requestCancel holds the task lock through its
-      // whole step, so outbox-first ordering here would form a task↔outbox
-      // lock cycle (40P01) under concurrency. Re-check the outbox row after
-      // both locks: a concurrent cancel may have superseded it.
-      const probe = await client.query<{ status: string }>(
-        'SELECT status FROM outbox WHERE id = $1',
-        [row.id],
+  for (const candidate of rows) {
+    const permission = await withTransaction<PermitResult>(pool, async (client: PoolClient) => {
+      // Never acquire an outbox lock before its task, and never upgrade this
+      // task lock: independent intake must pass the existing FK KEY SHARE.
+      const task = await lockTaskRow(client, candidate.task_id, 'no_key_update');
+      const row = await lockOutboxRow(client, candidate.id);
+      if (
+        !row ||
+        row.task_id !== candidate.task_id ||
+        row.status !== 'dispatched' ||
+        row.provider_receipt_id !== null
+      ) {
+        return null;
+      }
+      const binding = bindCurrentSend(task, row);
+      if (!binding || !task) {
+        await markOutboxSuperseded(client, row.id);
+        return 'superseded';
+      }
+      const gateNow = nowMs ?? Date.now();
+      if (isPastFireWindow(task.fire_at_utc.getTime(), gateNow)) {
+        await markOutboxFailedDeadline(client, row.id, 'past fire window before send permission');
+        return 'failedDeadline';
+      }
+      if (gateNow < task.fire_at_utc.getTime()) return null;
+      const granted = await commitSendPermit(
+        client,
+        row.id,
+        new Date(gateNow + ACK_CHECK_DELAYS_MS[0]),
       );
-      if (!probe.rows[0] || probe.rows[0].status !== 'dispatched') return null;
-      const taskProbe = await client.query<{ id: string }>('SELECT id FROM tasks WHERE id = $1', [
-        row.task_id,
-      ]);
-      if (!taskProbe.rows[0]) return null;
-      await client.query('SELECT id FROM tasks WHERE id = $1 FOR UPDATE', [row.task_id]);
-      const locked = await lockOutboxRow(client, row.id);
-      if (!locked || locked.status !== 'dispatched') return null;
-      return sendOne(client, locked, provider ?? null, nowMs);
+      return granted ? binding : null;
     });
-    if (!disposition) continue;
+    if (!permission) continue;
     summary.scanned += 1;
-    if (disposition === 'fired') summary.fired += 1;
-    else if (disposition === 'retried') summary.retried += 1;
-    else if (disposition === 'ackUnknown') summary.ackUnknown += 1;
-    else if (disposition === 'superseded') summary.superseded += 1;
-    else if (disposition === 'failedDeadline') summary.failedDeadline += 1;
-    else if (disposition === 'breaches') summary.breaches += 1;
+    if (typeof permission === 'string') {
+      summary[permission] += 1;
+      continue;
+    }
+
+    // withTransaction has completed COMMIT. No persisted state authorizes
+    // another stack to enter the provider, even if this stack dies here.
+    publishDeliveryCheckpoint('permit_committed', permission.taskId);
+    const disposition = await withTransaction<SendDisposition | null>(
+      pool,
+      async (client: PoolClient) => {
+        const task = await lockTaskRow(client, permission.taskId, 'no_key_update');
+        const row = await lockOutboxRow(client, candidate.id);
+        if (!row || row.task_id !== permission.taskId || row.status !== 'acked_unknown') {
+          return null;
+        }
+        const binding = bindCurrentSend(task, row);
+        if (!binding || !task || !sameSendBinding(permission, binding)) {
+          // A cancel committed in the gap wins without any provider call.
+          await markOutboxSuperseded(client, row.id);
+          return 'superseded';
+        }
+        const gateNow = nowMs ?? Date.now();
+        if (isPastFireWindow(task.fire_at_utc.getTime(), gateNow)) {
+          const reconciled = await reconcileReceivedSend(client, task, row);
+          if (reconciled === 'fired') return 'fired';
+          // Only missed owns the atomic task-missed/send-deadline decision.
+          // An expired permission still does not prove that intake failed.
+          return 'ackUnknown';
+        }
+        if (gateNow < task.fire_at_utc.getTime()) return 'ackUnknown';
+
+        let providerFailed = false;
+        try {
+          // Keep the task lock for the whole call, so cancel cannot commit
+          // first. A returned delivered=true is not independent receipt proof.
+          await deliverInApp(
+            {
+              ownerId: binding.ownerId,
+              taskId: binding.taskId,
+              idempotencyKey: binding.sendKey,
+            },
+            provider,
+          );
+        } catch {
+          // The receive transaction may already have committed. In either
+          // case this permission stays spent; no refusal/retry path exists.
+          providerFailed = true;
+        }
+
+        // Defensive breach protection for unexpected re-entrant state writes.
+        // Ordinary cross-process cancel is blocked by our NO KEY UPDATE lock.
+        const current = await lockTaskRow(client, binding.taskId, 'no_key_update');
+        if (current?.state === 'cancel_pending' || current?.state === 'cancelled') {
+          await recordCancelBreach(client, {
+            ownerId: binding.ownerId,
+            taskId: binding.taskId,
+            evidenceRef: row.provider_receipt_id ?? binding.sendKey,
+          });
+          await markOutboxSuperseded(client, row.id);
+          return 'breaches';
+        }
+        if (!current) {
+          await markOutboxSuperseded(client, row.id);
+          return 'superseded';
+        }
+        const reconciled = await reconcileReceivedSend(client, current, row);
+        if (reconciled === 'fired') return 'fired';
+        if (reconciled === 'superseded') return 'superseded';
+        await markOutboxAckUnknown(client, {
+          outboxId: row.id,
+          ackCheckNo: row.ack_check_no,
+          nextCheckAt: row.last_attempt_at ?? new Date(gateNow + ACK_CHECK_DELAYS_MS[0]),
+          lastError: providerFailed
+            ? 'inapp provider error; delivery outcome unknown; permission spent'
+            : 'inapp receipt unconfirmed; delivery outcome unknown; permission spent',
+        });
+        publishDeliveryCheckpoint('result_before_commit', binding.taskId);
+        return 'ackUnknown';
+      },
+    );
+    if (disposition) summary[disposition] += 1;
   }
   return summary;
 }

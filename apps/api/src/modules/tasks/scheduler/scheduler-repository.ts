@@ -72,15 +72,16 @@ export async function listDueScheduleRows(client: PoolClient, limit: number): Pr
   return rows;
 }
 
-/** Lock the task row for a schedule/cancel phase. */
+/** Send must not block the independent receiver's task-FK KEY SHARE check. */
 export async function lockTaskRow(
   client: PoolClient,
   taskId: string,
+  lockMode: 'update' | 'no_key_update' = 'update',
 ): Promise<SchedulerTaskRow | null> {
   const { rows } = await client.query<SchedulerTaskRow>(
     `SELECT id, owner_id, state, state_version, fire_at_utc, wall_time,
        timezone_id, schedule_receipt, original_note
-     FROM tasks WHERE id = $1 FOR UPDATE`,
+     FROM tasks WHERE id = $1 ${lockMode === 'no_key_update' ? 'FOR NO KEY UPDATE' : 'FOR UPDATE'}`,
     [taskId],
   );
   return rows[0] ?? null;
@@ -164,7 +165,7 @@ export async function listMissedCandidates(
   return rows;
 }
 
-/** Due send rows: dispatched, backoff elapsed, still inside the fire window. */
+/** Due unpermitted send candidates; completed receipt-bearing rows stay inert. */
 export async function listDueSendRows(client: PoolClient, limit: number): Promise<OutboxRow[]> {
   const { rows } = await client.query<OutboxRow>(
     `SELECT o.id, o.owner_id, o.task_id, o.expected_state_version, o.command,
@@ -174,6 +175,7 @@ export async function listDueSendRows(client: PoolClient, limit: number): Promis
      JOIN tasks t ON t.id = o.task_id
      WHERE o.status = 'dispatched'
        AND o.command->>'kind' = 'send'
+       AND o.provider_receipt_id IS NULL
        AND (o.last_attempt_at IS NULL OR o.last_attempt_at <= now())
        AND t.fire_at_utc >= now() - interval '15 minutes'
      ORDER BY o.created_at ASC
@@ -231,6 +233,39 @@ export async function markOutboxDispatched(
      WHERE id = $1`,
     [outboxId, providerReceiptId],
   );
+}
+
+/** The successful CAS, committed by the caller, grants this stack one call. */
+export async function commitSendPermit(
+  client: PoolClient,
+  outboxId: string,
+  firstCheckAt: Date,
+): Promise<boolean> {
+  const { rows } = await client.query<{ id: string }>(
+    `UPDATE outbox SET status = 'acked_unknown', ack_check_no = 0,
+       last_attempt_at = $2, last_error = 'inapp delivery outcome unknown; permit committed',
+       updated_at = now()
+     WHERE id = $1 AND status = 'dispatched' AND provider_receipt_id IS NULL
+     RETURNING id`,
+    [outboxId, firstCheckAt.toISOString()],
+  );
+  return rows.length === 1;
+}
+
+/** Caller already holds the task lock; only its canonical send can reconcile. */
+export async function lockTaskSendRow(
+  client: PoolClient,
+  taskId: string,
+  sendKey: string,
+): Promise<OutboxRow | null> {
+  const { rows } = await client.query<OutboxRow>(
+    `SELECT id, owner_id, task_id, expected_state_version, command,
+       idempotency_key, attempt_no, status, created_at, updated_at,
+       last_attempt_at, ack_check_no, provider_receipt_id, last_error
+     FROM outbox WHERE task_id = $1 AND idempotency_key = $2 FOR UPDATE`,
+    [taskId, sendKey],
+  );
+  return rows[0] ?? null;
 }
 
 export async function markOutboxAckUnknown(

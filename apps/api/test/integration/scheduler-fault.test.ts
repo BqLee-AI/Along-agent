@@ -1,11 +1,9 @@
-// Scheduler fault injection (F1/F2, deterministic): kill -9 resume fires
-// exactly once, cancel-before-fire triggers zero sends, lease expiry lets a
-// second worker resume exactly once. Time is forced with DB timestamp updates
-// (never sleep): fire_at_utc is nudged into the past, lease expiry backdated.
-// D9 authoritative assertions live here (see ci/gates.json scope).
+// Deterministic PostgreSQL scheduler regressions: repeated terminal scans,
+// cancel-before-fire, stale versions and expired leases. SQL time/queue
+// fixtures exercise behavior; these tests are not process-kill evidence.
 import { beforeAll, afterAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import type { Pool } from 'pg';
+import { Pool } from 'pg';
 import { confirmApproval } from '../../src/modules/approvals/confirm.js';
 import { getApprovalDetail } from '../../src/modules/approvals/service.js';
 import { getTaskDetail } from '../../src/modules/tasks/service.js';
@@ -18,8 +16,11 @@ import { recordCancelBreach } from '../../src/modules/tasks/scheduler/scheduler-
 import { runCancelPhase } from '../../src/modules/tasks/scheduler/cancel-phase.js';
 import { runClaimPhase } from '../../src/modules/tasks/scheduler/claim.js';
 import { runAckPhase } from '../../src/modules/tasks/scheduler/ack.js';
-import { localInAppProvider } from '../../src/modules/notifications/service.js';
-import type { InAppNotice } from '../../src/modules/notifications/service.js';
+import {
+  createLocalInAppProvider,
+  type InAppNotice,
+  type InAppProvider,
+} from '../../src/modules/notifications/service.js';
 import {
   createIntegrationDatabase,
   databaseUrl,
@@ -53,7 +54,7 @@ async function recordCancelBreachVia(pool: Pool, ownerId: string, taskId: string
 }
 
 async function scheduleAndArm(pool: Pool, taskId: string, ownerId: string): Promise<void> {
-  // Same SKIP LOCKED contention as the schedule test: drive our own row.
+  // Assert this task even when a phase scans other tasks in this file.
   for (let i = 0; i < 10; i += 1) {
     await runSchedulePhase(pool);
     const detail = await getTaskDetail({ pool }, ownerId, taskId);
@@ -67,26 +68,34 @@ async function scheduleAndArm(pool: Pool, taskId: string, ownerId: string): Prom
 maybe('scheduler fault injection (F1/F2, D9)', () => {
   let database: IntegrationDatabase;
   let pool: Pool;
+  let receivePool: Pool;
+  let provider: InAppProvider;
   beforeAll(async () => {
     database = await createIntegrationDatabase();
     pool = database.pool;
+    receivePool = new Pool({ ...pool.options, max: 1 });
+    provider = createLocalInAppProvider(receivePool);
   });
   afterAll(async () => {
-    await database?.close();
+    try {
+      await receivePool?.end();
+    } finally {
+      await database?.close();
+    }
   });
 
-  it('F1 kill -9 resume: exactly one notice, exactly one fired event', async () => {
+  it('F1 repeated send scans preserve exactly one notice and fired event', async () => {
     const { taskId, ownerId } = await confirmTask(pool);
     await scheduleAndArm(pool, taskId, ownerId);
 
-    // First worker claims, then "dies" (lease row persists without a send).
+    // Claim and complete normally, then scan the terminal task again.
     await driveClaimUntilLeased(pool, taskId, 'worker-f1-a');
-    await driveSendUntilFired(pool, taskId, ownerId);
+    await driveSendUntilFired(pool, provider, taskId, ownerId);
     const firstDetail = await getTaskDetail({ pool }, ownerId, taskId);
     expect(firstDetail.state).toBe('fired');
 
-    // Resume with a fresh worker: nothing left to fire for this task.
-    await runSendPhase(pool);
+    // A second scan cannot acquire a new invocation permit.
+    await runSendPhase(pool, provider);
 
     const { rows: notices } = await pool.query(
       'SELECT count(*) AS n FROM notifications WHERE task_id = $1',
@@ -109,7 +118,7 @@ maybe('scheduler fault injection (F1/F2, D9)', () => {
     const calls = new Map<string, number>();
     const observingProvider = async (notice: InAppNotice) => {
       calls.set(notice.taskId, (calls.get(notice.taskId) ?? 0) + 1);
-      return localInAppProvider(notice);
+      return provider(notice);
     };
     for (let i = 0; i < 15; i += 1) {
       await runSendPhase(pool, observingProvider);
@@ -224,22 +233,24 @@ maybe('scheduler fault injection (F1/F2, D9)', () => {
     const { taskId, ownerId } = await confirmTask(pool);
     await scheduleAndArm(pool, taskId, ownerId);
     await driveClaimUntilLeased(pool, taskId, 'worker-stale-version');
-    // Simulate a lost provider answer, then a subsequently reconciled receipt.
-    // Even with that persisted receipt, stale ack work must honor fencing.
+    // Commit real intake without worker finalization, then model unknown work
+    // as a SQL fixture. Version drift must fence both ack and later send scans.
     let calls = 0;
-    const unknownAnswer = async (notice: InAppNotice) => {
+    const observingProvider = async (notice: InAppNotice) => {
       if (notice.taskId === taskId) calls += 1;
-      const result = await localInAppProvider(notice);
-      return { ...result, delivered: false, answered: false };
+      return provider(notice);
     };
-    for (let i = 0; i < 15; i += 1) {
-      await runSendPhase(pool, unknownAnswer);
-      const { rows } = await pool.query(
-        `SELECT status FROM outbox WHERE task_id = $1 AND command->>'kind' = 'send'`,
-        [taskId],
-      );
-      if (rows[0]?.status === 'acked_unknown') break;
-    }
+    const { rows: sendRows } = await pool.query<{ idempotency_key: string }>(
+      `SELECT idempotency_key FROM outbox WHERE task_id = $1 AND command->>'kind' = 'send'`,
+      [taskId],
+    );
+    expect(sendRows).toHaveLength(1);
+    await observingProvider({ ownerId, taskId, idempotencyKey: sendRows[0]!.idempotency_key });
+    await pool.query(
+      `UPDATE outbox SET status = 'acked_unknown', last_attempt_at = NULL
+       WHERE task_id = $1 AND command->>'kind' = 'send'`,
+      [taskId],
+    );
     expect(calls).toBe(1);
     expect(
       (
@@ -249,10 +260,6 @@ maybe('scheduler fault injection (F1/F2, D9)', () => {
         )
       ).rows,
     ).toEqual([{ status: 'acked_unknown' }]);
-    await pool.query(
-      `UPDATE notifications SET status = 'sent', sent_at = now() WHERE task_id = $1`,
-      [taskId],
-    );
     expect(
       (await pool.query('SELECT status FROM notifications WHERE task_id = $1', [taskId])).rows,
     ).toEqual([{ status: 'sent' }]);
@@ -284,7 +291,7 @@ maybe('scheduler fault injection (F1/F2, D9)', () => {
       [taskId],
     );
     for (let i = 0; i < 15; i += 1) {
-      await runSendPhase(pool, unknownAnswer);
+      await runSendPhase(pool, observingProvider);
       const { rows } = await pool.query(
         `SELECT status FROM outbox WHERE task_id = $1 AND command->>'kind' = 'send'`,
         [taskId],
@@ -302,7 +309,7 @@ maybe('scheduler fault injection (F1/F2, D9)', () => {
     ).toEqual([{ status: 'superseded' }]);
   });
 
-  it('lease expiry resume: a second worker resumes exactly once', async () => {
+  it('an expired unconsumed lease can be reclaimed and sent once', async () => {
     const { taskId, ownerId } = await confirmTask(pool);
     await scheduleAndArm(pool, taskId, ownerId);
 
@@ -319,13 +326,13 @@ maybe('scheduler fault injection (F1/F2, D9)', () => {
     );
     expect(leases[0]?.lease_owner).toBe('worker-expiry-b');
 
-    await driveSendUntilFired(pool, taskId, ownerId);
+    await driveSendUntilFired(pool, provider, taskId, ownerId);
     const { rows: firedEvents } = await pool.query(
       "SELECT count(*) AS n FROM task_events WHERE task_id = $1 AND type = 'fired'",
       [taskId],
     );
     expect(Number(firedEvents[0]?.n)).toBe(1);
-    await runSendPhase(pool);
+    await runSendPhase(pool, provider);
     const { rows: notices } = await pool.query(
       'SELECT count(*) AS n FROM notifications WHERE task_id = $1',
       [taskId],
@@ -343,7 +350,7 @@ maybe('scheduler fault injection (F1/F2, D9)', () => {
     await runMissedPhase(pool);
     const detail = await getTaskDetail({ pool }, ownerId, taskId);
     expect(detail.state).toBe('missed');
-    await runSendPhase(pool);
+    await runSendPhase(pool, provider);
     const { rows: firedEvents } = await pool.query(
       "SELECT count(*) AS n FROM task_events WHERE task_id = $1 AND type = 'fired'",
       [taskId],
