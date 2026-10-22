@@ -1,0 +1,703 @@
+{
+  "scope": "A1 original literal failure and separately identified repeat setup; repeat natural deadline is not yet observed",
+  "observed_at": "2026-10-22T07:48:11.544944+00:00",
+  "tracking_issue": "https://github.com/BqLee-AI/Along-agent/issues/38",
+  "original_failed_acceptance": {
+    "at": "2026-10-22T07:22:25.590886+00:00",
+    "engine_initial_failure": "dockerDesktopLinuxEngine named pipe absent",
+    "desktop_start_exit": 0,
+    "before_container_restart": [
+      {
+        "name": "along-v0-accept-api-1",
+        "image_id": "sha256:908ed59e951777b6eb1e3dac92550a3278e7274a2e1c0eb2a1e317a898261603",
+        "state": {
+          "Status": "exited",
+          "Running": false,
+          "Paused": false,
+          "Restarting": false,
+          "OOMKilled": false,
+          "Dead": false,
+          "Pid": 0,
+          "ExitCode": 255,
+          "Error": "",
+          "StartedAt": "2026-10-21T15:39:20.010218328Z",
+          "FinishedAt": "2026-10-22T07:19:52.475229143Z"
+        },
+        "restart_policy": {
+          "Name": "no",
+          "MaximumRetryCount": 0
+        }
+      },
+      {
+        "name": "along-v0-closeout-pg",
+        "image_id": "sha256:81bd698b4594e751a3269e4dcd3e03a4a0ec0daf7b72e7aa1abd43cce9887542",
+        "state": {
+          "Status": "exited",
+          "Running": false,
+          "Paused": false,
+          "Restarting": false,
+          "OOMKilled": false,
+          "Dead": false,
+          "Pid": 0,
+          "ExitCode": 255,
+          "Error": "",
+          "StartedAt": "2026-10-21T13:13:16.11661207Z",
+          "FinishedAt": "2026-10-22T07:19:52.47521931Z"
+        },
+        "restart_policy": {
+          "Name": "no",
+          "MaximumRetryCount": 0
+        }
+      }
+    ],
+    "original_a1_before_worker_restart": {
+      "readonly_snapshot": {
+        "observed_at": "2026-10-22T07:23:52.065Z",
+        "task": {
+          "id": "d021e80d-c78e-467c-8400-c818a3730737",
+          "fold": 0,
+          "kind": "notify_only",
+          "state": "scheduled",
+          "wall_time": "2026-10-22 09:20",
+          "created_at": "2026-10-21T12:11:20.753421+00:00",
+          "occurrence": "once",
+          "fire_at_utc": "2026-10-22T01:20:00+00:00",
+          "timezone_id": "Asia/Shanghai",
+          "tzdb_version": "fixture-v1",
+          "original_note": "明天9:20提醒我喝水",
+          "state_version": 2,
+          "schedule_receipt": "sched:d021e80d-c78e-467c-8400-c818a3730737",
+          "source_approval_id": "52c9a308-e313-43d2-870e-06daa7715571",
+          "recreated_from_task_id": null,
+          "resolved_utc_offset_seconds": 28800
+        },
+        "events": [
+          {
+            "id": "0e258626-f4ce-4c6b-a3b4-0c7ad3a1e5f1",
+            "type": "created",
+            "task_id": "d021e80d-c78e-467c-8400-c818a3730737",
+            "evidence_ref": "local",
+            "state_version": 1,
+            "recorded_at_utc": "2026-10-21T12:11:20.753421+00:00"
+          },
+          {
+            "id": "91c2516d-7976-4ddc-8943-fb64f764ce86",
+            "type": "scheduled",
+            "task_id": "d021e80d-c78e-467c-8400-c818a3730737",
+            "evidence_ref": "sched:d021e80d-c78e-467c-8400-c818a3730737",
+            "state_version": 2,
+            "recorded_at_utc": "2026-10-21T12:11:25.273553+00:00"
+          }
+        ],
+        "notices": [],
+        "outbox": [
+          {
+            "id": "31623597-ae34-41f4-89f6-65f8a748ae9e",
+            "status": "dispatched",
+            "command": {
+              "kind": "schedule",
+              "task_id": "d021e80d-c78e-467c-8400-c818a3730737",
+              "fire_at_utc": "2026-10-22T01:20:00.000Z",
+              "timezone_id": "Asia/Shanghai",
+              "idempotency_key": "confirm:[REDACTED_OWNER]:52c9a308-e313-43d2-870e-06daa7715571:b0134701-aa9a-47c7-aaa1-38e00da08cfc",
+              "expected_state_version": 1
+            },
+            "task_id": "d021e80d-c78e-467c-8400-c818a3730737",
+            "attempt_no": 1,
+            "created_at": "2026-10-21T12:11:20.753421+00:00",
+            "last_error": null,
+            "updated_at": "2026-10-21T12:11:25.273553+00:00",
+            "ack_check_no": 0,
+            "idempotency_key": "confirm:[REDACTED_OWNER]:52c9a308-e313-43d2-870e-06daa7715571:b0134701-aa9a-47c7-aaa1-38e00da08cfc",
+            "last_attempt_at": "2026-10-21T12:11:25.273553+00:00",
+            "provider_receipt_id": "sched:d021e80d-c78e-467c-8400-c818a3730737",
+            "expected_state_version": 1
+          }
+        ],
+        "approval": {
+          "id": "52c9a308-e313-43d2-870e-06daa7715571",
+          "fold": 0,
+          "kind": "create_task",
+          "state": "consumed",
+          "wall_time": "2026-10-22 09:20",
+          "created_at": "2026-10-21T12:09:03.253748+00:00",
+          "expires_at": "2026-10-22T12:09:03.253748+00:00",
+          "occurrence": "single",
+          "fire_at_utc": "2026-10-22T01:20:00+00:00",
+          "timezone_id": "Asia/Shanghai",
+          "tzdb_version": "fixture-v1",
+          "original_text": "明天9:20提醒我喝水",
+          "target_task_id": null,
+          "conversation_id": "0ae170b6-baa5-456b-8e96-f6ff47ed4215",
+          "consumed_task_id": "d021e80d-c78e-467c-8400-c818a3730737",
+          "presentation_hash": "ph_ee6d897be78e2f5e079d84f83e5bdc08ba4ce880818108e124d1812180a8ba06",
+          "presentation_version": "v1",
+          "expected_state_version": null,
+          "supersedes_approval_id": null,
+          "resolved_utc_offset_seconds": 28800
+        }
+      },
+      "native_events": [],
+      "observer_last_event": {
+        "at": "2026-10-21T16:03:21.192Z",
+        "instance": "first-v2-compose-all",
+        "pid": 1,
+        "stage": "worker_tick",
+        "workerId": "worker-54aedda1-77ce-4349-9633-7fafd4bba735",
+        "success": true
+      }
+    },
+    "after_original_worker_recovery": {
+      "readonly_snapshot": {
+        "observed_at": "2026-10-22T07:30:40.466Z",
+        "task": {
+          "id": "d021e80d-c78e-467c-8400-c818a3730737",
+          "fold": 0,
+          "kind": "notify_only",
+          "state": "missed",
+          "wall_time": "2026-10-22 09:20",
+          "created_at": "2026-10-21T12:11:20.753421+00:00",
+          "occurrence": "once",
+          "fire_at_utc": "2026-10-22T01:20:00+00:00",
+          "timezone_id": "Asia/Shanghai",
+          "tzdb_version": "fixture-v1",
+          "original_note": "明天9:20提醒我喝水",
+          "state_version": 3,
+          "schedule_receipt": "sched:d021e80d-c78e-467c-8400-c818a3730737",
+          "source_approval_id": "52c9a308-e313-43d2-870e-06daa7715571",
+          "recreated_from_task_id": null,
+          "resolved_utc_offset_seconds": 28800
+        },
+        "events": [
+          {
+            "id": "0e258626-f4ce-4c6b-a3b4-0c7ad3a1e5f1",
+            "type": "created",
+            "task_id": "d021e80d-c78e-467c-8400-c818a3730737",
+            "evidence_ref": "local",
+            "state_version": 1,
+            "recorded_at_utc": "2026-10-21T12:11:20.753421+00:00"
+          },
+          {
+            "id": "91c2516d-7976-4ddc-8943-fb64f764ce86",
+            "type": "scheduled",
+            "task_id": "d021e80d-c78e-467c-8400-c818a3730737",
+            "evidence_ref": "sched:d021e80d-c78e-467c-8400-c818a3730737",
+            "state_version": 2,
+            "recorded_at_utc": "2026-10-21T12:11:25.273553+00:00"
+          },
+          {
+            "id": "8ddea321-9f69-4ea5-b48a-f6c8a43f294d",
+            "type": "missed",
+            "task_id": "d021e80d-c78e-467c-8400-c818a3730737",
+            "evidence_ref": "local",
+            "state_version": 3,
+            "recorded_at_utc": "2026-10-22T07:25:29.641249+00:00"
+          }
+        ],
+        "notices": [],
+        "outbox": [
+          {
+            "id": "31623597-ae34-41f4-89f6-65f8a748ae9e",
+            "status": "superseded",
+            "command": {
+              "kind": "schedule",
+              "task_id": "d021e80d-c78e-467c-8400-c818a3730737",
+              "fire_at_utc": "2026-10-22T01:20:00.000Z",
+              "timezone_id": "Asia/Shanghai",
+              "idempotency_key": "confirm:[REDACTED_OWNER]:52c9a308-e313-43d2-870e-06daa7715571:b0134701-aa9a-47c7-aaa1-38e00da08cfc",
+              "expected_state_version": 1
+            },
+            "task_id": "d021e80d-c78e-467c-8400-c818a3730737",
+            "attempt_no": 1,
+            "created_at": "2026-10-21T12:11:20.753421+00:00",
+            "last_error": null,
+            "updated_at": "2026-10-22T07:25:29.641249+00:00",
+            "ack_check_no": 0,
+            "idempotency_key": "confirm:[REDACTED_OWNER]:52c9a308-e313-43d2-870e-06daa7715571:b0134701-aa9a-47c7-aaa1-38e00da08cfc",
+            "last_attempt_at": "2026-10-21T12:11:25.273553+00:00",
+            "provider_receipt_id": "sched:d021e80d-c78e-467c-8400-c818a3730737",
+            "expected_state_version": 1
+          }
+        ],
+        "approval": {
+          "id": "52c9a308-e313-43d2-870e-06daa7715571",
+          "fold": 0,
+          "kind": "create_task",
+          "state": "consumed",
+          "wall_time": "2026-10-22 09:20",
+          "created_at": "2026-10-21T12:09:03.253748+00:00",
+          "expires_at": "2026-10-22T12:09:03.253748+00:00",
+          "occurrence": "single",
+          "fire_at_utc": "2026-10-22T01:20:00+00:00",
+          "timezone_id": "Asia/Shanghai",
+          "tzdb_version": "fixture-v1",
+          "original_text": "明天9:20提醒我喝水",
+          "target_task_id": null,
+          "conversation_id": "0ae170b6-baa5-456b-8e96-f6ff47ed4215",
+          "consumed_task_id": "d021e80d-c78e-467c-8400-c818a3730737",
+          "presentation_hash": "ph_ee6d897be78e2f5e079d84f83e5bdc08ba4ce880818108e124d1812180a8ba06",
+          "presentation_version": "v1",
+          "expected_state_version": null,
+          "supersedes_approval_id": null,
+          "resolved_utc_offset_seconds": 28800
+        }
+      },
+      "api_started_at": "2026-10-22T07:24:58.400395092Z",
+      "successful_completed_ticks": [
+        {
+          "at": "2026-10-22T07:25:29.660Z",
+          "instance": "first-v2-compose-all",
+          "pid": 1,
+          "stage": "worker_tick",
+          "workerId": "worker-da3f6730-a3a8-43d5-a5d3-664ee890b589",
+          "success": true
+        },
+        {
+          "at": "2026-10-22T07:25:59.442Z",
+          "instance": "first-v2-compose-all",
+          "pid": 1,
+          "stage": "worker_tick",
+          "workerId": "worker-da3f6730-a3a8-43d5-a5d3-664ee890b589",
+          "success": true
+        },
+        {
+          "at": "2026-10-22T07:26:29.442Z",
+          "instance": "first-v2-compose-all",
+          "pid": 1,
+          "stage": "worker_tick",
+          "workerId": "worker-da3f6730-a3a8-43d5-a5d3-664ee890b589",
+          "success": true
+        },
+        {
+          "at": "2026-10-22T07:26:59.440Z",
+          "instance": "first-v2-compose-all",
+          "pid": 1,
+          "stage": "worker_tick",
+          "workerId": "worker-da3f6730-a3a8-43d5-a5d3-664ee890b589",
+          "success": true
+        },
+        {
+          "at": "2026-10-22T07:27:29.440Z",
+          "instance": "first-v2-compose-all",
+          "pid": 1,
+          "stage": "worker_tick",
+          "workerId": "worker-da3f6730-a3a8-43d5-a5d3-664ee890b589",
+          "success": true
+        },
+        {
+          "at": "2026-10-22T07:27:59.443Z",
+          "instance": "first-v2-compose-all",
+          "pid": 1,
+          "stage": "worker_tick",
+          "workerId": "worker-da3f6730-a3a8-43d5-a5d3-664ee890b589",
+          "success": true
+        },
+        {
+          "at": "2026-10-22T07:28:29.445Z",
+          "instance": "first-v2-compose-all",
+          "pid": 1,
+          "stage": "worker_tick",
+          "workerId": "worker-da3f6730-a3a8-43d5-a5d3-664ee890b589",
+          "success": true
+        },
+        {
+          "at": "2026-10-22T07:28:59.443Z",
+          "instance": "first-v2-compose-all",
+          "pid": 1,
+          "stage": "worker_tick",
+          "workerId": "worker-da3f6730-a3a8-43d5-a5d3-664ee890b589",
+          "success": true
+        },
+        {
+          "at": "2026-10-22T07:29:29.442Z",
+          "instance": "first-v2-compose-all",
+          "pid": 1,
+          "stage": "worker_tick",
+          "workerId": "worker-da3f6730-a3a8-43d5-a5d3-664ee890b589",
+          "success": true
+        },
+        {
+          "at": "2026-10-22T07:29:59.465Z",
+          "instance": "first-v2-compose-all",
+          "pid": 1,
+          "stage": "worker_tick",
+          "workerId": "worker-da3f6730-a3a8-43d5-a5d3-664ee890b589",
+          "success": true
+        },
+        {
+          "at": "2026-10-22T07:30:29.441Z",
+          "instance": "first-v2-compose-all",
+          "pid": 1,
+          "stage": "worker_tick",
+          "workerId": "worker-da3f6730-a3a8-43d5-a5d3-664ee890b589",
+          "success": true
+        }
+      ],
+      "original_a1_actual_calls": [],
+      "original_a1_acceptance_passed": false,
+      "late_send_suppressed_without_rewriting_task_time": true
+    },
+    "readyz": {
+      "status": 200,
+      "body": {
+        "status": "ok"
+      }
+    },
+    "restart_policy_smoke": {
+      "updated_services": ["along-v0-closeout-pg", "along-v0-accept-api-1"],
+      "policy": "unless-stopped",
+      "api_before_kill_started_at": "2026-10-22T07:24:58.400395092Z",
+      "kill_signal": "SIGKILL",
+      "kill_exit": 0,
+      "performed_before_new_a1_creation": true,
+      "docker_kill_observation": {
+        "state": {
+          "Status": "exited",
+          "Running": false,
+          "Paused": false,
+          "Restarting": false,
+          "OOMKilled": false,
+          "Dead": false,
+          "Pid": 0,
+          "ExitCode": 137,
+          "Error": "",
+          "StartedAt": "2026-10-22T07:24:58.400395092Z",
+          "FinishedAt": "2026-10-22T07:34:20.963988808Z"
+        },
+        "restart_count": 0,
+        "result": "control-plane docker kill left container stopped; not accepted as automatic restart proof"
+      },
+      "inside_process_exit_probe": {
+        "before_started_at": "2026-10-22T07:35:36.514304745Z",
+        "operation": "container exec process.kill(1, SIGTERM), without Docker stop/kill API",
+        "command_exit": 0,
+        "after_started_at": "2026-10-22T07:35:37.889634232Z",
+        "restart_count": 1,
+        "running": true,
+        "readyz_status": 200,
+        "readyz_body": {
+          "status": "ok"
+        },
+        "passed": true
+      }
+    },
+    "tracking_issue": "https://github.com/BqLee-AI/Along-agent/issues/38"
+  },
+  "repeat_acceptance_creation": {
+    "tracking_issue": "https://github.com/BqLee-AI/Along-agent/issues/38",
+    "original_failed_task_id": "d021e80d-c78e-467c-8400-c818a3730737",
+    "raw_text": "明天9:20提醒我喝水",
+    "sse": {
+      "status": 200,
+      "url": "http://127.0.0.1:3100/api/v1/conversations/messages",
+      "request": {
+        "raw_text": "明天9:20提醒我喝水",
+        "confirmed_timezone": "Asia/Shanghai",
+        "idempotency_key": "6642ef6f-ab27-4b13-be2a-d87bdd3f4a92"
+      },
+      "body": "data: {\"protocol_version\":\"v1\",\"seq\":130,\"type\":\"thread.started\",\"payload\":{\"conversation_id\":\"30cdabf8-338c-455a-8e64-4fd783ac0ef9\",\"run_id\":\"c7a385d8-f4c7-4406-b084-a0260b067d72\",\"stream_protocol_version\":\"v1\",\"ruleset_id\":\"FIXTURE_V1\",\"tzdb_version\":\"fixture-v1\"},\"request_id\":\"bbd586a5-a85a-4ab5-88c6-8b5e5e0ae86d\"}\n\ndata: {\"protocol_version\":\"v1\",\"seq\":131,\"type\":\"message.delta\",\"payload\":{\"conversation_id\":\"30cdabf8-338c-455a-8e64-4fd783ac0ef9\",\"run_id\":\"c7a385d8-f4c7-4406-b084-a0260b067d72\",\"delta\":\"请确认 A-30F2：你说'明天9:20提醒我喝水'，我将它归一为 2026-10-23 09:20（Asia/Shanghai），设为单次提醒；确认前不会创建正式提醒，也不会排期。\"},\"request_id\":\"bbd586a5-a85a-4ab5-88c6-8b5e5e0ae86d\"}\n\ndata: {\"protocol_version\":\"v1\",\"seq\":132,\"type\":\"card.proposed\",\"payload\":{\"conversation_id\":\"30cdabf8-338c-455a-8e64-4fd783ac0ef9\",\"run_id\":\"c7a385d8-f4c7-4406-b084-a0260b067d72\",\"card_id\":\"card:30f2cc6c-64f0-45ff-83ef-03a6bd0c43a4\",\"schema_version\":\"v1\",\"wall_time\":\"2026-10-23 09:20\",\"timezone_id\":\"Asia/Shanghai\",\"original_text\":\"明天9:20提醒我喝水\"},\"request_id\":\"bbd586a5-a85a-4ab5-88c6-8b5e5e0ae86d\"}\n\ndata: {\"protocol_version\":\"v1\",\"seq\":133,\"type\":\"approval_required\",\"payload\":{\"conversation_id\":\"30cdabf8-338c-455a-8e64-4fd783ac0ef9\",\"run_id\":\"c7a385d8-f4c7-4406-b084-a0260b067d72\",\"approval_id\":\"30f2cc6c-64f0-45ff-83ef-03a6bd0c43a4\",\"card_id\":\"card:30f2cc6c-64f0-45ff-83ef-03a6bd0c43a4\",\"presentation_hash\":\"ph_edfcdf56aa4a002b8a86d774930b3f07b88f3b8e14f65d93fdbe349678fb13ae\"},\"request_id\":\"bbd586a5-a85a-4ab5-88c6-8b5e5e0ae86d\"}\n\ndata: {\"protocol_version\":\"v1\",\"seq\":134,\"type\":\"thread.completed\",\"payload\":{\"conversation_id\":\"30cdabf8-338c-455a-8e64-4fd783ac0ef9\",\"run_id\":\"c7a385d8-f4c7-4406-b084-a0260b067d72\",\"approval_id\":\"30f2cc6c-64f0-45ff-83ef-03a6bd0c43a4\"},\"request_id\":\"bbd586a5-a85a-4ab5-88c6-8b5e5e0ae86d\"}\n\n"
+    },
+    "frames": [
+      {
+        "protocol_version": "v1",
+        "seq": 130,
+        "type": "thread.started",
+        "payload": {
+          "conversation_id": "30cdabf8-338c-455a-8e64-4fd783ac0ef9",
+          "run_id": "c7a385d8-f4c7-4406-b084-a0260b067d72",
+          "stream_protocol_version": "v1",
+          "ruleset_id": "FIXTURE_V1",
+          "tzdb_version": "fixture-v1"
+        },
+        "request_id": "bbd586a5-a85a-4ab5-88c6-8b5e5e0ae86d"
+      },
+      {
+        "protocol_version": "v1",
+        "seq": 131,
+        "type": "message.delta",
+        "payload": {
+          "conversation_id": "30cdabf8-338c-455a-8e64-4fd783ac0ef9",
+          "run_id": "c7a385d8-f4c7-4406-b084-a0260b067d72",
+          "delta": "请确认 A-30F2：你说'明天9:20提醒我喝水'，我将它归一为 2026-10-23 09:20（Asia/Shanghai），设为单次提醒；确认前不会创建正式提醒，也不会排期。"
+        },
+        "request_id": "bbd586a5-a85a-4ab5-88c6-8b5e5e0ae86d"
+      },
+      {
+        "protocol_version": "v1",
+        "seq": 132,
+        "type": "card.proposed",
+        "payload": {
+          "conversation_id": "30cdabf8-338c-455a-8e64-4fd783ac0ef9",
+          "run_id": "c7a385d8-f4c7-4406-b084-a0260b067d72",
+          "card_id": "card:30f2cc6c-64f0-45ff-83ef-03a6bd0c43a4",
+          "schema_version": "v1",
+          "wall_time": "2026-10-23 09:20",
+          "timezone_id": "Asia/Shanghai",
+          "original_text": "明天9:20提醒我喝水"
+        },
+        "request_id": "bbd586a5-a85a-4ab5-88c6-8b5e5e0ae86d"
+      },
+      {
+        "protocol_version": "v1",
+        "seq": 133,
+        "type": "approval_required",
+        "payload": {
+          "conversation_id": "30cdabf8-338c-455a-8e64-4fd783ac0ef9",
+          "run_id": "c7a385d8-f4c7-4406-b084-a0260b067d72",
+          "approval_id": "30f2cc6c-64f0-45ff-83ef-03a6bd0c43a4",
+          "card_id": "card:30f2cc6c-64f0-45ff-83ef-03a6bd0c43a4",
+          "presentation_hash": "ph_edfcdf56aa4a002b8a86d774930b3f07b88f3b8e14f65d93fdbe349678fb13ae"
+        },
+        "request_id": "bbd586a5-a85a-4ab5-88c6-8b5e5e0ae86d"
+      },
+      {
+        "protocol_version": "v1",
+        "seq": 134,
+        "type": "thread.completed",
+        "payload": {
+          "conversation_id": "30cdabf8-338c-455a-8e64-4fd783ac0ef9",
+          "run_id": "c7a385d8-f4c7-4406-b084-a0260b067d72",
+          "approval_id": "30f2cc6c-64f0-45ff-83ef-03a6bd0c43a4"
+        },
+        "request_id": "bbd586a5-a85a-4ab5-88c6-8b5e5e0ae86d"
+      }
+    ],
+    "approval_id": "30f2cc6c-64f0-45ff-83ef-03a6bd0c43a4",
+    "created_via_real_web": true,
+    "original_task_replaced": false,
+    "detail": {
+      "status": 200,
+      "body": {
+        "code": 0,
+        "data": {
+          "approval_id": "30f2cc6c-64f0-45ff-83ef-03a6bd0c43a4",
+          "kind": "create_task",
+          "status": "pending",
+          "echo_text": "请确认 A-30F2：你说'明天9:20提醒我喝水'，我将它归一为 2026-10-23 09:20（Asia/Shanghai），设为单次提醒；确认前不会创建正式提醒，也不会排期。",
+          "original_text": "明天9:20提醒我喝水",
+          "fire_at_local": "2026-10-23 09:20",
+          "expires_in_seconds": 86399,
+          "snapshot": {
+            "fire_at_utc": "2026-10-23T01:20:00.000Z",
+            "timezone_id": "Asia/Shanghai",
+            "fold": 0,
+            "offset_seconds": 28800
+          },
+          "presentation_hash": "ph_edfcdf56aa4a002b8a86d774930b3f07b88f3b8e14f65d93fdbe349678fb13ae",
+          "presentation_version": "v1",
+          "expires_at": "2026-10-23T07:40:18.533Z",
+          "recreated_from": null
+        },
+        "msg": "ok",
+        "error": null,
+        "request_id": "840e0799-b572-4917-9add-b72f6ebd5c26"
+      }
+    },
+    "confirmation_ui": "Along\n今日\n对话\n确认\n任务\n活动\n确认提醒\n\n状态 pending · 确认有效期 24 小时 · 剩余约 23 小时 59 分（服务端计算）\n\n你的原话\n明天9:20提醒我喝水\n归一后的本地时间\n2026-10-23 09:20（Asia/Shanghai）\n展示模板\nv1\n请确认 A-30F2：你说'明天9:20提醒我喝水'，我将它归一为 2026-10-23 09:20（Asia/Shanghai），设为单次提醒；确认前不会创建正式提醒，也不会排期。\n\n提醒保存在云端；到点在调度器成功运行时尝试通知。设备关机、休眠或进程未运行时可能错过，不保证准时响。\n\n确认\n拒绝\n修改这条提议",
+    "before_confirmation": {
+      "tasks": 0,
+      "outbox": 0
+    },
+    "actual_first_confirmation": {
+      "status": 200,
+      "url": "http://127.0.0.1:3100/api/v1/approvals/30f2cc6c-64f0-45ff-83ef-03a6bd0c43a4/actions/confirm",
+      "request": {
+        "presentation_hash": "ph_edfcdf56aa4a002b8a86d774930b3f07b88f3b8e14f65d93fdbe349678fb13ae",
+        "seen_content": "请确认 A-30F2：你说'明天9:20提醒我喝水'，我将它归一为 2026-10-23 09:20（Asia/Shanghai），设为单次提醒；确认前不会创建正式提醒，也不会排期。",
+        "idempotency_key": "1bcade15-fffa-42ed-b1cd-4d6d6d5532d1"
+      },
+      "body": {
+        "code": 0,
+        "data": {
+          "approval_id": "30f2cc6c-64f0-45ff-83ef-03a6bd0c43a4",
+          "status": "consumed",
+          "task_id": "eb4d9ff4-0328-44b6-bb1a-4d342d72465b",
+          "duplicate": false
+        },
+        "msg": "ok",
+        "error": null,
+        "request_id": "cd1ad525-c5c7-4ccb-922e-8a4c4bc95067"
+      }
+    },
+    "task_id": "eb4d9ff4-0328-44b6-bb1a-4d342d72465b",
+    "after_confirmation_readonly": {
+      "observed_at": "2026-10-22T07:40:43.295Z",
+      "task": {
+        "id": "eb4d9ff4-0328-44b6-bb1a-4d342d72465b",
+        "fold": 0,
+        "kind": "notify_only",
+        "state": "saved",
+        "wall_time": "2026-10-23 09:20",
+        "created_at": "2026-10-22T07:40:43.076157+00:00",
+        "occurrence": "once",
+        "fire_at_utc": "2026-10-23T01:20:00+00:00",
+        "timezone_id": "Asia/Shanghai",
+        "tzdb_version": "fixture-v1",
+        "original_note": "明天9:20提醒我喝水",
+        "state_version": 1,
+        "schedule_receipt": null,
+        "source_approval_id": "30f2cc6c-64f0-45ff-83ef-03a6bd0c43a4",
+        "recreated_from_task_id": null,
+        "resolved_utc_offset_seconds": 28800
+      },
+      "events": [
+        {
+          "id": "ebd05325-8fbb-4ca4-9b4c-74117155f357",
+          "type": "created",
+          "task_id": "eb4d9ff4-0328-44b6-bb1a-4d342d72465b",
+          "evidence_ref": "local",
+          "state_version": 1,
+          "recorded_at_utc": "2026-10-22T07:40:43.076157+00:00"
+        }
+      ],
+      "notices": [],
+      "outbox": [
+        {
+          "id": "1767b0e3-8351-4149-a61a-bf413efaf526",
+          "status": "pending",
+          "command": {
+            "kind": "schedule",
+            "task_id": "eb4d9ff4-0328-44b6-bb1a-4d342d72465b",
+            "fire_at_utc": "2026-10-23T01:20:00.000Z",
+            "timezone_id": "Asia/Shanghai",
+            "idempotency_key": "confirm:[REDACTED_OWNER]:30f2cc6c-64f0-45ff-83ef-03a6bd0c43a4:1bcade15-fffa-42ed-b1cd-4d6d6d5532d1",
+            "expected_state_version": 1
+          },
+          "task_id": "eb4d9ff4-0328-44b6-bb1a-4d342d72465b",
+          "attempt_no": 1,
+          "created_at": "2026-10-22T07:40:43.076157+00:00",
+          "last_error": null,
+          "updated_at": "2026-10-22T07:40:43.076157+00:00",
+          "ack_check_no": 0,
+          "idempotency_key": "confirm:[REDACTED_OWNER]:30f2cc6c-64f0-45ff-83ef-03a6bd0c43a4:1bcade15-fffa-42ed-b1cd-4d6d6d5532d1",
+          "last_attempt_at": null,
+          "provider_receipt_id": null,
+          "expected_state_version": 1
+        }
+      ],
+      "approval": {
+        "id": "30f2cc6c-64f0-45ff-83ef-03a6bd0c43a4",
+        "fold": 0,
+        "kind": "create_task",
+        "state": "consumed",
+        "wall_time": "2026-10-23 09:20",
+        "created_at": "2026-10-22T07:40:18.533473+00:00",
+        "expires_at": "2026-10-23T07:40:18.533473+00:00",
+        "occurrence": "single",
+        "fire_at_utc": "2026-10-23T01:20:00+00:00",
+        "timezone_id": "Asia/Shanghai",
+        "tzdb_version": "fixture-v1",
+        "original_text": "明天9:20提醒我喝水",
+        "target_task_id": null,
+        "conversation_id": "30cdabf8-338c-455a-8e64-4fd783ac0ef9",
+        "consumed_task_id": "eb4d9ff4-0328-44b6-bb1a-4d342d72465b",
+        "presentation_hash": "ph_edfcdf56aa4a002b8a86d774930b3f07b88f3b8e14f65d93fdbe349678fb13ae",
+        "presentation_version": "v1",
+        "expected_state_version": null,
+        "supersedes_approval_id": null,
+        "resolved_utc_offset_seconds": 28800
+      }
+    },
+    "task_ui": "Along\n今日\n对话\n确认\n任务\n活动\n任务 eb4d9ff4\n\nsaved · 2026-10-23 09:20（Asia/Shanghai）\n\n登记回执\n无（未确认调度成功）\n状态版本\n1\n创建时间\n2026-10-22T07:40:43.076Z\n取消这条提醒\n站内通知\n\n以下仅为站内通知记录，不表示用户收到或看过。\n\n暂无站内通知记录\n\n事件账\n类型\t记录时间（UTC）\t证据\ncreated\t2026-10-22T07:40:43.076Z\tlocal",
+    "source_commit": "54380b88dfe670b8e36896e9ffdd46fb7b9bfee3",
+    "image_id": "sha256:908ed59e951777b6eb1e3dac92550a3278e7274a2e1c0eb2a1e317a898261603",
+    "role": "all",
+    "fire_at_utc": "2026-10-23T01:20:00Z",
+    "grace_end_utc": "2026-10-23T01:35:00Z",
+    "acceptance_passed": false,
+    "natural_delivery_observed": false,
+    "scheduled_readonly_observation": {
+      "observed_at": "2026-10-22T07:44:50.354Z",
+      "task": {
+        "id": "eb4d9ff4-0328-44b6-bb1a-4d342d72465b",
+        "fold": 0,
+        "kind": "notify_only",
+        "state": "scheduled",
+        "wall_time": "2026-10-23 09:20",
+        "created_at": "2026-10-22T07:40:43.076157+00:00",
+        "occurrence": "once",
+        "fire_at_utc": "2026-10-23T01:20:00+00:00",
+        "timezone_id": "Asia/Shanghai",
+        "tzdb_version": "fixture-v1",
+        "original_note": "明天9:20提醒我喝水",
+        "state_version": 2,
+        "schedule_receipt": "sched:eb4d9ff4-0328-44b6-bb1a-4d342d72465b",
+        "source_approval_id": "30f2cc6c-64f0-45ff-83ef-03a6bd0c43a4",
+        "recreated_from_task_id": null,
+        "resolved_utc_offset_seconds": 28800
+      },
+      "approval": {
+        "id": "30f2cc6c-64f0-45ff-83ef-03a6bd0c43a4",
+        "fold": 0,
+        "kind": "create_task",
+        "state": "consumed",
+        "wall_time": "2026-10-23 09:20",
+        "created_at": "2026-10-22T07:40:18.533473+00:00",
+        "expires_at": "2026-10-23T07:40:18.533473+00:00",
+        "occurrence": "single",
+        "fire_at_utc": "2026-10-23T01:20:00+00:00",
+        "timezone_id": "Asia/Shanghai",
+        "tzdb_version": "fixture-v1",
+        "original_text": "明天9:20提醒我喝水",
+        "target_task_id": null,
+        "conversation_id": "30cdabf8-338c-455a-8e64-4fd783ac0ef9",
+        "consumed_task_id": "eb4d9ff4-0328-44b6-bb1a-4d342d72465b",
+        "presentation_hash": "ph_edfcdf56aa4a002b8a86d774930b3f07b88f3b8e14f65d93fdbe349678fb13ae",
+        "presentation_version": "v1",
+        "expected_state_version": null,
+        "supersedes_approval_id": null,
+        "resolved_utc_offset_seconds": 28800
+      },
+      "notices": [],
+      "events": [
+        {
+          "id": "ebd05325-8fbb-4ca4-9b4c-74117155f357",
+          "type": "created",
+          "task_id": "eb4d9ff4-0328-44b6-bb1a-4d342d72465b",
+          "evidence_ref": "local",
+          "state_version": 1,
+          "recorded_at_utc": "2026-10-22T07:40:43.076157+00:00"
+        },
+        {
+          "id": "5b92bf2b-8881-430f-82b8-c894583ea315",
+          "type": "scheduled",
+          "task_id": "eb4d9ff4-0328-44b6-bb1a-4d342d72465b",
+          "evidence_ref": "sched:eb4d9ff4-0328-44b6-bb1a-4d342d72465b",
+          "state_version": 2,
+          "recorded_at_utc": "2026-10-22T07:41:08.643651+00:00"
+        }
+      ],
+      "native_provider_calls": [],
+      "successful_ticks_after_grace": []
+    },
+    "scheduled_task_ui": "Along\n今日\n对话\n确认\n任务\n活动\n任务 eb4d9ff4\n\nscheduled · 2026-10-23 09:20（Asia/Shanghai）\n\n登记回执\nsched:eb4d9ff4-0328-44b6-bb1a-4d342d72465b\n状态版本\n2\n创建时间\n2026-10-22T07:40:43.076Z\n取消这条提醒\n站内通知\n\n以下仅为站内通知记录，不表示用户收到或看过。\n\n暂无站内通知记录\n\n事件账\n类型\t记录时间（UTC）\t证据\ncreated\t2026-10-22T07:40:43.076Z\tlocal\nscheduled\t2026-10-22T07:41:08.643Z\tsched:eb4d9ff4-0328-44b6-bb1a-4d342d72465b"
+  },
+  "repeat_observer_setup": {
+    "task_name": "AlongV0Closeout-A1-eb4d9ff4",
+    "task_create_exit": 1,
+    "script": "D:\\Temp\\along-v0-accept-20261021\\watch-a1-repeat.py",
+    "task_id": "eb4d9ff4-0328-44b6-bb1a-4d342d72465b",
+    "fire_at_utc": "2026-10-23T01:20:00Z",
+    "grace_end_utc": "2026-10-23T01:35:00Z",
+    "original_watcher_modified": false,
+    "scheduler_access_denied": true,
+    "startup_fallback": "owned current-user Run value, only at interactive logon",
+    "startup_registry_key": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+    "startup_value_name": "AlongV0Closeout-A1-eb4d9ff4",
+    "spawn_pid": 27836,
+    "breakaway_from_host_job": true,
+    "breakaway_error": null,
+    "cleanup_required": true,
+    "does_not_guarantee_host_uptime": true
+  },
+  "completed_acceptance": false,
+  "original_a1_passed": false,
+  "repeat_a1_passed": false,
+  "unmodified_original_records": [
+    "v0-crash-recovery-evidence-2026-10-21.json",
+    "a1-observation.jsonl",
+    "a1-target.json",
+    "events.jsonl cumulative history"
+  ],
+  "remaining": "Natural 2026-10-23T01:20Z delivery, through 01:35Z plus two completed successful ticks, readonly post-tick snapshot, independent review, final archive/head gates/closeout and owned resource cleanup"
+}

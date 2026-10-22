@@ -1,6 +1,7 @@
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: along
       POSTGRES_PASSWORD: along
@@ -15,6 +16,7 @@ services:
     ports:
       - '${DB_PORT:-55432}:5432'
   api:
+    restart: unless-stopped
     build:
       context: ../..
       dockerfile: infra/docker/Dockerfile
