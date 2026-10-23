@@ -7,7 +7,7 @@
 - [Required] 八步按序推进，前一步未完成不得进入下一步（B06 §1–§2）：
 - `简报`（GET /brief 聚合今日任务与待确认）→ `卡片`（任务/提议的结构化呈现）→ `对话`（POST /conversations/messages，SSE 流式）→ `提议`（Agent 产出待确认方案 + presentation 冻结）→ `确认`（approval confirm/reject，确认门一等公民）→ `调度`（Scheduler.schedule，拿回执才算已排期）→ `通知`（Notifier.send，到点 15 分钟内触发一次）→ `活动账`（task_events 只追加，用户可核对已记录步骤）。
 - [Required] 确认门是唯一放行点：确认前不创建正式 task、不排期；草稿可留，钟不可进（B06 §2 总闸 1）。
-- [Required] Approval 消费 + 建 Task 同事务：这是 v0 唯一允许的跨模块事务，其余模块自有 schema、跨模块只传 id（见 schema/02）。
+- [Required] 确认消费与创建 Task/created/outbox 或与公共取消用例单事务；同步公共用例/显式 DTO/只读投影合法，可靠异步命令走 outbox，五缝不是所有模块唯一通道（design/02 §1–§2）。
 - 该链路形态以自家可测指标为准。
 
 ## Required 列表（PRD 层硬约束）
@@ -23,7 +23,7 @@
 - [Required] Redis 延后；Postgres 唯一事实源；单镜像 api|worker|all。
 - [Required] Web：Next.js（App Router），RSC 开、Turbopack 开（默认配置）；Electron 套壳在后（见 design/01）。
 - [Required] 鉴权：Better Auth 自建 credential（D7 空环境冒烟不依赖外部 IdP；v0 单租户）；v0 端点只暴露 `GET /me`。
-- [Deferred] CangjieMagic 只作 AgentRuntime 第二实现，v0–P3 不用；Spike S1–S3 与 P1 并行、P2 末结案。
+- [Required] 仓颉唯一宿主 Harness（模型/工具循环、当前上下文、计划、预算、等待/恢复/停止）；TS 长期保留工具/业务/worker/API/Web 与 Run 存储。R1 未实现，不迁移整个 TS 后端，也不在 TS 工具内藏第二 Agent（design/09/11、ADR 0009）。
 
 ## 本目录导读
 

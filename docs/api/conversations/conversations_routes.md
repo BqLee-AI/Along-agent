@@ -37,6 +37,8 @@
 
 响应：`Content-Type: text/event-stream`，`200` 建连；首事件必为 `thread.started`（含 `conversation_id` + `stream_protocol_version`），尾事件为 `thread.completed | thread.failed | thread.cancelled` 之一。每行 `data: {protocol_version, seq, type, payload, request_id}`（design/10 §4），`seq` 即 `run_checkpoints.event_seq`，用于 `?after_seq=` 补全。事件名与字段以 `packages/stream-protocol` 的 `thread-stream.schema.json` 为准，本文只列 v0 必需子集（S0 #14 冻结：`design/09` AgentEvent→本篇 SSE 为投影关系，不各写一套；`approval_proposed→approval_required`、`answer/done→message.delta+thread.completed`、`run_failed→thread.failed`、`thinking/tool_call/tool_result→message.delta/tool.status`）：
 
+[Observed] 此处“恢复”仅是已存流事件补读/幂等重放，不重新执行工具，不提供通用 Harness resume API。仓颉当前上下文/等待点为 R1 目标，TS 长期负责存储与投影；checkpoint/fencing 不保证任意外部写恰好一次，未知效果不盲重放（[design/09 §6](../../design/09-agent-runtime-and-checkpoint.md)）。
+
 | SSE 事件            | 含义                                                                                         |
 | ------------------- | -------------------------------------------------------------------------------------------- |
 | `thread.started`    | 流开始，含 conversation_id                                                                   |

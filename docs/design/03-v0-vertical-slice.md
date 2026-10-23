@@ -17,7 +17,7 @@
 
 - [Required] v0 切片 = 简报 → 卡片 → 对话 → 确认 → 调度 → 触发 → 通知 → 活动页，Web 单端，不做 Electron、不做多端同步。
 - [Required] 没点头不进钟：confirm 之前不建正式 task、不排期。草稿只能是 approval（pending），不是 task。
-- [Required] Approval 消费 + task 创建 + 首个 task_events + outbox 写同一事务，是 v0 唯一跨模块事务；其余一律单模块事务 + outbox 接力。
+- [Required] 确认消费与创建任务/created/outbox，或与 tasks 公共取消用例的取消状态/事件/命令同事务；确认外的可靠异步任务走 outbox，同步公共用例与只读投影不强制入队（02 §1–§2）。
 - [Required] task_events 只追加，DB 禁 UPDATE/DELETE（靠权限与评审保证，不在本篇写 SQL）。
 - [Required] 对外口径只说“已记录的步骤”，不承诺必达；取消后触发数 = 0 为一级指标；超 15min 标 missed 不补发。
 - [Proposed] 喝水提醒（B06 §1 验收用例）在本云端体系中降级为调度子用例：`task.kind=notify_only`，不走 LLM 先验调度，不走 Agent 规划，只走 time-core 归一 + 确认门 + 调度触发。
@@ -39,10 +39,10 @@
 
 ### 1.2 舍（2 本机假设，明确不迁）
 
-| B06 本机假设                     | v0 云端做法                                                                                                                  |
-| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| SQLite 本机库 + 本机 outbox 扫表 | [Required] Postgres 唯一事实源；outbox 为领域事件表，由 worker 角色认领（见 08）；Redis 延后，不引入                         |
-| 归一住仓颉服务端、TS 只摆        | [Required] time-core 放 TS 服务端纯函数（见 05）；CangjieMagic 仅作 AgentRuntime 第二实现，v0–P3 不用，不做时间归一（见 04） |
+| B06 本机假设                     | v0 云端做法                                                                                                          |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| SQLite 本机库 + 本机 outbox 扫表 | [Required] Postgres 唯一事实源；outbox 为领域事件表，由 worker 角色认领（见 08）；Redis 延后，不引入                 |
+| 归一住仓颉服务端、TS 只摆        | [Required] time-core 在 TS 服务端；仓颉唯一 Harness，不做时间归一；TS 长期保留工具/业务/存储（09/11），本次未实现 R1 |
 
 ### 1.3 起步值声明
 
@@ -171,9 +171,10 @@ pending -> expired（超 24h 起步值；清内容留号）
 pending -> superseded（被新确认单替代）
 ```
 
-## 6. confirm 单事务（唯一跨模块事务）
+## 6. confirm 受控单事务（创建与取消分支）
 
 - [Required] 同一事务内：验 owner → 验 pending → 验 `now < expires_at` → 重建 presentation 预期并比 `presentation_hash` → 建 task(saved) → 写 `task_events.created` → 写 outbox → approval 置 consumed。任一步失败全回滚，对外只说“没记上”，不报成功。
+- [Required · 现有取消分支] cancel_task 批准校验同一冻结门后，在同一事务调用 tasks 公共取消用例并消费批准；取消状态、事件、旧工作失效与 outbox 命令保持原子，撤销回执仍按 07/08，不能把 consumed 解释为外部效果已撤销。
 - [Required] 重复 confirm（连点/重发幂等键）回原 task，不建第二条。
 
 ## 7. 错误码（v0 全集，本篇只列，细则各归属篇）

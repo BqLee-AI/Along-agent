@@ -5,26 +5,26 @@
 ## Top3 风险
 
 - [Required] R1 时间语义算错：DST 不存在/歧义时刻、时区未确认却解析"明天"、展示层私自换算。对策：time-core 纯函数唯一权威；LLM 不算时间；展示层只读冻结字段；错误码 NONEXISTENT_LOCAL_TIME / AMBIGUOUS_LOCAL_TIME（带两候选）/ UNKNOWN_TIMEZONE / TZDB_UNAVAILABLE。
-- [Required] R2 确认与调度缝隙：重复确认建出双 task、确认与消费之间快照被改、Approval 消费与建 Task 非原子。对策：presentation_hash 比对（PRESENTATION_MISMATCH 即停）；消费 + 建 Task 同事务（唯一跨模块事务）；重复确认只回同一 task。
+- [Required] R2 确认与调度缝隙：重复确认、冻结快照变化、批准消费与业务动作非原子。对策：冻结 hash/seen 校验；消费与创建任务或公共取消用例同事务，重复回原对象（design/02/06），不拆坏取消事务。
 - [Required] R3 触发恰好一次失效：取消与触发竞态、重试放大、outbox 重放。对策：取消赢过一切（取消提交后排队重试全作废）；outbox 验版本发请求记结果 + 幂等键；发了没回只核对不重发；取消后触发数 = 0 为一级指标，破 0 记 security_events（一年，不跟 task 走，不留内容），人复核放行。
 
 ## 硬约束（摘录，细则见 design/api/schema）
 
 - [Required] task_events 只追加，DB 禁 UPDATE/DELETE；UNIQUE(task_id,fire_at)；recreated_from 唯一。
-- [Required] 除 approval 消费 + 建 task 外，禁止跨模块事务；模块自有 schema，跨模块只传 id；领域事件走 outbox。
+- [Required] 确认创建/取消为受控跨模块单事务；同步公共用例/DTO/只读投影合法，可靠异步命令走 outbox。D1 只证明存储实现导入边界，不证明 SQL 所有权（design/02 §2）。
 - [Required] /readyz 类型化错误不降级：规则缺失（tzdb/别名表）则服务不就绪；归一禁引 CangjieMagic 由构建依赖图在 CI 拦。
 - [Required] AG-UI 投影走 packages/stream-protocol 版本化 zod；事件名开工对照 thread-stream.schema.json。
-- [Required] 仓颉永不直连业务库、不做时间归一；v0–P3 不用第二实现。
+- [Required] 仓颉唯一 Harness，不直连业务库、不做时间归一、不直接调 MCP；TS 长期保留能力/业务/存储，不内藏第二套 Agent（design/09/11）。
 
 ## 指标（一级与校准中）
 
-| 指标                                             | 目标                              | 级别                                            |
-| ------------------------------------------------ | --------------------------------- | ----------------------------------------------- |
-| 取消已提交后仍发出的触发请求数                   | = 0                               | 一级（破 0 即事故，记 security_events）         |
-| 超 15 分钟未触发                                 | 标 missed，不补发                 | Required（15min 为实验起步值，待校准）          |
-| 重复确认建出第二 task 数                         | = 0                               | Required                                        |
-| kill -9 后 resume 副作用次数                     | 恰好一次                          | Required（S2 结案标准）                         |
-| 回显有效期 / 锚龄线 / 心跳 / 扫表周期 / 重试上限 | 24h / 1min / 30s / 30s / 3 次退避 | 全为待校准实验起步值（B06 迁移云端），P1 末复核 |
+| 指标                                             | 目标                              | 级别                                                  |
+| ------------------------------------------------ | --------------------------------- | ----------------------------------------------------- |
+| 取消已提交后仍发出的触发请求数                   | = 0                               | 一级（破 0 即事故，记 security_events）               |
+| 超 15 分钟未触发                                 | 标 missed，不补发                 | Required（15min 为实验起步值，待校准）                |
+| 重复确认建出第二 task 数                         | = 0                               | Required                                              |
+| 恢复中的未知效果                                 | 不盲重放；按工具查询或停未知      | Required；事件补读不等于执行恢复，非通用 exactly-once |
+| 回显有效期 / 锚龄线 / 心跳 / 扫表周期 / 重试上限 | 24h / 1min / 30s / 30s / 3 次退避 | 全为待校准实验起步值（B06 迁移云端），P1 末复核       |
 
 - [Required] 06 的 24h / 15min / 1min / 30s / 3 退避迁云端后全是待校准实验起步值：P1 只考核方向性达标，数值冻结需 P1 实测复核（见 04 重开门槛）。
 - [Proposed] 触发窗口内送达率、简报打开聚合延迟：P1 只采集基线，不设硬目标。
@@ -32,9 +32,9 @@
 ## 阶段准入准出
 
 - [Required] P0 准出：鉴权二选一拍板；Deferred 清单阻塞项认领到阶段；time-core 四测例（顺的/不存在的/没选的/选了的）先行通过。
-- [Required] P1 准入：P0 准出达成；contracts 契约测试进程内可跑。P1 准出：v0 验收全绿（见 04）+ 五缝接口 Fake 全通 + 取消后触发数 = 0 实测。
-- [Required] P2 准出：Spike S1–S3 结案——S1 契约全绿 + 100 并发首 token ≤150ms + 30min RSS 不涨 + cancel 2s 内；S2 kill -9 后 resume 副作用恰好一次；S3 200 卡片 zod 通过率≥TS 基线 −2pt + MCP 经网关 + OTel 贯通 + 镜像构建 ≤10min。任一不满足不得进 P3。
-- [Deferred] P3 准入含 propose_task 排期回调联调；P4/Electron 与 P5/规模化门另行立项。
+- [Required] v0 准出按 04 的 A1–A4 与实际证据范围，不把尚未实现的 R1 当 v0 失败，不把历史记录改写为 Harness 已验收。
+- [Required] R1 目标按 design/11 的真实 Web→TS→仓颉→TS 工具/产物验证；事件补读、当前上下文/等待与后续无人值守崩溃恢复分开。旧 S1–S3 阈值不再决定是否采用仓颉，取消/冻结/回执/未知不重发不放宽。
+- [Deferred] 仓颉库与模型供应商、性能/内存预算随真实负载验证；Electron 与规模化仍另行立项。本次不实现 R1 或提升 D8 状态。
 
 ## 对外口径（不承诺）
 

@@ -5,7 +5,7 @@
 - **状态**：草案 v0.1（design 为真源，prd 跟随）
 - **范围**：服务端/前端技术栈选型（已确认 vs 待定）、monorepo 布局、包依赖方向、复用优先级
 - **不包含**：模块拆分判据（见 02）、API 路由表（见 10）、表字段（见 schema 组）、Spike 细节（见 11）、CI 死规矩实现（见 13）
-- **阶段标签**：v0 MVP 全链路适用；P1 起五缝接口化后仍然有效
+- **阶段标签**：v0 TS 业务基线；R1 起仓颉唯一 Harness + 长期 TS 能力层（不是全后端迁移）
 
 ## 标记约定
 
@@ -18,29 +18,29 @@
 
 ### 1.1 已确认（Required）
 
-| 层级        | 选型                                                    | 来源                                        | 说明                                                                                                                 |
-| ----------- | ------------------------------------------------------- | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| 服务端语言  | TypeScript（Bun 1.4.2 运行）                            | Required（#13）                             | TS 模块化单体，一个镜像 `api\|worker\|all` 三角色；time-core 为服务端纯函数子集                                      |
-| 唯一事实源  | PostgreSQL 16+                                          | Required；AF 三硬约束之一（Observed, AF§5） | Redis 仅加速且延后（v0 不引入）；业务状态一律以 PG 约束为准                                                          |
-| Web 前端    | Next.js（App Router），RSC 开、Turbopack 开（默认配置） | Required（P0 冻结）                         | Web 先行，后用 Electron 套同一份 Next.js；v0 只做 Web 单端；偏离默认配置时另开 docs PR 说明                          |
-| 认证        | Better Auth 自建 credential                             | Required（已定）                            | D7 空环境冒烟不依赖外部 IdP；v0 单租户；v0 端点只暴露 `GET /me`                                                      |
-| 实时对话    | SSE（`text/event-stream`）                              | Required                                    | WS + `ws-ticket` P2 起；Web Push 仅兜底                                                                              |
-| 校验        | zod（前后端同源）                                       | Required                                    | `packages/contracts`、`packages/stream-protocol` 版本化 zod；卡片/事件名开工对照 `thread-stream.schema.json`（AF§7） |
-| 部署形态    | 单镜像 + compose 冒烟（起步）                           | Required；AF 自托管（Observed, AF§2/§5）    | 一个镜像三种角色 `api\|worker\|all`（对标 AF `all/control/worker`）；做大后迁 K8s（Deferred 细节）                   |
-| 包管理/构建 | Bun 1.4.2 workspaces + 单一 bun.lock                    | Required（ADR 0006，取代 0002）             | 根 scripts 显式依赖优先构建；Oxlint 1.89.0、Oxfmt 0.74.0、bun:test 统一质量入口                                      |
-| 可观测      | OpenTelemetry + 结构化日志 + `request_id` 全链路        | Required                                    | v0 先 OTel+日志；PostHog/Sentry 为 Deferred                                                                          |
+| 层级         | 选型                                                    | 来源                                        | 说明                                                                                                                 |
+| ------------ | ------------------------------------------------------- | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| 服务端语言   | TypeScript（Bun 1.4.2 运行）                            | Required（#13）                             | TS 模块化单体，一个镜像 `api\|worker\|all` 三角色；time-core 为服务端纯函数子集                                      |
+| 宿主 Harness | 仓颉（唯一模型/工具循环）                               | Required（#44；ADR 0009）                   | 当前上下文、计划、预算、等待/恢复/停止；TS 保留业务、工具与 Run 存储，见 09/11                                       |
+| 唯一事实源   | PostgreSQL 16+                                          | Required；AF 三硬约束之一（Observed, AF§5） | Redis 仅加速且延后（v0 不引入）；业务状态一律以 PG 约束为准                                                          |
+| Web 前端     | Next.js（App Router），RSC 开、Turbopack 开（默认配置） | Required（P0 冻结）                         | Web 先行，后用 Electron 套同一份 Next.js；v0 只做 Web 单端；偏离默认配置时另开 docs PR 说明                          |
+| 认证         | Better Auth 自建 credential                             | Required（已定）                            | D7 空环境冒烟不依赖外部 IdP；v0 单租户；v0 端点只暴露 `GET /me`                                                      |
+| 实时对话     | SSE（`text/event-stream`）                              | Required                                    | WS + `ws-ticket` P2 起；Web Push 仅兜底                                                                              |
+| 校验         | zod（前后端同源）                                       | Required                                    | `packages/contracts`、`packages/stream-protocol` 版本化 zod；卡片/事件名开工对照 `thread-stream.schema.json`（AF§7） |
+| 部署形态     | 单镜像 + compose 冒烟（起步）                           | Required；AF 自托管（Observed, AF§2/§5）    | 一个镜像三种角色 `api\|worker\|all`（对标 AF `all/control/worker`）；做大后迁 K8s（Deferred 细节）                   |
+| 包管理/构建  | Bun 1.4.2 workspaces + 单一 bun.lock                    | Required（ADR 0006，取代 0002）             | 根 scripts 显式依赖优先构建；Oxlint 1.89.0、Oxfmt 0.74.0、bun:test 统一质量入口                                      |
+| 可观测       | OpenTelemetry + 结构化日志 + `request_id` 全链路        | Required                                    | v0 先 OTel+日志；PostHog/Sentry 为 Deferred                                                                          |
 
 ### 1.2 待定（Deferred，一律不猜）
 
-| 待定项          | 候选                          | 决策点                         | 本文档态度                              |
-| --------------- | ----------------------------- | ------------------------------ | --------------------------------------- |
-| 目标市场/合规   | 数据驻留、隐私条款            | Deferred                       | 不设字段                                |
-| 是否练仓颉      | CangjieMagic 是否进入生产路径 | P1 并行 Spike S1–S3，P2 末结案 | v0–P3 不用（见 11）                     |
-| 推送通道        | Web Push 供应商、邮件/短信    | Deferred                       | v0 只站内通知 + 活动页                  |
-| LLM 供应商/计费 | provider、模型路由、额度      | Deferred                       | 预算字段只定语义（见 09），不绑定供应商 |
-| 向量库/RAG      | pgvector vs 独立向量库        | P2+                            | v0 不做 RAG                             |
+| 待定项          | 候选                       | 决策点   | 本文档态度                              |
+| --------------- | -------------------------- | -------- | --------------------------------------- |
+| 目标市场/合规   | 数据驻留、隐私条款         | Deferred | 不设字段                                |
+| 推送通道        | Web Push 供应商、邮件/短信 | Deferred | v0 只站内通知 + 活动页                  |
+| LLM 供应商/计费 | provider、模型路由、额度   | Deferred | 预算字段只定语义（见 09），不绑定供应商 |
+| 向量库/RAG      | pgvector vs 独立向量库     | P2+      | v0 不做 RAG                             |
 
-## 2. Monorepo 布局（Required）
+## 2. Monorepo 布局（Observed：v0 关键目录）
 
 ```text
 Along-agent/
@@ -48,25 +48,18 @@ Along-agent/
     api/                    # TS 模块化单体入口：api|worker|all 三角色
       src/
         main.ts             # ROLE=api|worker|all 分发
-        routes/             # REST 路由（真源见 10）
-        sse/                # SSE 聚合与断线恢复
+        http/               # HTTP 入口、认证与 SSE 响应
+        modules/            # conversations/tools/业务模块与存储
         worker/             # Scheduler claim/lease/fencing + Notifier 投递
     web/                    # Next.js App Router（Web 先行；后被 Electron 套同一份）
-      app/
-        (auth)/             # login/callback
-        (main)/             # brief/chat/tasks/approvals
-        (public)/           # landing/downloads/share
+      src/app/              # Next.js 页面
+      src/lib/              # HTTP 客户端与展示辅助
   packages/
     contracts/              # 跨模块契约：zod + JSON Schema + 契约测试（进程内/远程同一套）
     stream-protocol/        # SSE/AG-UI 投影版本化 zod（对照 thread-stream.schema.json）
     time-core/              # 纯函数 normalize（禁时钟、禁 agent-runtime 依赖）
-    agent-runtime/          # TsAgentRuntime（见 09）
-    tool-gateway/           # ToolGateway 白名单+zod+风险分级+审计（见 02）
     scheduler-core/         # schedule/claim/cancel 领域逻辑（worker 角色执行）
     notifier-core/          # send→回执+幂等
-    connector-vault/        # secret 引用（v0 仅接口+Fake）
-  spikes/
-    cangjie-runtime/        # 第二实现隔离区（见 11），永不直连业务库
   infra/
     docker/                 # 单镜像 Dockerfile
     compose/                # compose 冒烟（见 13）
@@ -76,6 +69,10 @@ Along-agent/
     prd/                    # 跟随
 ```
 
+[Observed] 对话运行、ToolGateway 与业务存储在 `apps/api/src/modules/conversations|tools|approvals|tasks|notifications|identity|time|brief`，不是独立 `agent-runtime` 包。上图为关键目录摘要，不要求每个模块建立同名空壳层。
+
+[Required] 仓颉 Harness 的具体目录/传输适配随 R1 决定，不再限制为 `spikes/` 候选第二实现；TS 长期保留 ToolGateway、tools、memory/grep、MCP、PC/browser、办公连接器、身份/批准/时间/任务/worker/API/Web 与 Run/checkpoint 持久存储。尚未实现的能力不能据目录设计宣称已存在。
+
 ### Electron 套壳预留（Proposed，v0 不做）
 
 - 远期用 Electron 套同一份 Next.js；v0 只做 Web 单端。
@@ -84,12 +81,11 @@ Along-agent/
 ## 3. 依赖方向（Required，CI 死规矩前身）
 
 ```text
-apps/api ──depends──▶ packages/{contracts, stream-protocol, agent-runtime,
-                        tool-gateway, scheduler-core, notifier-core,
-                        connector-vault, time-core}
-packages/agent-runtime ──depends──▶ packages/{contracts, time-core}
+apps/api ──depends──▶ packages/{contracts, stream-protocol,
+                        scheduler-core, notifier-core, time-core}
+仓颉 Harness ──服务契约──▶ TS ToolGateway / Run 存储接口（目标，未实现）
 packages/scheduler-core ──depends──▶ packages/{contracts, time-core}
-packages/{tool-gateway, notifier-core, connector-vault} ──depends──▶ packages/contracts
+packages/notifier-core ──depends──▶ packages/contracts
 packages/time-core ──depends──▶ （零依赖：只用 IANA TZDB 只读数据 + 纯函数）
 packages/contracts ──depends──▶ zod（仅此）
 ```
@@ -98,8 +94,8 @@ packages/contracts ──depends──▶ zod（仅此）
 
 1. `time-core` 禁止导入 `agent-runtime`、禁止读取系统时钟、禁止访问 `process.env`/网络（纯函数）。
 2. 展示层（`apps/web` + SSE 投影）禁止调用 `normalize` 之外的任何时间换算，禁止自行 `Date` 运算拼 `fire_at_utc`。
-3. `spikes/cangjie-runtime` 禁止依赖 `apps/api` 与业务表（见 11）。
-4. 所有跨模块引用只传 `id`（见 02），禁止跨 schema 直读表。
+3. 仓颉不得直连业务库或导入 TS 存储实现，不直接调 MCP/PC/browser（经 TS 网关，见 11）。
+4. 身份/资源关联 ID-first；公共用例可接收显式 DTO、返回只读投影，受控确认事务与可靠异步 outbox 分别定义（见 02 §1–§2）。D1 只证明静态导入边界，不解析 SQL 所有权。
 
 ## 4. 复用优先（Proposed → Required）
 

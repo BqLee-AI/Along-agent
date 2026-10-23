@@ -27,9 +27,9 @@
 | 06   | [approvals 确认门](design/06-approvals-confirmation-gate.md)             | first 版本化冻结回显、显式完整修改、单一后继、持久幂等与按钮重新确认                         |
 | 07   | [task_events 事件账](design/07-task-events-ledger.md)                    | 只追加账本、取消优先、活动页读模型                                                           |
 | 08   | [调度与投递](design/08-scheduler-and-delivery.md)                        | 未排期过窗终结与遗留恢复、一次性调用许可、独立本地接收、未知不重发及取消栅栏                 |
-| 09   | [AgentRuntime 与 checkpoint](design/09-agent-runtime-and-checkpoint.md)  | TsAgentRuntime 主实现、run/attempt/checkpoint、预算权威                                      |
+| 09   | [Harness 与 checkpoint](design/09-agent-runtime-and-checkpoint.md)       | 仓颉唯一循环/当前上下文/预算；TS 存储；事件补读≠执行恢复，未知不盲重放                       |
 | 10   | [API 与流式通道](design/10-api-and-stream-design.md)                     | REST 真源、envelope、128KiB原始JSON字节边界与未消费流收尾、SSE版本化、WS延后                 |
-| 11   | [CangjieMagic spike 与灰度](design/11-cangjie-runtime-spike.md)          | 第二实现验证 S1–S3、灰度与结案条件                                                           |
+| 11   | [仓颉 Harness 与 TS 能力层](design/11-cangjie-runtime-spike.md)          | 唯一 Harness/长期 TS 分工、真实链路、R1 未实现及旧第二实现目标退出                           |
 | 12   | [a13n 六思想落点](design/12-a13n-principles-landing.md)                  | harness/checkpoint/自托管/revision/AG-UI 投影/readyz                                         |
 | 13   | [P0 开工与 CI 死规矩](design/13-p0-bootstrap-and-ci-rules.md)            | Bun/Ox 统一入口、依赖优先构建与串行类型检查、限流边界 CLI、static 后四路隔离并行、五门全成功 |
 
@@ -94,6 +94,7 @@
 
 - [OpenSpec 说明](../openspec/README.md)：`openspec/specs/` 为可验收行为契约真源（SHALL + Scenario），`docs/design/` 为设计真源；spec 只写行为并引用 design 章节，不复制字段/路由表。
 - [ADR 决策记录](adr/README.md)：0000 模板、0001–0005 种子 ADR、[0006 Bun + Ox 工具链](adr/0006-bun-ox-toolchain.md)（取代 0002）、[0007 CI 关键路径局部修订](adr/0007-ci-critical-path.md)（调整 0006 的编排/失败传播）及 [0008 static 内部调度](adr/0008-static-scheduling.md)（局部修订 0007 的内部并发边界）；Bun/Ox 选型和五门全成功不变，冻结决策正文保留，改口径另起新 ADR。
+- [ADR 0009](adr/0009-cangjie-harness-ts-capabilities.md) 对齐仓颉唯一 Harness/TS 长期能力，并局部修订 0003 的 outbox/确认事务绝对范围；旧 ADR 正文与历史验收保留。同步公共用例/DTO、只读投影、确认创建/取消单事务和可靠异步 outbox 分列（design/02 §1–§2）；D1 仅证明存储导入边界，不证明 SQL 所有权。本次仅规范对齐，不实现 R1 或改变有效安全 spec。
 - 冲突矩阵：行为/验收以 spec 为准，字段/路由以 design/api/schema 为准，why 以 ADR 为准。
 
 ## 维护约定
@@ -102,7 +103,7 @@
 - 每篇头部固定四行：状态 / 范围 / 不包含 / 阶段标签；节内用 Observed / Required / Proposed / Deferred 标注断言级别。
 - 未确认事项只出现在 `prd/04-acceptance-open-questions.md` 的 Deferred 清单，不写入 design 真源层。
 - 不复制外部产物原文、token、DSN；引用蓝图一律用 B00–B06 / AF 代号。
-- 不猜 Deferred 字段（鉴权方案、目标市场、是否练仓颉、Web 框架、推送、LLM 供应商、计费）：相关 schema/API 留占位，由 P0/P1 决策解冻。
+- 不猜仍未定的目标市场、推送、LLM 供应商、计费等字段；已定项以 design/01 与 PRD 04 为准。仓颉唯一 Harness/TS 长期能力已定，选库和接入未实现，不再列为“是否练仓颉”候选。
 - 仓库密钥、私有策略、真实 `.env`、用户数据一律不得提交。
 
 ## 断言四分标签约定

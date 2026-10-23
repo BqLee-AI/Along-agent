@@ -1,6 +1,6 @@
 # Conversation & Runs Schema 设计
 
-> 状态：v0 可开工。范围：`conversations`、`messages`、`agent_runs`、`run_attempts`、`run_checkpoints`、`agent_revisions`、`prompt_versions`。不包含：向量记忆/知识库（P1）、用量计费、推送。阶段标签：v0 MVP（对话+执行存档）；P1 起五缝 AgentRuntime 接口化。
+> 状态：v0 存储合同；R1 未实现。范围：对话/Run/事件与不可变版本。不包含：新执行快照或工具结果账字段、通用恢复实现。阶段标签：TS 长期持有 PG/Run/checkpoint 存储，仓颉组织执行上下文（design/09/11）。
 
 ## 设计依据
 
@@ -115,7 +115,7 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 
 ### 用途
 
-[Required] run 的单次尝试（fenced 执行 + lease，a13n 落点）。kill -9 后 resume 开新 attempt，副作用恰好一次（S2 要求）。
+[Observed] run 的一次存储尝试；v0 不因存在 lease 字段就已实现 Agent 并发 fencing 或通用 kill/resume。[Required] 后续恢复需独立执行资格合同，不由新 attempt 推导外部副作用恰好一次（design/09 §6）。
 
 ### 字段
 
@@ -138,14 +138,13 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 
 ### 写入规则
 
-- [Required] 同一 run 同时只有一个 `running` attempt（应用层 + lease 保证）。
-- [Required] 失活 attempt 标 `fenced_out`，不删；resume 开新 `attempt_no`。
+- [Proposed · 后续执行恢复] 同 Run 执行资格/lease/version 原子裁决，失活尝试保留证据；具体 attempt 状态与续跑分配随跨语言合同验证，不把当前表字段当已生效的 Agent fencing 保证。
 
 ## `run_checkpoints`
 
 ### 用途
 
-[Required] 边做边存档（a13n checkpoint）。每次 tool 调用后写一条，重启/超时后带 `resume_from` 重放继续。
+[Observed] v0 实际逐条保存 thread 事件供幂等 POST 和 GET after_seq 补读（conversations/repository.ts#appendCheckpoint），不是可重启模型循环的完整执行快照。[Required] R1 上下文/等待与后续无人值守恢复分别定义，不能靠 checkpoint/lease 推导通用 exactly-once；未知不盲重放（design/09 §6）。
 
 ### 字段
 

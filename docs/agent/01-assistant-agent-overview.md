@@ -19,7 +19,7 @@ POST /conversations/messages (SSE)
   -> Scheduler / Notifier（Agent 不再参与）
 ```
 
-[Observed] 外部产品形态参考：长期记忆+主动任务+任务卡确认；harness 思想为推理与脚手架解耦、checkpoint 可续跑。本篇取两者交集的 v0 子集：单 Agent tool-loop + 确认门 + 只追加事件。
+[Observed] v0 实际为 TS 确定性 turn、确认门和只追加事件，无真实 LLM；[Required] 真实模型/工具循环从 R1 起唯一归仓颉 Harness，TS 保留业务/能力/存储（design/09/11）。外部产品/AF 只作参考，不作为已实现证据。
 
 ## 职责（做）
 
@@ -49,7 +49,7 @@ POST /conversations/messages (SSE)
   -> assistant 答复（含 proposal A-XXXX 回显 + presentation_hash 绑定内容；S0 #14 冻结：v0 只认点确认按钮，整句文本只做展示，旧 `C-XXXX` 短号作废统一 `A-`）
   -> 用户点确认按钮（“好/嗯/行”与整句文本均不算；S0 #14 冻结）
   -> POST /approvals/{id}/actions/confirm（事务：验 owner + 验 pending + 验 now<expires_at + hash 对比）
-      -> 成功：approval consumed + 建 task（唯一跨模块事务）
+      -> 成功：approval consumed + 创建 task/created/outbox，或同事务调用 tasks 公共取消用例
       -> 失败：PRESENTATION_MISMATCH / APPROVAL_EXPIRED(410) / APPROVAL_SUPERSEDED，按 04 话术回澄清
   -> task 进入 saved→pending_schedule→scheduled（凭 Scheduler 登记回执，见 design 真源）
 ```
@@ -60,13 +60,13 @@ POST /conversations/messages (SSE)
 
 ## 设计原则
 
-- [Required] ID-first：跨模块只传 id（conversation_id/run_id/approval_id/task_id），不透传大对象；模块自有 schema。
+- [Required] ID-first 用于资源/身份关联，公开用例允许显式 DTO 与只读投影；五缝不是所有跨模块调用唯一入口，可靠异步命令走 outbox（design/02/04）。
 - [Required] 最小工具集：每次 run 限定 allowlist 子集，默认最小集；敏感工具 `requires_approval=true` 直接产 approval 事件，不存在"先执行后补确认"。
-- [Required] 预算先行：双预算（max_iterations + max_tokens，TS 权威，见 05）超限即停并返回已产出，不静默续跑。
+- [Required] 预算先行：仓颉强制模型/工具循环预算，TS 校验/保存配置并守执行资格；v0 TS 字符估算不等于真实模型 usage（05）。
 - [Deferred] 多 Agent（规划者→执行者→检查者）、`@execution` 自定义 plan、沙箱、Skills 市场均 P1 后远期，本篇不展开。
 
 ## 与 design/04/09 的一致性
 
 - 本篇"不算时间/不直写库/不直调连接器"对应 design/04（AgentRuntime+ToolGateway 边界）与 design/09（time-core 确定性层）。
 - `normalize(wall_time, timezone_id, fold_choice, ruleset)` 为服务端纯函数唯一权威；LLM 输入输出均不含 `fire_at_utc`。
-- Cangjie 只作 AgentRuntime 第二实现（见 05），v0–P3 不用；本篇职责描述对两实现同一契约。
+- 仓颉唯一 Harness，TS 长期能力/业务/存储；R1 当前上下文与等待未实现，事件补读不等于执行恢复，未知不盲重放（design/09/11）。

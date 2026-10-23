@@ -93,4 +93,4 @@ Content 表（`briefs`、`cards`）为 v1 / Deferred，移出 v0 落地顺序（
 
 - task：`saved → pending_schedule → scheduled → fired | missed`；`saved/pending_schedule/scheduled → cancel_pending → cancelled`。
 - approval：`pending → consumed | rejected | expired | superseded`。
-- 唯一跨模块事务：approval 消费 + task 创建同事务；其余跨模块经 outbox。
+- 受控确认事务覆盖创建任务和取消请求；公共用例可传 DTO/返回只读投影，可靠异步命令才走 outbox（design/02 §1–§2）。D1 不解析 SQL 所有权。Run/checkpoint 存储长期归 TS，仓颉上下文/等待恢复按 design/09/11，事件补读不证明通用执行恢复。

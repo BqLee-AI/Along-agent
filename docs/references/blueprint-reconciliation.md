@@ -2,6 +2,8 @@
 
 > 状态：冻结（design 真源，蓝图为输入）。范围：B00–B06 逐篇 verdict、8 个冲突裁决、06 不变量保留清单。不包含：实现代码。阶段标签：v0 以 06 为准，其余篇章取舍如下。
 
+> 历史对账适用范围：下方 B05/P1–P3、第二实现与 Spike 裁决保留为当时方案，不定义当前 Harness 目标。#44 已确定仓颉唯一 Harness + TS 长期能力/业务/存储（[design/09](../design/09-agent-runtime-and-checkpoint.md)、[design/11](../design/11-cangjie-runtime-spike.md)、[ADR 0009](../adr/0009-cangjie-harness-ts-capabilities.md)）；不把历史研究或验收重写为 R1 通过。
+
 ## 逐篇 verdict
 
 | 蓝图                                                                                      | 结论                             | 去向                                                                                                                                 |

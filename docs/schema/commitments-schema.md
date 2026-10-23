@@ -5,7 +5,7 @@
 ## 设计依据
 
 - B06 §5 确认/C 草稿、`pending_confirmation` 一行定义；§6 R 正式表与状态机；§9 取消优先与安全指标 [B06]。
-- Contract 状态机：task `saved→pending_schedule→scheduled(回执)→fired|missed →cancel_pending→cancelled`；approval `pending→consumed|rejected|expired|superseded`；`UNIQUE(task_id,fire_at)`；`recreated_from` 唯一；`task_events` 只追加；Approval 消费 + 建 Task 同事务是唯一跨模块事务。
+- Contract 状态机及 UNIQUE/只追加不变；批准消费与创建任务或取消请求保持受控单事务，范围见 design/02 §1–§2、design/06 §6，不强制公共读取/同步用例入 outbox。
 - v0 切片：06 喝水提醒降级为调度子用例（`task.kind = notify_only`，不走 LLM 先验调度 + time-core）。
 
 ## 旧称映射
@@ -22,8 +22,8 @@ tasks 1 ── 0..n notifications
 tasks 1 ── 0..1 tasks       (recreated_from_task_id 自引用)
 ```
 
-- 唯一跨模块事务：`approvals` 消费 + `tasks` 创建同事务（验 owner、验 pending、验 `now < expires_at`）。
-- 其余跨模块经 `outbox` 领域事件，不开分布式事务。
+- 受控跨模块事务：确认批准消费与 tasks 创建/created/outbox，或与 tasks 公共取消用例的状态/事件/取消命令/旧工作失效同事务；冻结确认门、全回滚与回执语义不变。
+- 可靠异步命令走 outbox；同步公共用例/DTO/只读投影合法，不开启任意跨模块或分布式事务（design/02 §1–§2）。
 
 ## `approvals`
 
