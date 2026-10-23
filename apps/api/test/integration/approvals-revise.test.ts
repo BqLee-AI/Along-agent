@@ -48,14 +48,17 @@ async function confirmBody(pool: Pool, owner: string, id: string) {
     idempotency_key: randomUUID(),
   };
 }
-async function waitBlocked(pool: Pool, locker: PoolClient) {
-  const pid = (await locker.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+async function waitBlocked(pool: Pool, locker: PoolClient | number): Promise<number> {
+  const pid =
+    typeof locker === 'number'
+      ? locker
+      : (await locker.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
   for (let n = 0; n < 200; n++) {
     const { rows } = await pool.query(
-      'SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))) AS blocked',
+      'SELECT pid FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)) LIMIT 1',
       [pid],
     );
-    if (rows[0].blocked) return;
+    if (rows[0]) return rows[0].pid;
     await pool.query('SELECT pg_sleep(0.01)');
   }
   throw new Error('writer did not reach the target lock');
@@ -345,20 +348,34 @@ maybe('approval revise durable PostgreSQL behavior', () => {
           action === 'confirm'
             ? confirmApproval({ pool }, old.ownerId, old.id, confirmation)
             : rejectApproval({ pool }, old.ownerId, old.id, { idempotency_key: randomUUID() });
+        await pool.query(
+          `CREATE FUNCTION hold_approval_writer() RETURNS trigger LANGUAGE plpgsql AS $$
+           BEGIN
+             PERFORM pg_advisory_xact_lock(hashtextextended(OLD.id::text, 0));
+             RETURN NEW;
+           END $$;
+           CREATE TRIGGER hold_approval_writer BEFORE UPDATE ON approvals
+           FOR EACH ROW WHEN (OLD.id = '${old.id}'::uuid)
+           EXECUTE FUNCTION hold_approval_writer()`,
+        );
         const locker = await pool.connect();
         try {
           await locker.query('BEGIN');
-          // Permit reservation FK KEY SHARE while ordering actual target writers.
-          await locker.query('SELECT id FROM approvals WHERE id=$1 FOR NO KEY UPDATE', [old.id]);
+          // Pause inside the first target UPDATE, after its row lock is owned.
+          // Waiting behind a third-party row lock does not establish writer order.
+          await locker.query('SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))', [
+            old.id,
+          ]);
           const one = (first === 'revise' ? revise(old.ownerId, old.id, body()) : write()).then(
             (value) => ({ value }),
             (error) => ({ error }),
           );
-          await waitBlocked(pool, locker);
+          const writerPid = await waitBlocked(pool, locker);
           const two = (first === 'revise' ? write() : revise(old.ownerId, old.id, body())).then(
             (value) => ({ value }),
             (error) => ({ error }),
           );
+          await waitBlocked(pool, writerPid);
           await locker.query('COMMIT');
           const [a, b] = await Promise.all([one, two]);
           expect(a).toHaveProperty('value');
@@ -374,6 +391,9 @@ maybe('approval revise durable PostgreSQL behavior', () => {
         } finally {
           await locker.query('ROLLBACK');
           locker.release();
+          await pool.query(
+            'DROP TRIGGER hold_approval_writer ON approvals; DROP FUNCTION hold_approval_writer()',
+          );
         }
       }
     }
