@@ -1,11 +1,12 @@
-// A past-window task first reconciles its independent receipt under the same
-// task lock. Only an unreceived, still-scheduled task may become missed.
+// Registered tasks reconcile independent intake before missing. Never-registered
+// tasks terminate directly, including residue from already-failed commands.
 import { isPastFireWindow, sendKeyFor } from '@along/scheduler-core';
 import type { Pool, PoolClient } from 'pg';
 import { withTransaction } from '../../../db/transaction.js';
 import { reconcileReceivedSend } from './delivery.js';
 import {
   appendTaskEvent,
+  completeUnscheduledMissed,
   listMissedCandidates,
   lockTaskRow,
   lockTaskSendRow,
@@ -27,13 +28,13 @@ export async function runMissedPhase(pool: Pool, nowMs?: number): Promise<Missed
   for (const candidate of candidates) {
     const done = await withTransaction(pool, async (client: PoolClient) => {
       const task = await lockTaskRow(client, candidate.id);
-      if (
-        !task ||
-        task.state !== 'scheduled' ||
-        !isPastFireWindow(task.fire_at_utc.getTime(), nowMs ?? Date.now())
-      ) {
+      if (!task || !isPastFireWindow(task.fire_at_utc.getTime(), nowMs ?? Date.now())) {
         return false;
       }
+      if (task.state === 'saved' || task.state === 'pending_schedule') {
+        return completeUnscheduledMissed(client, task);
+      }
+      if (task.state !== 'scheduled') return false;
       const row = await lockTaskSendRow(
         client,
         task.id,

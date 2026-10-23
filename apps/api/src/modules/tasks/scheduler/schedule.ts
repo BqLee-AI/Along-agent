@@ -6,11 +6,11 @@ import type { Pool, PoolClient } from 'pg';
 import { withTransaction } from '../../../db/transaction.js';
 import {
   appendTaskEvent,
+  completeUnscheduledMissed,
   listDueScheduleRows,
   lockOutboxRow,
   lockTaskRow,
   markOutboxDispatched,
-  markOutboxFailedDeadline,
   markOutboxSuperseded,
   transitionTask,
   type OutboxRow,
@@ -75,8 +75,8 @@ export async function scheduleOne(
     return 'superseded';
   }
   if (isPastFireWindow(task.fire_at_utc.getTime(), Date.now())) {
-    // Past the window before registration: deadline, never schedule.
-    await markOutboxFailedDeadline(client, row.id, 'past fire window at schedule time');
+    // State, event and queue terminate atomically; never invent a receipt.
+    await completeUnscheduledMissed(client, task);
     return 'failed_deadline';
   }
   void FIRE_WINDOW_MS;

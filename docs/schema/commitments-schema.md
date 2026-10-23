@@ -152,8 +152,8 @@ tasks 1 ── 0..1 tasks       (recreated_from_task_id 自引用)
 
 - [Required] 除 `state` / `state_version` 外建后冻结；改时间必须走新 task（先断旧再立新）。
 - [Required] 状态与事件同一事务写（写 `tasks` + 追加 `task_events` 原子）。
-- [Required] `scheduled` 必须有登记回执；无回执停在 `pending_schedule`。
-- [Required] 超 15min 标 `missed` 不补发；取消后触发数 = 0 为一级指标（`security_events` v0 落表，一年留存、不跟 task 走，S0 #14 冻结）。
+- [Required] `scheduled` 必须有登记回执；无回执不得标为 `scheduled`。未排期 `saved/pending_schedule` 超窗也转 `missed`，不伪造回执。
+- [Required] 超 15min 标 `missed` 不补发；状态、唯一对应事件及队列终结同事务，恢复包括 schedule 命令已终结的未排期遗留任务（design/08 §5）。取消后触发数 = 0 为一级指标（`security_events` v0 落表，一年留存、不跟 task 走，S0 #14 冻结）。
 - [Required] 取消赢过一切：取消提交（`cancel_pending` 提交即算，S0 #14 冻结）后排队重试全作废；触发门禁照拦。
 
 ## `task_events`

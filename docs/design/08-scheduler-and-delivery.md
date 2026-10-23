@@ -62,6 +62,9 @@ outbox 行
 ## 5. 15min 与重约 [Required]
 
 - 到点 15min 内私密触发一次（起步值，待校准）；超时记 missed，不补发。
+- 未完成排期的 `saved/pending_schedule` 也必须超窗终结：schedule 阶段在 task→outbox 锁序及同一事务内提交 `missed`、递增版本、追加一条 `missed` 事件，并将待排期命令记为 `failed_deadline`；不写登记/发送回执、不调用 provider。
+- missed 恢复扫描同时覆盖未排期活跃任务，不依赖 schedule 命令仍可重试；旧 worker 已写 `failed_deadline` 的遗留任务也可终结，旧终结命令不重开。重复或并发扫描不重复事件；任一写入失败全事务回滚。
+- `cancel_pending/cancelled` 不属于 missed 候选；取消先提交时保留撤销回执路径。已排期任务继续按 §8 先核对真实接收，不能用未排期分支覆盖历史接收或未知结果。
 - 一键重约开新 task，`recreated_from` 指旧 task；内容当候选、时间重给，不继承旧确认。
 
 ## 6. 诚实口径 [Required]

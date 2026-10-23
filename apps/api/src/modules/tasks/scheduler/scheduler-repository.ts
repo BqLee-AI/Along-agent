@@ -155,7 +155,7 @@ export async function listMissedCandidates(
     `SELECT id, owner_id, state, state_version, fire_at_utc, wall_time,
        timezone_id, schedule_receipt, original_note
      FROM tasks
-     WHERE state IN ('scheduled', 'cancel_pending')
+     WHERE state IN ('saved', 'pending_schedule', 'scheduled')
        AND fire_at_utc < now() - interval '15 minutes'
      ORDER BY fire_at_utc ASC
      LIMIT $1
@@ -437,6 +437,37 @@ export async function completeCancelFromReceipt(
     [fence.taskId, receipt.id],
   );
   await markOutboxDispatched(client, receipt.id, receipt.provider_receipt_id);
+  return true;
+}
+
+/** Caller holds the past-window task lock. No registration or send occurred. */
+export async function completeUnscheduledMissed(
+  client: PoolClient,
+  task: SchedulerTaskRow,
+): Promise<boolean> {
+  if (task.state !== 'saved' && task.state !== 'pending_schedule') return false;
+  const moved = await transitionTask(client, {
+    taskId: task.id,
+    fromStates: ['saved', 'pending_schedule'],
+    toState: 'missed',
+    expectedVersion: task.state_version,
+  });
+  if (!moved) throw new Error('unscheduled missed fence changed while task lock held');
+  await appendTaskEvent(client, {
+    ownerId: task.owner_id,
+    taskId: task.id,
+    stateVersion: task.state_version + 1,
+    type: 'missed',
+    evidenceRef: 'local',
+  });
+  await client.query(
+    `UPDATE outbox SET status = 'failed_deadline',
+       last_error = 'past fire window before registration',
+       last_attempt_at = now(), updated_at = now()
+     WHERE task_id = $1 AND command->>'kind' = 'schedule' AND status = 'pending'`,
+    [task.id],
+  );
+  await supersedeQueuedOutboxForTask(client, task.id);
   return true;
 }
 
