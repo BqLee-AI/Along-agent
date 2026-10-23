@@ -1,63 +1,68 @@
-# 11. Cangjie Runtime Spike（第二实现）
+# 11. 仓颉宿主 Harness 与 TS 能力层
 
 ## 文档状态
 
-- **状态**：草案 v0.1（design 为真源，prd 跟随）
-- **范围**：Cangjie 在五缝中的位置与分工、Spike S1–S3 数字标准、灰度阶梯、结案模板、红线（永不直连库）
-- **不包含**：TsAgentRuntime 本体设计（见 09）、CI 死规矩实现（见 13）
-- **阶段标签**：v0–P3 不用 Cangjie；Spike 与 P1 并行、P2 末结案；是否转正另行决策（Deferred）
-
-## 标记约定
-
-Observed / Required / Proposed / Deferred 同 01。**本篇所有数字阈值均为“实验起步值”（Proposed，待校准）**，结案时按实测回写。
+- **状态**：规范基线对齐（#44；design 为真源，prd 跟随）
+- **范围**：唯一 Harness 的语言/状态责任、Web→TS→仓颉→TS 工具链及验证边界
+- **不包含**：R1 实现、最终跨语言 API/schema、工具链或供应商选型、全 TS 后端迁移
+- **阶段标签**：v0 TS 业务资产保留；R1 目标未实现；旧 P 阶段与 S1–S3 不作完成证据
 
 ## 1. 位置与分工（Required）
 
-- CangjieMagic 只作 AgentRuntime **第二实现**：`CangjieAgentRuntime` 经远程 HTTP/SSE 提供与 TsAgentRuntime **同一契约**（`run/resume/cancel → AgentEvent`，见 09；`contracts` 同一套契约测试进程内/远程双跑）。
-- 分工：仓颉侧只管“想与编排”（选 Agent、跑 loop、调工具、产事件流）；**不做鉴权、不直连业务库、不做时间归一**（Observed B04§2/§5；B06§4：TS 只收输入、只摆快照、不重算——Spike 阶段仓颉侧同样不重算时间，需排期回调 `propose_task`，见 §5）。
-- 隔离：代码只进 `spikes/cangjie-runtime/`；产物独立镜像；内网调用；失败不影响主路径（灰度外流量永不进仓颉）。
+仓颉从第一条真实 Agent 闭环起就是唯一宿主 Harness，不是 TS 通用 Agent 的候选第二实现。TS 后端是长期能力/业务层，不退役 API/worker，也不在工具内部隐藏另一套完整 Agent。决策原因见 [ADR 0009](../adr/0009-cangjie-harness-ts-capabilities.md)。
 
-## 2. Spike S1–S3（Required 立项，阈值 Proposed 实验起步值）
+| 责任                                                                              | 唯一所有者                             |
+| --------------------------------------------------------------------------------- | -------------------------------------- |
+| 模型消息/function calling 循环、本次上下文、工具结果纳入、简短计划、行动选择      | 仓颉 Harness                           |
+| 运行预算、等待/继续/恢复决策、停止后不再安排步骤                                  | 仓颉 Harness                           |
+| ToolGateway、工具定义/实现、schema/权限/批准校验、执行记录                        | TS                                     |
+| 长期 memory 的保存/检索/grep/修订/删除；MCP/办公连接器；PC/browser/文件执行       | TS 能力模块；不是仓颉生态重建          |
+| auth/身份/凭据、批准/业务事务、time-core、tasks、scheduler/notifier/outbox/worker | 现有 TS 产品后端                       |
+| PostgreSQL、消息/Run/checkpoint/结果/事件持久化、读取与 SSE 投影、Web             | TS；仓颉通过服务契约读写快照，不直连库 |
 
-| Spike               | 目标                                            | 通过标准（实验起步值，待校准）                                                                                                                                                      |
-| ------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| S1 契约+性能+稳定性 | 同一契约全绿；首 token 可接受；无泄漏；取消及时 | ① `contracts` 契约测试全绿（进程内+远程同一套）；② 100 并发下首 token p95 ≤ 150ms（本机/同内网，待校准）；③ 30min 持续流 RSS 不涨（±5% 内，待校准）；④ `cancel` 2s 内生效（待校准） |
-| S2 恰好一次         | kill -9 后 resume 副作用恰好一次                | ① `kill -9` 后 `resume(from_checkpoint)` 可续；② 工具副作用计数恰好一次（含 fencing/幂等键去重证据）；③ 重放不产生第二条 Task/通知                                                  |
-| S3 生态贯通         | 卡片 zod、MCP 经网关、OTel、镜像                | ① 200 张卡片 zod 通过率 ≥ TS 实现 −2pt（待校准）；② MCP 调用经 ToolGateway（直连数为 0）；③ OTel trace 贯通（run→tool→approval 同 `request_id`）；④ 镜像构建 ≤ 10min（待校准）      |
+当前上下文不等于长期 memory；仓颉控制“接下来尝试什么”，TS 裁决“动作是否允许、已发生什么”。TS 不独立推进模型循环，仓颉不另存可独立裁决的事实库。
 
-- 所有阈值标注 `[实验起步值]`；任一不达标只延期结案，不放宽标准。
-- 测量方法：与主路径同负载、同 `contracts` 用例、同 OTel collector；原始数据归档 `spikes/cangjie-runtime/reports/`。
+## 2. 一次请求的责任链
 
-## 3. 灰度阶梯（Required，S1–S3 全绿后才可进）
-
-1. 影子（0% 用户影响）：复制线上只读流量比对事件流一致性，不落库。
-2. 内测（白名单 actor）：真实 `run`，独立 revision 标记，可一键切回 TS。
-3. 小流量（≤5%，可回滚）：一級指标（取消后触发数=0、missed 不补发）无回归。
-4. 转正评审：是否转正另行决策；转正前仓颉仍不得直连库、不得算时间。
-
-任一阶梯一级指标破 0 即回滚到上一阶（Required）。
-
-## 4. 结案模板（Required，每 Spike 一份）
+[Required · 目标；不是现有远程接口字段]
 
 ```text
-Spike <S1/S2/S3> 结案
-- 结论：通过 / 未通过（含未达标项与数据）
-- 阈值对照表：每项“起步值 → 实测值 → 建议正式值”
-- 回写：本篇阈值更新 + contracts/stream-protocol 变更（如有）
-- 决策建议：继续 / 暂停 / 转正评审
-- 附件：reports/ 原始数据 + trace 样例 request_id 列表
+Web → TS API（身份/输入/逻辑 Run 与可信执行资格）
+    → 仓颉 Harness（模型、上下文、计划、预算）
+    → TS ToolGateway（重验 schema/权限/批准/执行资格）
+    → TS tools / memory / grep / MCP / PC/browser / 办公
+    → 结构化结果、产物引用、回执、待批准或未知
+    → 仓颉继续 / 等待 / 结束
+TS 存储 Run/快照/已接受结果/事件 → SSE/补读 → Web
 ```
 
-P2 末三份齐后统一结案；缺一份即“未结案”，P3 不得转正。
+TS 从可信绑定恢复 owner、工具范围和取消状态，不信任仓颉或模型自报授权；现有同进程 ToolContext 不可原样成为远程请求。参数校验由真正执行者 TS 重验，不复制时间/批准业务规则到仓颉。
 
-## 5. 红线（Required，违反即 Spike 失败）
+批准后恢复同一逻辑 Run，不重复动作。取消在 TS 提交并由工具边界拦新动作，仓颉观察后停止安排；不能承诺撤销既成外部效果。具体调用身份、结果账、跨语言合同分别由后续 #45/#46/#47 定义和实现，本次不预写最终字段/路由。
 
-1. 仓颉永不直连业务库（PG）：上下文由调用方传入；需要记忆/知识走服务接口。
-2. 仓颉不做时间归一：需排期回调 `propose_task{wall_time, timezone_id, fold_choice?}` 给 TS/time-core，结果以 TS 回执为准。
-3. 仓颉不直接调外部 MCP Server：统一经 ToolGateway（白名单+审计）。
-4. 仓颉不暴露公网：只接受 BFF/调度内网调用（Observed B03§7）。
-5. 归一禁引 CangjieMagic（B06§4/P1 死规矩）：`time-core` 依赖图 CI 拦截，见 13。
+## 3. 现状与验证边界（Observed）
+
+基线 `a10344c`：`conversations/service.ts#runTurn/executeRun` 是确定性 v0 turn，无真实 LLM provider；消息幂等、事件先存后发和 GET 补读在 TS。`tasks/scheduler/send.ts` 的一次许可/独立回执核对是专属发送恢复，不证明通用 Agent 恢复。当前 contracts-dual/D8 仅最小 healthz 双跑/partial，不证明仓颉 run/resume/cancel 已实现。
+
+旧版本的“第二实现 / v0–P3 不用 / P2 末 S1–S3 竞赛转正”不再是有效目标。旧研究数字、历史 ADR 与验收记录只证明其当时范围，不重写为 R1 通过，也不因 R1 未实施把 v0 重新判失败。
+
+## 4. 实施验收边界（Required；未执行）
+
+- 真实 Web→TS→仓颉→TS 工具→实际产物/回读证明闭环，工具选择随输入/观察变化；固定回放和 mock 不能代替真实模型和产物。
+- 仓颉预算/上下文/等待/停止，与 TS 权限/批准/执行资格分别验证；不得用 TS 隐藏循环或孤立仓颉 CLI 代替集成。
+- 事件补读不执行工具。已接受结果不重执行；可能已执行但未存结果先查询或停在未知，不盲重放。checkpoint/lease/fencing 不单独保证 external exactly-once（09 §6）。
+- R1 有限等待上下文与后续无人值守任意崩溃恢复分开验收；只有实际覆盖的工具/故障窗口才能声明保证。
+- 复用既有五个 required checks；后续真实跨语言消费者合同进入既有 contracts-dual，不在本次新增 CI 门或提前提升 D8 状态。性能/内存目标需真实负载校准，不沿用旧实验数字为主 Harness 转正门。
+
+## 5. 红线（Required）
+
+1. 仓颉不直连 PostgreSQL 业务库，Run/checkpoint 存储继续 TS 所有。
+2. 时间归一只在 TS/time-core；需排期经 TS propose_task 与冻结按钮确认，不自行计算 UTC。
+3. 外部 MCP、PC/browser、memory/grep 与办公执行经 TS 网关；工具不得内藏完整 Agent。
+4. Harness 内网接入仍须可信 Run 授权绑定；内网不是免鉴权许可。
+5. 只追加事件、冻结展示、确认创建/取消单事务、取消优先、回执门和未知不盲重发不变。
 
 ## 引用
 
-- B04 全文、B05§S1–S3、B06§4；合同 Cangjie 条款；AF 隔离思想。
+- [09 Harness 与 checkpoint](09-agent-runtime-and-checkpoint.md)、[02 模块边界](02-modular-monolith-and-split-triggers.md)、[04 五缝](04-five-seams-contract.md)、[PRD 待决 D2](../prd/04-acceptance-open-questions.md)。
+- B04/B06、AF 仅作机制参考，不把其语言/进程实现复制为项目目标。

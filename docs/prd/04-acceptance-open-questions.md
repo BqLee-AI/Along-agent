@@ -15,6 +15,7 @@
 - [Required] 工具链验收遵循 Bun 1.4.2 冻结安装、Oxlint 1.89.0、Oxfmt 0.74.0 与 `bun:test`；`bun run verify` 是本地与 static 的共同阻塞入口。依赖优先构建后串行执行全部 workspace 类型检查，保留源码、测试与 Next route typegen。文件级并行保留隔离及 mock/时钟恢复；只有只读边界 fixture 可最多两个真实 CLI 并行，逐项拒绝断言、绿例两种扫描和清理前等待均须保留。`test:contracts` 包含 API 两种传输及契约包，`test:integration` 覆盖全部 9 个真实 PostgreSQL 16 文件，`test:scheduler` 保留 D9 指定集。D1/D2 原边界与断言不因工具或调度改变（见 design/01 §5、design/13 §3–§4、ADR 0006、0008）。
 - [Required] 同次 verify 仅复用成功 typecheck 构建的共享 packages；失败构建不消费，独立单元入口与跳过 typecheck 的 verify 仍真实准备包，不依赖旧 dist 或跨 job 产物。Compose 宿主不安装没有宿主消费者的依赖，镜像内仍真实执行 Bun 冻结安装、构建与运行；缺/有 `TZDB_VERSION` 两轮全新卷的就绪场景均须保留，格式错误不能作为警告放行。验收结果记在对应 change tasks / PR，不把未执行检查写成完成。
 - [Required · #43] HTTP入口在业务POST收集前复用身份与适用CSRF头门禁；原始JSON字节累计不超过131072（含分块/UTF8），超限413 PAYLOAD_TOO_LARGE，空/畸形JSON400 VALIDATION_ERROR，响应头/envelope/error的request_id一致。拒绝未消费上传先发有限响应再关闭，不等end或无界drain；合法小JSON与keep-alive、冻结确认/取消事务不回归。真实HTTP有限上传和隔离PG覆盖见对应PR；不以此声明DoS、代理缓冲、内存/吞吐或慢连接防护已验收（design/10 §1.1）。
+- [Required · #44 规范目标] 仓颉唯一组织模型/工具循环、当前上下文、计划、预算、等待/恢复/停止；TS 长期保留 ToolGateway/tools/memory/grep/MCP/PC/browser/办公、身份/批准/时间/任务/worker、API/Web 与 Run/checkpoint 存储（design/09/11、ADR 0009）。这是 R1 前职责基线，不是 R1 已验收；事件补读不等于执行恢复，fencing/checkpoint 不保证通用 external exactly-once，未知不盲重放。
 
 ### #26 七步 smoke 的通知可见面与结论边界
 
@@ -26,16 +27,16 @@
 
 ## Deferred 清单（每条写明阻塞阶段）
 
-| #   | 事项         | 现状                                                                        | 阻塞阶段                                      |
-| --- | ------------ | --------------------------------------------------------------------------- | --------------------------------------------- |
-| D1  | 目标市场     | 未定；多租户隔离只预留，v0 跑单租户行为                                     | 阻塞 P5 计费与组织模型；不阻塞 P1             |
-| D2  | 是否练仓颉   | 未定；CangjieMagic 只作第二实现，v0–P3 不用                                 | 阻塞 P3 联调排期；不阻塞 P1/P2                |
-| D3  | 鉴权方案     | 已定：Better Auth 自建 credential（D7 空环境冒烟不依赖外部 IdP；v0 单租户） | 已冻结；schema/05 与 api 鉴权章节按此落地     |
-| D4  | Web 框架     | 已定：Next.js，RSC 开、Turbopack 开（默认配置，偏离另开 docs PR 说明）      | 已冻结；apps/web 脚手架按此落地               |
-| D5  | 推送渠道     | Web Push 仅兜底；邮件/系统推送未选                                          | 阻塞 P5 触达扩展；不阻塞 P1（应用内通知先行） |
-| D6  | LLM 供应商   | 未选；预算护栏（BUDGET_EXCEEDED）先行                                       | 阻塞成本核算；不阻塞 P1 功能验收              |
-| D7  | 计费模型     | 未定；额度字段留占位不冻结                                                  | 阻塞 P5；不阻塞 P1                            |
-| D8  | 每日任务粒度 | 每日重复任务进 v1；v0 只做单次 + missed 一键重约                            | 阻塞 P2+ 重复语义设计；不阻塞 P1              |
+| #   | 事项             | 现状                                                                        | 阻塞阶段                                      |
+| --- | ---------------- | --------------------------------------------------------------------------- | --------------------------------------------- |
+| D1  | 目标市场         | 未定；多租户隔离只预留，v0 跑单租户行为                                     | 阻塞 P5 计费与组织模型；不阻塞 P1             |
+| D2  | 仓颉职责（已定） | 仓颉唯一 Harness + TS 长期能力/业务/存储；库/模型协议兼容未验证             | 责任已冻结；R1 实施未完成，不阻塞既有 v0 证据 |
+| D3  | 鉴权方案         | 已定：Better Auth 自建 credential（D7 空环境冒烟不依赖外部 IdP；v0 单租户） | 已冻结；schema/05 与 api 鉴权章节按此落地     |
+| D4  | Web 框架         | 已定：Next.js，RSC 开、Turbopack 开（默认配置，偏离另开 docs PR 说明）      | 已冻结；apps/web 脚手架按此落地               |
+| D5  | 推送渠道         | Web Push 仅兜底；邮件/系统推送未选                                          | 阻塞 P5 触达扩展；不阻塞 P1（应用内通知先行） |
+| D6  | LLM 供应商       | 未选；预算护栏（BUDGET_EXCEEDED）先行                                       | 阻塞成本核算；不阻塞 P1 功能验收              |
+| D7  | 计费模型         | 未定；额度字段留占位不冻结                                                  | 阻塞 P5；不阻塞 P1                            |
+| D8  | 每日任务粒度     | 每日重复任务进 v1；v0 只做单次 + missed 一键重约                            | 阻塞 P2+ 重复语义设计；不阻塞 P1              |
 
 - [Required] 正文不得猜 Deferred 字段：相关 schema/API 留占位，由归属阶段决策解冻；解冻前 /readyz 按类型化错误如实报告，不降级。
 - [Required] D3、D4 已在 P0 冻结，不再阻塞 P1 开工（见 03 准入）。
@@ -44,7 +45,7 @@
 
 - [Required] 取消后触发数破 0：重开 P1，Scheduler claim/lease/fencing 与 outbox 核对逻辑必须复审，人复核放行前不得发版。
 - [Required] missed 率或触发延迟持续超基线 2 倍：重开实验起步值（24h/15min/1min/30s/3 退避），以 P1 实测 rescues 为准重新冻结。
-- [Required] S1–S3 任一结案项不达标：不得进 P3；CangjieMagic 第二实现无限期保持 Proposed。
+- [Required] 仓颉实现/选库验证失败需修正适配或选库，不降为 TS 隐藏 Agent 或迁移全后端；旧 S1–S3 第二实现转正门不再适用。实际恢复保证按工具/故障窗口举证（design/11）。
 - [Required] presentation_hash 比对失败率异常（展示与快照系统性对不上）：停在待核对，重开 stream-protocol 版本对照（thread-stream.schema.json）与卡片渲染链。
 - [Required] /readyz 类型化错误（tzdb/别名表缺失）出现：服务保持不就绪，重开 deploy 单镜像构建流程，不得手动放行。
 - [Proposed] 用户连续要求"范围提醒/尽快/有空时"类模糊时间：记入未支持请求列表（30 天归档、一年删除），只在用户主动查看或 v1 评审时翻出，不为此重开 v0。

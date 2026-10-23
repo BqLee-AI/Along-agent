@@ -71,7 +71,7 @@ Card：
 ## 预算（简报 run 独立预算）
 
 - [Required] 简报 run 与对话 run 预算隔离：`brief_budget={max_tokens: 2000, max_cards: 10, max_tool_calls: 0}`——简报 LLM 无工具调用（上下文已冻结注入），`max_tool_calls=0` 恒定。
-- [Required] 超限即停：token 超限截断并标 degraded；卡数超限按上节截断。TS 侧为权威计数（见 05 双预算）。
+- [Required] 模型生成预算由仓颉 Harness 强制，TS 负责卡片 schema/投影与存储，不内藏第二模型循环（见 05）。v0 简报实际是确定性只读投影；此处模型预算是后续目标，不是已实现 provider usage。
 - [Proposed] 实验起步值：2000 tokens 为待校准值（与 24h/15min/1min/30s/3退避同为云端待校准实验起步，以自家可测指标为准）。
 
 ## 与 design/04/09 的一致性

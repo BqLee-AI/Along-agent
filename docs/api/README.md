@@ -75,7 +75,7 @@
 
 - 写操作幂等键的默认通用约定：客户端在 `POST /conversations/messages`、既有 confirm/reject、`POST /tasks/{id}/actions/cancel` 上附带 `Idempotency-Key: <uuidv4>`，按既有端点合同去重。**revise 例外**：只认必填 body `idempotency_key`，不以 header/request_id 补缺或覆盖；按 `(owner, revise, key)` 持久保留预约/结果，不作24h自动清理，跨目标/异body冲突见 approvals §6。不能把默认通用键空间或保留期套在 revise。
 - `request_id` 去重只用于链路追踪，不替代幂等键。
-- 确认消费与建 Task 在同一事务内完成（唯一跨模块事务），重复确认返回 `200` + 原 task，不新建（见 approvals 文档）。
+- 确认消费与创建 Task/created/outbox，或取消批准与 tasks 公共取消用例同事务；重复确认回原 task/取消对象，不重复业务动作（见 approvals；design/02 §1–§2）。同步公共服务/DTO/只读投影不强制 outbox。
 - 取消幂等：重复取消同一 task 返回 `200` + 当前状态（见 tasks 文档）。
 - 改期 v0 无原子替换接口：先取消旧 task，再走对话/确认建新 task，`recreated_from` 关联（见 tasks 文档）。
 
@@ -137,5 +137,5 @@
 
 - design 为真源、prd 跟随：路由增删、权限/CSRF/幂等语义、envelope 或错误码变化时，先改 design/03，再同步本文档与各分组文档。
 - 本目录只定 HTTP 契约，不写实现代码；字段级 zod schema 以 `packages/stream-protocol`（SSE 事件）与服务端 schema 为准，文档引用其版本号。
-- 不复制外部产物原文/token/DSN；不猜 Deferred 事项（鉴权方案/目标市场/是否练仓颉/Web 框架/推送通道/LLM 供应商/计费）。
+- 不复制外部产物原文/token/DSN；不猜未定目标市场/推送通道/LLM 供应商/计费。仓颉唯一 Harness 与 TS 长期能力/业务/存储责任已定（design/09/11），不等于远程 API 已实现。
 - 引用蓝图统一用 B00–B06 / AF 代号。

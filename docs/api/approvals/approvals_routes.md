@@ -80,8 +80,8 @@
 ```
 
 - 三件套校验：`approval_id` + 服务端冻结快照 + `presentation_hash`（规范编码：排版空格不计、原话空格计、时间先归一再编码）。对不上返回 `409 PRESENTATION_MISMATCH`，停在待核对，不建 Task。
-- 成功 `200`：确认消费 + 建 Task 同一事务，返回新建 task：
-  `data={approval_id, status:"consumed", task_id:"<UUID>", duplicate:false}`。
+- create_task 成功 `200`：确认消费 + 建 Task/created/outbox 同事务，返回新建 task：`data={approval_id, status:"consumed", task_id:"<UUID>", duplicate:false}`。
+- cancel_task 成功 `200`：同一冻结校验后，在同一事务调用 tasks 公共取消用例并消费批准；`task_id` 为原目标，响应沿用上述形状。consumed 不证明已取得撤销回执，任务仍按回执停 cancel_pending/进入 cancelled；重复消费不再次请求业务动作（design/02 §1、design/06 §6）。
 - 重复确认：同一 approval 或同幂等键再次 confirm，返回 `200` + 原 `task_id`，`data.duplicate=true`，不新建（“这是重复确认，没有新建第二条”）。
 - `POST /approvals/{id}/actions/reject` 请求体：`{"reason": "…"(可选), "idempotency_key": "…"}`；成功 `200`，`status=rejected` 终态。
 - 24h 过期或目标已过：`410 APPROVAL_EXPIRED`；被新版本替代：`409 APPROVAL_SUPERSEDED`（`details.successor_approval_id` 指向新确认）；已消费后 reject：`409` + 原 task 引用（用“取消”而非“拒绝”关闭 task，见 tasks 文档）。

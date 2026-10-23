@@ -17,9 +17,9 @@
 ## 范围：P0–P5
 
 - [Required] P0 前置决策：Better Auth 自建 vs OIDC 二选一拍板；目标市场与计费方向的最小假设；技术栈冻结（Web 框架、LLM 供应商起步选择）。P0 不定，schema/05 与 api 鉴权章节不得冻结。
-- [Required] P1（v0 MVP）：八步闭环 Web 单端 + 五缝全接口化（AgentRuntime / ToolGateway / Scheduler / Notifier / ConnectorVault 接口 + Fake）+ time-core 服务端时间层 + 只追加事件账。差异化三点全部落 P1（见下）。
-- [Proposed] P2 实时增强：WS + ws-ticket 接入；Spike S1–S3 与 P1 并行、P2 末结案（结案标准见 03）。
-- [Proposed] P3 仓颉第二实现：CangjieAgentRuntime 远程 HTTP/SSE 上线，v0–P3 默认不用；需排期回调 propose_task；仓颉永不直连业务库、不做时间归一。
+- [Required] v0 保留八步 Web 闭环、time-core、确认门和只追加事件。五缝是主要能力边界，不强制全模块接口空壳或远程化（design/02/04）。
+- [Proposed] 旧 P2 实时增强（WS 等）仍是独立后续能力，不作为仓颉候选第二实现竞赛阶段。
+- [Required] R1 起仓颉唯一 Harness，负责模型/工具循环、本次上下文、计划、预算、等待/恢复/停止；TS 长期保留 ToolGateway/tools/memory/grep/MCP/PC/browser/办公、身份/批准/时间/任务/worker、API/Web/Run 存储。R1 未实现；旧 P3 转正定位停止适用（design/09/11）。
 - [Deferred] P4 Electron 套壳：套同一份 Next.js；v0 不做任何客户端常驻逻辑。
 - [Deferred] P5 规模化：K8s、计费、推送渠道扩展；以 P1 可测指标为准另行立项。
 

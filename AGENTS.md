@@ -7,7 +7,7 @@ TypeScript + Next.js（App Router）+ PostgreSQL 16 的云端个人助理；包�
 - 服务端：TS 模块化单体，一个镜像三种角色 `api|worker|all`；Postgres 唯一事实源，Redis 延后不引入。
 - 认证：Better Auth 自建 credential（#1 已定，单租户；v0 端点只暴露 `GET /me`）。
 - 布局：`apps/api`（服务端入口）、`apps/web`（Next.js）；`packages/time-core|scheduler-core|notifier-core|stream-protocol|contracts`；详见 `docs/design/01-tech-stack-and-repo-structure.md §2`。
-- 待定不猜：目标市场、LLM 供应商、推送通道、计费、是否练仓颉（见 `docs/prd/04-acceptance-open-questions.md` D1–D8）。
+- 待定不猜：目标市场、LLM 供应商、推送通道、计费（见 `docs/prd/04-acceptance-open-questions.md`）。仓颉唯一 Harness 与 TS 长期能力/业务/存储分工已定（`docs/design/09-agent-runtime-and-checkpoint.md`、`docs/design/11-cangjie-runtime-spike.md`），R1 仍未实现。
 
 ## 常用命令
 
@@ -24,9 +24,9 @@ TypeScript + Next.js（App Router）+ PostgreSQL 16 的云端个人助理；包�
 ## 代码约定
 
 - TypeScript 严格模式；模块按 `apps/api/src/modules/<name>/` 划分所有权，一模块一 schema 前缀。
-- 跨模块只传 id，不直读对方表；除 confirm 单事务外禁跨模块事务，其余走 outbox。
+- 跨模块资源关联 ID-first；允许同步公共用例、显式 DTO 与只读投影，不直读对方私有表。确认创建或取消保持受控单事务，其他可靠异步命令/事件走 outbox，不将公共读取/同步调用强制入队；D1 只证明存储实现导入边界，不证明 SQL 所有权（见 design/02、04、ADR 0009）。
 - 安全内核 5 条（硬规则）：
-  1. confirm 单事务：验 owner/pending/有效期 → 比 `presentation_hash` → 建 task → 写 `task_events.created` → 写 outbox → consumed，全回滚，重复回同一 task。
+  1. confirm 创建分支单事务：验 owner/pending/有效期 → 比 `presentation_hash` → 建 task → 写 `task_events.created` → 写 outbox → consumed，全回滚，重复回同一 task。取消分支经相同冻结校验后，同事务调用 tasks 公共取消用例并 consumed，取消状态/事件/命令保持原子；重复回原目标，仍须遵守撤销回执门（design/06）。
   2. 时间唯一权威 `time-core.normalize` 纯函数（零依赖，不读时钟/env/网络）；入口必问（缺年份/时区/时段就问）/模糊词挡（“左右/尽快/有空时”）；`/readyz` 类型化不降级。
   3. `task_events` 只追加，DB 禁 UPDATE/DELETE；`UNIQUE(task_id, fire_at)`；`recreated_from` 唯一。
   4. 取消赢过一切（`cancel_pending` 提交计时）+ 无回执不停终态（无 `schedule_receipt` 不标 `scheduled`，无撤销回执不标 `cancelled`）。

@@ -16,7 +16,7 @@
 - [Required] 确认门是 v0 唯一“点头”：confirm 之前无 task、无排期；草稿只是 approval(pending)。
 - [Required] v0 只认确认按钮；整句文本确认不参与意图解析（S0 #14，见 §4）。
 - [Required] 确认绑定三样：`approval_id` + 当时看到的完整内容 + `presentation_hash`；对不上即 PRESENTATION_MISMATCH。
-- [Required] Approval 消费 + 建 task 同事务是唯一跨模块事务。
+- [Required] 批准消费与创建任务或取消请求保持受控单事务；同步公共用例/只读投影/异步 outbox 的适用范围见 02 §1–§2。
 
 ## 1. approval 对象（字段到名）
 
@@ -84,9 +84,10 @@ presentation 输入
 - `hash = "ph_" + sha256(canonical, hex)`。模板排版空白永不进 hash；`original_text` 逐字节精确。
 - first 的 v2 是回显内容版本，不另改规范编码域：仍用 `along-presentation/v1` 算法，第二字段按冻结值编码 `v2`。读取和确认均使用行内 `presentation_version`；不能拿当前默认 v1 重算新 first 的 hash，也不能接受缺少次数/偏移的旧普通模板作为 v2 的 `seen_content`。未知版本仍拒绝确认。
 
-## 6. 同事务（唯一跨模块事务）[Required]
+## 6. 受控同事务（创建与取消）[Required]
 
 - 同一事务：验 owner/pending/有效期 → 比 hash → 建 task(saved) → 写 task_events.created → 写 outbox → approval→consumed。
+- cancel_task 分支：同一冻结确认门校验后，经 tasks 公共取消用例提交取消状态/事件/旧工作失效/取消命令并消费批准；不得拆成消费后异步请求取消。撤销回执前仍是 cancel_pending，consumed 不等于已撤销外部效果（07/08）。
 - 任一步失败全回滚；对外只说“没记上”，不报成功。
 
 ## 7. 展示只读 [Required]

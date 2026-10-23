@@ -1,10 +1,10 @@
 # CangjieMagic 能力边界（已知 vs 未验证）
 
-> 状态：调研结论（2026-10-13），以公开仓库文档为准。范围：CangjieMagic 框架能力在我方架构中的位置。不包含：仓颉语法教程、模型供应商选型。阶段标签：v0–P3 不用（CangjieMagic 只作 AgentRuntime 第二实现，远程 HTTP/SSE）；Spike S1–S3 与 P1 并行、P2 末结案。
+> 状态：历史调研（2026-10-13，未重新验证框架能力）。范围：公开仓库能力摘要。不包含：当前语言分工的实施证据。阶段标签：以下旧第二实现/S1–S3 数字只保留历史研究范围，非有效 R1 转正门；当前目标以 design/09/11、ADR 0009 为准。
 
 ## 定位一句话
 
-CangjieMagic 只作 AgentRuntime 第二实现（`CangjieAgentRuntime`，远程 HTTP/SSE）；v0–P3 不用；仓颉永不直连业务库、不做时间归一；需排期回调 `propose_task`（Deferred）。详见 design/11。
+[Required · 当前] 仓颉唯一宿主 Harness，TS 长期保留 tools/memory/grep/MCP/PC/browser/办公、业务/worker/API/Web 与存储；不全迁 TS 后端。CangjieMagic 是待验证的仓颉库选择，不决定是否采用仓颉。下方“我方映射”与 S1–S3 为历史方案，不能当作已实现或当前要求；尤其通用 exactly-once 未被证明（[design/11](../design/11-cangjie-runtime-spike.md)）。
 
 ## 已知能力（Observed，来自公开仓库文档）
 

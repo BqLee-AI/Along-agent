@@ -13,14 +13,15 @@
 
 ## 清单
 
-| 编号                              | 标题                               | 状态       | 依据                                                                          |
-| --------------------------------- | ---------------------------------- | ---------- | ----------------------------------------------------------------------------- |
-| 0000                              | 模板（不决策）                     | —          | 本 README                                                                     |
-| 0001                              | 为什么用 ADR                       | Accepted   | 本 README                                                                     |
-| [0002](0002-pnpm-turbo.md)        | 包管理与构建：pnpm + Turbo（历史） | Superseded | 被 [0006](0006-bun-ox-toolchain.md) 取代，正文保留                            |
-| 0003                              | 唯一事实源 PG + outbox             | Accepted   | design/01 §1；design/02 §1–§2；design/08；design/13 D3–D6                     |
-| 0004                              | spec / design 权威关系             | Accepted   | docs/README.md；openspec/config.yaml；design/13                               |
-| 0005                              | S0 冻结                            | Accepted   | AGENTS.md S0 条款；design/07、10、06、03；design/13 D10                       |
-| [0006](0006-bun-ox-toolchain.md)  | Bun + Ox 工具链                    | Accepted   | design/01 §1、§5；design/13 §3–§4；#13                                        |
-| [0007](0007-ci-critical-path.md)  | CI 关键路径局部修订                | Accepted   | 仅局部修订 0006 的 CI 编排/失败传播；Bun/Ox 选型不变；design/13 §4；#21       |
-| [0008](0008-static-scheduling.md) | static 内部调度                    | Accepted   | 局部修订 0007 的内部并发边界；构建拓扑、五门与 D1–D10 不变；design/13 §4；#24 |
+| 编号                                            | 标题                               | 状态                         | 依据                                                                                |
+| ----------------------------------------------- | ---------------------------------- | ---------------------------- | ----------------------------------------------------------------------------------- |
+| 0000                                            | 模板（不决策）                     | —                            | 本 README                                                                           |
+| 0001                                            | 为什么用 ADR                       | Accepted                     | 本 README                                                                           |
+| [0002](0002-pnpm-turbo.md)                      | 包管理与构建：pnpm + Turbo（历史） | Superseded                   | 被 [0006](0006-bun-ox-toolchain.md) 取代，正文保留                                  |
+| [0003](0003-pg-source-of-truth-outbox.md)       | 唯一事实源 PG + outbox             | Accepted（局部由 0009 修订） | PG/可靠异步投递保留；所有调用/outbox 与仅创建事务的绝对范围以 0009 为准，旧正文冻结 |
+| 0004                                            | spec / design 权威关系             | Accepted                     | docs/README.md；openspec/config.yaml；design/13                                     |
+| 0005                                            | S0 冻结                            | Accepted                     | AGENTS.md S0 条款；design/07、10、06、03；design/13 D10                             |
+| [0006](0006-bun-ox-toolchain.md)                | Bun + Ox 工具链                    | Accepted                     | design/01 §1、§5；design/13 §3–§4；#13                                              |
+| [0007](0007-ci-critical-path.md)                | CI 关键路径局部修订                | Accepted                     | 仅局部修订 0006 的 CI 编排/失败传播；Bun/Ox 选型不变；design/13 §4；#21             |
+| [0008](0008-static-scheduling.md)               | static 内部调度                    | Accepted                     | 局部修订 0007 的内部并发边界；构建拓扑、五门与 D1–D10 不变；design/13 §4；#24       |
+| [0009](0009-cangjie-harness-ts-capabilities.md) | 仓颉唯一 Harness / TS 长期能力     | Accepted                     | 局部修订 0003 的调用/事务范围；design/02/04/09/11；不改业务、安全 spec 或 CI        |

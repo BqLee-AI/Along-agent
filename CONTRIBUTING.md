@@ -34,6 +34,7 @@
 1. 从 issue 领任务：issue 正文用 `.github/ISSUE_TEMPLATE/` 官方模板（`task.md` 通用任务或 `decision.md` 方案拍板），Spec 路径 + 章节号必填。
 2. `main` 禁止直推，一律走 issue → 分支 → PR。
 3. 一个 PR 只做一件事；有行为契约先建 OpenSpec-only PR，再提实现 PR。
+4. #44 为规范基线对齐，不改变有效业务行为：仓颉唯一 Harness、TS 长期能力/业务/存储；同步公共用例、只读投影、确认创建/取消单事务与异步 outbox 的适用范围见 [design/02 §1–§2](docs/design/02-modular-monolith-and-split-triggers.md) 与 [design/09](docs/design/09-agent-runtime-and-checkpoint.md)。历史 ADR/验收不冒充新目标已实现；行为变化仍先独立 OpenSpec-only。
 
 ## 3. 分支命名
 
@@ -119,6 +120,7 @@
 - Web 不得直接引用 API 源码（含类型），报 `no-web-to-api`；HTTP 客户端不受影响。
 - 共享包依赖范围：time-core 仅自身源码；contracts、stream-protocol 仅自身源码与 zod；scheduler-core 仅自身源码、contracts、time-core；notifier-core 仅自身源码、contracts。未声明的 workspace、应用、外部包和 Node 内置模块均拒绝。
 - `scripts/fixtures/boundaries/` 保留扫描输入；测试复制到只读使用的临时目录并链接已安装的真实 zod/TypeScript，最多两个异步 CLI 同时运行，逐条断言 depcruise 退出码、违规规则名且无未解析依赖。绿例保留 err/JSON 两种真实扫描，清理前等待已排队及运行中的 CLI 结束；红例输出 `[red] exit=1 <规则>: <来源> → <目标>`，D1 evidence 由 `ci/gates.json` 登记。此并发仅用于边界 fixture，不改共享时钟、mock 或数据库用例的并发。
+- D1 绿色仅证明上述静态导入规则，不解析 SQL 表归属、owner 过滤或事务原子性。公共函数中直接 SQL 仍需按模块所有权人工审查及行为验证；受控确认事务包含创建和取消分支，不是跨模块存储导入豁免（design/02 §1–§2，ADR 0009）。
 
 ## 7. AI 辅助声明
 
