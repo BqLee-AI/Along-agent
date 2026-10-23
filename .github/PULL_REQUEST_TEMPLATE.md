@@ -21,7 +21,12 @@ Spec:（可填 openspec/changes/<name>/proposal.md 或 docs/design 路径 §章�
 
 ## Verification
 
-<!-- 跑了什么：CI 链接 / 测试输出 / 变红测试链接；必须含命令与结果 -->
+<!-- 按 CONTRIBUTING.md §6.1 说明策略和保护的行为：测试先行 / 复用覆盖 / 先探索 / 不适用，由实现者自主选择。 -->
+<!-- 测试先行须给出 Red 命令及目标失败原因、Green 命令与结果；其他策略给对应覆盖/实验/检查依据，不强填 Red。 -->
+<!-- 以下记录实际命令、结果和适用版本；环境失败、事后补测或变异证据不冒充 TDD，不要求红色 commit。 -->
+
+- 测试策略与证据：
+- 真实路径验证：（实际用户/API/数据库/跨语言/工具产物；不适用说明原因与替代检查）
 
 - [ ] `bun run verify` 通过（含 typecheck、lint、unit 与阻塞式 format:check）
 - [ ] `bun run test:contracts` 通过（API 进程内/HTTP 双跑及契约包）
