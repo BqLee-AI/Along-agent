@@ -22,13 +22,13 @@
 
 ## 1. 总览与选型
 
-| 缝             | 职责一句话                                                    | v0 落点                                           | P1+                                                   |
-| -------------- | ------------------------------------------------------------- | ------------------------------------------------- | ----------------------------------------------------- |
-| AgentRuntime   | 仓颉负责模型/工具循环、当前上下文、计划、预算、等待/恢复/停止 | TS 确定性 turn、Run/事件存储；无真实 LLM          | 仓颉唯一 Harness；TS Run 持久化与业务执行资格继续保留 |
-| ToolGateway    | 白名单 + 校验 + 风险分级 + 审计                               | 本地 3~5 工具（时间只读、便签读写类），无外部 MCP | MCP 经网关聚合，仓颉只认网关                          |
-| Scheduler      | 登记 schedule / 认领 lease + fencing / cancel                 | PG lease（见 08），无 Redis                       | 量大再议 Redis 延后项                                 |
-| Notifier       | send → 回执 + 幂等                                            | 站内信（应用内通知）先行                          | 邮件/推送后期，接口不变                               |
-| ConnectorVault | secret 引用不出明文                                           | 仅接口 + Fake，无真实连接                         | 第 1~2 真实连接按评审接入                             |
+| 缝             | 职责一句话                                                    | v0 落点                                                                   | P1+                                                   |
+| -------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------- | ----------------------------------------------------- |
+| AgentRuntime   | 仓颉负责模型/工具循环、当前上下文、计划、预算、等待/恢复/停止 | TS 确定性 turn、Run/事件存储；无真实 LLM                                  | 仓颉唯一 Harness；TS Run 持久化与业务执行资格继续保留 |
+| ToolGateway    | 白名单 + 校验 + 风险分级 + 审计                               | 本地 5 工具：提醒提议、取消请求、任务列表、简报卡片、用户偏好；无外部 MCP | MCP 经网关聚合，仓颉只认网关                          |
+| Scheduler      | 登记 schedule / 认领 lease + fencing / cancel                 | PG lease（见 08），无 Redis                                               | 量大再议 Redis 延后项                                 |
+| Notifier       | send → 回执 + 幂等                                            | 站内信（应用内通知）先行                                                  | 邮件/推送后期，接口不变                               |
+| ConnectorVault | secret 引用不出明文                                           | 仅接口 + Fake，无真实连接                                                 | 第 1~2 真实连接按评审接入                             |
 
 ## 2. AgentRuntime（目标语义，非现有远程 API）
 
@@ -87,7 +87,7 @@ Scheduler.claim(due_tasks) -> lease（PG 行锁 + lease_owner + lease_expires，
 Scheduler.cancel(task_id, idempotency_key) -> cancel_receipt | PENDING（无回执即 PENDING）
 ```
 
-- [Required] 登记成功以回执为准；无回执 task 停 `pending_schedule`。
+- [Required] 登记成功以回执为准；无回执不标 `scheduled`，未过窗时停 `pending_schedule`。未完成排期的 `saved/pending_schedule` 超原到点 15min 按 08 §5 原子终结为 `missed`，不伪造回执、不调用 provider；取消分支仍遵守撤销回执门。
 - [Required] 认领 fencing：`expected_state_version` 对不上不发；版本变/已取消标 SUPERSEDED 不发。
 - [Required] 取消优先：cancel 提交后排队重试全作废；触发门禁照拦。
 
@@ -98,7 +98,7 @@ Notifier.send(task_id, fire_at_utc, idempotency_key, attempt_no) -> receipt | AC
   receipt含 provider_receipt_id；ACK_UNKNOWN 只核对不重发（30s/2min/5min 各核一次，仍未知转持久对账）
 ```
 
-- [Required] 同一幂等键最多 3 次退避（起步值：首次后 1min、再 5min，待校准）；离原定不足 15min 不试，记 FAILED_DEADLINE_WINDOW 请新建。
+- [Required] 仅明确拒绝且能证明未接收的通道可按通道合同退避；本地 inapp 异常/无回答只核对，不盲重发。超原到点 15min 不发新请求，历史接收核对不算补发；许可、退避与未知核对以 08 §4/§7–§8 为准。
 - [Required] 口径天花板：receipt 只证明接口收了，不证明用户看见；对外只说“已记录的步骤可核对”。
 - [Observed] v0 通道 = 应用内通知；系统通知三问（认幂等键？可按键查？取消可拦？）答不上就按降级写，不假设。
 

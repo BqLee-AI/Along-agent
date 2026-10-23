@@ -69,7 +69,7 @@ checkpoint: 每个 attempt 内按 step_no 单调追加（只追加，不改写�
 
 - 白名单：每次 `run` 限定 `tools_allowlist`，默认最小集；allowlist 外调用直接 `TOOL_DENIED`。
 - 参数校验：zod schema per-tool；风险分级 `low/medium/high`；`high` 强制 HITL。
-- 审计：每次 `tool_call/tool_result` 写 `tool_calls`（含 `invocation_id`、`risk_level`、`approval_id?`、`request_id`）。
+- [Required · R1 目标] 审计关联每次 `tool_call/tool_result` 的稳定 `invocation_id`、风险与批准引用及 `request_id`；稳定身份/结果账合同随 #45 定义。现有 v0 `tool_calls` 不是已实施的 invocation_id 结果账，不以此声明通用执行去重。
 
 ## 6. 事件补读、执行上下文与效果恢复
 
