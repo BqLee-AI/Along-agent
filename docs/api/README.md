@@ -68,6 +68,7 @@
   - 有会话但无权访问他人资源返回 `403`（多租户隔离，服务端按 `owner_id` 强制过滤，不依赖客户端传参）。
   - 所有 `POST` 写操作需要 CSRF 防护。默认机制：Cookie session + `X-CSRF-Token` 请求头（token 来源见 `GET /me`，方案确定前为 [Proposed]，字段名可换但“写操作必校验”不变）。
   - `GET` 与探针不要求 CSRF。
+  - HTTP入口先完成既有身份/适用CSRF头门禁再收集POST body；JSON原始字节累计上限128KiB（131072字节），Content-Length仅用于早拒，chunked仍逐块累计。空/畸形JSON为400，超限413；未消费请求先送完有限响应再关闭连接，不等待上传end，不无界drain；合法完整请求保留keep-alive。详见design/10 §1.1。
   - 服务端对外口径只说“已记录步骤”，不承诺必达（触发/通知语义见 tasks 文档）。
 
 ## 4. 幂等与并发 [Required]
@@ -86,7 +87,8 @@
 | 422  | NONEXISTENT_LOCAL_TIME | 本地时间不存在（如夏令时跳变缺失时刻），不存不排                         | conversations            |
 | 422  | AMBIGUOUS_LOCAL_TIME   | 本地时间出现两次，需 `fold_choice` 二选一，`details.candidates` 带两候选 | conversations            |
 | 422  | UNKNOWN_TIMEZONE       | 非法/未知 IANA 时区                                                      | conversations            |
-| 400  | VALIDATION_ERROR       | 请求体 zod 校验失败（通用）                                              | 全 POST                  |
+| 400  | VALIDATION_ERROR       | 请求体为空、JSON语法错误或zod校验失败                                    | 全 POST                  |
+| 413  | PAYLOAD_TOO_LARGE      | JSON body原始累计字节超过131072；顶层code为413，不占40xxxx业务编号       | HTTP入口                 |
 | 401  | UNAUTHENTICATED        | 无会话或会话失效                                                         | 全受保护路由             |
 | 403  | FORBIDDEN              | 跨用户/跨租户访问                                                        | 全受保护路由             |
 | 404  | NOT_FOUND              | 资源不存在（含已清理墓碑只留号的情形按 404 + 提示）                      | GET 详情/事件            |

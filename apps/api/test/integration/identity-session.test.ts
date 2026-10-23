@@ -1,4 +1,4 @@
-import { EventEmitter } from 'node:events';
+import { Readable } from 'node:stream';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
@@ -40,8 +40,8 @@ function fakeGet(url: string, headers: Record<string, string> = {}) {
 }
 
 function fakePost(url: string, headers: Record<string, string>, payload: unknown) {
-  const emitter = new EventEmitter();
-  const req = Object.assign(emitter, {
+  // A paused stream retains bytes while asynchronous session resolution runs.
+  const req = Object.assign(Readable.from([Buffer.from(JSON.stringify(payload), 'utf8')]), {
     method: 'POST',
     url,
     headers,
@@ -59,10 +59,6 @@ function fakePost(url: string, headers: Record<string, string>, payload: unknown
       (this as unknown as FakeResponse).payload = body;
     },
   } as unknown as FakeResponse;
-  setImmediate(() => {
-    emitter.emit('data', Buffer.from(JSON.stringify(payload), 'utf8'));
-    emitter.emit('end');
-  });
   return { req, res, body: () => JSON.parse(res.payload) as Record<string, unknown> };
 }
 

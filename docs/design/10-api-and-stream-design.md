@@ -21,6 +21,15 @@ Observed / Required / Proposed / Deferred 同 01。
 - 认证：v0 `GET /me` 外全部需 Better Auth session（模式 Deferred，P0 定）；写操作 CSRF（SameSite cookie + `X-CSRF-Token`，对标 QuantAgent api 约定 Observed）。
 - 版本化：破坏性变更走 `/api/v2`；SSE 事件带 `protocol_version`（见 §4）。
 
+### 1.1 JSON 请求体边界（Required · #43）
+
+- HTTP入口唯一拥有请求体收集与连接收尾。批准、对话、任务POST先复用既有actor与适用的CSRF请求头门禁，再收集body；模块仍使用同一actor执行owner/业务授权，不新增身份体系。未知路由不解析或无界drain上传。
+- JSON body原始累计上限为 **128 KiB（131072字节）**，包含语法、转义和全部字段，按UTF8字节而非字符计数；等于上限可解析，超过一字节即拒绝。既有最长文本/回显20000字符，最坏JSON转义约120000字节，余量用于协议字段；业务schema长度不变。此传输合同不承诺接受任意空白/填充或大文件。
+- 身份/CSRF在先；可用Content-Length超限提前413，但它不替代每个到达块的累计检查，无长度/chunked同样有界。越界块不加入保存数组，不做concat/JSON.parse；释放已收集块。未新增Content-Type或解压支持合同。
+- 超限返回HTTP413、顶层`code:413`、`error.code:PAYLOAD_TOO_LARGE`；空/畸形JSON返回既有HTTP400/`VALIDATION_ERROR`。均使用通用envelope，响应头、顶层和error的`request_id`一致；不新增40xxxx业务编号。SSE头仅在入口通过后建立。
+- 提前拒绝或超限且流未消费完时暂停读取，发送有限错误响应并声明`Connection: close`，响应发送完成后销毁未结束请求/连接；不等客户端end、不无界drain。客户端中断/流错误结束读取并移除读取监听器，不解析部分JSON或进入业务。合法完整请求保留keep-alive；既有owner、冻结确认、幂等和取消事务不变。
+- 该边界只限制应用保存/解析的JSON字节，不声明总进程内存/吞吐/代理缓冲/慢连接防护已验证；独立上传平台、代理与超时策略不在#43范围。
+
 ## 2. v0 路由表（Required，13 业务端点 + 2 探针）
 
 | #   | 方法 | 路径                                     | 说明                                                                        | 幂等/约束                                                 |
@@ -66,6 +75,8 @@ Observed / Required / Proposed / Deferred 同 01。
 ## 6. 错误码（Required，`40xxxx` 业务段 + HTTP 状态）
 
 下表 `40xxxx` 是既有业务目录编号。按实际 `packages/contracts/src/envelope.ts` 与 HTTP `failEnvelope`，业务失败顶层 `code` 为 numeric 目录值，`error.code` 为符号名；SSE `payload.error.code` 同样为符号名，`http_status` 单独表达错误语义，不将两候选变成新事件类型。认证/结构/依赖错误沿用既有 envelope，本文不借#30重编号。
+
+传输新增错误沿用HTTP状态作顶层code：`413 / PAYLOAD_TOO_LARGE`（见§1.1）；空/畸形JSON沿用`400 / VALIDATION_ERROR`，均非40xxxx业务编号。
 
 | 目录编号 / error.code 符号名      | HTTP | 含义                                        | 触发点                                  |
 | --------------------------------- | ---- | ------------------------------------------- | --------------------------------------- |
