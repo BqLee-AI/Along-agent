@@ -18,8 +18,10 @@
 
 - [x] 真正 SIGKILL 覆盖许可前、许可后、接收前、接收后回答丢失、结果提交前及终态后；实际调用分开计数（A3）。
 - [x] 真实取消竞争与原到点+15min 后两个实际 tick，取消后调用 0、正控制 1（A3/D9）。
-- [ ] 同一服务端镜像 ROLE=all+PG16+Compose+真实 Web/session，冻结显示及通知/事件链正确（A1/A3、D1/D2/D8）。
+- [x] 同一服务端镜像 ROLE=all+PG16+Compose+真实 Web/session，冻结显示及通知/事件链正确（A1/A3、D1/D2/D8）。
 - [x] 记录源码/镜像、输入/IDs、调用/receipt/通知/fired、时间窗及证据局限；独立审查，不把未知当成功。
-- [ ] OpenSpec 严格校验与 archive，精确收口 head 五门 SUCCESS/CLEAN 后合并并 Closes #29；清理独占资源。
+- [x] OpenSpec 严格校验与 archive；清理本轮独占运行资源，验收数据卷保留备查。
 
-运行记录：[2026-10-21 A3 证据](../../../docs/demo/v0-crash-recovery-evidence-2026-10-21.md)。组合镜像 all 绝对时间正控制完成；原始字面 A1 因引擎中断未在 2026-10-22T01:20Z 后宽限内触发，恢复后诚实 missed。失败与独立新任务见 [A1 恢复记录](../../../docs/demo/v0-a1-recovery-evidence-2026-10-22.md) 和 [#38](https://github.com/BqLee-AI/Along-agent/issues/38)。新任务自然到点为 2026-10-23T01:20Z，不能将其登记或此前正控制冒充完整 v0 通过；本 change 暂不归档、关闭 issue 或清理验收环境。
+收口合并门：精确收口 head 的五项 required checks 必须全部 SUCCESS、合并状态 CLEAN 后才允许 squash 合并，并在收口 PR 中 Closes #29 / Closes #38。归档及本清单不替代该门。
+
+运行记录：[2026-10-21 A3 证据](../../../../docs/demo/v0-crash-recovery-evidence-2026-10-21.md)、[A1 失败与部署恢复](../../../../docs/demo/v0-a1-recovery-evidence-2026-10-22.md) 和 [2026-10-23 完整验收记录](../../../../docs/demo/v0-closeout-evidence-2026-10-23.md)。原始 A1 保持失败/missed；独立新字面任务自然次日到点，实际调用/通知/fired 各 1，宽限后两个成功轮次及后置只读样本成立，真实任务详情与活动页一致。不用新任务覆盖旧失败，不将旧镜像强杀证据重标为本轮镜像实跑。
