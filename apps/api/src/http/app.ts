@@ -1,7 +1,10 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Pool } from 'pg';
-import { createActorResolver, csrfTokenFor, type ActorResolver } from './auth.js';
+import { createActorResolver, csrfTokenFor, verifyCsrf, type ActorResolver } from './auth.js';
 import {
+  csrfMismatch,
+  HttpError,
+  validationError,
   failEnvelope,
   notFound,
   requestIdOf,
@@ -30,22 +33,61 @@ function isAppDeps(opts: TzdbOnlyOpts | AppDeps): opts is AppDeps {
   return 'pool' in opts || 'resolveActor' in opts;
 }
 
-function readBody(req: IncomingMessage): Promise<unknown> {
-  const { promise, resolve, reject } = Promise.withResolvers<unknown>();
+const MAX_BODY_BYTES = 131072;
+
+function closeUnreadRequest(req: IncomingMessage, res: ServerResponse): void {
+  if (!req.socket || req.readableEnded) return;
+  req.pause();
+  res.shouldKeepAlive = false;
+  res.setHeader('connection', 'close');
+  // Flush the finite response before destroying an unfinished upload. Do not
+  // resume/drain an attacker-controlled stream or wait for its end.
+  const close = () => req.destroy();
+  req.once('error', () => {});
+  res.once('finish', close);
+  res.once('close', close);
+}
+
+function readBody(req: IncomingMessage): Promise<{ body: unknown } | null> {
+  if (req.destroyed) return Promise.resolve(null);
+  const { promise, resolve, reject } = Promise.withResolvers<{ body: unknown } | null>();
   const chunks: Buffer[] = [];
-  req.on('data', (c: Buffer) => chunks.push(c));
-  req.on('end', () => {
-    if (chunks.length === 0) {
-      resolve(undefined);
+  let bytes = 0;
+  function cleanup() {
+    chunks.length = 0;
+    req.off('data', onData);
+    req.off('end', onEnd);
+    req.off('error', onInterrupted);
+    req.off('close', onInterrupted);
+  }
+  function onData(chunk: Buffer) {
+    bytes += chunk.length;
+    if (bytes > MAX_BODY_BYTES) {
+      req.pause();
+      cleanup();
+      reject(new HttpError(413, 413, 'PAYLOAD_TOO_LARGE', 'request body too large'));
       return;
     }
+    chunks.push(chunk);
+  }
+  function onEnd() {
     try {
-      resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+      const body: unknown = JSON.parse(Buffer.concat(chunks, bytes).toString('utf8'));
+      cleanup();
+      resolve({ body });
     } catch {
-      resolve(undefined);
+      cleanup();
+      reject(validationError('invalid JSON body'));
     }
-  });
-  req.on('error', reject);
+  }
+  function onInterrupted() {
+    cleanup();
+    resolve(null);
+  }
+  req.on('data', onData);
+  req.once('end', onEnd);
+  req.once('error', onInterrupted);
+  req.once('close', onInterrupted);
   return promise;
 }
 
@@ -58,12 +100,63 @@ export async function handleRequest(
   opts: TzdbOnlyOpts | AppDeps,
 ): Promise<void> {
   const requestId = requestIdOf(req);
+  // All module envelopes and SSE frames reuse this normalized transport id.
+  req.headers['x-request-id'] = requestId;
   const url = new URL(req.url ?? '/', 'http://localhost');
   const { pathname } = url;
   const deps: AppDeps = isAppDeps(opts) ? opts : { pool: null, tzdbVersion: opts.tzdbVersion };
   const tzdbVersion = deps.tzdbVersion;
   const timeContext = deps.timeContext ?? loadTimeContext(tzdbVersion);
-  const resolveActor = deps.resolveActor ?? createActorResolver({ pool: deps.pool });
+  let resolveActor = deps.resolveActor ?? createActorResolver({ pool: deps.pool });
+  let body: unknown;
+  if (req.method !== 'GET' && req.method !== 'POST') closeUnreadRequest(req, res);
+  const protectedPost =
+    req.method === 'POST' &&
+    (pathname === '/api/v1/approvals' ||
+      pathname.startsWith('/api/v1/approvals/') ||
+      pathname.startsWith('/api/v1/conversations/') ||
+      pathname === '/api/v1/tasks' ||
+      pathname.startsWith('/api/v1/tasks/'));
+  if (protectedPost) {
+    const actor = await resolveActor(req);
+    if (!actor) {
+      closeUnreadRequest(req, res);
+      sendJson(res, 401, failEnvelope(unauthorized(), requestId), requestId);
+      return;
+    }
+    // Resolve once; module entry points retain their own authorization guards.
+    resolveActor = async () => actor;
+    const writeRoute =
+      pathname === '/api/v1/conversations/messages' ||
+      /^\/api\/v1\/approvals\/[^/]+\/actions\/(?:confirm|reject|revise)$/.test(pathname) ||
+      /^\/api\/v1\/tasks\/[^/]+\/actions\/cancel$/.test(pathname);
+    if (!writeRoute) {
+      closeUnreadRequest(req, res);
+      sendJson(res, 404, failEnvelope(notFound(), requestId), requestId);
+      return;
+    }
+    if (!verifyCsrf(req, actor)) {
+      closeUnreadRequest(req, res);
+      sendJson(res, 403, failEnvelope(csrfMismatch(), requestId), requestId);
+      return;
+    }
+    try {
+      // Content-Length is only an early rejection hint. Chunked requests and
+      // all accepted lengths still pass through the cumulative byte counter.
+      const length = req.headers['content-length'];
+      if (typeof length === 'string' && Number(length) > MAX_BODY_BYTES) {
+        throw new HttpError(413, 413, 'PAYLOAD_TOO_LARGE', 'request body too large');
+      }
+      const parsed = await readBody(req);
+      if (!parsed) return;
+      body = parsed.body;
+    } catch (err) {
+      if (!(err instanceof HttpError)) throw err;
+      closeUnreadRequest(req, res);
+      sendJson(res, err.httpStatus, failEnvelope(err, requestId), requestId);
+      return;
+    }
+  }
 
   if (req.method === 'GET' && pathname === '/healthz') {
     sendJson(res, 200, { status: 'ok' }, requestId);
@@ -132,7 +225,6 @@ export async function handleRequest(
   // Approvals read routes (PR1) + confirm/reject (PR2).
   if (pathname === '/api/v1/approvals' || pathname.startsWith('/api/v1/approvals/')) {
     if (req.method === 'GET' || req.method === 'POST') {
-      const body = req.method === 'POST' ? await readBody(req) : undefined;
       const handled = await handleApprovalRoute(req, res, url, {
         pool: deps.pool,
         resolveActor,
@@ -156,7 +248,6 @@ export async function handleRequest(
     pathname.startsWith('/api/v1/conversations/')
   ) {
     if (req.method === 'GET' || req.method === 'POST') {
-      const body = req.method === 'POST' ? await readBody(req) : undefined;
       const handled = await handleConversationRoute(req, res, url, {
         pool: deps.pool,
         resolveActor,
@@ -171,7 +262,6 @@ export async function handleRequest(
 
   if (pathname === '/api/v1/tasks' || pathname.startsWith('/api/v1/tasks/')) {
     if (req.method === 'GET' || req.method === 'POST') {
-      const body = req.method === 'POST' ? await readBody(req) : undefined;
       const handled = await handleTaskRoute(req, res, url, {
         pool: deps.pool,
         resolveActor,
@@ -183,10 +273,7 @@ export async function handleRequest(
     return;
   }
 
-  // Consume the body for non-GET so sockets drain even on 404.
-  if (req.method !== 'GET') {
-    await readBody(req);
-  }
+  closeUnreadRequest(req, res);
 
   sendJson(
     res,
