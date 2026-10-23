@@ -1,0 +1,268 @@
+{
+  "scope": "New independent literal A1 natural-time completion and actual browser read-side verification. Original A1 remains failed. Not a device delivery/read receipt.",
+  "compiled_at": "2026-10-23T01:43:10.721587+00:00",
+  "source_main": "7ac8c0c3299f2a37ec48338c171a8b8cc47c4dfb",
+  "runtime_image_id": "sha256:908ed59e951777b6eb1e3dac92550a3278e7274a2e1c0eb2a1e317a898261603",
+  "task_id": "eb4d9ff4-0328-44b6-bb1a-4d342d72465b",
+  "original_failed_task_id": "d021e80d-c78e-467c-8400-c818a3730737",
+  "observer_result": {
+    "task_id": "eb4d9ff4-0328-44b6-bb1a-4d342d72465b",
+    "fire_at_utc": "2026-10-23T01:20:00+00:00",
+    "grace_end_utc": "2026-10-23T01:35:00+00:00",
+    "finished_at": "2026-10-23T01:35:54.285000+00:00",
+    "checks": {
+      "approval_frozen_unchanged": true,
+      "task_frozen_unchanged": true,
+      "same_source_approval": true,
+      "task_fired": true,
+      "one_actual_call": true,
+      "one_notice": true,
+      "one_fired_event": true,
+      "call_within_grace": true,
+      "fired_within_grace": true,
+      "two_real_successful_ticks_after_grace": true
+    },
+    "passed": true
+  },
+  "final_readonly_sample": {
+    "observed_at": "2026-10-23T01:35:54.285Z",
+    "task": {
+      "id": "eb4d9ff4-0328-44b6-bb1a-4d342d72465b",
+      "fold": 0,
+      "kind": "notify_only",
+      "state": "fired",
+      "wall_time": "2026-10-23 09:20",
+      "created_at": "2026-10-22T07:40:43.076157+00:00",
+      "occurrence": "once",
+      "fire_at_utc": "2026-10-23T01:20:00+00:00",
+      "timezone_id": "Asia/Shanghai",
+      "tzdb_version": "fixture-v1",
+      "original_note": "明天9:20提醒我喝水",
+      "state_version": 3,
+      "schedule_receipt": "sched:eb4d9ff4-0328-44b6-bb1a-4d342d72465b",
+      "source_approval_id": "30f2cc6c-64f0-45ff-83ef-03a6bd0c43a4",
+      "recreated_from_task_id": null,
+      "resolved_utc_offset_seconds": 28800
+    },
+    "approval": {
+      "id": "30f2cc6c-64f0-45ff-83ef-03a6bd0c43a4",
+      "fold": 0,
+      "kind": "create_task",
+      "state": "consumed",
+      "wall_time": "2026-10-23 09:20",
+      "created_at": "2026-10-22T07:40:18.533473+00:00",
+      "expires_at": "2026-10-23T07:40:18.533473+00:00",
+      "occurrence": "single",
+      "fire_at_utc": "2026-10-23T01:20:00+00:00",
+      "timezone_id": "Asia/Shanghai",
+      "tzdb_version": "fixture-v1",
+      "original_text": "明天9:20提醒我喝水",
+      "target_task_id": null,
+      "conversation_id": "30cdabf8-338c-455a-8e64-4fd783ac0ef9",
+      "consumed_task_id": "eb4d9ff4-0328-44b6-bb1a-4d342d72465b",
+      "presentation_hash": "ph_edfcdf56aa4a002b8a86d774930b3f07b88f3b8e14f65d93fdbe349678fb13ae",
+      "presentation_version": "v1",
+      "expected_state_version": null,
+      "supersedes_approval_id": null,
+      "resolved_utc_offset_seconds": 28800
+    },
+    "notices": [
+      {
+        "id": "b7753a16-fe19-49ba-865f-11aebded2f93",
+        "body": "已记录：明天9:20提醒我喝水（2026-10-23 09:20 Asia/Shanghai）。到点在调度器运行时尝试通知，关机、休眠或队列拥堵可能错过。",
+        "title": "提醒 2026-10-23 09:20 Asia/Shanghai",
+        "status": "sent",
+        "channel": "inapp",
+        "sent_at": "2026-10-23T01:20:14.764501+00:00",
+        "task_id": "eb4d9ff4-0328-44b6-bb1a-4d342d72465b",
+        "created_at": "2026-10-23T01:20:14.764501+00:00",
+        "fire_at_utc": "2026-10-23T01:20:00+00:00",
+        "idempotency_key": "send:eb4d9ff4-0328-44b6-bb1a-4d342d72465b:2026-10-23T01:20:00.000Z",
+        "expected_state_version": 2
+      }
+    ],
+    "events": [
+      {
+        "id": "ebd05325-8fbb-4ca4-9b4c-74117155f357",
+        "type": "created",
+        "task_id": "eb4d9ff4-0328-44b6-bb1a-4d342d72465b",
+        "evidence_ref": "local",
+        "state_version": 1,
+        "recorded_at_utc": "2026-10-22T07:40:43.076157+00:00"
+      },
+      {
+        "id": "5b92bf2b-8881-430f-82b8-c894583ea315",
+        "type": "scheduled",
+        "task_id": "eb4d9ff4-0328-44b6-bb1a-4d342d72465b",
+        "evidence_ref": "sched:eb4d9ff4-0328-44b6-bb1a-4d342d72465b",
+        "state_version": 2,
+        "recorded_at_utc": "2026-10-22T07:41:08.643651+00:00"
+      },
+      {
+        "id": "5b7ba984-7581-4f4e-81e2-bb9540021478",
+        "type": "fired",
+        "task_id": "eb4d9ff4-0328-44b6-bb1a-4d342d72465b",
+        "evidence_ref": "inapp:b7753a16-fe19-49ba-865f-11aebded2f93",
+        "state_version": 3,
+        "recorded_at_utc": "2026-10-23T01:20:14.718338+00:00"
+      }
+    ],
+    "native_provider_calls": [
+      {
+        "at": "2026-10-23T01:20:14.729Z",
+        "instance": "first-v2-compose-all",
+        "pid": 1,
+        "stage": "provider_call_entered",
+        "taskId": "eb4d9ff4-0328-44b6-bb1a-4d342d72465b"
+      }
+    ],
+    "successful_ticks_after_grace": [
+      {
+        "at": "2026-10-23T01:35:14.647Z",
+        "instance": "first-v2-compose-all",
+        "pid": 1,
+        "stage": "worker_tick",
+        "workerId": "worker-2b4d70c8-1c42-4e07-8799-dfd1c8b8df61",
+        "success": true
+      },
+      {
+        "at": "2026-10-23T01:35:44.644Z",
+        "instance": "first-v2-compose-all",
+        "pid": 1,
+        "stage": "worker_tick",
+        "workerId": "worker-2b4d70c8-1c42-4e07-8799-dfd1c8b8df61",
+        "success": true
+      }
+    ]
+  },
+  "browser": {
+    "observed_at": "2026-10-23T01:43:10.721541+00:00",
+    "browser": "managed Chromium, actual Next.js production pages on 127.0.0.1:3100",
+    "web_source": "main@7ac8c0c; existing production build",
+    "same_owner_as_task": true,
+    "session_method": "Temporary server-seeded signed session for the existing synthetic owner, using production identity crypto and session schema. No dev-auth bridge; no business records altered. Credentials held only in memory.",
+    "me": {
+      "http": 200,
+      "confirmed_timezone": "Asia/Shanghai",
+      "owner_equal": true
+    },
+    "task_url": "http://127.0.0.1:3100/tasks/eb4d9ff4-0328-44b6-bb1a-4d342d72465b",
+    "task_http": 200,
+    "task_api": {
+      "task_id": "eb4d9ff4-0328-44b6-bb1a-4d342d72465b",
+      "kind": "notify_only",
+      "state": "fired",
+      "state_version": 3,
+      "fire_at_utc": "2026-10-23T01:20:00.000Z",
+      "fire_at_local": "2026-10-23 09:20",
+      "timezone_id": "Asia/Shanghai",
+      "source_approval_id": "30f2cc6c-64f0-45ff-83ef-03a6bd0c43a4",
+      "recreated_from": null,
+      "schedule_receipt": "sched:eb4d9ff4-0328-44b6-bb1a-4d342d72465b",
+      "created_at": "2026-10-22T07:40:43.076Z",
+      "notifications": [
+        {
+          "id": "b7753a16-fe19-49ba-865f-11aebded2f93",
+          "title": "提醒 2026-10-23 09:20 Asia/Shanghai",
+          "body": "已记录：明天9:20提醒我喝水（2026-10-23 09:20 Asia/Shanghai）。到点在调度器运行时尝试通知，关机、休眠或队列拥堵可能错过。",
+          "status": "sent",
+          "sent_at": "2026-10-23T01:20:14.764Z"
+        }
+      ]
+    },
+    "task_page_text": "Along\n今日\n对话\n确认\n任务\n活动\n任务 eb4d9ff4\n\nfired · 2026-10-23 09:20（Asia/Shanghai）\n\n登记回执\nsched:eb4d9ff4-0328-44b6-bb1a-4d342d72465b\n状态版本\n3\n创建时间\n2026-10-22T07:40:43.076Z\n取消这条提醒\n站内通知\n\n以下仅为站内通知记录，不表示用户收到或看过。\n\n提醒 2026-10-23 09:20 Asia/Shanghai\n\n已记录：明天9:20提醒我喝水（2026-10-23 09:20 Asia/Shanghai）。到点在调度器运行时尝试通知，关机、休眠或队列拥堵可能错过。\n\n记录状态\nsent\n发送时间（UTC）\n2026-10-23T01:20:14.764Z\n事件账\n类型\t记录时间（UTC）\t证据\ncreated\t2026-10-22T07:40:43.076Z\tlocal\nscheduled\t2026-10-22T07:41:08.643Z\tsched:eb4d9ff4-0328-44b6-bb1a-4d342d72465b\nfired\t2026-10-23T01:20:14.718Z\tinapp:b7753a16-fe19-49ba-865f-11aebded2f93",
+    "events_http": 200,
+    "events_api": {
+      "items": [
+        {
+          "event_id": "ebd05325-8fbb-4ca4-9b4c-74117155f357",
+          "type": "created",
+          "recorded_at_utc": "2026-10-22T07:40:43.076Z",
+          "state_version": 1,
+          "evidence_ref": "local"
+        },
+        {
+          "event_id": "5b92bf2b-8881-430f-82b8-c894583ea315",
+          "type": "scheduled",
+          "recorded_at_utc": "2026-10-22T07:41:08.643Z",
+          "state_version": 2,
+          "evidence_ref": "sched:eb4d9ff4-0328-44b6-bb1a-4d342d72465b"
+        },
+        {
+          "event_id": "5b7ba984-7581-4f4e-81e2-bb9540021478",
+          "type": "fired",
+          "recorded_at_utc": "2026-10-23T01:20:14.718Z",
+          "state_version": 3,
+          "evidence_ref": "inapp:b7753a16-fe19-49ba-865f-11aebded2f93"
+        }
+      ],
+      "next_cursor": null
+    },
+    "activity_url": "http://127.0.0.1:3100/activity",
+    "activity_target_rows": [
+      {
+        "cells": [
+          "fired",
+          "eb4d9ff4fired",
+          "2026-10-23T01:20:14.718Z",
+          "inapp:b7753a16-fe19-49ba-865f-11aebded2f93"
+        ],
+        "task_href": "/tasks/eb4d9ff4-0328-44b6-bb1a-4d342d72465b"
+      },
+      {
+        "cells": [
+          "scheduled",
+          "eb4d9ff4fired",
+          "2026-10-22T07:41:08.643Z",
+          "sched:eb4d9ff4-0328-44b6-bb1a-4d342d72465b"
+        ],
+        "task_href": "/tasks/eb4d9ff4-0328-44b6-bb1a-4d342d72465b"
+      },
+      {
+        "cells": ["created", "eb4d9ff4fired", "2026-10-22T07:40:43.076Z", "local"],
+        "task_href": "/tasks/eb4d9ff4-0328-44b6-bb1a-4d342d72465b"
+      }
+    ],
+    "activity_link_returns_same_task": true,
+    "task_text_unchanged_after_navigation": true,
+    "visual_review": "Task page full-page and activity viewport screenshots inspected; frozen wall time, one sent record, disabled cancellation and target created/scheduled/fired rows visible. Screenshots remain local, not committed."
+  },
+  "independent_evidence_reviews": [
+    {
+      "reviewer": "ReviewA1FinalEvidence",
+      "scope": "Same new literal A1, frozen binding, native invocation count, SQL visibility within grace, two successful post-grace ticks, API/DOM/activity correspondence",
+      "result": "supported",
+      "findings": [],
+      "reran_runtime": false,
+      "human_or_platform_approval": false
+    },
+    {
+      "reviewer": "ReviewV0AcceptanceScope",
+      "scope": "A1-A4 acceptance mapping, approved safety-first unknown outcome boundary, source/image and existing evidence applicability",
+      "result": "supported",
+      "findings": [],
+      "reran_runtime": false,
+      "human_or_platform_approval": false
+    }
+  ],
+  "owned_runtime_cleanup": {
+    "temporary_browser_session_revoked": true,
+    "browser_closed": true,
+    "temporary_production_web_stopped": true,
+    "login_startup_entry_removed": "AlongV0Closeout-A1-eb4d9ff4",
+    "remaining_observer_processes": 0,
+    "removed_containers": ["along-v0-accept-api-1", "along-v0-closeout-pg"],
+    "removed_image_tag": "along-agent:v0-closeout-54380b88dfe6",
+    "removed_network": "along-v0-accept_default",
+    "retained_data_volume": "along-v0-closeout-data",
+    "raw_evidence_retained_outside_repository": true,
+    "unrelated_projects_untouched": true
+  },
+  "limitations": [
+    "Docker/WSL were stopped by the user overnight and restarted before the new task fire time; no uninterrupted overnight observation is claimed.",
+    "Observer was restarted at 2026-10-23T01:14:49.269Z before fire. Its stale reference to an intentionally removed stopped PostgreSQL container was corrected to handle absence while retaining shared-volume guard.",
+    "Actual provider entry point diagnostics were persisted independently in events.jsonl; SQL notice count alone is not used to prove one actual invocation.",
+    "Event recorded_at_utc timestamps occur inside transactions and are not claimed as exact COMMIT timestamps.",
+    "Provider reception is a local in-app database record, not proof of external device delivery or user read."
+  ]
+}
