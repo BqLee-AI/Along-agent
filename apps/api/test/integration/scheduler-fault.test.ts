@@ -357,4 +357,138 @@ maybe('scheduler fault injection (F1/F2, D9)', () => {
     );
     expect(Number(firedEvents[0]?.n)).toBe(0);
   });
+
+  for (const state of ['saved', 'pending_schedule']) {
+    it(`terminates a never-scheduled ${state} task after the window without invoking a provider`, async () => {
+      const { taskId, ownerId } = await confirmTask(pool);
+      await pool.query(
+        "UPDATE tasks SET state = $2, fire_at_utc = now() - interval '20 minutes' WHERE id = $1",
+        [taskId, state],
+      );
+      let calls = 0;
+      const noSend: InAppProvider = async () => {
+        calls += 1;
+        throw new Error('past-window task must not invoke a provider');
+      };
+      for (let tick = 0; tick < 3; tick += 1) {
+        await Promise.all([runSchedulePhase(pool), runSchedulePhase(pool)]);
+        await runClaimPhase(pool, 'unscheduled-deadline');
+        await runSendPhase(pool, noSend);
+        await runMissedPhase(pool);
+      }
+      expect((await getTaskDetail({ pool }, ownerId, taskId)).state).toBe('missed');
+      expect(
+        (
+          await pool.query('SELECT schedule_receipt, state_version FROM tasks WHERE id = $1', [
+            taskId,
+          ])
+        ).rows,
+      ).toEqual([{ schedule_receipt: null, state_version: 2 }]);
+      expect(
+        (
+          await pool.query(
+            'SELECT type FROM task_events WHERE task_id = $1 ORDER BY state_version',
+            [taskId],
+          )
+        ).rows,
+      ).toEqual([{ type: 'created' }, { type: 'missed' }]);
+      expect(
+        (
+          await pool.query('SELECT status, provider_receipt_id FROM outbox WHERE task_id = $1', [
+            taskId,
+          ])
+        ).rows,
+      ).toEqual([{ status: 'failed_deadline', provider_receipt_id: null }]);
+      expect(
+        (await pool.query('SELECT id FROM notifications WHERE task_id = $1', [taskId])).rows,
+      ).toEqual([]);
+      expect(calls).toBe(0);
+    });
+  }
+
+  it('recovers historical failed schedule commands without reopening or duplicating events', async () => {
+    const { taskId, ownerId } = await confirmTask(pool);
+    await pool.query("UPDATE tasks SET fire_at_utc = now() - interval '20 minutes' WHERE id = $1", [
+      taskId,
+    ]);
+    // Exact old-worker residue: command is terminal, task was never registered.
+    await pool.query("UPDATE outbox SET status = 'failed_deadline' WHERE task_id = $1", [taskId]);
+    for (let tick = 0; tick < 3; tick += 1) {
+      await Promise.all([runMissedPhase(pool), runMissedPhase(pool)]);
+    }
+    expect((await getTaskDetail({ pool }, ownerId, taskId)).state).toBe('missed');
+    expect(
+      (
+        await pool.query('SELECT type FROM task_events WHERE task_id = $1 ORDER BY state_version', [
+          taskId,
+        ])
+      ).rows,
+    ).toEqual([{ type: 'created' }, { type: 'missed' }]);
+    expect(
+      (
+        await pool.query('SELECT status, provider_receipt_id FROM outbox WHERE task_id = $1', [
+          taskId,
+        ])
+      ).rows,
+    ).toEqual([{ status: 'failed_deadline', provider_receipt_id: null }]);
+  });
+
+  it('preserves a committed cancellation when an unscheduled task is already past its window', async () => {
+    const { taskId, ownerId } = await confirmTask(pool);
+    await pool.query("UPDATE tasks SET fire_at_utc = now() - interval '20 minutes' WHERE id = $1", [
+      taskId,
+    ]);
+    await requestCancel({ pool }, ownerId, taskId, { idempotency_key: randomUUID() });
+    await Promise.all([runSchedulePhase(pool), runMissedPhase(pool)]);
+    expect((await getTaskDetail({ pool }, ownerId, taskId)).state).toBe('cancel_pending');
+    await runCancelPhase(pool);
+    await Promise.all([runSchedulePhase(pool), runMissedPhase(pool)]);
+    expect((await getTaskDetail({ pool }, ownerId, taskId)).state).toBe('cancelled');
+    expect(
+      (
+        await pool.query('SELECT type FROM task_events WHERE task_id = $1 ORDER BY state_version', [
+          taskId,
+        ])
+      ).rows,
+    ).toEqual([{ type: 'created' }, { type: 'cancel_requested' }, { type: 'cancelled' }]);
+  });
+
+  it('rolls back unscheduled deadline state and queue when the missed event cannot commit', async () => {
+    const { taskId } = await confirmTask(pool);
+    await pool.query("UPDATE tasks SET fire_at_utc = now() - interval '20 minutes' WHERE id = $1", [
+      taskId,
+    ]);
+    await pool.query(
+      `CREATE FUNCTION fail_unscheduled_missed() RETURNS trigger LANGUAGE plpgsql AS $$
+       BEGIN IF NEW.task_id = '${taskId}'::uuid AND NEW.type = 'missed'
+       THEN RAISE EXCEPTION 'injected missed event failure'; END IF; RETURN NEW; END $$;
+       CREATE TRIGGER fail_unscheduled_missed BEFORE INSERT ON task_events
+       FOR EACH ROW EXECUTE FUNCTION fail_unscheduled_missed()`,
+    );
+    try {
+      await expect(runSchedulePhase(pool)).rejects.toMatchObject({ code: 'P0001' });
+      expect(
+        (
+          await pool.query(
+            'SELECT state, state_version, schedule_receipt FROM tasks WHERE id = $1',
+            [taskId],
+          )
+        ).rows,
+      ).toEqual([{ state: 'saved', state_version: 1, schedule_receipt: null }]);
+      expect(
+        (await pool.query('SELECT status FROM outbox WHERE task_id = $1', [taskId])).rows,
+      ).toEqual([{ status: 'pending' }]);
+      expect(
+        (await pool.query('SELECT type FROM task_events WHERE task_id = $1', [taskId])).rows,
+      ).toEqual([{ type: 'created' }]);
+    } finally {
+      await pool.query(
+        'DROP TRIGGER fail_unscheduled_missed ON task_events; DROP FUNCTION fail_unscheduled_missed()',
+      );
+    }
+    await runSchedulePhase(pool);
+    expect((await pool.query('SELECT state FROM tasks WHERE id = $1', [taskId])).rows).toEqual([
+      { state: 'missed' },
+    ]);
+  });
 });
