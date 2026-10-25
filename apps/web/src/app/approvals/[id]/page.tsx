@@ -1,15 +1,22 @@
 import { apiGet } from '../../../lib/api';
 import { describeApproval } from '../../../lib/presentation';
-import type { ApprovalDetail, Me } from '../../../lib/types';
+import { ApprovalDetailSchema, MeSchema } from '../../../lib/types';
 import ApprovalActions from './ApprovalActions';
 
 export const dynamic = 'force-dynamic';
 
-export default async function ApprovalDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function ApprovalDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ conversation_id?: string; run_id?: string }>;
+}) {
   const { id } = await params;
+  const query = await searchParams;
   const [detailResult, meResult] = await Promise.all([
-    apiGet<ApprovalDetail>(`/api/v1/approvals/${id}`),
-    apiGet<Me>('/api/v1/me'),
+    apiGet<unknown>(`/api/v1/approvals/${id}`),
+    apiGet<unknown>('/api/v1/me'),
   ]);
   if (!detailResult.ok) {
     return (
@@ -19,7 +26,8 @@ export default async function ApprovalDetailPage({ params }: { params: Promise<{
       </section>
     );
   }
-  const detail = detailResult.data;
+  const detail = ApprovalDetailSchema.parse(detailResult.data);
+  const me = meResult.ok ? MeSchema.safeParse(meResult.data) : null;
   const view = describeApproval(detail);
   const actionable = detail.status === 'pending';
   return (
@@ -52,8 +60,10 @@ export default async function ApprovalDetailPage({ params }: { params: Promise<{
         kind={detail.kind}
         originalText={detail.original_text ?? ''}
         timezone={detail.snapshot.timezone_id}
-        csrfToken={meResult.ok ? meResult.data.csrf_token : null}
+        me={me?.success ? me.data : null}
         actionable={actionable}
+        conversationId={query.conversation_id ?? null}
+        runId={query.run_id ?? null}
       />
     </section>
   );

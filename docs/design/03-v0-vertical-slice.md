@@ -52,7 +52,7 @@
 
 ```text
 1 GET /brief → 今日简报 + 可点卡片（只读，不建任何写对象）
-2 卡片/输入 → POST /conversations/messages（SSE）→ AgentRuntime.run（v0 为规则+单 propose_task，不做多步规划）
+2 卡片/输入 → POST /conversations/messages（SSE）；默认 execution=business 保持确定性规则+单 propose_task，不做多步规划；显式 harness 的正式循环/等待见09/11
 3 propose_task（含 wall_time + timezone_id + 原话）→ 调 time-core.normalize
 4a 归一成功 → 建 approval(pending) + 确认卡（冻结快照，见 06）
 4b 归一失败 → 回澄清（NONEXISTENT / AMBIGUOUS+两候选 / UNKNOWN_TIMEZONE / TZDB_UNAVAILABLE），不建 approval
@@ -65,38 +65,41 @@
 
 ### 各步持久化与失败分支
 
-| 步骤           | 写什么                                                                                                                     | 失败分支                                                                            |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| 1 brief        | [Observed] 不写业务对象；读 task/approval 投影即可                                                                         | 读失败 → 空简报 + 可重试，不捏造卡片                                                |
-| 2 messages SSE | [Required] 写 conversation message（用户句 + 助手句）；run 挂 checkpoint（agent_runs/run_attempts/run_checkpoints，见 04） | LLM 超时/预算超 → BUDGET_EXCEEDED 进可重试，不建 approval                           |
-| 3 normalize    | [Required] 不写业务对象；只记 run_checkpoint（含 ruleset_id、tzdb_version）                                                | 错误码见 §4，直接回澄清                                                             |
-| 4a 建 approval | [Required] 写 approval(pending) + 快照冻结                                                                                 | 写失败 → 回“没记上，请重发”，不给确认卡                                             |
-| 5 confirm      | [Required] 见 §6 单事务                                                                                                    | APPROVAL_EXPIRED(410) / APPROVAL_SUPERSEDED / PRESENTATION_MISMATCH → 停，不建 task |
-| 7 登记         | [Required] schedule_receipt 回填 task；事件 scheduled                                                                      | 无回执 → 停 pending_schedule，不标 scheduled                                        |
-| 8 触发         | [Required] fired/missed 事件；Notifier 回执号                                                                              | ACK_UNKNOWN 只核对不重发（见 08）                                                   |
-| 取消           | [Required] cancel_pending→cancelled；cancel_requested 事件                                                                 | 无撤销回执 → 停 cancel_pending，不谎称已取消                                        |
+| 步骤           | 写什么                                                                               | 失败分支                                                                            |
+| -------------- | ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| 1 brief        | [Observed] 不写业务对象；读 task/approval 投影即可                                   | 读失败 → 空简报 + 可重试，不捏造卡片                                                |
+| 2 messages SSE | [Required] 写用户输入；接受的助手 delta、终态 checkpoint、attempt/Run 同事务（见09） | business 保留确定性分支；harness 连接/预算失败类型化终结，不以重试重发未知效果      |
+| 3 normalize    | [Required] 不写业务对象；只记 run_checkpoint（含 ruleset_id、tzdb_version）          | 错误码见 §4，直接回澄清                                                             |
+| 4a 建 approval | [Required] 写 approval(pending) + 快照冻结                                           | 写失败 → 回“没记上，请重发”，不给确认卡                                             |
+| 5 confirm      | [Required] 见 §6 单事务                                                              | APPROVAL_EXPIRED(410) / APPROVAL_SUPERSEDED / PRESENTATION_MISMATCH → 停，不建 task |
+| 7 登记         | [Required] schedule_receipt 回填 task；事件 scheduled                                | 无回执 → 停 pending_schedule，不标 scheduled                                        |
+| 8 触发         | [Required] fired/missed 事件；Notifier 回执号                                        | ACK_UNKNOWN 只核对不重发（见 08）                                                   |
+| 取消           | [Required] cancel_pending→cancelled；cancel_requested 事件                           | 无撤销回执 → 停 cancel_pending，不谎称已取消                                        |
 
-## 3. v0 端点清单（13 业务端点 + 2 探针）
+## 3. 端点清单（v0 13个 + Harness 3个业务端点，另2探针）
 
-| 方法 | 路径                              | 说明                                                                    |
-| ---- | --------------------------------- | ----------------------------------------------------------------------- |
-| GET  | `/me`                             | 当前用户快照（鉴权 Deferred，字段不展开）                               |
-| GET  | `/brief`                          | 今日简报 + 卡片（只读聚合）                                             |
-| POST | `/conversations/messages`         | 发送消息，SSE 回流（思考/澄清/确认卡引用，不直返 task）                 |
-| GET  | `/conversations/{id}`             | 会话详情（含消息 + 关联 approval/task id 引用）                         |
-| GET  | `/approvals`                      | 待确认队列                                                              |
-| GET  | `/approvals/{id}`                 | 确认单详情 + 快照                                                       |
-| POST | `/approvals/{id}/actions/confirm` | 确认（单事务建 task），见 06                                            |
-| POST | `/approvals/{id}/actions/reject`  | 拒绝（pending→rejected）                                                |
-| GET  | `/tasks`                          | 任务列表                                                                |
-| GET  | `/tasks/{id}`                     | 任务详情，含站内通知只读投影（§3.1）                                    |
-| POST | `/tasks/{id}/actions/cancel`      | 取消（cancel_pending→cancelled）                                        |
-| GET  | `/tasks/{id}/events`              | 只追加事件账只读（见 07）                                               |
-| POST | `/approvals/{id}/actions/revise`  | 显式修改指定 pending 提议，新详情重回显且须重新按钮确认（design/06 §9） |
-| GET  | `/healthz`                        | 存活探针，不依赖 DB                                                     |
-| GET  | `/readyz`                         | 就绪探针；类型化错误，不降级（见 05 tzdb 门）                           |
+| 方法 | 路径                                             | 说明                                                                        |
+| ---- | ------------------------------------------------ | --------------------------------------------------------------------------- |
+| GET  | `/me`                                            | 当前用户快照（鉴权 Deferred，字段不展开）                                   |
+| GET  | `/brief`                                         | 今日简报 + 卡片（只读聚合）                                                 |
+| POST | `/conversations/messages`                        | 发送消息，SSE 回流（思考/澄清/确认卡引用，不直返 task）                     |
+| GET  | `/conversations/{id}`                            | 会话详情（含消息 + 关联 approval/task id 引用）                             |
+| GET  | `/approvals`                                     | 待确认队列                                                                  |
+| GET  | `/approvals/{id}`                                | 确认单详情 + 快照                                                           |
+| POST | `/approvals/{id}/actions/confirm`                | 确认（单事务建 task），见 06                                                |
+| POST | `/approvals/{id}/actions/reject`                 | 拒绝（pending→rejected）                                                    |
+| GET  | `/tasks`                                         | 任务列表                                                                    |
+| GET  | `/tasks/{id}`                                    | 任务详情，含站内通知只读投影（§3.1）                                        |
+| POST | `/tasks/{id}/actions/cancel`                     | 取消（cancel_pending→cancelled）                                            |
+| GET  | `/tasks/{id}/events`                             | 只追加事件账只读（见 07）                                                   |
+| POST | `/approvals/{id}/actions/revise`                 | 显式修改指定 pending 提议，新详情重回显且须重新按钮确认（design/06 §9）     |
+| GET  | `/conversations/{cid}/runs/{rid}`                | 只读当前 Run/attempt/有效批准等待点，不启动执行（09、conversations API §3） |
+| POST | `/conversations/{cid}/runs/{rid}/actions/cancel` | 先持久撤销执行资格，再通知/终止进程；保留既成效果                           |
+| POST | `/conversations/{cid}/runs/{rid}/actions/resume` | 仅显式继续最后有效批准等待点，同 Run 新 attempt，不重建原动作               |
+| GET  | `/healthz`                                       | 存活探针，不依赖 DB                                                         |
+| GET  | `/readyz`                                        | 就绪探针；类型化错误，不降级（见 05 tzdb 门）                               |
 
-- [Required] v0 不新增以上之外的端点；WS + ws-ticket 自 P2 起，Web Push 仅兜底，均不在 v0。
+- [Required] 本清单限定既有 v0 与正式 Harness Run 入口；不因此新增任意 checkpoint 恢复、自动执行或其他通道。WS + ws-ticket 自 P2 起，Web Push 仅兜底，均不在 v0。
 - [Required] 全链路 `request_id` + 幂等键；POST confirm/cancel 连点只回同一结果。
 
 ### 3.1 任务详情的站内通知投影 [Required，#26 契约增量]

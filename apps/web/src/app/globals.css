@@ -164,6 +164,7 @@ button:disabled {
 }
 
 input,
+select,
 textarea {
   font: inherit;
   width: 100%;

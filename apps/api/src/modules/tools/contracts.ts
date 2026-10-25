@@ -2,6 +2,14 @@ import type { CreatedApproval } from '../approvals/create.js';
 import type { TimeContext } from '../time/context.js';
 import type { TimeFailure } from '../time/normalize.js';
 
+export const TOOL_IDS = [
+  'propose_task',
+  'request_cancel_task',
+  'list_tasks',
+  'read_brief_cards',
+  'get_user_prefs',
+] as const;
+
 export interface ToolContext {
   ownerId: string;
   conversationId: string;

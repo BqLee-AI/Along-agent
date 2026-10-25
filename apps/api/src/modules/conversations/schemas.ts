@@ -4,6 +4,7 @@ import { z } from 'zod';
 export const SendMessageBodySchema = z
   .object({
     conversation_id: z.string().uuid().optional(),
+    execution: z.enum(['business', 'harness']).optional(),
     raw_text: z.string().min(1).max(20000),
     card_ref: z.string().min(1).max(200).optional(),
     confirmed_timezone_id: z.string().min(1).max(100).nullable().optional(),
@@ -20,3 +21,17 @@ export const ConversationEventsQuerySchema = z.object({
   after_seq: z.coerce.number().int().nonnegative().optional(),
   limit: z.coerce.number().int().min(1).max(500).default(200),
 });
+
+export const CancelRunBodySchema = z
+  .object({
+    idempotency_key: z.string().uuid(),
+    reason: z.string().min(1).max(200).optional(),
+  })
+  .strict();
+
+export const ResumeRunBodySchema = z
+  .object({
+    checkpoint_id: z.string().uuid(),
+    idempotency_key: z.string().uuid(),
+  })
+  .strict();

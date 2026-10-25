@@ -1,6 +1,6 @@
 # Conversation & Runs Schema 设计
 
-> 状态：v0存储与TS调用身份/结果合同。范围：对话/Run/事件、不可变版本、工具接受结果与只追加审计。不包含：仓颉跨语言授权、执行上下文自动恢复。TS长期持有PG/Run/checkpoint，仓颉组织循环与当前上下文（design/09/11）。
+> 状态：业务与正式 Harness 存储合同。范围：对话/Run/attempt、只追加事件/有限快照、冻结执行权威与调用接受结果。不包含：任意崩溃自动恢复或通用 exactly-once。TS 长期持有 PostgreSQL 与事实，仓颉组织循环和本次上下文（design/09/11）。
 
 ## 设计依据
 
@@ -84,7 +84,7 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 
 ### 用途
 
-[Required] 一次 Agent 执行（v0：提醒路归一/澄清/回显生成）。对应 a13n `run`（durable run 封存）。
+[Required] 一次逻辑执行，冻结 `execution=business|harness`。默认/历史 business 沿确定性业务；harness 为唯一仓颉核心且 mode=chat，批准恢复不换 Run。
 
 ### 字段
 
@@ -96,8 +96,15 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 | `agent_revision`        | `text`        | not null                                                    | 不可变 agent 版本号（逻辑引用 `agent_revisions.revision`） |
 | `mode`                  | `text`        | not null                                                    | 按 `chat/task` 约束（v0 提醒路多为 `task`，纯问为 `chat`） |
 | `status`                | `text`        | not null, default `'running'`                               | 按 `running/suspended_approval/done/failed/cancelled` 约束 |
-| `budget_max_iterations` | `integer`     | not null                                                    | 最大迭代（防死循环，v0 小值）                              |
-| `budget_max_tokens`     | `integer`     | not null                                                    | 最大 token（防烧钱）                                       |
+| `budget_max_iterations` | `integer`     | not null                                                    | 接受时冻结；harness 的累计模型迭代上限                     |
+| `budget_max_tokens`     | `integer`     | not null                                                    | 可得 usage 的起步上限；缺 usage 不冒充可证明费用           |
+| `execution`             | `text`        | not null, default business                                  | business/harness，禁止执行中切换                           |
+| `tools_allowlist`       | `jsonb`       | not null, array                                             | 冻结服务端工具范围；历史 business 为[]，不伪造授权         |
+| `frozen_context`        | `jsonb`       | harness 必须 object                                         | 接受时的输入时间/规则上下文；不是模型推理链                |
+| `input_message_id`      | `uuid`        | nullable FK messages；harness 必填                          | 该 Run 实际接受的用户消息                                  |
+| `waiting_checkpoint_id` | `uuid`        | nullable FK run_checkpoints                                 | 最后有效批准等待点                                         |
+| `waiting_invocation_id` | `uuid`        | nullable                                                    | 同 Run 已接受批准提议调用                                  |
+| `waiting_approval_id`   | `uuid`        | nullable                                                    | 原冻结批准；当前决议另从公共读取获取                       |
 | `created_at`            | `timestamptz` | not null, default `now()`                                   | 创建时间                                                   |
 | `ended_at`              | `timestamptz` | nullable                                                    | 结束时间                                                   |
 
@@ -108,14 +115,15 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 
 ### 写入规则
 
-- [Required] 创建时冻结 `agent_revision`；执行中不换版本。
-- [Required] 超预算即停并返回已产出（B04 §6）。
+- [Required] 创建时冻结 execution、owner/conversation、revision、mode、预算、工具范围、上下文与输入引用；0015 trigger 禁止事后改变，终态 Run 不可改写。
+- [Required] harness suspended_approval 时三个 waiting 引用必须齐备；其他 harness 状态必须为空。TS 锁内进一步验证实际 owner/Run/已接受调用/批准对应关系，引用本身不作授权。
+- [Required] 已接受助手 delta 合并的消息、终态 checkpoint、attempt/Run 同事务；无助手输出的结构化失败不合成助手消息。取消不能覆盖已提交事实或伪撤销既成效果。预算失败保留已产出。
 
 ## `run_attempts`
 
 ### 用途
 
-[Observed] run 的一次存储尝试；v0 不因存在 lease 字段就已实现 Agent 并发 fencing 或通用 kill/resume。[Required] 后续恢复需独立执行资格合同，不由新 attempt 推导外部副作用恰好一次（design/09 §6）。
+[Required] 同 Run 的一次有效执行；批准挂起结束当前 attempt，显式恢复创建递增 attempt。每次动作校验最新 running attempt 与实际 Run/权限/取消；旧 pipe 不因持有 UUID 而恢复执行权。存在 lease 字段不代表已实现通用租约或任意崩溃 kill/resume。
 
 ### 字段
 
@@ -138,27 +146,27 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 
 ### 写入规则
 
-- [Proposed · 后续执行恢复] 同 Run 执行资格/lease/version 原子裁决，失活尝试保留证据；具体 attempt 状态与续跑分配随跨语言合同验证，不把当前表字段当已生效的 Agent fencing 保证。
+- [Required] `attempt → Run → invocation` 锁序裁决当前执行资格。同有效批准等待点最多一个恢复 attempt；取消与恢复竞争时重新定位最新 attempt。不由 attempt 递增推导外部效果 exactly-once。
 
 ## `run_checkpoints`
 
 ### 用途
 
-[Observed] v0 实际逐条保存 thread 事件供幂等 POST 和 GET after_seq 补读（conversations/repository.ts#appendCheckpoint），不是可重启模型循环的完整执行快照。[Required] R1 上下文/等待与后续无人值守恢复分别定义，不能靠 checkpoint/lease 推导通用 exactly-once；未知不盲重放（design/09 §6）。
+[Required] 对外 thread 事件与内部 `harness_snapshot` 共用只追加表。只有有效批准等待点有有限恢复语义；历史业务事件不伪造完整执行上下文，普通 checkpoint/lease 不提供通用恢复保证。
 
 ### 字段
 
-| 字段                      | 类型          | 约束                                                       | 说明                                                                                                                                                                                                       |
-| ------------------------- | ------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`                      | `uuid`        | primary key                                                | checkpoint ID                                                                                                                                                                                              |
-| `owner_id`                | `uuid`        | not null                                                   | 所属用户，查询必带                                                                                                                                                                                         |
-| `attempt_id`              | `uuid`        | not null, references `run_attempts(id)` on delete restrict | 所属 attempt                                                                                                                                                                                               |
-| `seq`                     | `bigint`      | not null                                                   | attempt 内序号，从 1 递增                                                                                                                                                                                  |
-| `event_seq`               | `bigint`      | not null, unique, default `nextval`                        | 全局跨会话流游标；`GET /conversations/{id}?after_seq=` 只做不透明比较                                                                                                                                      |
-| `kind`                    | `text`        | not null                                                   | 按 `thinking/tool_call/tool_result/approval_required/answer/thread.started/message.delta/card.proposed/thread.completed/thread.failed/thread.cancelled` 约束（v1 冻结词集，见 `packages/stream-protocol`） |
-| `payload`                 | `jsonb`       | not null, default `'{}'`                                   | 结构化摘要（tool 名 + 参数摘要 + 结果摘要）；不存敏感原文                                                                                                                                                  |
-| `stream_protocol_version` | `text`        | not null                                                   | 投影协议版本（`packages/stream-protocol` 版本号），AG-UI 投影依据                                                                                                                                          |
-| `created_at`              | `timestamptz` | not null, default `now()`                                  | 创建时间                                                                                                                                                                                                   |
+| 字段                      | 类型          | 约束                                                       | 说明                                                                                              |
+| ------------------------- | ------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `id`                      | `uuid`        | primary key                                                | checkpoint ID                                                                                     |
+| `owner_id`                | `uuid`        | not null                                                   | 所属用户，查询必带                                                                                |
+| `attempt_id`              | `uuid`        | not null, references `run_attempts(id)` on delete restrict | 所属 attempt                                                                                      |
+| `seq`                     | `bigint`      | not null                                                   | attempt 内序号，从 1 递增                                                                         |
+| `event_seq`               | `bigint`      | not null, unique                                           | 全局不透明流游标；before-insert 持 conversation 锁后重新分配，锁持至提交；允许内部行/回滚导致间隙 |
+| `kind`                    | `text`        | not null                                                   | 保留既有内部/七词事件，新增内部 `harness_snapshot`；读取外部流显式过滤                            |
+| `payload`                 | `jsonb`       | not null, default `'{}'`                                   | 结构化摘要（tool 名 + 参数摘要 + 结果摘要）；不存敏感原文                                         |
+| `stream_protocol_version` | `text`        | not null                                                   | 投影协议版本（`packages/stream-protocol` 版本号），AG-UI 投影依据                                 |
+| `created_at`              | `timestamptz` | not null, default `now()`                                  | 创建时间                                                                                          |
 
 ### 约束与索引
 
@@ -170,6 +178,19 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 
 - [Required] 只追加，禁 `UPDATE`/`DELETE`。
 - [Required] `payload` 不存敏感值原文；tool 参数摘要脱敏。
+- [Required] harness_snapshot 保存版本、已接受消息/工具结果引用、usage/next_call_no/等待引用，不保存 raw args、provider body、密钥或完整推理链；TS 验证同 owner/Run、真实接受事实与单调进度。
+- [Required] 同 conversation 先持 NO KEY UPDATE 锁再分配游标，并保持至提交，避免小游标晚提交被客户端永久漏掉，并与终态消息插入取得的外键 KEY SHARE 兼容。内部快照不交给外部 ThreadEventSchema；GET/同入站键只读不启动执行。
+
+## `harness_resumes` / `harness_cancellations`
+
+0015 的最小持久动作关系，均只追加、禁止 UPDATE/DELETE，不另造工具结果账。
+
+| 表                    | 字段与约束                                                                                                        | 语义                                                       |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| harness_resumes       | owner_id/idempotency_key 主键；run_id/checkpoint_id/attempt_id 外键；checkpoint_id、attempt_id 各唯一；created_at | 同等待点仅一次有效恢复，同键丢回答定位原 attempt，不另启动 |
+| harness_cancellations | owner_id/idempotency_key 主键；run_id 外键；reason、created_at                                                    | 同键同 Run/reason 回原裁决，冲突409；终态只返回真实状态    |
+
+所有读写均先验证 owner/conversation/Run 和当前权限；resume 只允许最后有效等待点与真实已决批准，拒绝普通/他人/旧引用、business 或终态。取消事实先提交才通知 native；取消和恢复的幂等身份不代替 invocation_id。
 
 ## `conversation_idempotency`
 
@@ -179,16 +200,16 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 
 ### 字段
 
-| 字段              | 类型          | 约束                                     | 说明                                                      |
-| ----------------- | ------------- | ---------------------------------------- | --------------------------------------------------------- |
-| `owner_id`        | `uuid`        | not null, references `users(id)`         | 所属用户                                                  |
-| `idempotency_key` | `text`        | not null                                 | 客户端键；缺省回退 body `idempotency_key` 或 `request_id` |
-| `request_hash`    | `text`        | not null                                 | 规范化请求体 SHA-256；同键不同体返回 `409 STATE_CONFLICT` |
-| `conversation_id` | `uuid`        | not null, references `conversations(id)` | 命中的会话                                                |
-| `run_id`          | `uuid`        | not null, references `agent_runs(id)`    | 命中的 run                                                |
-| `user_message_id` | `uuid`        | nullable, references `messages(id)`      | 该次用户消息                                              |
-| `created_at`      | `timestamptz` | not null, default `now()`                | 创建时间                                                  |
-| `expires_at`      | `timestamptz` | not null                                 | 24h 重放窗口                                              |
+| 字段              | 类型          | 约束                                     | 说明                                                                                                 |
+| ----------------- | ------------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `owner_id`        | `uuid`        | not null, references `users(id)`         | 所属用户                                                                                             |
+| `idempotency_key` | `text`        | not null                                 | 客户端键；缺省回退 body `idempotency_key` 或 `request_id`                                            |
+| `request_hash`    | `text`        | not null                                 | business 保留历史材料；harness/v1 域分隔，同 owner/key 换执行类型或其他绑定内容为409，不另开幂等空间 |
+| `conversation_id` | `uuid`        | not null, references `conversations(id)` | 命中的会话                                                                                           |
+| `run_id`          | `uuid`        | not null, references `agent_runs(id)`    | 命中的 run                                                                                           |
+| `user_message_id` | `uuid`        | nullable, references `messages(id)`      | 该次用户消息                                                                                         |
+| `created_at`      | `timestamptz` | not null, default `now()`                | 创建时间                                                                                             |
+| `expires_at`      | `timestamptz` | not null                                 | 24h 重放窗口                                                                                         |
 
 ### 约束与索引
 

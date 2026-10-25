@@ -4,8 +4,8 @@
 
 - **状态**：设计真源（design 为真源，prd 跟随）
 - **范围**：五个重点能力边界、同步公共用例/DTO/读取投影、受控确认事务、可靠异步 outbox 与跨语言职责
-- **不包含**：R1 实现、最终远程字段/API、具体 SQL、供应商与密钥
-- **阶段标签**：v0 TS 现状与 R1 仓颉 Harness 目标分列；不要求全模块远程化
+- **不包含**：完整 R1、供应商与密钥、具体 SQL
+- **阶段标签**：确定性 business 与正式仓颉 Harness 分列；不要求全模块远程化
 
 ## 引用
 
@@ -22,44 +22,27 @@
 
 ## 1. 总览与选型
 
-| 缝             | 职责一句话                                                    | v0 落点                                                                   | P1+                                                   |
-| -------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------- | ----------------------------------------------------- |
-| AgentRuntime   | 仓颉负责模型/工具循环、当前上下文、计划、预算、等待/恢复/停止 | TS 确定性 turn、Run/事件存储；无真实 LLM                                  | 仓颉唯一 Harness；TS Run 持久化与业务执行资格继续保留 |
-| ToolGateway    | 白名单 + 校验 + 风险分级 + 审计                               | 本地 5 工具：提醒提议、取消请求、任务列表、简报卡片、用户偏好；无外部 MCP | MCP 经网关聚合，仓颉只认网关                          |
-| Scheduler      | 登记 schedule / 认领 lease + fencing / cancel                 | PG lease（见 08），无 Redis                                               | 量大再议 Redis 延后项                                 |
-| Notifier       | send → 回执 + 幂等                                            | 站内信（应用内通知）先行                                                  | 邮件/推送后期，接口不变                               |
-| ConnectorVault | secret 引用不出明文                                           | 仅接口 + Fake，无真实连接                                                 | 第 1~2 真实连接按评审接入                             |
+| 缝             | 职责一句话                                                  | v0 落点                                                                          | P1+                                                  |
+| -------------- | ----------------------------------------------------------- | -------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| AgentRuntime   | 仓颉唯一组织模型/工具循环、当前上下文、预算、等待/恢复/停止 | 显式 execution 分派；business 确定性业务、harness 正式 native；TS 存储与资格裁决 | 真实 provider/完整 R1 分别验收，不保留 TS 第二 Agent |
+| ToolGateway    | 白名单 + 校验 + 风险分级 + 审计                             | 本地 5 工具：提醒提议、取消请求、任务列表、简报卡片、用户偏好；无外部 MCP        | MCP 经网关聚合，仓颉只认网关                         |
+| Scheduler      | 登记 schedule / 认领 lease + fencing / cancel               | PG lease（见 08），无 Redis                                                      | 量大再议 Redis 延后项                                |
+| Notifier       | send → 回执 + 幂等                                          | 站内信（应用内通知）先行                                                         | 邮件/推送后期，接口不变                              |
+| ConnectorVault | secret 引用不出明文                                         | 仅接口 + Fake，无真实连接                                                        | 第 1~2 真实连接按评审接入                            |
 
-## 2. AgentRuntime（目标语义，非现有远程 API）
+## 2. AgentRuntime（正式 native 与 TS 可信边界）
 
-[Proposed] 下列形状只说明能力关联，字段、传输及可信授权绑定随 R1 合同定义，不把同进程 ctx 原样发布为仓颉可自报的权限。
-
-```text
-AgentRuntime.run(input) -> AgentEvent stream
-  input
-    run_id / request_id / idempotency_key
-    owner_id / conversation_id
-    mode                  chat | task（v0 只用 chat + 单 propose_task）
-    tools_allowlist       缺省最小集
-    budget                max_iterations / max_tokens
-  AgentEvent（名开工对照 packages/stream-protocol，版本化 zod）
-    thinking / tool_call / tool_result
-    clarification_required（含 time-core 错误透传）
-    approval_proposed（含 approval_id 引用，不含快照明文外泄；S0 #14 冻结：对外 SSE 投影为 `approval_required`，见 `docs/api/conversations/conversations_routes.md §2`）
-    answer / done / run_failed（含 BUDGET_EXCEEDED；S0 #14 冻结：对外投影为 `message.delta+thread.completed` / `thread.failed`）
-AgentRuntime.resume(run_id, resume_from_checkpoint)
-AgentRuntime.cancel(run_id)
-```
+[Required] 用户 API 见 conversations 路由，内部 `harness/v1` strict NDJSON 见共享 contracts/harness.ts。每有效 attempt 一个固定原生进程；model/reserve/invoke/snapshot/suspend/answer/finish 仅请求动作，TS 恢复可信 owner/Run/权限，不发布可自报授权的同进程 ctx。不另保留目标示意 API 或第二份状态机（design/09 §2–§4）。
 
 - [Required] 仓颉组织本次上下文和执行转移，经 TS 接口保存/读取运行快照与已接受结果；TS 存储不独立选择下一模型/工具步骤，仓颉不另建可独立裁决的事实库。
-- [Required] 仓颉强制执行迭代/token/时间预算，TS 校验配置并在工具侧约束执行资格；不信任模型自报 usage，不把 v0 字符估算冒充真实 provider usage。
-- [Required] 敏感工具经 TS 批准门；拒绝不得绕路完成同一未授权效果。v0 提议后结束，R1 同 Run 等待/唤醒尚未实现。
-- [Required] 跨语言消费者合同复用已有 contracts-dual 入口；当前 D8 healthz 双跑不证明 run/resume/cancel、工具结果或等待恢复已覆盖。
+- [Required] 仓颉强制累计迭代/可得 usage，缺 usage 保留未知；TS 冻结预算和执行资格，不复制循环、不字符估算。时间/费用 SLA 随真实 provider/负载单独验收。
+- [Required] 敏感工具经 TS 冻结批准门。harness 在有限快照后挂起，同 Run 显式恢复原调用及真实决议；拒绝/过期/替代不跟 successor 或同义绕拒绝。确定性 business 提议后结束，不伪称同 Run 模型等待。
+- [Required] 跨语言消费者门复用 contracts-dual；D8 按实际 fresh 构建/生产者消费者/结果纳入/执行资格拒绝证据限定升级，最小 healthz 双跑本身仍只证明 partial。
 - [Deferred] 多 Agent 线性协同、`@execution` 自定义 plan：远期，不在本契约加方法。
 
 ### 实施与验证边界
 
-[Required] 真实模型、TS 工具产物、批准等待/取消与未知结果分别取证，见 11。TS 调用账见下节；跨语言授权/消费者与等待合同归 #46/#47，不以本地结果原子性声明 R1 Harness 已完成。
+[Required] 最小正式接入、跨语言 CI 消费者门与完整 R1 分级取证（11 §4），不能把受控模型 transport/本地结果原子性当成真实 provider、模型质量或 R1 产物验收。
 
 ## 3. ToolGateway（稳定调用身份、本地原子结果与审计）
 

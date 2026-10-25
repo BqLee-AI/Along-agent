@@ -2,67 +2,83 @@
 
 ## 文档状态
 
-- **状态**：规范基线对齐（#44；design 为真源，prd 跟随）
-- **范围**：唯一 Harness 的语言/状态责任、Web→TS→仓颉→TS 工具链及验证边界
-- **不包含**：R1 实现、最终跨语言 API/schema、工具链或供应商选型、全 TS 后端迁移
-- **阶段标签**：v0 TS 业务资产保留；R1 目标未实现；旧 P 阶段与 S1–S3 不作完成证据
+- **状态**：唯一 Harness 与正式最小接入合同
+- **范围**：语言/状态责任、Web→TS→仓颉→TS 工具、固定工具链及分级验证
+- **不包含**：实际供应商选型、完整 R1 产物验收、全 TS 后端迁移或通用恢复
+- **阶段标签**：正式 native 核心与 TS 能力层；验收按覆盖行为和环境分别声明
 
 ## 1. 位置与分工（Required）
 
-仓颉从第一条真实 Agent 闭环起就是唯一宿主 Harness，不是 TS 通用 Agent 的候选第二实现。TS 后端是长期能力/业务层，不退役 API/worker，也不在工具内部隐藏另一套完整 Agent。决策原因见 [ADR 0009](../adr/0009-cangjie-harness-ts-capabilities.md)。
+仓颉从第一条真实 Agent 闭环起就是唯一宿主 Harness，不是 TS 通用 Agent 的候选第二实现。TS 是长期能力/业务层，不退役 API/worker，也不在工具内部隐藏完整 Agent。原因见 [ADR0009](../adr/0009-cangjie-harness-ts-capabilities.md)。
 
-| 责任                                                                              | 唯一所有者                             |
-| --------------------------------------------------------------------------------- | -------------------------------------- |
-| 模型消息/function calling 循环、本次上下文、工具结果纳入、简短计划、行动选择      | 仓颉 Harness                           |
-| 运行预算、等待/继续/恢复决策、停止后不再安排步骤                                  | 仓颉 Harness                           |
-| ToolGateway、工具定义/实现、schema/权限/批准校验、执行记录                        | TS                                     |
-| 长期 memory 的保存/检索/grep/修订/删除；MCP/办公连接器；PC/browser/文件执行       | TS 能力模块；不是仓颉生态重建          |
-| auth/身份/凭据、批准/业务事务、time-core、tasks、scheduler/notifier/outbox/worker | 现有 TS 产品后端                       |
-| PostgreSQL、消息/Run/checkpoint/结果/事件持久化、读取与 SSE 投影、Web             | TS；仓颉通过服务契约读写快照，不直连库 |
+| 责任                                                                 | 唯一所有者                    |
+| -------------------------------------------------------------------- | ----------------------------- |
+| 模型消息/工具提议解析与循环、本次上下文、工具结果纳入、行动选择      | 仓颉 Harness                  |
+| 累计迭代/usage、等待/继续/恢复与停止决策                             | 仓颉 Harness                  |
+| 工具定义/实现、schema、权限、批准与执行资格、接受结果                | TS                            |
+| 长期 memory/检索/grep/修订/删除、MCP/办公、PC/browser/文件执行       | TS 能力模块，不在仓颉重建生态 |
+| auth/凭据、冻结批准/time-core/tasks/scheduler/notifier/outbox/worker | TS 产品后端                   |
+| PostgreSQL、Run/checkpoint/消息/事件持久化、SSE/补读与 Web           | TS                            |
 
-当前上下文不等于长期 memory；仓颉控制“接下来尝试什么”，TS 裁决“动作是否允许、已发生什么”。TS 不独立推进模型循环，仓颉不另存可独立裁决的事实库。
+本次上下文不是长期 memory；仓颉决定接下来尝试什么，TS 裁决动作是否允许、已发生什么。纯模型 HTTP transport 可以在 TS 持有凭据并转换协议，但不得选择工具、组织通用循环或推进 Run。
 
 ## 2. 一次请求的责任链
 
-[Required · 目标；不是现有远程接口字段]
-
 ```text
-Web → TS API（身份/输入/逻辑 Run 与可信执行资格）
-    → 仓颉 Harness（模型、上下文、计划、预算）
-    → TS ToolGateway（重验 schema/权限/批准/执行资格）
-    → TS tools / memory / grep / MCP / PC/browser / 办公
-    → 结构化结果、产物引用、回执、待批准或未知
-    → 仓颉继续 / 等待 / 结束
-TS 存储 Run/快照/已接受结果/事件 → SSE/补读 → Web
+Web 明确选择 execution=harness
+  → TS 认证/CSRF/输入/幂等，冻结可信 Run 与 attempt
+  → 同容器固定仓颉子进程：上下文、模型请求、提议、预算
+  → TS 固定 model transport 或公共 ToolGateway
+  → TS 重验当前权限/attempt/取消及工具参数，持久预约和接受结果
+  → 仓颉观察真实结果，继续 / 保存等待点 / 结束
+TS 事实与只追加事件 → SSE / GET 补读 → Web
 ```
 
-TS 从可信绑定恢复 owner、工具范围和取消状态，不信任仓颉或模型自报授权；现有同进程 ToolContext 不可原样成为远程请求。参数校验由真正执行者 TS 重验，不复制时间/批准业务规则到仓颉。
+- 传输是每 attempt 一条 `harness/v1` UTF-8 NDJSON pipe，不增加 RPC 服务、远程 bearer 或 FFI。具体帧见 [共享 schema](../../packages/contracts/src/harness.ts) 和 design/09 §2。
+- native 不接收数据库/会话/模型密钥，不自报 owner 或 allowlist。每次工具动作从进程闭包和持久事实恢复可信 `ToolContext`；TS 不把内部对象原样暴露为远程合同。
+- business 是既有确定性提醒/取消/查询路径，不是另一个 Agent，也不作为 harness 失败回退。默认兼容 business，消息 `mode` 不承担执行器分派。
+- 批准等待保存有限引用和进度；显式恢复仍是同 Run、新 attempt、原 invocation/批准和真实当前决议。GET 与同入站键只补读，不能从事件行推导恢复授权。
+- cancel 在 TS 提交资格撤销与唯一取消事件后才 abort HTTP/终止进程；既成工具/按钮确认事实保留。
 
-批准后恢复同一逻辑 Run，不重复动作。取消在 TS 提交并由工具边界拦新动作，仓颉观察后停止安排；不能承诺撤销既成外部效果。具体调用身份、结果账、跨语言合同分别由后续 #45/#46/#47 定义和实现，本次不预写最终字段/路由。
+## 3. 工具链与生产配置
 
-## 3. 现状与验证边界（Observed）
+正式项目 `apps/harness` 使用官方 Linux x64 SDK1.0.5 LTS/stdx1.0.5.1。`artifacts.lock` 记录来源和固定 SHA256；SDK hash 与官网元数据匹配，stdx hash 是官方 release 下载后本地计算值，不冒称独立发行 checksum。
 
-基线 `a10344c`：`conversations/service.ts#runTurn/executeRun` 是确定性 v0 turn，无真实 LLM provider；消息幂等、事件先存后发和 GET 补读在 TS。`tasks/scheduler/send.ts` 的一次许可/独立回执核对是专属发送恢复，不证明通用 Agent 恢复。当前 contracts-dual/D8 仅最小 healthz 双跑/partial，不证明仓颉 run/resume/cancel 已实现。
+- `bun run harness:prepare` 准备锁定工具链；`bun run build:harness` 构建正式源。完整用法、平台前置与运行库位置见 [README](../../apps/harness/README.md)。
+- 镜像采用独立 Debian 编译阶段，真实安装 binutils/GCC/C++/libc 开发闭包；不能把裸 Bun runtime 能执行旧 ELF 当作 fresh 编译成功。runtime 只复制生产产物、必要动态库和适用 SDK/stdx/第三方 notices。
+- TS 固定 OpenAI-compatible chat-completions transport；`HARNESS_MODEL_BASE_URL/HARNESS_MODEL` 指定兼容端点和模型，`HARNESS_MODEL_API_KEY` 可选且只留 TS。实际供应商、计费与质量不在此决定。
+- `HARNESS_BINARY` 默认 `/app/harness/bin/along-harness`，`HARNESS_LIBRARY_PATH` 默认 `/app/harness/lib`。缺配置或不可执行时新 harness Run 返回503，无写入/SSE、无 fixture 回退。部署者设置变量，不写真实值到仓库 `.env`。
+- 帧/HTTP 模型响应实施1MiB字节边界，协议/进程/provider错误脱敏；不记录原始 stderr、请求/响应或完整推理链。未知 usage 保留未知，不承诺不可证明的 token/费用上限。
 
-旧版本的“第二实现 / v0–P3 不用 / P2 末 S1–S3 竞赛转正”不再是有效目标。旧研究数字、历史 ADR 与验收记录只证明其当时范围，不重写为 R1 通过，也不因 R1 未实施把 v0 重新判失败。
+部署先停旧运行写者，事务应用新增迁移，再切同次构建的 native/TS 进程。新事实接纳后只前滚，不删除调用账、不复活旧 attempt 或让旧二进制混写。历史 business 只读兼容，不伪造可恢复快照。
 
-## 4. 实施验收边界（Required；未执行）
+## 4. 分级验收边界（Required）
 
-- 真实 Web→TS→仓颉→TS 工具→实际产物/回读证明闭环，工具选择随输入/观察变化；固定回放和 mock 不能代替真实模型和产物。
-- 仓颉预算/上下文/等待/停止，与 TS 权限/批准/执行资格分别验证；不得用 TS 隐藏循环或孤立仓颉 CLI 代替集成。
-- 事件补读不执行工具。已接受结果不重执行；可能已执行但未存结果先查询或停在未知，不盲重放。checkpoint/lease/fencing 不单独保证 external exactly-once（09 §6）。
-- R1 有限等待上下文与后续无人值守任意崩溃恢复分开验收；只有实际覆盖的工具/故障窗口才能声明保证。
-- 复用既有五个 required checks；后续真实跨语言消费者合同进入既有 contracts-dual，不在本次新增 CI 门或提前提升 D8 状态。性能/内存目标需真实负载校准，不沿用旧实验数字为主 Harness 转正门。
+### 最小正式接入（#46）
+
+在新的隔离 PG16 上，通过真实签名会话/CSRF、HTTP/Web、当前正式 native 与真实工具/批准事实，验证可信权限、生命周期、有限等待恢复、补读隔离、五工具公共端口和原业务不变量。native 独立 CLI 不能替代集成。
+
+仅在服务端依赖注入点控制模型 transport 响应；fixture 不得自选动作/slot、执行 reserve/invoke、编排 Run 状态或替换 native。正式核心仍负责上下文、选择解析、实际工具观察、预算、等待和停止。该证据可以覆盖接入合同，但不证明真实 provider/模型质量或完整 R1。
+
+### 跨语言消费者门（#47）
+
+沿用五个 required checks，不新增门。根 `test:contracts` 与既有 `contracts-dual` 需 fresh 构建锁定 native、隔离 PG16，实际运行正式生产者/消费者的成功与拒绝合同，并证明删除必要构建/结果纳入/资格检查步骤会变红。D8 只可按实测 Run/工具/有限批准恢复范围升级，文件存在、job 名或固定 fixture 不能代替证据；此前最小 healthz 双跑仅是 partial。
+
+### 完整 R1 与后续恢复
+
+真实 Web→TS→仓颉→TS 工具→实际产物/回读证明目标闭环，选择随输入/观察变化；固定回放和 mock 不代替真实模型和产物。真实供应商、模型质量、R1 产物、性能/内存需分别以实际环境举证，不沿用旧 S1–S3 实验数字作为主 Harness 转正门。
+
+有限批准等待不等于任意崩溃自动恢复。已接受结果不重执行，unknown 只核对或停下；checkpoint/lease/fencing 不单独保证 external exactly-once。design/08 通知专属许可/回执证据不泛化至所有连接器。
 
 ## 5. 红线（Required）
 
-1. 仓颉不直连 PostgreSQL 业务库，Run/checkpoint 存储继续 TS 所有。
-2. 时间归一只在 TS/time-core；需排期经 TS propose_task 与冻结按钮确认，不自行计算 UTC。
-3. 外部 MCP、PC/browser、memory/grep 与办公执行经 TS 网关；工具不得内藏完整 Agent。
-4. Harness 内网接入仍须可信 Run 授权绑定；内网不是免鉴权许可。
-5. 只追加事件、冻结展示、确认创建/取消单事务、取消优先、回执门和未知不盲重发不变。
+1. 仓颉不直连 PostgreSQL 业务库，存储权威继续 TS 所有。
+2. 时间归一只在 TS/time-core；排期经 propose_task 与冻结按钮确认，不自行计算 UTC。
+3. MCP、PC/browser、memory/grep 与办公经 TS 能力边界；工具不内藏另一套 Agent。
+4. 同容器/内网不是免鉴权，快照和 reply 不能提升 Run 权限。
+5. 只追加事件、冻结展示、确认创建/取消单事务、取消优先、回执门与未知不盲重发不变。
 
 ## 引用
 
-- [09 Harness 与 checkpoint](09-agent-runtime-and-checkpoint.md)、[02 模块边界](02-modular-monolith-and-split-triggers.md)、[04 五缝](04-five-seams-contract.md)、[PRD 待决 D2](../prd/04-acceptance-open-questions.md)。
-- B04/B06、AF 仅作机制参考，不把其语言/进程实现复制为项目目标。
+- [09 Harness/checkpoint](09-agent-runtime-and-checkpoint.md)、[02 模块边界](02-modular-monolith-and-split-triggers.md)、[04 五缝](04-five-seams-contract.md)、[PRD 待决 D2](../prd/04-acceptance-open-questions.md)。
+- B04/B06、AF 仅为机制参考；旧第二实现/S1–S3 转正目标退出，历史记录保留其当时适用边界。

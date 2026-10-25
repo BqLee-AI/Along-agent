@@ -87,12 +87,17 @@ export async function insertRun(
     mode: 'chat' | 'task';
     maxIterations: number;
     maxTokens: number;
+    execution: 'business' | 'harness';
+    allowlist: readonly string[];
+    frozenContext: unknown;
+    inputMessageId: string;
   },
 ): Promise<void> {
   await client.query(
     `INSERT INTO agent_runs (id, owner_id, conversation_id, agent_revision,
-       mode, status, budget_max_iterations, budget_max_tokens)
-     VALUES ($1,$2,$3,$4,$5,'running',$6,$7)`,
+       mode, status, budget_max_iterations, budget_max_tokens, execution,
+       tools_allowlist, frozen_context, input_message_id)
+     VALUES ($1,$2,$3,$4,$5,'running',$6,$7,$8,$9::jsonb,$10::jsonb,$11)`,
     [
       args.runId,
       args.ownerId,
@@ -101,6 +106,10 @@ export async function insertRun(
       args.mode,
       args.maxIterations,
       args.maxTokens,
+      args.execution,
+      JSON.stringify(args.allowlist),
+      JSON.stringify(args.frozenContext),
+      args.inputMessageId,
     ],
   );
 }
@@ -236,6 +245,8 @@ export async function listRunEvents(
      JOIN run_attempts a ON a.id = c.attempt_id
      JOIN agent_runs r ON r.id = a.run_id
      WHERE r.owner_id = $1 AND r.id = $2
+       AND c.kind IN ('thread.started','message.delta','card.proposed','approval_required',
+         'thread.completed','thread.failed','thread.cancelled')
      ORDER BY c.event_seq ASC`,
     [ownerId, runId],
   );
@@ -257,6 +268,8 @@ export async function listConversationEvents(
      JOIN run_attempts a ON a.id = c.attempt_id
      JOIN agent_runs r ON r.id = a.run_id
      WHERE r.owner_id = $1 AND r.conversation_id = $2
+       AND c.kind IN ('thread.started','message.delta','card.proposed','approval_required',
+         'thread.completed','thread.failed','thread.cancelled')
        AND ($3::bigint IS NULL OR c.event_seq > $3::bigint)
      ORDER BY c.event_seq ASC
      LIMIT $4`,
@@ -275,17 +288,6 @@ export async function getRunStatus(
     [ownerId, runId],
   );
   return rows[0]?.status ?? null;
-}
-
-export async function finishRun(
-  client: Pick<Pool | PoolClient, 'query'>,
-  runId: string,
-  status: 'done' | 'failed' | 'cancelled',
-): Promise<void> {
-  await client.query('UPDATE agent_runs SET status = $2, ended_at = now() WHERE id = $1', [
-    runId,
-    status,
-  ]);
 }
 
 export async function finishAttempt(

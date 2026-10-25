@@ -2,13 +2,16 @@ import { parseRole } from './role.js';
 import { serve } from './http/server.js';
 import { startWorkerLoop } from './worker/loop.js';
 import { createPool } from './db/pool.js';
+import { loadHarnessServices } from './modules/conversations/harness-config.js';
 
 const role = parseRole(process.env.ROLE);
 
 // Main owns the request/scheduler pool; the worker owns its receive pool.
 const pool = createPool();
 const server =
-  role === 'api' || role === 'all' ? serve({ port: Number(process.env.PORT ?? 3000), pool }) : null;
+  role === 'api' || role === 'all'
+    ? serve({ port: Number(process.env.PORT ?? 3000), pool, harness: loadHarnessServices() })
+    : null;
 const worker = role === 'worker' || role === 'all' ? startWorkerLoop({ pool }) : null;
 
 let shuttingDown = false;

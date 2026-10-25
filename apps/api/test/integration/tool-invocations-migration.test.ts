@@ -150,6 +150,13 @@ maybe('0014 durable invocation migration stop-write cutover', () => {
       await expect(
         database.pool.query('DELETE FROM tool_calls WHERE id=$1', [auditId]),
       ).rejects.toMatchObject({ code: 'P0001' });
+      // The 0014-only assertions above exercise that exact cutover. Runtime
+      // writers require the complete deployed schema, including later fences.
+      for (const filename of (await readdir(migrations))
+        .filter((file) => file.endsWith('.sql') && file > '0014_conversation_tool_invocations.sql')
+        .sort()) {
+        await database.pool.query(await readFile(new URL(filename, migrations), 'utf8'));
+      }
       const input = { toolId: 'get_user_prefs', args: {} };
       const { invocationId } = await reserveInvocation(database.pool, ctx, {
         ...input,

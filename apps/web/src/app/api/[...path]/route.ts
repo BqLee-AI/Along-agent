@@ -1,6 +1,7 @@
 // Same-origin proxy to the API. Keeps cookies and CSRF headers intact and
 // streams responses (SSE included) without buffering.
 import type { NextRequest } from 'next/server';
+import { EnvelopeSchema } from '@along/contracts';
 
 const API_BASE = process.env.API_BASE ?? 'http://127.0.0.1:3000';
 const FORWARD_REQUEST = [
@@ -34,11 +35,20 @@ async function proxy(req: NextRequest, context: RouteContext): Promise<Response>
     const value = req.headers.get(name);
     if (value) headers.set(name, value);
   }
+  // Next's Node adapter signals a premature response close, not normal EOF.
+  // Also handle downstream stream cancellation (including reader.cancel()).
+  const controller = new AbortController();
+  const abort = () => {
+    controller.abort(req.signal.reason);
+  };
+  req.signal.addEventListener('abort', abort, { once: true });
+  if (req.signal.aborted) abort();
   const init: RequestInit & { duplex?: 'half' } = {
     method: req.method,
     headers,
     cache: 'no-store',
     redirect: 'manual',
+    signal: controller.signal,
   };
   if (req.method !== 'GET' && req.method !== 'HEAD' && req.body) {
     init.body = req.body;
@@ -49,14 +59,18 @@ async function proxy(req: NextRequest, context: RouteContext): Promise<Response>
   try {
     upstream = await fetch(target, init);
   } catch {
+    req.signal.removeEventListener('abort', abort);
+    if (controller.signal.aborted) throw controller.signal.reason;
+    const requestId = req.headers.get('x-request-id') ?? crypto.randomUUID();
     return Response.json(
-      {
+      EnvelopeSchema.parse({
         code: 502,
         data: null,
         msg: 'api unreachable',
-        error: { code: 'BAD_GATEWAY', message: 'API 不可达' },
-      },
-      { status: 502 },
+        error: { code: 'BAD_GATEWAY', message: 'API 不可达', request_id: requestId },
+        request_id: requestId,
+      }),
+      { status: 502, headers: { 'x-request-id': requestId } },
     );
   }
 
@@ -65,10 +79,41 @@ async function proxy(req: NextRequest, context: RouteContext): Promise<Response>
     const value = upstream.headers.get(name);
     if (value) responseHeaders.set(name, value);
   }
-  return new Response(upstream.body, {
-    status: upstream.status,
-    headers: responseHeaders,
+  const cookies = upstream.headers.getSetCookie();
+  if (cookies.length > 0) {
+    responseHeaders.delete('set-cookie');
+    for (const cookie of cookies) responseHeaders.append('set-cookie', cookie);
+  }
+  if (!upstream.body) {
+    req.signal.removeEventListener('abort', abort);
+    return new Response(null, { status: upstream.status, headers: responseHeaders });
+  }
+  const reader = upstream.body.getReader();
+  if (controller.signal.aborted) await reader.cancel(controller.signal.reason);
+  const body = new ReadableStream<Uint8Array>({
+    async pull(downstream) {
+      try {
+        const chunk = await reader.read();
+        if (chunk.done) {
+          req.signal.removeEventListener('abort', abort);
+          downstream.close();
+        } else {
+          downstream.enqueue(chunk.value);
+        }
+      } catch (error) {
+        req.signal.removeEventListener('abort', abort);
+        controller.abort(error);
+        await reader.cancel(error).catch(() => undefined);
+        downstream.error(error);
+      }
+    },
+    async cancel(reason) {
+      req.signal.removeEventListener('abort', abort);
+      controller.abort(reason);
+      await reader.cancel(reason).catch(() => undefined);
+    },
   });
+  return new Response(body, { status: upstream.status, headers: responseHeaders });
 }
 
 export const dynamic = 'force-dynamic';

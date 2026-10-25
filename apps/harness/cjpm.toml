@@ -1,0 +1,11 @@
+[package]
+cjc-version = "1.0.5"
+name = "along_harness"
+description = "Along native harness pipe core"
+version = "1.0.0"
+output-type = "executable"
+
+[dependencies]
+
+[target.x86_64-unknown-linux-gnu.bin-dependencies]
+path-option = ["/opt/along-toolchain/stdx/linux_x86_64_cjnative/dynamic/stdx"]

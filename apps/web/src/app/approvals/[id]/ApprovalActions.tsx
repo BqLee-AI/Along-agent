@@ -1,6 +1,11 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { EnvelopeSchema, type Envelope, type RunView } from '@along/contracts';
+import { AmbiguousTimeDetailsSchema } from '@along/stream-protocol';
+import { z } from 'zod';
+import { conversationHref, readRun, runStatusLabel } from '../../../lib/conversation-run';
+import type { Me } from '../../../lib/types';
 
 interface Props {
   approvalId: string;
@@ -9,8 +14,10 @@ interface Props {
   kind: 'create_task' | 'cancel_task';
   originalText: string;
   timezone: string;
-  csrfToken: string | null;
+  me: Me | null;
   actionable: boolean;
+  conversationId: string | null;
+  runId: string | null;
 }
 
 type FoldChoice = 'first' | 'second' | 'none';
@@ -22,49 +29,38 @@ interface RevisionBody {
   idempotency_key: string;
 }
 
-interface AmbiguousTime {
-  wall_time: string;
-  timezone_id: string;
-  ruleset_id: string;
-  candidates: {
-    fold_choice: 'first' | 'second';
-    offset_seconds: number;
-    fire_at_utc: string;
-  }[];
-}
+type AmbiguousTime = z.infer<typeof AmbiguousTimeDetailsSchema>;
 
-interface ActionEnvelope {
-  code: number;
-  data?: {
-    approval_id?: string;
-    successor_approval_id?: string;
-    duplicate?: boolean;
-    task_id?: string;
-  } | null;
-  error?: { code?: string; message?: string; details?: unknown } | null;
-}
+const ConfirmResultSchema = z
+  .object({
+    approval_id: z.string().uuid(),
+    status: z.literal('consumed'),
+    task_id: z.string().uuid(),
+    duplicate: z.boolean(),
+  })
+  .strict();
+const RejectResultSchema = z
+  .object({
+    approval_id: z.string().uuid(),
+    status: z.literal('rejected'),
+    duplicate: z.boolean(),
+  })
+  .strict();
+const ReviseResultSchema = z
+  .object({
+    approval_id: z.string().uuid(),
+    successor_approval_id: z.string().uuid(),
+    duplicate: z.boolean(),
+  })
+  .strict();
+const ErrorReferencesSchema = z.object({
+  successor_approval_id: z.string().uuid().optional(),
+  task_id: z.string().uuid().optional(),
+});
 
 function readAmbiguity(details: unknown): AmbiguousTime | null {
-  if (!details || typeof details !== 'object') return null;
-  const value = details as Partial<AmbiguousTime>;
-  if (
-    typeof value.wall_time !== 'string' ||
-    typeof value.timezone_id !== 'string' ||
-    typeof value.ruleset_id !== 'string' ||
-    !Array.isArray(value.candidates) ||
-    value.candidates.length !== 2 ||
-    !value.candidates.every(
-      (candidate, index) =>
-        candidate &&
-        candidate.fold_choice === (index === 0 ? 'first' : 'second') &&
-        typeof candidate.offset_seconds === 'number' &&
-        Number.isFinite(candidate.offset_seconds) &&
-        typeof candidate.fire_at_utc === 'string',
-    )
-  ) {
-    return null;
-  }
-  return value as AmbiguousTime;
+  const parsed = AmbiguousTimeDetailsSchema.safeParse(details);
+  return parsed.success ? parsed.data : null;
 }
 
 export default function ApprovalActions({
@@ -74,8 +70,10 @@ export default function ApprovalActions({
   kind,
   originalText,
   timezone,
-  csrfToken,
+  me,
   actionable,
+  conversationId,
+  runId,
 }: Props) {
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
@@ -90,9 +88,36 @@ export default function ApprovalActions({
   const [related, setRelated] = useState<{ href: string; label: string } | null>(null);
   const [navigating, setNavigating] = useState(false);
   const revisionRef = useRef<RevisionBody | null>(null);
-  const canAct = actionable && Boolean(csrfToken) && !blocked;
+  const [decisionRecorded, setDecisionRecorded] = useState(false);
+  const [originalRun, setOriginalRun] = useState<RunView | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
+  const [readingRun, setReadingRun] = useState(false);
+  const csrfToken = me?.csrf_token;
+  const canAct = actionable && me !== null && !blocked && !decisionRecorded;
 
-  function showFailure(payload: ActionEnvelope, status: number): void {
+  async function refreshOriginal(): Promise<RunView | null> {
+    if (!conversationId || !runId) return null;
+    setReadingRun(true);
+    setRunError(null);
+    try {
+      const view = await readRun(conversationId, runId);
+      setOriginalRun(view);
+      return view;
+    } catch (failure) {
+      setRunError(failure instanceof Error ? failure.message : '无法读取原运行。');
+      return null;
+    } finally {
+      setReadingRun(false);
+    }
+  }
+
+  useEffect(() => {
+    void refreshOriginal();
+    // URL references identify the original Run, never an approval successor.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId, runId]);
+
+  function showFailure(payload: Envelope, status: number): void {
     const failure = payload.error;
     setError(failure?.message ?? `请求失败（${status}）`);
     if (
@@ -102,15 +127,15 @@ export default function ApprovalActions({
     ) {
       setBlocked(true);
     }
-    const details = failure?.details;
-    if (details && typeof details === 'object') {
-      const reference = details as { successor_approval_id?: unknown; task_id?: unknown };
-      if (typeof reference.successor_approval_id === 'string') {
+    const parsed = ErrorReferencesSchema.safeParse(failure?.details);
+    if (parsed.success) {
+      const reference = parsed.data;
+      if (reference.successor_approval_id) {
         setRelated({
           href: `/approvals/${encodeURIComponent(reference.successor_approval_id)}`,
           label: '查看替代后的提议',
         });
-      } else if (typeof reference.task_id === 'string') {
+      } else if (reference.task_id) {
         setRelated({
           href: `/tasks/${encodeURIComponent(reference.task_id)}`,
           label: '查看已创建的提醒（改期请先取消再新建）',
@@ -142,20 +167,38 @@ export default function ApprovalActions({
         },
         body: JSON.stringify(body),
       });
-      const payload = (await response.json()) as ActionEnvelope;
+      const payload = EnvelopeSchema.parse(await response.json());
       if (!response.ok || payload.code !== 0) {
         showFailure(payload, response.status);
         return;
       }
+      setDecisionRecorded(true);
+      const result = (action === 'confirm' ? ConfirmResultSchema : RejectResultSchema).parse(
+        payload.data,
+      );
+      if (result.approval_id !== approvalId)
+        throw new Error('批准操作返回了不同的提议。请读取原运行状态。');
+      if (conversationId && runId) {
+        const view = await refreshOriginal();
+        if (result.status === 'consumed') {
+          setRelated({
+            href: `/tasks/${encodeURIComponent(result.task_id)}`,
+            label: '查看已创建的提醒',
+          });
+        }
+        // Approval success is not resume success. Stay with the original Run;
+        // the user explicitly continues its persisted checkpoint in the thread.
+        if (!view || view.execution === 'harness') return;
+      }
       leaving = true;
       setNavigating(true);
-      if (action === 'confirm' && payload.data?.task_id) {
-        window.location.assign(`/tasks/${encodeURIComponent(payload.data.task_id)}`);
+      if (result.status === 'consumed') {
+        window.location.assign(`/tasks/${encodeURIComponent(result.task_id)}`);
         return;
       }
       window.location.assign('/approvals');
-    } catch {
-      setError('网络异常，请重试。');
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : '网络异常，请读取原运行状态。');
     } finally {
       if (!leaving) {
         busyRef.current = false;
@@ -205,7 +248,7 @@ export default function ApprovalActions({
         },
         body: JSON.stringify(body),
       });
-      const payload = (await response.json()) as ActionEnvelope;
+      const payload = EnvelopeSchema.parse(await response.json());
       if (!response.ok || payload.code !== 0) {
         showFailure(payload, response.status);
         setAmbiguity(
@@ -215,14 +258,20 @@ export default function ApprovalActions({
         );
         return;
       }
-      const result = payload.data;
-      if (
-        result?.approval_id !== approvalId ||
-        typeof result.successor_approval_id !== 'string' ||
-        typeof result.duplicate !== 'boolean'
-      ) {
+      const result = ReviseResultSchema.parse(payload.data);
+      if (result.approval_id !== approvalId) {
         setError('修改结果暂时无法读取。请保持输入不变并重试，使用同一请求查询结果。');
         return;
+      }
+      setDecisionRecorded(true);
+      if (conversationId && runId) {
+        const view = await refreshOriginal();
+        setEditing(false);
+        setRelated({
+          href: `/approvals/${encodeURIComponent(result.successor_approval_id)}`,
+          label: '查看修改后的提议（不会自动继续或确认）',
+        });
+        if (!view || view.execution === 'harness') return;
       }
       leaving = true;
       setNavigating(true);
@@ -244,7 +293,7 @@ export default function ApprovalActions({
       <p className="notice">
         提醒保存在云端；到点在调度器成功运行时尝试通知。设备关机、休眠或进程未运行时可能错过，不保证准时响。
       </p>
-      {!csrfToken && actionable ? (
+      {me === null && actionable ? (
         <p className="error">无法获取操作凭证，请重新登录后重试。</p>
       ) : null}
       {editing ? (
@@ -381,6 +430,44 @@ export default function ApprovalActions({
           ) : null}
         </div>
       )}
+      {conversationId && runId ? (
+        <div className="panel" aria-label="原批准所属运行" aria-busy={readingRun}>
+          <p role="status">
+            {originalRun ? runStatusLabel[originalRun.status] : '原运行状态尚未读取。'}
+          </p>
+          {decisionRecorded ? <p>批准操作已收到结果，不要重复确认来恢复继续请求。</p> : null}
+          {originalRun?.execution === 'harness' &&
+          !originalRun.can_resume &&
+          originalRun.status === 'running' ? (
+            <p>决议可能早于等待点保存。请读取状态；等待实际挂起后再显式继续。</p>
+          ) : null}
+          {originalRun?.status === 'suspended_approval' && !originalRun.can_resume ? (
+            <p>原批准仍未决，暂不能继续。</p>
+          ) : null}
+          <div className="actions">
+            <button
+              type="button"
+              className="secondary"
+              disabled={busy || readingRun}
+              onClick={() => void refreshOriginal()}
+            >
+              读取原运行状态
+            </button>
+            <a href={conversationHref(conversationId, runId)}>
+              {originalRun?.can_resume ? '返回并继续原运行' : '返回原运行（只读，不自动执行）'}
+            </a>
+          </div>
+          <p className="muted">
+            只继续此链接中的 conversation / Run
+            和服务端等待点；拒绝或修改不会自动选择后继提议。返回对话后需点击“继续原运行”。
+          </p>
+          {runError ? (
+            <p className="error" role="alert">
+              {runError}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       {error ? (
         <p id="approval-action-error" className="error" role="alert">
           {error}

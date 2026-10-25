@@ -4,6 +4,7 @@
 import { beforeAll, afterAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { EventEmitter } from 'node:events';
 import type { Pool } from 'pg';
 import { ThreadEventSchema, type ThreadEvent } from '@along/stream-protocol';
 import { handleConversationRoute } from '../../src/modules/conversations/routes.js';
@@ -11,8 +12,8 @@ import {
   executeRun,
   getConversationDetail,
   startConversationRun,
-  type StartResult,
 } from '../../src/modules/conversations/service.js';
+import type { StartResult } from '../../src/modules/conversations/contracts.js';
 import { listRunEvents } from '../../src/modules/conversations/repository.js';
 import { invokeTool, reserveToolInvocation } from '../../src/modules/tools/gateway.js';
 import { confirmApproval } from '../../src/modules/approvals/confirm.js';
@@ -29,6 +30,28 @@ import { loadTimeContext } from '../../src/modules/time/context.js';
 const timeContext = loadTimeContext('fixture-v1');
 
 const maybe = databaseUrl ? describe : describe.skip;
+
+class CapturedResponse extends EventEmitter {
+  status = 0;
+  headers: Record<string, string> = {};
+  writableEnded = false;
+  destroyed = false;
+  constructor(private readonly frames: string[]) {
+    super();
+  }
+  flushHeaders() {}
+  writeHead(status: number, headers: Record<string, string>) {
+    this.status = status;
+    this.headers = headers;
+  }
+  write(chunk: string) {
+    this.frames.push(chunk);
+    return true;
+  }
+  end() {
+    this.writableEnded = true;
+  }
+}
 
 async function seedUser(pool: Pool): Promise<string> {
   const id = randomUUID();
@@ -277,29 +300,25 @@ maybe('conversation runtime', () => {
     expect(confirmed.duplicate).toBe(false);
   });
 
-  it('over-budget input fails the stream with BUDGET_EXCEEDED 429', async () => {
+  it('long business input follows deterministic clarification without estimating model usage', async () => {
     const ownerId = await seedUser(pool);
     const started = await startConversationRun(
       { pool, timeContext },
       ownerId,
       randomUUID(),
-      { raw_text: `提醒${'水'.repeat(8000)}`, confirmed_timezone: 'Asia/Shanghai' },
+      { raw_text: `你好${'水'.repeat(8000)}`, confirmed_timezone: 'Asia/Shanghai' },
       randomUUID(),
     );
     const events = await collect(pool, started);
-    expect(events.map((e) => e.type)).toEqual(['thread.started', 'thread.failed']);
-    const failed = events[1];
-    if (!failed || failed.type !== 'thread.failed') {
-      throw new Error('thread.failed missing');
-    }
-    expect(failed.payload.error).toMatchObject({
-      code: 'BUDGET_EXCEEDED',
-      http_status: 429,
-    });
+    expect(events.map((e) => e.type)).toEqual([
+      'thread.started',
+      'message.delta',
+      'thread.completed',
+    ]);
     const { rows } = await pool.query('SELECT status FROM agent_runs WHERE id = $1', [
       started.runId,
     ]);
-    expect(rows[0]?.status).toBe('failed');
+    expect(rows[0]?.status).toBe('done');
   });
 
   it('same Idempotency-Key replays the stored events; a changed body is 409', async () => {
@@ -414,42 +433,23 @@ maybe('conversation runtime', () => {
       url: '/api/v1/conversations/messages',
       headers: { 'x-request-id': 'x'.repeat(300) },
     } as unknown as IncomingMessage;
-    const sse = { status: 0, headers: {} as Record<string, string>, ended: false };
-    const res = {
-      get status() {
-        return sse.status;
+    const res = new CapturedResponse(frames);
+    await handleConversationRoute(
+      req,
+      res as unknown as ServerResponse,
+      new URL(req.url ?? '/', 'http://localhost'),
+      {
+        pool,
+        timeContext,
+        resolveActor: async () => ({
+          ownerId,
+          sessionId: null,
+          displayName: 'tester',
+          timezoneId: 'Asia/Shanghai',
+        }),
+        body: { raw_text: '明天 9:20 提醒我喝水', confirmed_timezone: 'Asia/Shanghai' },
       },
-      get headers() {
-        return sse.headers;
-      },
-      get writableEnded() {
-        return sse.ended;
-      },
-      destroyed: false,
-      flushHeaders() {},
-      writeHead(status: number, headers: Record<string, string>) {
-        sse.status = status;
-        sse.headers = headers;
-      },
-      write(chunk: string) {
-        frames.push(chunk);
-        return true;
-      },
-      end() {
-        sse.ended = true;
-      },
-    } as unknown as ServerResponse;
-    await handleConversationRoute(req, res, new URL(req.url ?? '/', 'http://localhost'), {
-      pool,
-      timeContext,
-      resolveActor: async () => ({
-        ownerId,
-        sessionId: null,
-        displayName: 'tester',
-        timezoneId: 'Asia/Shanghai',
-      }),
-      body: { raw_text: '明天 9:20 提醒我喝水', confirmed_timezone: 'Asia/Shanghai' },
-    });
+    );
     const events = frames
       .filter((frame) => frame.startsWith('data: '))
       .map((frame) => ThreadEventSchema.parse(JSON.parse(frame.slice(6))));
@@ -754,40 +754,11 @@ maybe('conversation runtime', () => {
       url: '/api/v1/conversations/messages',
       headers: { 'x-request-id': randomUUID() },
     } as unknown as IncomingMessage;
-    interface SseRes extends ServerResponse {
-      status: number;
-      headers: Record<string, string>;
-      writableEnded: boolean;
-    }
-    const sse = { status: 0, headers: {} as Record<string, string>, ended: false };
-    const res = {
-      get status() {
-        return sse.status;
-      },
-      get headers() {
-        return sse.headers;
-      },
-      get writableEnded() {
-        return sse.ended;
-      },
-      destroyed: false,
-      flushHeaders() {},
-      writeHead(status: number, headers: Record<string, string>) {
-        sse.status = status;
-        sse.headers = headers;
-      },
-      write(chunk: string) {
-        frames.push(chunk);
-        return true;
-      },
-      end() {
-        sse.ended = true;
-      },
-    } as unknown as SseRes;
+    const res = new CapturedResponse(frames);
 
     const handled = await handleConversationRoute(
       req,
-      res,
+      res as unknown as ServerResponse,
       new URL(req.url ?? '/', 'http://localhost'),
       {
         pool,
