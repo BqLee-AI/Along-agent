@@ -18,3 +18,13 @@
 4. 接受新调用后保持结果账与审计，发布失败停写并前滚修复，不删除账、重置unknown或恢复旧二进制；旧SSE仍可补读，不据旧日志重新执行。
 
 字段与行为见[调用schema](../../docs/schema/conversation-and-runs-schema.md#tool_invocations)、[ToolGateway](../../docs/design/04-five-seams-contract.md)。新鲜库、历史0013升级、事务异常回滚与数据库拒绝非法变更由真实PG集成和SQL合同验证。
+
+## 0015：正式 Harness 可信运行与有限等待
+
+- agent_runs 增加冻结 execution/工具范围/启动上下文/输入引用与有效等待引用；旧行默认 business，不伪造快照。trigger 禁改接受权威与终态；harness 挂起必须具备完整等待引用。
+- checkpoints 保持只追加，增加内部 harness_snapshot；读取外部流显式过滤。before-insert 先持 conversation 的 NO KEY UPDATE 锁再分配 event_seq，锁至提交，防止小游标晚提交漏读且与终态消息的外键 KEY SHARE 兼容；游标间隙合法。
+- harness_resumes / harness_cancellations 保存最小只追加动作身份；同等待 checkpoint、恢复 attempt 唯一，不复制工具结果账。实际 owner/Run/决议/最新 attempt 由公共运行用例验证。
+- 停止旧运行写者后事务应用0015，失败保留原 schema/version；成功切同次构建 TS/native 产物再接流量。接纳新事实后前滚修复，不回退混合执行器、不删除调用/动作事实或恢复旧 pipe。
+- 历史业务与事件可读；仅最后有效批准等待点支持显式 resume。任意 checkpoint、无人值守崩溃恢复及通用外部 exactly-once 不在该迁移保证内。
+
+字段与路由见[运行 schema](../../docs/schema/conversation-and-runs-schema.md)、[Harness 设计](../../docs/design/09-agent-runtime-and-checkpoint.md)、[运行说明](../../apps/harness/README.md)。新鲜库、0014 升级、重复执行及 DDL 故障回滚由真实 PG 合同覆盖。

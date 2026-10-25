@@ -17,6 +17,26 @@ describe('errors', () => {
 });
 
 describe('envelope', () => {
+  it('accepts the success wire envelope with a null error while retaining typed failure validation', () => {
+    const success = EnvelopeSchema.parse({
+      code: 0,
+      data: { csrf_token: null },
+      msg: 'ok',
+      error: null,
+      request_id: 'success-request',
+    });
+    expect(success.error).toBeNull();
+    expect(
+      EnvelopeSchema.safeParse({
+        code: 1,
+        data: null,
+        msg: 'failure',
+        error: { code: 'INTERNAL_ERROR' },
+        request_id: 'failure-request',
+      }).success,
+    ).toBe(false);
+  });
+
   it('rejects envelope missing request_id', () => {
     const parsed = EnvelopeSchema.safeParse({ code: 200, data: {}, msg: 'ok' });
     expect(parsed.success).toBe(false);

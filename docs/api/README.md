@@ -9,10 +9,10 @@
 ## 1. Base Path 与路由总数 [Required]
 
 - Base Path：`/api/v1`。下文路由表省略该前缀，如 `GET /me` 即 `GET /api/v1/me`。
-- v0 对外端点共 13 个业务端点 + 2 个探针（含 approvals 显式 revise 契约增量），与 design/03 路由数一致：
+- 对外共 16 个业务端点 + 2 个探针：既有 v0 的13个业务端点（含 approvals revise）及正式 Harness 的3个 Run 入口，与 design/03 一致：
   - auth：`GET /me`（1）。
   - brief：`GET /brief`（1）。
-  - conversations：`POST /conversations/messages`（SSE）、`GET /conversations/{id}`（2）。
+  - conversations：`POST /conversations/messages`（SSE）、`GET /conversations/{id}`，加 Run 查询、取消和有限批准恢复（5；见 conversations §3）。
   - approvals：`GET /approvals`、`GET /approvals/{id}`、`POST /approvals/{id}/actions/confirm`、`POST /approvals/{id}/actions/reject`、`POST /approvals/{id}/actions/revise`（5；revise 见 approvals §6）。
   - tasks：`GET /tasks`、`GET /tasks/{id}`、`POST /tasks/{id}/actions/cancel`、`GET /tasks/{id}/events`（4）。
 - 探针：`GET /healthz`、`GET /readyz`（不计入业务端点，不走 envelope，见 §6）。
@@ -94,10 +94,13 @@
 | 404  | NOT_FOUND              | 资源不存在（含已清理墓碑只留号的情形按 404 + 提示）                      | GET 详情/事件            |
 | 409  | APPROVAL_SUPERSEDED    | 确认已被新版本替代                                                       | approvals confirm/reject |
 | 410  | APPROVAL_EXPIRED       | 确认已过期（24h 或目标已过）                                             | approvals confirm/reject |
-| 429  | BUDGET_EXCEEDED        | 对话预算超限（token/轮次/时长），停并告知                                | conversations SSE        |
+| 429  | BUDGET_EXCEEDED        | 仓颉累计迭代/可得 usage 超限；未知不估算费用                             | conversations SSE        |
 | 429  | RATE_LIMITED           | 限流，后续版本细化配额 [Proposed]                                        | 全局                     |
 | 503  | TZDB_UNAVAILABLE       | 时区库不可用，时间归一拒绝服务                                           | conversations            |
 | 503  | NOT_READY              | /readyz 类型化错误，不降级（见 §6；旧名 SERVICE_NOT_READY 作废）         | 探针                     |
+| 503  | HARNESS_UNAVAILABLE    | 显式 harness 缺 native/模型配置，或模型传输不可用；无业务/fixture 回退   | conversations            |
+| 502  | HARNESS_PROTOCOL_ERROR | strict pipe/模型响应拒绝，脱敏失败                                       | conversations SSE        |
+| 502  | HARNESS_EXITED         | native 异常退出，不能覆盖已提交终态/挂起                                 | conversations SSE        |
 
 - [Required] numeric `40xxxx` 映射见 `docs/design/10-api-and-stream-design.md §6`；HTTP 状态以本表为准（S0 #14 冻结）。
 - 时间业务失败的顶层 `code` 为既有 numeric，`error.code` 为符号名；SSE 中放在 `thread.failed.payload.error`，外层已建立的流仍 HTTP 200、唯一失败终结。`AMBIGUOUS_LOCAL_TIME` 的两候选结构与纯归一边界见 design/05 §9.1，不能混用 numeric 与符号名。
@@ -117,25 +120,28 @@
 
 ## 7. 全路由表 [Required]
 
-| #   | 方法 | 路径                              | 鉴权         | CSRF | 幂等键 | 说明                                         | 详见                                  |
-| --- | ---- | --------------------------------- | ------------ | ---- | ------ | -------------------------------------------- | ------------------------------------- |
-| 1   | GET  | `/me`                             | 会话（自检） | 否   | —      | 当前 actor 快照 + CSRF token                 | auth/auth_routes.md                   |
-| 2   | GET  | `/brief`                          | 是           | 否   | —      | 每日简报 + 卡片列表（v0 仅 day-in-progress） | brief/brief_routes.md                 |
-| 3   | POST | `/conversations/messages`         | 是           | 是   | 是     | 发送消息，SSE 流式回事件                     | conversations/conversations_routes.md |
-| 4   | GET  | `/conversations/{id}`             | 是           | 否   | —      | 会话恢复（历史事件重放）                     | conversations/conversations_routes.md |
-| 5   | GET  | `/approvals`                      | 是           | 否   | —      | 待确认/历史确认列表                          | approvals/approvals_routes.md         |
-| 6   | GET  | `/approvals/{id}`                 | 是           | 否   | —      | 确认详情（冻结快照+回显）                    | approvals/approvals_routes.md         |
-| 7   | POST | `/approvals/{id}/actions/confirm` | 是           | 是   | 是     | 确认，体含 `presentation_hash`               | approvals/approvals_routes.md         |
-| 8   | POST | `/approvals/{id}/actions/reject`  | 是           | 是   | 是     | 拒绝                                         | approvals/approvals_routes.md         |
-| 9   | GET  | `/tasks`                          | 是           | 否   | —      | 任务列表                                     | tasks/tasks_routes.md                 |
-| 10  | GET  | `/tasks/{id}`                     | 是           | 否   | —      | 任务详情                                     | tasks/tasks_routes.md                 |
-| 11  | POST | `/tasks/{id}/actions/cancel`      | 是           | 是   | 是     | 取消（幂等）                                 | tasks/tasks_routes.md                 |
-| 12  | GET  | `/tasks/{id}/events`              | 是           | 否   | —      | 只追加事件账（按 recorded_at）               | tasks/tasks_routes.md                 |
-| 13  | POST | `/approvals/{id}/actions/revise`  | 是           | 是   | 是     | 显式完整修改，返回旧/新 ID，再读新详情确认   | approvals/approvals_routes.md §6      |
+| #   | 方法 | 路径                                             | 鉴权         | CSRF | 幂等键 | 说明                                         | 详见                                     |
+| --- | ---- | ------------------------------------------------ | ------------ | ---- | ------ | -------------------------------------------- | ---------------------------------------- |
+| 1   | GET  | `/me`                                            | 会话（自检） | 否   | —      | 当前 actor 快照 + CSRF token                 | auth/auth_routes.md                      |
+| 2   | GET  | `/brief`                                         | 是           | 否   | —      | 每日简报 + 卡片列表（v0 仅 day-in-progress） | brief/brief_routes.md                    |
+| 3   | POST | `/conversations/messages`                        | 是           | 是   | 是     | 发送消息，SSE 流式回事件                     | conversations/conversations_routes.md    |
+| 4   | GET  | `/conversations/{id}`                            | 是           | 否   | —      | 会话恢复（历史事件重放）                     | conversations/conversations_routes.md    |
+| 5   | GET  | `/approvals`                                     | 是           | 否   | —      | 待确认/历史确认列表                          | approvals/approvals_routes.md            |
+| 6   | GET  | `/approvals/{id}`                                | 是           | 否   | —      | 确认详情（冻结快照+回显）                    | approvals/approvals_routes.md            |
+| 7   | POST | `/approvals/{id}/actions/confirm`                | 是           | 是   | 是     | 确认，体含 `presentation_hash`               | approvals/approvals_routes.md            |
+| 8   | POST | `/approvals/{id}/actions/reject`                 | 是           | 是   | 是     | 拒绝                                         | approvals/approvals_routes.md            |
+| 9   | GET  | `/tasks`                                         | 是           | 否   | —      | 任务列表                                     | tasks/tasks_routes.md                    |
+| 10  | GET  | `/tasks/{id}`                                    | 是           | 否   | —      | 任务详情                                     | tasks/tasks_routes.md                    |
+| 11  | POST | `/tasks/{id}/actions/cancel`                     | 是           | 是   | 是     | 取消（幂等）                                 | tasks/tasks_routes.md                    |
+| 12  | GET  | `/tasks/{id}/events`                             | 是           | 否   | —      | 只追加事件账（按 recorded_at）               | tasks/tasks_routes.md                    |
+| 13  | POST | `/approvals/{id}/actions/revise`                 | 是           | 是   | 是     | 显式完整修改，返回旧/新 ID，再读新详情确认   | approvals/approvals_routes.md §6         |
+| 14  | GET  | `/conversations/{cid}/runs/{rid}`                | 是           | 否   | —      | owner-scoped Run/attempt/有效等待点，不执行  | conversations/conversations_routes.md §3 |
+| 15  | POST | `/conversations/{cid}/runs/{rid}/actions/cancel` | 是           | 是   | 是     | 先持久取消，再通知/终止执行                  | conversations/conversations_routes.md §3 |
+| 16  | POST | `/conversations/{cid}/runs/{rid}/actions/resume` | 是           | 是   | 是     | 最后有效批准等待点，同 Run 新 attempt；SSE   | conversations/conversations_routes.md §3 |
 
 ## 8. 维护方式
 
 - design 为真源、prd 跟随：路由增删、权限/CSRF/幂等语义、envelope 或错误码变化时，先改 design/03，再同步本文档与各分组文档。
 - 本目录只定 HTTP 契约，不写实现代码；字段级 zod schema 以 `packages/stream-protocol`（SSE 事件）与服务端 schema 为准，文档引用其版本号。
-- 不复制外部产物原文/token/DSN；不猜未定目标市场/推送通道/LLM 供应商/计费。仓颉唯一 Harness 与 TS 长期能力/业务/存储责任已定（design/09/11），不等于远程 API 已实现。
+- 不复制外部产物原文/token/DSN；不猜目标市场/推送通道/实际 LLM 供应商/计费。仓颉唯一 Harness 与 TS 长期能力/业务/存储已定；正式 pipe/用户 Run API 见 design/09/11，完整 R1 与通用恢复不据此自动通过。
 - 引用蓝图统一用 B00–B06 / AF 代号。

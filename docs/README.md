@@ -27,22 +27,22 @@
 | 06   | [approvals 确认门](design/06-approvals-confirmation-gate.md)             | 版本化冻结回显、显式修改、按钮确认及工具批准/结果原子边界                                    |
 | 07   | [task_events 事件账](design/07-task-events-ledger.md)                    | 只追加账本、取消优先、活动页读模型                                                           |
 | 08   | [调度与投递](design/08-scheduler-and-delivery.md)                        | 未排期过窗终结与遗留恢复、一次性调用许可、独立本地接收、未知不重发及取消栅栏                 |
-| 09   | [Harness 与 checkpoint](design/09-agent-runtime-and-checkpoint.md)       | 仓颉唯一循环/上下文/预算；TS调用账；事件补读不等于执行恢复                                   |
+| 09   | [Harness 与 checkpoint](design/09-agent-runtime-and-checkpoint.md)       | 正式仓颉循环、TS 资格/事实、原子终态、有限批准恢复与只读补读                                 |
 | 10   | [API 与流式通道](design/10-api-and-stream-design.md)                     | REST 真源、envelope、128KiB原始JSON字节边界与未消费流收尾、SSE版本化、WS延后                 |
-| 11   | [仓颉 Harness 与 TS 能力层](design/11-cangjie-runtime-spike.md)          | 唯一 Harness/长期 TS 分工、真实链路、R1 未实现及旧第二实现目标退出                           |
+| 11   | [仓颉 Harness 与 TS 能力层](design/11-cangjie-runtime-spike.md)          | 正式 native/固定工具链/纯模型 transport；接入、消费者门与完整 R1 分级验收                    |
 | 12   | [a13n 六思想落点](design/12-a13n-principles-landing.md)                  | harness/checkpoint/自托管/revision/AG-UI 投影/readyz                                         |
 | 13   | [P0 开工与 CI 死规矩](design/13-p0-bootstrap-and-ci-rules.md)            | Bun/Ox 统一入口、依赖优先构建与串行类型检查、限流边界 CLI、static 后四路隔离并行、五门全成功 |
 
 ## 三、API（6 篇）
 
-| 序号 | 文档                                                    | 作用                                                          |
-| ---- | ------------------------------------------------------- | ------------------------------------------------------------- |
-| 1    | [API 索引与约定](api/README.md)                         | 13 业务端点 + 2 探针全表、envelope、幂等、错误码总表          |
-| 2    | [auth 与 me](api/auth/auth_routes.md)                   | 鉴权 Deferred 二选一、GET /me、401/403                        |
-| 3    | [brief 简报与卡片](api/brief/brief_routes.md)           | GET /brief、card schema_version                               |
-| 4    | [对话与 SSE](api/conversations/conversations_routes.md) | POST messages SSE、GET 恢复、approval_required 带 approval_id |
-| 5    | [确认门](api/approvals/approvals_routes.md)             | 列表/详情/confirm\|reject\|revise、持久修改重放、重新确认     |
-| 6    | [任务与事件](api/tasks/tasks_routes.md)                 | 列表/详情/cancel 幂等/events 只读按 recorded_at               |
+| 序号 | 文档                                                    | 作用                                                      |
+| ---- | ------------------------------------------------------- | --------------------------------------------------------- |
+| 1    | [API 索引与约定](api/README.md)                         | 13 业务端点 + 2 探针全表、envelope、幂等、错误码总表      |
+| 2    | [auth 与 me](api/auth/auth_routes.md)                   | 鉴权 Deferred 二选一、GET /me、401/403                    |
+| 3    | [brief 简报与卡片](api/brief/brief_routes.md)           | GET /brief、card schema_version                           |
+| 4    | [对话与 SSE](api/conversations/conversations_routes.md) | execution 分派、Run 读/取消/有限批准恢复、SSE 与补读隔离  |
+| 5    | [确认门](api/approvals/approvals_routes.md)             | 列表/详情/confirm\|reject\|revise、持久修改重放、重新确认 |
+| 6    | [任务与事件](api/tasks/tasks_routes.md)                 | 列表/详情/cancel 幂等/events 只读按 recorded_at           |
 
 ## 四、Schema（5 篇）
 
@@ -63,7 +63,7 @@
 | 3    | [工具网关与 v0 工具](agent/02-tool-gateway-and-v0-tools.md) | 五工具schema、持久身份/重放、批准原子结果、当前权限与unknown不重发 |
 | 4    | [简报与卡片生成](agent/03-brief-and-card-generation.md)     | 每日调度触发、输出 schema、校验降级、预算                          |
 | 5    | [提议到承诺流](agent/04-proposal-to-commitment-flow.md)     | 分诊、澄清问法、time-core 错误到话术映射                           |
-| 6    | [对话运行与预算](agent/05-chat-runtime-flow-and-budget.md)  | conversation/run/attempt/trace、状态机、双预算                     |
+| 6    | [对话运行与预算](agent/05-chat-runtime-flow-and-budget.md)  | Run/attempt/调用边界、native 累计预算、同 Run 批准恢复与取消       |
 | 7    | [评测夹具](agent/06-eval-fixtures.md)                       | 50 条时间表达集、200 卡片集版本化、指标口径                        |
 
 ## 六、Demo、收口规划与验收记录（11 篇）
@@ -94,7 +94,7 @@
 
 - [OpenSpec 说明](../openspec/README.md)：`openspec/specs/` 为可验收行为契约真源（SHALL + Scenario），`docs/design/` 为设计真源；spec 只写行为并引用 design 章节，不复制字段/路由表。
 - [ADR 决策记录](adr/README.md)：0000 模板、0001–0005 种子 ADR、[0006 Bun + Ox 工具链](adr/0006-bun-ox-toolchain.md)（取代 0002）、[0007 CI 关键路径局部修订](adr/0007-ci-critical-path.md)（调整 0006 的编排/失败传播）及 [0008 static 内部调度](adr/0008-static-scheduling.md)（局部修订 0007 的内部并发边界）；Bun/Ox 选型和五门全成功不变，冻结决策正文保留，改口径另起新 ADR。
-- [ADR 0009](adr/0009-cangjie-harness-ts-capabilities.md) 对齐仓颉唯一 Harness/TS 长期能力，并局部修订 0003 的 outbox/确认事务绝对范围；旧 ADR 正文与历史验收保留。同步公共用例/DTO、只读投影、确认创建/取消单事务和可靠异步 outbox 分列（design/02 §1–§2）；D1 仅证明存储导入边界，不证明 SQL 所有权。本次仅规范对齐，不实现 R1 或改变有效安全 spec。
+- [ADR0009](adr/0009-cangjie-harness-ts-capabilities.md) 确定仓颉唯一 Harness/TS 长期能力，并局部修订0003的 outbox/确认事务绝对范围；历史 ADR/验收保留其适用边界。同步公共用例/DTO、只读投影、确认创建/取消单事务和可靠异步 outbox 分列，D1 不证明 SQL 所有权。正式实现与分级验收见 design/09/11，[native 构建/运行说明](../apps/harness/README.md) 不等于真实 provider/完整 R1 验收。
 - 冲突矩阵：行为/验收以 spec 为准，字段/路由以 design/api/schema 为准，why 以 ADR 为准。
 
 ## 维护约定
@@ -103,7 +103,7 @@
 - 每篇头部固定四行：状态 / 范围 / 不包含 / 阶段标签；节内用 Observed / Required / Proposed / Deferred 标注断言级别。
 - 未确认事项只出现在 `prd/04-acceptance-open-questions.md` 的 Deferred 清单，不写入 design 真源层。
 - 不复制外部产物原文、token、DSN；引用蓝图一律用 B00–B06 / AF 代号。
-- 不猜仍未定的目标市场、推送、LLM 供应商、计费等字段；已定项以 design/01 与 PRD 04 为准。仓颉唯一 Harness/TS 长期能力已定，选库和接入未实现，不再列为“是否练仓颉”候选。
+- 不猜目标市场、推送、LLM 供应商、计费等待决项；范围和依据见 design/01 与 PRD 04。仓颉唯一 Harness/TS 长期能力分工见 design/09；正式最小接入不替代真实 provider 与完整 R1 验收。
 - 仓库密钥、私有策略、真实 `.env`、用户数据一律不得提交。
 
 ## 断言四分标签约定

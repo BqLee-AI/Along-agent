@@ -19,13 +19,13 @@
 
 用途：前端启动时自检会话、取 CSRF token 与已确认时区；也是“会话是否有效”的唯一可编程判断点。
 
-成功响应 `200`（`data` 字段在方案确定前仅定形状，不定 token 细节）：
+成功响应 `200`（`data` 匹配公共 `Me` 合同）：
 
 ```json
 {
   "code": 0,
   "data": {
-    "user": { "id": "usr_01J…", "display_name": "…" },
+    "user": { "id": "550e8400-e29b-41d4-a716-446655440000", "display_name": "…" },
     "csrf_token": "csrf_…",
     "confirmed_timezone": "Asia/Shanghai"
   },
@@ -36,7 +36,7 @@
 ```
 
 - `user.id`：多租户隔离键，后续所有资源按此过滤 [Required]。
-- `csrf_token`：后续 POST 在 `X-CSRF-Token` 头回传 [Proposed：字段名随方案可换，机制不变]。
+- `csrf_token`：签名会话下发字符串，后续 POST 在 `X-CSRF-Token` 头回传。显式受控开发桥接可返回 `null`；客户端仍按完整 `Me` 合同判断身份有效，仅在 token 非 `null` 时添加该头，不把合法 `null` 当作登录失败，也不能借此绕过签名会话的 CSRF 校验 [Required]。
 - `confirmed_timezone`：用户已确认时区（缺失则为 `null`，前端引导确认；“明天”解析依赖此值冻结，见 conversations 文档）[Required]。
 - [Deferred] 不返回：session 过期时间、provider 信息、权限列表（v0 无 RBAC，owner 即全权）。
 
@@ -59,8 +59,8 @@
 - HTTP `401` + `error.code=UNAUTHENTICATED` [Required]。前端收到后清本地会话态、引导登录，不自动重试业务请求。
 - HTTP `403` + `FORBIDDEN`：会话有效但访问他人资源（各资源路由统一行为，本路由不直接产生）[Required]。
 
-## 3. CSRF 约定 [Proposed]
+## 3. CSRF 约定 [Required]
 
-- 机制：Cookie session + `X-CSRF-Token`。`GET /me` 下发 token，前端内存持有并在每次 POST 附带。
-- 缺失/错误 token 的 POST 返回 `403 FORBIDDEN`（`details.reason=CSRF_MISMATCH`），不执行副作用 [Required]。
-- 机制“写操作必校验”不变；token 形态变化时随之修订本节。
+- 签名会话使用 Cookie session + `X-CSRF-Token`。`GET /me` 下发 token，前端内存持有并在每次 POST 附带。
+- 缺失/错误 token 的 POST 返回 `403 CSRF_MISMATCH`，不执行副作用。
+- 显式受控开发桥接的 `csrf_token:null` 只说明该开发身份不提供 token；签名会话的写操作校验不因客户端省略头而降级。

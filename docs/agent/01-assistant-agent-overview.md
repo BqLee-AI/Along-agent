@@ -19,7 +19,7 @@ POST /conversations/messages (SSE)
   -> Scheduler / Notifier（Agent 不再参与）
 ```
 
-[Observed] v0 实际为 TS 确定性 turn、确认门和只追加事件，无真实 LLM；[Required] 真实模型/工具循环从 R1 起唯一归仓颉 Harness，TS 保留业务/能力/存储（design/09/11）。外部产品/AF 只作参考，不作为已实现证据。
+[Observed] business 是无模型的确定性业务；harness 明确进入正式仓颉核心，经 TS 纯模型 transport 和可信工具/批准边界。受控 transport 证明接入而非真实 provider/模型质量或完整 R1（design/09/11）；外部产品/AF 不作实现证据。
 
 ## 职责（做）
 
@@ -62,11 +62,11 @@ POST /conversations/messages (SSE)
 
 - [Required] ID-first 用于资源/身份关联，公开用例允许显式 DTO 与只读投影；五缝不是所有跨模块调用唯一入口，可靠异步命令走 outbox（design/02/04）。
 - [Required] 最小工具集：每次 run 限定 allowlist 子集，默认最小集；敏感工具 `requires_approval=true` 直接产 approval 事件，不存在"先执行后补确认"。
-- [Required] 预算先行：仓颉强制模型/工具循环预算，TS 校验/保存配置并守执行资格；v0 TS 字符估算不等于真实模型 usage（05）。
+- [Required] 预算先行：仓颉强制累计迭代/可得 usage，TS 冻结配置与资格；缺 usage 保留未知，不字符估算、不保证不可证明的费用（05）。
 - [Deferred] 多 Agent（规划者→执行者→检查者）、`@execution` 自定义 plan、沙箱、Skills 市场均 P1 后远期，本篇不展开。
 
 ## 与 design/04/09 的一致性
 
 - 本篇"不算时间/不直写库/不直调连接器"对应 design/04（AgentRuntime+ToolGateway 边界）与 design/09（time-core 确定性层）。
 - `normalize(wall_time, timezone_id, fold_choice, ruleset)` 为服务端纯函数唯一权威；LLM 输入输出均不含 `fire_at_utc`。
-- 仓颉唯一 Harness，TS 长期能力/业务/存储；R1 当前上下文与等待未实现，事件补读不等于执行恢复，未知不盲重放（design/09/11）。
+- 仓颉唯一 Harness，TS 长期能力/业务/存储；有限批准等待同 Run 显式恢复不等于任意崩溃自动恢复，GET 补读不执行，unknown 不盲重放；完整 R1 另行取证（design/09/11）。

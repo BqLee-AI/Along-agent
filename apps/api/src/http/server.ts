@@ -3,11 +3,13 @@ import type { Pool } from 'pg';
 import { handleRequest, type AppDeps } from './app.js';
 import { createActorResolver } from './auth.js';
 import { loadTimeContext } from '../modules/time/context.js';
+import type { HarnessServices } from '../modules/conversations/harness-process.js';
 
 export interface ServeOptions {
   port?: number;
   tzdbVersion?: string;
   pool?: Pool | null;
+  harness?: HarnessServices | null;
 }
 
 export function serve(options: ServeOptions = {}): Server {
@@ -20,6 +22,7 @@ export function serve(options: ServeOptions = {}): Server {
     resolveActor,
     tzdbVersion,
     timeContext: loadTimeContext(tzdbVersion),
+    harness: options.harness ?? null,
   };
   const server = createServer((req, res) => {
     void handleRequest(req, res, deps).catch(() => {

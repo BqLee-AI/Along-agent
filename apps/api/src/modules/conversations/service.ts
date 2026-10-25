@@ -1,16 +1,21 @@
-// Conversation runtime (issue #9): POST /conversations/messages orchestration.
-// Deterministic v0 (no LLM provider): triage -> ToolGateway -> approval or
-// clarification; every SSE event is persisted to run_checkpoints first so
-// replay (idempotent POST and GET after_seq) is exact.
+// Conversation entry: deterministic business use-cases or the native Harness.
+// Both persist the frozen seven-event stream; native choice/loop ownership is
+// exclusively in Cangjie, while TS owns accepted authority and durable facts.
 import { createHash, randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
-import { findReminderDirective } from '@along/time-core';
-import { requireTimeContext, type TimeContext } from '../time/context.js';
+import type { ExecutionKind } from '@along/contracts';
+import type { ConversationDeps, RunContext, StartResult, EventWriter } from './contracts.js';
 import {
-  THREAD_PROTOCOL_VERSION,
-  ThreadEventSchema,
-  type ThreadEvent,
-} from '@along/stream-protocol';
+  executeHarness,
+  cancelConversationRun,
+  getRunView,
+  resumeConversationRun,
+} from './harness-authority.js';
+import { appendEvent, commitTerminal, lockRun } from './run-state.js';
+import { TOOL_IDS } from '../tools/contracts.js';
+import { findReminderDirective } from '@along/time-core';
+import { requireTimeContext } from '../time/context.js';
+import { THREAD_PROTOCOL_VERSION, type ThreadEvent } from '@along/stream-protocol';
 import { withTransaction } from '../../db/transaction.js';
 import {
   forbidden,
@@ -18,7 +23,7 @@ import {
   notReady,
   stateConflict,
   validationError,
-  type HttpError,
+  HttpError,
 } from '../../http/errors.js';
 import { invokeTool, reserveToolInvocation } from '../tools/gateway.js';
 import type { ToolContext, ToolPayload } from '../tools/contracts.js';
@@ -28,12 +33,9 @@ import {
   type SendMessageBody,
 } from './schemas.js';
 import {
-  appendCheckpoint,
   createConversation,
   deleteExpiredIdempotency,
   findIdempotency,
-  finishAttempt,
-  finishRun,
   freezeConversationTimezone,
   getConversation,
   getRunStatus,
@@ -47,11 +49,8 @@ import {
 } from './repository.js';
 
 const AGENT_REVISION = 'assistant/r1';
-const MAX_ITERATIONS = 10;
-const MAX_TOKENS = 8000;
-// Conservative token estimate: one code point per token (CJK-heavy text).
-// v0 has no provider callback, so TS owns the count.
-const estimateTokens = (text: string): number => [...text].length;
+const BUSINESS_MAX_ITERATIONS = 10;
+const BUSINESS_MAX_TOKENS = 8000;
 
 // time-core's pure parser accepts second precision only (no milliseconds).
 function utcSecondIso(date: Date): string {
@@ -71,34 +70,6 @@ function pgErrorOf(err: unknown): { code?: string; constraint?: string } | null 
   };
 }
 
-export interface ConversationDeps {
-  pool: Pool | null;
-  timeContext: TimeContext;
-}
-
-export interface RunContext {
-  ownerId: string;
-  conversationId: string;
-  runId: string;
-  attemptId: string;
-  requestId: string;
-  inputText: string;
-  confirmedTimezone: string | null;
-  anchorReceivedAtUtc: string;
-  receivedAtUtc: string;
-  foldChoice: 'first' | 'second' | 'none';
-  maxIterations: number;
-  maxTokens: number;
-  timeContext: TimeContext;
-}
-
-export interface StartResult {
-  conversationId: string;
-  runId: string;
-  replay: ThreadEvent[] | null;
-  context: RunContext | null;
-}
-
 function requirePool(deps: ConversationDeps): Pool {
   if (!deps.pool) throw notReady();
   return deps.pool;
@@ -109,6 +80,7 @@ function requestHashOf(input: {
   text: string;
   timezone: string | null;
   fold: string;
+  execution: ExecutionKind;
 }): string {
   const canonical = JSON.stringify([
     input.conversationId ?? null,
@@ -116,7 +88,10 @@ function requestHashOf(input: {
     input.timezone,
     input.fold,
   ]);
-  return createHash('sha256').update(canonical, 'utf8').digest('hex');
+  return createHash('sha256')
+    .update(input.execution === 'harness' ? 'harness/v1\0' : '')
+    .update(canonical, 'utf8')
+    .digest('hex');
 }
 
 function textOf(body: SendMessageBody): string {
@@ -136,6 +111,7 @@ export async function startConversationRun(
   const parsed = SendMessageBodySchema.safeParse(body);
   if (!parsed.success) throw validationError('invalid message body');
   const input = parsed.data;
+  const execution = input.execution ?? 'business';
   const text = textOf(input);
   const timezone = input.confirmed_timezone_id ?? input.confirmed_timezone ?? null;
   const key = idempotencyKeyHeader ?? input.idempotency_key ?? requestId;
@@ -144,6 +120,7 @@ export async function startConversationRun(
     text,
     timezone,
     fold: input.fold_choice,
+    execution,
   });
   const pool = requirePool(deps);
 
@@ -167,6 +144,8 @@ export async function startConversationRun(
           context: null,
         };
       }
+      if (execution === 'harness' && !deps.harness)
+        throw new HttpError(503, 503, 'HARNESS_UNAVAILABLE', '原生 Agent 暂不可用。');
 
       let conversation: ConversationRow | null = null;
       if (input.conversation_id) {
@@ -178,7 +157,7 @@ export async function startConversationRun(
       }
       // Only new proposal turns need rules. Reads, cancellation and stored
       // idempotent results keep their own existing boundaries.
-      if (findReminderDirective(text) >= 0 && !CANCEL_INTENT.test(text))
+      if (execution === 'business' && findReminderDirective(text) >= 0 && !CANCEL_INTENT.test(text))
         requireTimeContext(deps.timeContext);
       if (!conversation) {
         const anchorIso = (await client.query<{ now: Date }>('SELECT now() AS now')).rows[0]?.now;
@@ -208,15 +187,37 @@ export async function startConversationRun(
       });
       const runId = randomUUID();
       const attemptId = randomUUID();
-      const mode = findReminderDirective(text) >= 0 || CANCEL_INTENT.test(text) ? 'task' : 'chat';
+      const mode =
+        execution === 'harness'
+          ? 'chat'
+          : findReminderDirective(text) >= 0 || CANCEL_INTENT.test(text)
+            ? 'task'
+            : 'chat';
+      const receivedAtUtc = utcSecondIso(new Date());
+      const maxIterations =
+        execution === 'harness' ? deps.harness!.maxIterations : BUSINESS_MAX_ITERATIONS;
+      const maxTokens = execution === 'harness' ? deps.harness!.maxTokens : BUSINESS_MAX_TOKENS;
+      const frozenContext = {
+        confirmedTimezone,
+        anchorReceivedAtUtc: utcSecondIso(conversation.anchor_received_at_utc),
+        receivedAtUtc,
+        foldChoice: input.fold_choice,
+        rulesetId: deps.timeContext.ruleset_id,
+        tzdbVersion: deps.timeContext.tzdb_version,
+        aliasVersion: deps.timeContext.available ? deps.timeContext.aliases.version : null,
+      };
       await insertRun(client, {
         runId,
         ownerId,
         conversationId: conversation.id,
         agentRevision: AGENT_REVISION,
         mode,
-        maxIterations: MAX_ITERATIONS,
-        maxTokens: MAX_TOKENS,
+        maxIterations,
+        maxTokens,
+        execution,
+        allowlist: TOOL_IDS,
+        frozenContext,
+        inputMessageId: userMessageId,
       });
       await insertAttempt(client, {
         attemptId,
@@ -233,7 +234,6 @@ export async function startConversationRun(
         runId,
         userMessageId,
       });
-      const receivedAtUtc = utcSecondIso(new Date());
       return {
         conversationId: conversation.id,
         runId,
@@ -249,8 +249,11 @@ export async function startConversationRun(
           anchorReceivedAtUtc: utcSecondIso(conversation.anchor_received_at_utc),
           receivedAtUtc,
           foldChoice: input.fold_choice,
-          maxIterations: MAX_ITERATIONS,
-          maxTokens: MAX_TOKENS,
+          maxIterations,
+          maxTokens,
+          execution,
+          userMessageId,
+          allowlist: TOOL_IDS,
           timeContext: deps.timeContext,
         },
       };
@@ -311,31 +314,9 @@ export async function startConversationRun(
   };
 }
 
-export type EventWriter = (event: ThreadEvent) => Promise<boolean>;
-
 interface RunSession {
   context: RunContext;
-  seq: number;
-  tokens: number;
-  iterations: number;
-  assistantText: string;
-  stopped: boolean;
   terminal: boolean;
-}
-
-function envelopeOf(
-  session: RunSession,
-  eventSeq: number,
-  type: ThreadEvent['type'],
-  payload: unknown,
-): ThreadEvent {
-  return ThreadEventSchema.parse({
-    protocol_version: THREAD_PROTOCOL_VERSION,
-    seq: eventSeq,
-    type,
-    payload,
-    request_id: session.context.requestId,
-  });
 }
 
 // Persist then return the envelope carrying the global event_seq. Persist
@@ -347,22 +328,21 @@ async function persist(
   type: ThreadEvent['type'],
   payload: unknown,
 ): Promise<ThreadEvent> {
-  if (session.terminal) throw new Error('run already terminated');
-  // Validate before storage; the global sequence is assigned by the DB.
-  const event = envelopeOf(session, 1, type, payload);
-  const eventSeq = await appendCheckpoint(pool, {
-    ownerId: session.context.ownerId,
-    attemptId: session.context.attemptId,
-    seq: session.seq,
-    type,
-    payload,
-    requestId: session.context.requestId,
+  if (session.terminal) throw stateConflict('run already terminated');
+  const event = await withTransaction(pool, async (client) => {
+    await lockRun(client, session.context);
+    if (type === 'thread.completed' || type === 'thread.failed' || type === 'thread.cancelled') {
+      return commitTerminal(
+        client,
+        session.context,
+        type === 'thread.completed' ? 'done' : type === 'thread.failed' ? 'failed' : 'cancelled',
+        payload,
+      );
+    }
+    return appendEvent(client, session.context, type, payload);
   });
-  if (type === 'thread.completed' || type === 'thread.failed' || type === 'thread.cancelled') {
+  if (type === 'thread.completed' || type === 'thread.failed' || type === 'thread.cancelled')
     session.terminal = true;
-  }
-  session.seq += 1;
-  event.seq = eventSeq;
   return event;
 }
 
@@ -375,7 +355,6 @@ async function emit(
 ): Promise<boolean> {
   const event = await persist(pool, session, type, payload);
   const open = await write(event);
-  if (!open) session.stopped = true;
   return open;
 }
 
@@ -427,31 +406,6 @@ function deltaPayload(session: RunSession, delta: string) {
   };
 }
 
-async function finish(
-  pool: Pool,
-  session: RunSession,
-  status: 'done' | 'failed' | 'cancelled',
-): Promise<void> {
-  // A terminal checkpoint is authoritative even when later audit writes fail.
-  try {
-    if (session.assistantText.length > 0) {
-      await insertMessage(pool, {
-        ownerId: session.context.ownerId,
-        conversationId: session.context.conversationId,
-        role: 'assistant',
-        content: session.assistantText,
-        requestId: null,
-      });
-    }
-  } finally {
-    try {
-      await finishAttempt(pool, session.context.attemptId, status === 'done' ? 'done' : 'failed');
-    } finally {
-      await finishRun(pool, session.context.runId, status);
-    }
-  }
-}
-
 async function failWith(
   pool: Pool,
   session: RunSession,
@@ -459,16 +413,11 @@ async function failWith(
   error: { code: string; message: string; http_status: number; details?: unknown },
 ): Promise<void> {
   if (session.terminal) return;
-  if (session.assistantText.length === 0) session.assistantText = error.message;
-  try {
-    await emit(pool, session, write, 'thread.failed', {
-      conversation_id: session.context.conversationId,
-      run_id: session.context.runId,
-      error,
-    });
-  } finally {
-    if (session.terminal) await finish(pool, session, 'failed');
-  }
+  await emit(pool, session, write, 'thread.failed', {
+    conversation_id: session.context.conversationId,
+    run_id: session.context.runId,
+    error,
+  });
 }
 
 // Client is gone: persist the terminal event for replay, then mark the run
@@ -480,7 +429,6 @@ async function cancelRun(pool: Pool, session: RunSession): Promise<void> {
     run_id: session.context.runId,
     reason: 'client_disconnected',
   });
-  await finish(pool, session, 'cancelled');
 }
 
 async function completeClarify(
@@ -490,20 +438,15 @@ async function completeClarify(
   text: string,
 ): Promise<void> {
   const ok = await emit(pool, session, write, 'message.delta', deltaPayload(session, text));
-  session.assistantText += text;
   if (!ok) {
     await cancelRun(pool, session);
     return;
   }
-  try {
-    await emit(pool, session, write, 'thread.completed', {
-      conversation_id: session.context.conversationId,
-      run_id: session.context.runId,
-      approval_id: null,
-    });
-  } finally {
-    if (session.terminal) await finish(pool, session, 'done');
-  }
+  await emit(pool, session, write, 'thread.completed', {
+    conversation_id: session.context.conversationId,
+    run_id: session.context.runId,
+    approval_id: null,
+  });
 }
 
 async function completeApproval(
@@ -519,7 +462,6 @@ async function completeApproval(
     'message.delta',
     deltaPayload(session, payload.echo_text),
   );
-  session.assistantText += payload.echo_text;
   if (!okDelta) {
     await cancelRun(pool, session);
     return;
@@ -548,15 +490,11 @@ async function completeApproval(
     await cancelRun(pool, session);
     return;
   }
-  try {
-    await emit(pool, session, write, 'thread.completed', {
-      conversation_id: session.context.conversationId,
-      run_id: session.context.runId,
-      approval_id: payload.approval.approvalId,
-    });
-  } finally {
-    if (session.terminal) await finish(pool, session, 'done');
-  }
+  await emit(pool, session, write, 'thread.completed', {
+    conversation_id: session.context.conversationId,
+    run_id: session.context.runId,
+    approval_id: payload.approval.approvalId,
+  });
 }
 
 function listSummary(payload: Extract<ToolPayload, { kind: 'list_tasks' }>): string {
@@ -576,20 +514,14 @@ function briefSummary(payload: Extract<ToolPayload, { kind: 'brief' }>): string 
     .join('\n')}`;
 }
 
-async function runTurn(pool: Pool, session: RunSession, write: EventWriter): Promise<void> {
+async function executeBusinessTurn(
+  pool: Pool,
+  session: RunSession,
+  write: EventWriter,
+): Promise<void> {
   const open = await emit(pool, session, write, 'thread.started', startPayload(session));
   if (!open) {
     await cancelRun(pool, session);
-    return;
-  }
-
-  if (session.tokens > session.context.maxTokens) {
-    await failWith(pool, session, write, {
-      code: 'BUDGET_EXCEEDED',
-      message: '本轮推理预算用完，已停下；请换句更具体的话重说。',
-      http_status: 429,
-      details: { max_tokens: session.context.maxTokens, tokens: session.tokens },
-    });
     return;
   }
 
@@ -618,16 +550,6 @@ async function runTurn(pool: Pool, session: RunSession, write: EventWriter): Pro
       );
       return;
     }
-    session.iterations += 1;
-    if (session.iterations > session.context.maxIterations) {
-      await failWith(pool, session, write, {
-        code: 'BUDGET_EXCEEDED',
-        message: '本轮推理预算用完，已停下；请换句更具体的话重说。',
-        http_status: 429,
-        details: { max_iterations: session.context.maxIterations },
-      });
-      return;
-    }
     const outcome = await invokeTurnTool(
       pool,
       toolContextOf(session, ['request_cancel_task', 'list_tasks']),
@@ -654,16 +576,6 @@ async function runTurn(pool: Pool, session: RunSession, write: EventWriter): Pro
   }
 
   if (wantsReminder) {
-    session.iterations += 1;
-    if (session.iterations > session.context.maxIterations) {
-      await failWith(pool, session, write, {
-        code: 'BUDGET_EXCEEDED',
-        message: '本轮推理预算用完，已停下；请换句更具体的话重说。',
-        http_status: 429,
-        details: { max_iterations: session.context.maxIterations },
-      });
-      return;
-    }
     const outcome = await invokeTurnTool(
       pool,
       toolContextOf(session, ['propose_task', 'list_tasks', 'get_user_prefs']),
@@ -698,8 +610,7 @@ async function runTurn(pool: Pool, session: RunSession, write: EventWriter): Pro
     return;
   }
 
-  // Agent route: read-only lookup, never an approval.
-  session.iterations += 1;
+  // Default deterministic business lookup; never a native/provider fallback.
   const outcome = await invokeTurnTool(
     pool,
     toolContextOf(session, ['list_tasks', 'read_brief_cards', 'get_user_prefs']),
@@ -733,19 +644,23 @@ export async function executeRun(
   deps: ConversationDeps,
   context: RunContext,
   write: EventWriter,
+  signal?: AbortSignal,
 ): Promise<void> {
   const pool = requirePool(deps);
+  const execution = await withTransaction(
+    pool,
+    async (client) => (await lockRun(client, context, true, false)).run.execution,
+  );
+  if (execution === 'harness') {
+    await executeHarness(deps, context, write, signal);
+    return;
+  }
   const session: RunSession = {
     context,
-    seq: 1,
-    tokens: estimateTokens(context.inputText),
-    iterations: 0,
-    assistantText: '',
-    stopped: false,
     terminal: false,
   };
   try {
-    await runTurn(pool, session, write);
+    await executeBusinessTurn(pool, session, write);
   } catch {
     if (session.terminal) return;
     // Post-open failures must still end the stream; if even the terminal
@@ -758,11 +673,6 @@ export async function executeRun(
       });
     } catch {
       if (session.terminal) return;
-      try {
-        await finish(pool, session, 'failed');
-      } catch {
-        // socket/DB gone: nothing left to persist
-      }
     }
   }
 }
@@ -807,3 +717,5 @@ export async function getConversationDetail(
     next_after_seq: last ? last.seq : null,
   };
 }
+
+export { cancelConversationRun, getRunView, resumeConversationRun };

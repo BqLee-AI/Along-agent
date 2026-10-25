@@ -17,12 +17,14 @@ import { handleConversationRoute } from '../modules/conversations/routes.js';
 import { handleTaskRoute } from '../modules/tasks/routes.js';
 import { handleBriefRoute } from '../modules/brief/routes.js';
 import { loadTimeContext, type TimeContext } from '../modules/time/context.js';
+import type { HarnessServices } from '../modules/conversations/harness-process.js';
 
 export interface AppDeps {
   pool: Pool | null;
   resolveActor?: ActorResolver;
   tzdbVersion?: string;
   timeContext?: TimeContext;
+  harness?: HarnessServices | null;
 }
 
 interface TzdbOnlyOpts {
@@ -128,6 +130,7 @@ export async function handleRequest(
     resolveActor = async () => actor;
     const writeRoute =
       pathname === '/api/v1/conversations/messages' ||
+      /^\/api\/v1\/conversations\/[^/]+\/runs\/[^/]+\/actions\/(?:cancel|resume)$/.test(pathname) ||
       /^\/api\/v1\/approvals\/[^/]+\/actions\/(?:confirm|reject|revise)$/.test(pathname) ||
       /^\/api\/v1\/tasks\/[^/]+\/actions\/cancel$/.test(pathname);
     if (!writeRoute) {
@@ -253,6 +256,7 @@ export async function handleRequest(
         resolveActor,
         body,
         timeContext,
+        harness: deps.harness,
       });
       if (handled) return;
     }

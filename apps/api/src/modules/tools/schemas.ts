@@ -4,13 +4,7 @@
 // fire_at_utc/fold/offset) are rejected at the gateway and audited as deny.
 import { z } from 'zod';
 
-export const TOOL_IDS = [
-  'propose_task',
-  'request_cancel_task',
-  'list_tasks',
-  'read_brief_cards',
-  'get_user_prefs',
-] as const;
+import { TOOL_IDS } from './contracts.js';
 
 export type ToolId = (typeof TOOL_IDS)[number];
 

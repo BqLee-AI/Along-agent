@@ -9,6 +9,9 @@ import {
   shortNoOf,
   type PresentationSnapshot,
 } from '../approvals/presentation.js';
+import { readCancelTaskCandidate, readToolTaskList } from '../tasks/tool-query.js';
+import { readToolBriefCards } from '../brief/tool-query.js';
+import { readUserPreferences } from '../identity/preferences.js';
 import { TOOL_INPUT_SCHEMAS } from './schemas.js';
 import type { ToolContext, ToolOutcome, ToolPayload } from './contracts.js';
 import { executeLocalInvocation, reserveInvocation } from './invocations.js';
@@ -147,26 +150,8 @@ async function runRequestCancelTask(
     };
   }
   const input = parsed.data;
-  const { rows } = await client.query<{
-    id: string;
-    owner_id: string;
-    state: string;
-    state_version: number;
-    wall_time: string;
-    timezone_id: string;
-    fold: number;
-    resolved_utc_offset_seconds: number;
-    tzdb_version: string;
-    fire_at_utc: Date;
-    original_note: string | null;
-  }>(
-    `SELECT id, owner_id, state, state_version, wall_time, timezone_id, fold,
-       resolved_utc_offset_seconds, tzdb_version, fire_at_utc, original_note
-     FROM tasks WHERE id = $1`,
-    [input.task_id],
-  );
-  const task = rows[0];
-  if (!task || task.owner_id !== ctx.ownerId) {
+  const task = await readCancelTaskCandidate(client, ctx.ownerId, input.task_id);
+  if (!task) {
     return {
       payload: {
         kind: 'clarify',
@@ -226,8 +211,6 @@ async function runRequestCancelTask(
   };
 }
 
-const ACTIVE_STATES = ['saved', 'pending_schedule', 'scheduled', 'cancel_pending'] as const;
-
 async function runListTasks(
   client: PoolClient,
   ctx: ToolContext,
@@ -245,33 +228,9 @@ async function runListTasks(
       errorCode: null,
     };
   }
-  const input = parsed.data;
-  const states = input.state ? [input.state] : [...ACTIVE_STATES];
-  const { rows } = await client.query<{
-    id: string;
-    original_note: string | null;
-    wall_time: string;
-    timezone_id: string;
-    state: string;
-  }>(
-    `SELECT id, original_note, wall_time, timezone_id, state FROM tasks
-     WHERE owner_id = $1 AND state = ANY($2::text[])
-     ORDER BY fire_at_utc ASC LIMIT $3`,
-    [ctx.ownerId, states, input.limit + 1],
-  );
-  const hasMore = rows.length > input.limit;
+  const projection = await readToolTaskList(client, ctx.ownerId, parsed.data);
   return {
-    payload: {
-      kind: 'list_tasks',
-      tasks: rows.slice(0, input.limit).map((row) => ({
-        task_id: row.id,
-        note_preview: (row.original_note ?? '').slice(0, 30),
-        fire_at_local_text: row.wall_time,
-        timezone_id: row.timezone_id,
-        state: row.state,
-      })),
-      has_more: hasMore,
-    },
+    payload: { kind: 'list_tasks', ...projection },
     errorCode: null,
   };
 }
@@ -293,34 +252,9 @@ async function runReadBriefCards(
       errorCode: null,
     };
   }
-  const input = parsed.data;
-  const { rows } = await client.query<{
-    id: string;
-    original_note: string | null;
-    wall_time: string;
-    timezone_id: string;
-    state: string;
-  }>(
-    `SELECT id, original_note, wall_time, timezone_id, state FROM tasks
-     WHERE owner_id = $1 AND wall_time LIKE $2 || '%' AND state <> 'cancelled'
-       AND ($3::uuid[] IS NULL OR id = ANY($3::uuid[]))
-     ORDER BY wall_time ASC LIMIT 50`,
-    [ctx.ownerId, input.date, input.card_ids ?? null],
-  );
+  const projection = await readToolBriefCards(client, ctx.ownerId, parsed.data);
   return {
-    payload: {
-      kind: 'brief',
-      brief_id: `brief:${input.date}`,
-      date: input.date,
-      cards: rows.map((row) => ({
-        card_id: row.id,
-        kind: 'task',
-        title: (row.original_note ?? '').slice(0, 30),
-        body_text: `${row.wall_time}（${row.timezone_id}）`,
-        source_refs: [row.id],
-        presentation_version: 'v1',
-      })),
-    },
+    payload: { kind: 'brief', ...projection },
     errorCode: null,
   };
 }
@@ -341,14 +275,11 @@ async function runGetUserPrefs(
       errorCode: 'TOOL_FORBIDDEN',
     };
   }
-  const { rows } = await client.query<{ timezone_id: string | null }>(
-    'SELECT timezone_id FROM users WHERE id = $1',
-    [ctx.ownerId],
-  );
+  const preferences = await readUserPreferences(client, ctx.ownerId);
   return {
     payload: {
       kind: 'prefs',
-      timezone_id: rows[0]?.timezone_id ?? null,
+      timezone_id: preferences.timezone_id,
       alias_version: ctx.timeContext.available ? ctx.timeContext.aliases.version : 'unavailable',
       quiet_hours: null,
       locale: null,

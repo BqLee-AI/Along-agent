@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { withTransaction } from '../../db/transaction.js';
 import { forbidden, notFound, stateConflict, HttpError } from '../../http/errors.js';
 import { readFrozenToolApproval } from '../approvals/tool-result.js';
-import { lockToolRunBinding } from '../conversations/tool-binding.js';
+import { assertToolRunBinding, lockToolRunBinding } from '../conversations/tool-binding.js';
 import type {
   InvocationInput,
   ReservationInput,
@@ -251,6 +251,72 @@ async function replay(client: PoolClient, ctx: ToolContext, row: Invocation): Pr
   if (result.status === 'unknown' || resultKind(result) !== row.outcome_kind)
     throw stateConflict('invalid accepted tool result');
   return result;
+}
+
+// Bootstrap reads accepted facts only. No invocation/attempt/Run locks are
+// acquired here: callers may already hold attempt → Run locks, and historical
+// reads remain valid after suspension or completion.
+export async function readInvocationSnapshots(
+  client: PoolClient,
+  ctx: ToolContext,
+  invocationIds: readonly string[],
+): Promise<Array<{ invocation_id: string; tool_id: string; result: ToolResult }>> {
+  await assertToolRunBinding(client, ctx);
+  if (invocationIds.length === 0) return [];
+  const { rows } = await client.query(
+    `SELECT * FROM tool_invocations
+     WHERE invocation_id = ANY($1::uuid[]) AND owner_id = $2
+       AND conversation_id = $3 AND run_id = $4`,
+    [invocationIds, ctx.ownerId, ctx.conversationId, ctx.runId],
+  );
+  const invocations = new Map(
+    rows.map((row) => {
+      const parsed = invocationSchema.parse(row);
+      return [parsed.invocation_id, parsed] as const;
+    }),
+  );
+  const snapshots: Array<{ invocation_id: string; tool_id: string; result: ToolResult }> = [];
+  for (const invocationId of invocationIds) {
+    const row = invocations.get(invocationId);
+    if (!row) throw notFound('tool invocation not found');
+    if (row.state !== 'completed') throw stateConflict('tool invocation has no accepted result');
+    const accepted = parseResult(await replay(client, ctx, row));
+    if (resultKind(accepted) !== row.outcome_kind)
+      throw stateConflict('invalid accepted tool result');
+    snapshots.push({
+      invocation_id: row.invocation_id,
+      tool_id: row.tool_id,
+      result: ctx.allowlist.includes(row.tool_id) ? accepted : permissionDenied,
+    });
+  }
+  return snapshots;
+}
+
+const runInvocationStateSchema = z
+  .object({
+    invocation_id: z.string().uuid(),
+    call_key: z.string(),
+    state: z.enum(['reserved', 'unknown', 'completed']),
+    outcome_kind: z
+      .enum(['success', 'approval_pending', 'clarification', 'time_error', 'denied', 'failed'])
+      .nullable(),
+    approval_id: z.string().uuid().nullable(),
+  })
+  .strict();
+export type RunInvocationState = z.infer<typeof runInvocationStateSchema>;
+
+export async function readRunInvocationStates(
+  client: PoolClient,
+  ctx: ToolContext,
+): Promise<RunInvocationState[]> {
+  await assertToolRunBinding(client, ctx);
+  const { rows } = await client.query(
+    `SELECT invocation_id, call_key, state, outcome_kind, approval_id FROM tool_invocations
+     WHERE owner_id = $1 AND conversation_id = $2 AND run_id = $3
+     ORDER BY created_at, invocation_id`,
+    [ctx.ownerId, ctx.conversationId, ctx.runId],
+  );
+  return rows.map((row) => runInvocationStateSchema.parse(row));
 }
 async function accept(
   client: PoolClient,

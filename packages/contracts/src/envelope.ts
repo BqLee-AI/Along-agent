@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-// Envelope: docs/design/10 §1 { code, data, msg, error? }; error carries request_id.
+// Envelope: success uses error:null; failures carry the typed request_id body.
 export const ErrorBodySchema = z.object({
   code: z.string(),
   message: z.string(),
@@ -12,7 +12,7 @@ export const EnvelopeSchema = z.object({
   code: z.number(),
   data: z.unknown().optional(),
   msg: z.string(),
-  error: ErrorBodySchema.optional(),
+  error: ErrorBodySchema.nullable().optional(),
   request_id: z.string(),
 });
 
