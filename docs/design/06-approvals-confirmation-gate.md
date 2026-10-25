@@ -195,3 +195,7 @@ Web 只在本人 pending create_task 显示“修改这条提议”，预填原�
 [Required] 批准结果账只保存原 approval_id 及 fireAt/hash/版本校验材料。`approvals/tool-result.ts#readFrozenToolApproval` 返回原冻结 CreatedApproval、回显、卡片引用与期限，不带动态状态或倒计时；批准进入 consumed/rejected/expired/superseded 后仍返回原引用，不延期限、不重算、不建替代。当前状态由详情接口另查，工具成功不承诺批准仍 pending 或任务已创建。
 
 [Required] 同调用引用顺序/并发/丢回答重交只接受一次结果；合法新引用允许同参数新动作。取消提议继续复用既有 pending 批准的业务规则，两次新调用可以关联同一个批准，不能给 approval_id 强加唯一调用约束。调用账、当前权限遮蔽与迁移边界见 design/04 §3。
+
+## 11. R1 文档授权（Proposed）
+
+[14 §5–§6](14-r1-document-task-loop.md) 定义独立 `document_approvals`/`document_approval_decisions`、精确基线/完整目标预览、按钮授权、唯一 apply 绑定与确定零写冲突的新批准前驱。按钮不写文件、不建 task；approved 不是效果回执。旧 task 的 consumed、有效期、修改和创建/取消单事务保持原合同，不把文件 rename 塞进该事务。对文档的 apply 唯一约束不套用到既有可复用 pending task 批准的提议调用。

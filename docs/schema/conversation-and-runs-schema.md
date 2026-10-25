@@ -327,3 +327,9 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 
 - [Required] 语言是独立维度：切语言重生成重确认，不复用旧 `presentation_hash`。
 - [Required] 旧模板有显示 bug → 作废旧 approval 重来，不悄悄替换模板内容。
+
+## R1 工作区与类型化等待增量（Proposed）
+
+字段/一致性真源见 [design/14 §3、§7、§10](../design/14-r1-document-task-loop.md)。既有 `frozen_context` 增加有限 workspace 授权引用；不保存真实 root，不给历史 Run 补授 workspace。等待 UUID 列复用，等待种类由可信原提议引用裁决，不让 native 任意指定查询表。
+
+文档 receipt 和新 snapshot 版本随 `harness/v2` 同批切换；历史 task snapshot/receipt 只读解释后恢复原 Run/预算/工具范围，不混跑旧 writer。`tool_invocations` 继续唯一持有接受结果；文档 UUID 不写入 `tool_calls.approval_id` 的 task 外键。新增迁移落地必要约束，不改旧迁移或 completed 事实；文档批准表归 approvals，见 commitments 与 design/14 §5。

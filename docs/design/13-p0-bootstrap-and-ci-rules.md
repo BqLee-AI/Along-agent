@@ -121,6 +121,10 @@ unknown 子合同使用测试专用协议对端连接真实调用核心和正式
 
 有限 enforced 只覆盖上述实测行为。其余工具/连接器合同、真实 provider/MCP、完整 R1 产物与模型质量、任意崩溃恢复、unknown 的完整产品恢复及通用 external exactly-once 保持 partial/Deferred；不能由 scope 文案、文件存在或绿色 job 名升级。
 
+### 4.3 R1 文件/MCP 扩展的证据准入（Proposed）
+
+[14 §11](14-r1-document-task-loop.md) 的文件、文档批准和实际 MCP 消费者继续使用既有根入口及五门；按本次正式 native/SDK/PG/真实文件结果追加精确 case ID，不新建 CI 平台。设计 PR 不提升 `ci/gates.json` 的覆盖范围，也不预填运行通过。unknown 产品路径、冲突后新批准及取消先提交的实际零新增动作须分别验证；受控模型只证反馈合同，真实 provider/产物另取证。
+
 ## 引用
 
 - B06§12 全文；01/02/09/10/11/12。

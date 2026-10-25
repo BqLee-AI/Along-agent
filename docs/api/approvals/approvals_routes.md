@@ -183,3 +183,9 @@ AMBIGUOUS唯一共享结构引用A4 `docs/design/05-time-core.md` §9.1：`detai
 处理优先级与并发详见 design/06 §9.4：owner 先于预约/终态，已完成同请求重放先于旧状态；未完成请求锁后检查 kind/state/DB实时时限，再归一，提交前再次检查。confirm/reject等待行锁期间到期同样410且持久expired。修改先提交→旧confirm/reject/不同键修改409 superseded；confirm或reject先提交→修改409 conflict；并发修改仅一后继。旧确认键不能绕过 superseded；新项材料与新详情不匹配才是既有409 PRESENTATION_MISMATCH。相同presentation可同hash/所见值，不追溯材料来源；客户端仍读新详情重新按钮确认。
 
 所有失败均不建 task/task_events/outbox/notification；业务替代失败不改旧项为 superseded、不留新approval。允许已提交的幂等预约，以及owner校验后应到期项的expired持久化；不能把它们描述成“完全零写入”。实际修改及重放也均零task；只有新项被用户重新按钮确认才建task。客户端遇失败保留旧项/输入，遇成功按新ID取详情重回显，不自动confirm、不乐观隐藏失败。
+
+## 7. R1 文档批准接口（Proposed）
+
+独立 `GET /api/v1/document-approvals/{id}` 及 `POST .../actions/confirm|reject` 的字段、冻结材料、幂等与锁序以 [design/14 §5.1–§5.4](../../design/14-r1-document-task-loop.md) 为真源。详情提供相对目标、原 Run、基线/完整目标及实际授权状态；确认检查精确预览/hash，只持久授权，不写文件/建 task。拒绝不撤销已经批准的在途效果。
+
+版本冲突后的新批准可引用明确零写的同目标前驱，旧授权及结果保持原事实。不得拿文档 UUID 调用旧 task confirm，或将其写入 task 批准外键；旧 approvals 的有效期、consumed、revise、时间展示与事务语义不变。

@@ -282,3 +282,9 @@ tasks 1 ── 0..1 tasks       (recreated_from_task_id 自引用)
 | `evidence_ref`    | `text`        | not null, default `'local'` | 证据引用，不留内容原文                                 |
 
 - [Required] 一年留存，不跟 task 走，不留内容原文；破 0 即记，人复核放行。
+
+## R1 文档批准与决议（Proposed）
+
+新增 `document_approvals` 与 `document_approval_decisions` 归 approvals；完整字段、约束与操作序列真源见 [design/14 §5](../design/14-r1-document-task-loop.md)，不把新文档事实塞入旧 task 批准的非空时间字段。
+
+批准冻结原 Run、workspace/登记摘要、相对目标、已接受全文引用/基线版本、确切完整目标/版本和展示材料；状态为 pending/approved/rejected，`apply_invocation_id` 一次绑定且唯一。可空的不可变唯一前驱 `replaces_approval_id` 仅连接同目标的可信零写 conflict，不能覆盖 unknown 或未尝试动作。决议关系只负责 owner/目标/规范请求摘要/幂等裁决，不另建效果账；文件写入事实仍在 `tool_invocations`。迁移新增不改旧文件，旧 task/事件/outbox 合同不变。
