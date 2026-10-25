@@ -2,7 +2,7 @@
 
 ## Purpose
 
-TBD - created by archiving change gates-executable. Update Purpose after archive.
+定义 D1–D10 的机读声明、执行证据、统一验证入口及五门隔离规则，使绿色检查对应实际执行的消费者和已限定的行为保证。
 
 ## Requirements
 
@@ -15,10 +15,10 @@ TBD - created by archiving change gates-executable. Update Purpose after archive
 - WHEN 读取 `ci/gates.json` 任一 status 为 enforced 的 gate
 - THEN 其 `enforced_by.job` 非空且等于 `.github/workflows/ci.yml` 中的 job 名，其 `evidence[]` 非空且每项为仓库内存在路径
 
-#### Scenario: partial gate 不强制指向
+#### Scenario: D8 的有限执行声明
 
-- WHEN 读取 status 为 partial 的 D8
-- THEN 允许缺 `enforced_by`，但 SHALL 在 scope 注明补齐条件（contracts-dual 已覆盖最小双跑）
+- WHEN D8 声明有限范围 enforced
+- THEN 清单包含 contracts-dual 执行指向、真实证据文件和唯一必需消费者 ID；未覆盖范围明确保留 partial，不以非空 scope 或旧 healthz 通过扩大保证（映射 D8；design/13 §4.2）
 
 ### Requirement: 缺执行即红
 
@@ -47,6 +47,30 @@ TBD - created by archiving change gates-executable. Update Purpose after archive
 
 - WHEN 两脚本都通过
 - THEN gates.json 中 enforced 条数等于 check-gates-executable 实际校验条数
+
+### Requirement: D8 正式跨语言消费者与本次执行证据
+
+根 `test:contracts` 与 `contracts-dual` SHALL 运行同一正式合同入口，从当前树构建并启动锁定 native，在同一生产 runtime、真实隔离 PG16 与签名身份上验证生产者和消费者；保留既有 healthz 双跑与契约包。声明范围和执行证据 SHALL 一致，不以跳过、旧产物或旧报告替代。
+
+#### Scenario: 同一业务在两入口消费真实结果
+
+- WHEN 分别通过本地公共用例和真实签名 HTTP 执行相同的正式 native 场景
+- THEN 原批准真实挂起、确认后同 Run 唯一后继 attempt 消费原批准与实际 task ID；拒绝、错误参数/状态、取消和重放遵守原合同，读取不执行，取消后无新效果（映射 D8；design/13 §4.2）
+
+#### Scenario: 严格边界与 unknown 子合同不冒充完整产品恢复
+
+- WHEN 公共 DTO 或真实 native wire 收到伪造/不兼容输入，或真实非事务调用核心在实际效果后丢失执行进程并返回 unknown
+- THEN 对应真实消费者拒绝非法输入；native 消费真实 unknown 后停止且不重发，原结果不被伪造成 accepted；该子合同不作为生产 unknown 快照或跨请求恢复证据（映射 D8；design/04 §3、design/13 §4.2）
+
+#### Scenario: 省略消费者不能借旧集合变绿
+
+- WHEN 本次构建/启动、消费者执行或必需 case 被省略，报告缺失、损坏、包含重复/跳过/失败的必需 case，或消费者进程失败
+- THEN 根入口和 contracts-dual 非零失败；只有本次实际报告中每个必需 ID 唯一通过且消费者成功才可通过，既有 healthz/契约包通过不能补足（映射 D8）
+
+#### Scenario: 必要业务步骤缺失导致行为变红
+
+- WHEN 在独立临时上下文省略真实结果纳入或执行资格裁决，重跑同一消费者
+- THEN 对应具体错误结果或越权效果使行为断言失败，恢复后通过；缺依赖、协议损坏或超时不计为该业务 Red，不添加生产绕过开关（映射 D8）
 
 ### Requirement: verify 主链覆盖
 

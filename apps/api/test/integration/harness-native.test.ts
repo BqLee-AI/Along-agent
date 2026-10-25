@@ -1,14 +1,17 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
-import { createServer, type Server, type IncomingMessage } from 'node:http';
+import { createServer } from 'node:http';
+import type { Server } from 'node:http';
 import { z } from 'zod';
 import { RunViewSchema } from '@along/contracts';
-import { ThreadEventSchema, type ThreadEvent } from '@along/stream-protocol';
+import { ThreadEventSchema } from '@along/stream-protocol';
+import type { ThreadEvent } from '@along/stream-protocol';
 import { handleRequest } from '../../src/http/app.js';
 import { createHarnessModelTransport } from '../../src/modules/conversations/harness-model.js';
 import { seedSession } from '../../src/modules/identity/seed.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
+import { frames, started, pending, jsonBody, listen } from '../helpers/harness-consumer.js';
 
 const binaryPath = process.env.HARNESS_BINARY ?? '';
 const maybe = binaryPath && databaseUrl ? describe : describe.skip;
@@ -33,36 +36,6 @@ const longAnswers = [
   { kind: 'longascii', content: 'a'.repeat(4001) },
   { kind: 'longunicode', content: 'a'.repeat(3999) + '😀' + '界'.repeat(4001) },
 ];
-
-function frames(text: string): ThreadEvent[] {
-  return text
-    .split('\n')
-    .filter((line) => line.startsWith('data: '))
-    .map((line) => ThreadEventSchema.parse(JSON.parse(line.slice(6))));
-}
-function started(events: ThreadEvent[]) {
-  const event = events.find((value) => value.type === 'thread.started');
-  if (!event || event.type !== 'thread.started') throw new Error('missing started');
-  return event.payload;
-}
-function pending(events: ThreadEvent[]) {
-  const event = events.find((value) => value.type === 'approval_required');
-  if (!event || event.type !== 'approval_required') throw new Error('missing approval');
-  return event.payload.approval_id;
-}
-async function jsonBody(req: IncomingMessage): Promise<unknown> {
-  const chunks: Buffer[] = [];
-  for await (const value of req) chunks.push(Buffer.isBuffer(value) ? value : Buffer.from(value));
-  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
-}
-async function listen(server: Server): Promise<string> {
-  const ready = once(server, 'listening');
-  server.listen(0, '127.0.0.1');
-  await ready;
-  const address = server.address();
-  if (!address || typeof address === 'string') throw new Error('missing port');
-  return `http://127.0.0.1:${address.port}`;
-}
 
 maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', () => {
   let database: IntegrationDatabase;

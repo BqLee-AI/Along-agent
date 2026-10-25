@@ -95,8 +95,42 @@
       "enforced_by": { "job": "compose-smoke", "evidence": ["scripts/compose-smoke.sh"] }
     },
     "D8": {
-      "status": "partial",
-      "scope": "minimal contract dual-run: same healthz suite in-process and over HTTP"
+      "status": "enforced",
+      "scope": "current-tree production native; same local/signed-HTTP Run, approval/task observation, rejection, cancellation, replay and strict DTO consumers; native wire rejection; real non-transactional Core-to-native unknown/late-cancel contracts; current required-case report and required-step omission negatives",
+      "owner": "#47",
+      "remaining": {
+        "status": "partial",
+        "scope": "other tool/connector seams; product HTTP external unknown and production unknown snapshot recovery; real provider/MCP, full R1 artifacts/model quality, arbitrary crash recovery and generic external exactly-once"
+      },
+      "enforced_by": {
+        "job": "contracts-dual",
+        "evidence": [
+          "scripts/test-contracts.sh",
+          "scripts/d8-contracts.mjs",
+          "scripts/check-gates-executable.mjs",
+          "scripts/test/gate-evidence.test.ts",
+          "apps/api/test/contracts/harness.test.ts",
+          "apps/api/test/contracts/harness-core-native.test.ts",
+          "apps/api/test/contracts/harness-wire.test.ts"
+        ],
+        "consumer_cases": [
+          "D8.approval.local",
+          "D8.approval.http",
+          "D8.rejected.local",
+          "D8.rejected.http",
+          "D8.cancel.local",
+          "D8.cancel.http",
+          "D8.replay.local",
+          "D8.replay.http",
+          "D8.dto.local",
+          "D8.dto.http",
+          "D8.tool-denied.local",
+          "D8.tool-denied.http",
+          "D8.unknown-core-native",
+          "D8.cancelled-core-native",
+          "D8.wire-rejection"
+        ]
+      }
     },
     "D9": {
       "status": "enforced",

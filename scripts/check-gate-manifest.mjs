@@ -2,6 +2,7 @@
 // Gate-manifest check: D9 enforced (#8 owner), D3-D6 enforced, never silently skipped.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { d8ConsumerCases } from './d8-contracts.mjs';
 
 const root = process.argv[2] ?? process.cwd();
 const manifest = JSON.parse(readFileSync(join(root, 'ci/gates.json'), 'utf8'));
@@ -37,7 +38,23 @@ if (
 const d7 = manifest.gates?.D7;
 if (d7?.status !== 'enforced') failures.push(`D7: expected enforced, got ${JSON.stringify(d7)}`);
 const d8 = manifest.gates?.D8;
-if (d8?.status !== 'partial') failures.push(`D8: expected partial, got ${JSON.stringify(d8)}`);
+if (
+  d8?.status !== 'enforced' ||
+  d8?.owner !== '#47' ||
+  d8?.enforced_by?.job !== 'contracts-dual' ||
+  typeof d8?.scope !== 'string' ||
+  d8.scope.trim().length === 0 ||
+  d8?.remaining?.status !== 'partial' ||
+  typeof d8?.remaining?.scope !== 'string' ||
+  d8.remaining.scope.trim().length === 0
+) {
+  failures.push(`D8: expected bounded enforced declaration with partial remaining scope`);
+}
+try {
+  d8ConsumerCases(d8);
+} catch (error) {
+  failures.push(error.message);
+}
 const d10 = manifest.gates?.D10;
 if (d10?.status !== 'enforced') failures.push(`D10: expected enforced, got ${JSON.stringify(d10)}`);
 for (const [gate, entry] of Object.entries(manifest.gates ?? {})) {

@@ -8,6 +8,7 @@
 - Bun 固定 `1.4.2`，使用 workspaces 与单一 `bun.lock`；不再通过独立任务编排器运行。Node.js `>= 22` 可用于调用兼容的 `scripts/verify.mjs`，不替代 Bun 安装、构建与测试。
 - Lint 使用 Oxlint `1.89.0`，格式化使用 Oxfmt `0.74.0`；命令统一经根 `package.json` scripts 调用。
 - 安装依赖：`bun install --frozen-lockfile`；锁文件与 manifest 不一致即失败，不在 CI 中改锁。需要 workspace `dist/` 的构建、开发、类型检查与测试入口须先构建依赖包，不依赖宿主机旧产物或其他 CI job 的文件。
+- `bun run test:contracts` 在 Linux x64 / WSL 使用 Docker，从当前树构建正式 Bun/native 镜像，自建独立网络、全新 PG16 与测试身份 secret；不使用已有数据库或个人模型凭据。原 healthz/契约包及真实本地/签名 HTTP 消费者同跑，必需 case 必须出现在本次实际报告且唯一通过。成功/失败均清理本次容器、卷、网络和镜像标签；缺前置不跳过（design/13 §4.2）。
 
 真实可用命令（以 `package.json` 为准，禁止自创）：
 
@@ -16,8 +17,8 @@
 | 本地启动            | `bun run dev`（先构建依赖包；`apps/api` 3000 `ROLE=all`、`apps/web` 3100）                           |
 | 类型检查            | `bun run typecheck`                                                                                  |
 | 单元测试            | `bun run test:unit`（非数据库测试）                                                                  |
-| 契约测试            | `bun run test:contracts`（API 进程内与 HTTP 双跑 + 契约包）                                          |
-| 数据库测试          | `bun run test:integration`（全部 9 个 DB 文件）                                                      |
+| 契约测试            | `bun run test:contracts`（正式 native + 隔离 PG 的本地/HTTP 合同、原 healthz 与契约包）              |
+| 数据库测试          | `bun run test:integration`（全部真实 PG 集成文件）                                                   |
 | 调度故障测试        | `bun run test:scheduler`（D9 指定集）                                                                |
 | Lint                | `bun run lint`                                                                                       |
 | 构建                | `bun run build:packages`（共享包）、`bun run build`（先包后应用）、`bun run build:api`（API 及依赖） |
@@ -76,7 +77,7 @@
 - 一键 verify：`bun run verify`，保留 `scripts/verify.mjs`；也可用 `bun scripts/verify.mjs` 或 `node scripts/verify.mjs` 调用，内部统一执行 Bun 命令。按序跑 `lint → typecheck → depcruise → gate-manifest → gates-executable → frozen-names → copy-claims → test:unit → openspec validate --all --strict → format:check`，任一失败即停并报步名与非零退出码。`openspec/changes` 下无 active change 时 OpenSpec 步提示跳过，也可用 `--skip openspec` 主动跳过。
 - 同次 `verify` 仅在 `typecheck` 成功后，让后续单元步骤复用其已构建的共享 packages，省去重复构建；失败即停，不消费失败构建。共享包构建保留依赖拓扑，其后的 workspace 类型检查用 `--sequential` 串行执行，不省略源码、测试或 Next route typegen。独立 `bun run test:unit` 或 `verify --skip typecheck` 仍先构建包，不以旧 `dist/`、跨次运行标记或其他 job 的产物代替准备。
 - 红例含义：`lint/typecheck` 红=代码或类型坏；`depcruise` 红=越 D1 依赖边界；治理脚本红=门清单/执行证据/冻结名/文案断言坏（看输出行）；`test:unit` 红=单元坏；`openspec validate` 红=change 的 proposal/tasks/spec 不一致；`format:check` 红=跑 `bun run format` 后重提，不能作为非阻塞警告放行。
-- 测试统一使用 `bun:test`，通过文件级并行提速，保留文件状态隔离与 mock/spy/时钟恢复；不把有共享状态的用例改成文件内 concurrent。单元入口排除数据库集，契约入口不能只跑契约包而漏掉 API 两种传输。数据库与调度故障入口使用真实 PostgreSQL 16、原迁移和明确测试环境，不跳过唯一性、只追加或取消窗口断言。
+- 测试统一使用 `bun:test`，通过文件级并行提速，保留文件状态隔离与 mock/spy/时钟恢复；不把有共享状态的用例改成文件内 concurrent。单元入口排除数据库与正式 native 合同集；契约入口保留 healthz/契约包，并运行相同业务的本地公共用例与真实签名 HTTP/native 消费者。本次报告缺失、必需 case 漏跑/重复/跳过/失败均拒绝，不以声明或旧测试绿色代替。数据库与调度故障入口使用真实 PostgreSQL 16、原迁移和明确测试环境，不跳过唯一性、只追加或取消窗口断言。
 - PostgreSQL 集成测试每文件用 `createIntegrationDatabase()` 创建随机独立 schema，并在其中应用原始迁移；连接的 `search_path` 不回退 public，worker 不能消费其他文件的夹具。新连接用该句柄的 `connect()`，子进程显式继承该句柄的连接串；结束时 `close()` 只清理本文件创建的 schema。测试角色需有数据库 CREATE 权限。
 - 共享调度驱动放在非 `.test.ts` helper；测试文件不得互相导入来复用函数，避免重复注册套件。数据库夹具与临时故障注入只验证测试边界，不替代生产 Web、真实到点与强杀验收。
 - 并发测试若要求指定先提交者，须在该业务事务已取得目标行写锁后设置可观察屏障，再启动并确认后写者等待；不能把“先调用”或“先等待第三方行锁”当作取得写入权。夹具同步仅放在本文件的隔离 schema，结束时清理，不修改生产锁或添加重试。
@@ -132,4 +133,4 @@
 - PR 必须附：① CI 全绿链接；② 关键测试输出（粘贴或 CI 日志链接）；③ 若触及 D1–D10，每条附变红测试链接或变异证明。
 - Reviewer 只看证据合入：无验收证据、无 Deferred 声明、无 Spec 引用的 PR 直接打回，不进入代码细节评审。
 - Required checks（5 个，必须全部成功才允许合并）：static、migration-scan、scheduler-fault、contracts-dual、compose-smoke。`static` 一次安装后运行本地同一 `verify` 入口；其余四个 job 都只依赖 `static`，通过后各自隔离并行，static 失败则全部下游不运行。Compose 不等待三个 DB/契约 job，因此其中一项失败时 Compose 可能已经消耗构建与运行资源，但不改变合并门，也不共享用户数据或可变数据库。Compose 宿主不安装没有宿主消费者的依赖，镜像内仍真实冻结安装与构建，保留两轮全新卷 D7。含义见 `docs/design/13-p0-bootstrap-and-ci-rules.md §3–§4`。
-- `scripts/check-gates-executable.mjs` 断言每条 enforced 门在 `ci/gates.json` 的 `enforced_by`（CI job 名 + evidence 文件）真实存在，跑在 `static` job 与本地 verify 的 gate-manifest 步之后。
+- `scripts/check-gates-executable.mjs` 断言每条 enforced 门在 `ci/gates.json` 的 `enforced_by`（CI job 名 + evidence 文件）真实存在，跑在 `static` 与本地 verify 的 gate-manifest 之后。根契约入口另传本次 Bun JUnit 报告路径，逐项拒绝未唯一通过的 D8 `consumer_cases`；static 不启动 PG/native。D8 的有限范围与 remaining/partial 不代表全部工具或完整 R1。

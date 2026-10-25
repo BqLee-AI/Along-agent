@@ -24,13 +24,13 @@ Observed / Required / Proposed / Deferred 同 01。
 
 ## 2. CI 门（Required，实现见 13）
 
-| 门               | 拦截内容                                                                                           | 对应原则          |
-| ---------------- | -------------------------------------------------------------------------------------------------- | ----------------- |
-| depcruise 依赖门 | time-core 零出边、模块存储实现导入隔离、Web 禁导 API；不解析 SQL 所有权（02 §2）                   | #1、红线          |
-| 纯函数门         | `time-core` 禁时钟/禁 env/禁网络；单测用 fixture 规则                                              | #4（可复现）      |
-| 约束存在门       | `UNIQUE(task_id,fire_at)`、`recreated_from` 唯一、`task_events` 无 UPDATE/DELETE 迁移扫描          | #4（DB 承载规则） |
-| 契约双跑门       | 当前 healthz 进程内/HTTP 双跑为 partial；后续真实 Harness 消费者合同沿原入口补证，不提前宣称已覆盖 | #1                |
-| 冒烟门           | 空环境 `compose up` + `/readyz` 类型化失败演练（缺 TZDB 时）                                       | #3、#6            |
+| 门               | 拦截内容                                                                                                              | 对应原则          |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------- | ----------------- |
+| depcruise 依赖门 | time-core 零出边、模块存储实现导入隔离、Web 禁导 API；不解析 SQL 所有权（02 §2）                                      | #1、红线          |
+| 纯函数门         | `time-core` 禁时钟/禁 env/禁网络；单测用 fixture 规则                                                                 | #4（可复现）      |
+| 约束存在门       | `UNIQUE(task_id,fire_at)`、`recreated_from` 唯一、`task_events` 无 UPDATE/DELETE 迁移扫描                             | #4（DB 承载规则） |
+| 契约双跑门       | 正式 native/PG 的本地与签名 HTTP 消费者、本次必需 case 报告及必要步骤负例；enforced/partial 按实际范围分列（13 §4.2） | #1                |
+| 冒烟门           | 空环境 `compose up` + `/readyz` 类型化失败演练（缺 TZDB 时）                                                          | #3、#6            |
 
 ## 3. Postgres 贯穿原则（Required，AF 三硬约束 Observed AF§5）
 

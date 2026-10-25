@@ -41,7 +41,7 @@ issue → Spec 章节 → OpenSpec change（如需）→ 分支 → PR → CI �
 - 本地启动：`bun run dev`（先构建依赖包；`apps/api` 3000 `ROLE=all`、`apps/web` 3100）。
 - 构建：`bun run build:packages` 构建共享包；`bun run build` 先包后应用；`bun run build:api` 构建 API 及其依赖。
 - 检查：`bun run verify`；类型与 lint 可分别运行 `bun run typecheck`、`bun run lint`；格式修复/阻塞检查为 `bun run format` / `bun run format:check`。
-- 测试：`bun run test:unit`（非数据库）、`bun run test:contracts`（API 进程内/HTTP 双跑及契约包）、`bun run test:integration`（全部 9 个真实数据库文件）、`bun run test:scheduler`（D9 指定集）；数据库测试需 PostgreSQL 16 与测试环境，详见 [贡献指南](CONTRIBUTING.md)。
+- 测试：`bun run test:unit`（非数据库与非 native 合同）、`bun run test:contracts`（Linux x64/WSL + Docker，当前生产 native 构建、自带隔离 PG、本地/签名 HTTP 消费者、原 healthz/契约包）、`bun run test:integration`（全部真实数据库文件）、`bun run test:scheduler`（D9 指定集）。契约入口不使用已有数据库或个人模型配置；其余数据库测试需 PostgreSQL 16 与明确测试环境，详见 [贡献指南](CONTRIBUTING.md)。
 - 契约校验：`openspec validate <name> --strict`（如 `openspec validate v0-safety-contract --strict`）
 - 环境变量：`DATABASE_URL`、`TZDB_VERSION`（缺失则 `/readyz` 503 `TZDB_UNAVAILABLE`，属预期行为）。
 
