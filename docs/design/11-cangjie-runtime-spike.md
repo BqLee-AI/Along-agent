@@ -78,6 +78,10 @@ TS 事实与只追加事件 → SSE / GET 补读 → Web
 4. 同容器/内网不是免鉴权，快照和 reply 不能提升 Run 权限。
 5. 只追加事件、冻结展示、确认创建/取消单事务、取消优先、回执门与未知不盲重发不变。
 
+## 6. R1 用户任务合同（Proposed）
+
+[14 §1–§11](14-r1-document-task-loop.md) 将完整 R1 收敛为受管项目资料到简报的真实任务：仓颉决定检索/查证/修改/回读，TS 提供有限文件与官方 SDK 支持的薄只读 MCP Server，文档按钮授权后同 Run 执行。SDK/Bun 镜像兼容须先真实实验，正式消费者只证明对应合同；真模型、位置/冲突/读失败变体和真实文档产物另验收。既有最小接入与 #47 有限 D8 不替代该矩阵。
+
 ## 引用
 
 - [09 Harness/checkpoint](09-agent-runtime-and-checkpoint.md)、[02 模块边界](02-modular-monolith-and-split-triggers.md)、[04 五缝](04-five-seams-contract.md)、[PRD 待决 D2](../prd/04-acceptance-open-questions.md)。

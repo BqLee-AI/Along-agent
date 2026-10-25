@@ -99,3 +99,9 @@ Web 批准链接保留原 conversation/Run，并明确打开新标签页；在�
 - [Required · #30] AMBIGUOUS必须带 `error.details={wall_time,timezone_id,ruleset_id,candidates}`，候选恰好两个，按UTC早晚给 `fold_choice=first|second`、`offset_seconds`、`fire_at_utc`，唯一形状见design/05 §9.1。2026-11-01 01:30纽约分别为05:30Z/-14400、06:30Z/-18000；不得只拼中文文本或让客户端造候选。
 - [Required · #30] Web保留原输入与服务端wall_time/timezone_id，展示两候选+数值偏移；点击first/second只以新幂等键、新请求和相应fold_choice重提议，保留纽约不能回退/me上海，日期/时区修改须清除旧候选。服务端重归一并沿既有锚点/跨午夜规则，不接受客户端UTC作为权威；成功pending后仍须按钮三件套确认，选择候选不等于建task。
 - 时间归一由服务端 time-core 纯函数执行，LLM 不算时间，展示层不换算 [Required]。真实三zone/2026–2027有限覆盖、未知用户时区与缺规则区分、readyz/DB及D7兼容见design/05 §5；真实回归/部署缺失取证见§10，不把mock故障当部署演练。
+
+## 5. R1 工作区选择与文档等待（Proposed）
+
+字段及接口真源见 [design/14 §3.2、§7](../../design/14-r1-document-task-loop.md)：本人只读 `GET /api/v1/workspaces` 提供安全登记项；harness 消息可选 `workspace_id`，选择进入入站 hash 和 Run 冻结上下文，business 携带则拒绝。旧无 workspace 请求不改 hash 材料；RunView 只增加安全工作区摘要和明确的文档等待种类，不返回宿主 root。
+
+文档批准仍经原 Run 显式 resume：approved 只允许后续 apply，不能作为 consumed task_id；pending 不启动，拒绝终止，早决议/并发/重交复用同等待点。仍使用既有七词 `approval_required` 跳转独立文档批准页，不发假时间卡片；unknown 按正常失败终结，不能恢复未知快照。对应增量不是既有 task 接口字段变更。

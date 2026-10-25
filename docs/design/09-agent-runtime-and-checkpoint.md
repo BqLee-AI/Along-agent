@@ -85,6 +85,10 @@ attempt: running → done | failed | fenced_out
 - `event_seq` 是不透明全局游标。内部快照造成间隙合法；同 conversation 对外追加序列化分配和提交，避免小游标晚提交被 GET 永久漏读。游标锁采用与外键 KEY SHARE 兼容的 NO KEY UPDATE，避免并发终态消息写者升级锁死锁。
 - WS/ws-ticket、Web Push/其他推送按原阶段与 Deferred 决策，不因 native 接入自动扩展。
 
+## 9. R1 文档批准与正常未知终结（Proposed）
+
+[14 §7](14-r1-document-task-loop.md) 定义 `harness/v2` 的 task/document 批准判别、有限 workspace 上下文和同 Run 文档批准恢复；不伪造 task_id，不增加事件词或任意恢复入口。生产 unknown 直接正常 failed，不把未接受 invocation 填进 completed-only 快照。历史任务等待点只读解释后恢复原授权，TS/native/Web 同批切换，不混跑旧执行器。
+
 ## 引用
 
 - B02§2/B04/AF§4–§7、B06§8 仅作机制参考，不复制外部产物。
