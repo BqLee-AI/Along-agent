@@ -187,3 +187,11 @@ confirm/reject/revise 必须共用 owner 后、锁后有效性规则；terminal 
 | R11  | Web完整编辑/明确时区/fold，稳定重试键，失败保留旧项，成功跳新详情再按钮确认                       | 真实session/CSRF/Web/HTTP/SQL串联；A2/D2/D10  |
 
 Web 只在本人 pending create_task 显示“修改这条提议”，预填原文/显式时区并允许完整重述；不计算 UTC、不替代确认。一次未决提交保留原 body/键（响应丢失重试不换键，必要时在本浏览器会话保存未决提交）；用户编辑、选择 fold 或修正失败输入后用新键。成功只按返回关联跳新详情并读取现状态，展示新回显/告知再确认；失败保留输入和旧详情，不乐观标 superseded，竞争错误指向真实 successor/task。规则缺失不妨碍已有详情读取/确认冻结数据或取消，A2 不重算旧任务。
+
+## 10. 工具提议与已接受结果的原子边界
+
+[Required] `tools/gateway.ts` 的 propose_task/request_cancel_task 在持久调用预约后，经同一 PoolClient 调用本模块创建/取得批准；批准、tool_invocations 接受结果和 tool_calls 审计同事务提交。结果/审计/COMMIT 失败全部回滚，原预约可重交；不能先提交批准、再另写结果。此边界不消费批准、不建 task，按钮 confirm 的创建/取消事务及真实回执门不变。
+
+[Required] 批准结果账只保存原 approval_id 及 fireAt/hash/版本校验材料。`approvals/tool-result.ts#readFrozenToolApproval` 返回原冻结 CreatedApproval、回显、卡片引用与期限，不带动态状态或倒计时；批准进入 consumed/rejected/expired/superseded 后仍返回原引用，不延期限、不重算、不建替代。当前状态由详情接口另查，工具成功不承诺批准仍 pending 或任务已创建。
+
+[Required] 同调用引用顺序/并发/丢回答重交只接受一次结果；合法新引用允许同参数新动作。取消提议继续复用既有 pending 批准的业务规则，两次新调用可以关联同一个批准，不能给 approval_id 强加唯一调用约束。调用账、当前权限遮蔽与迁移边界见 design/04 §3。

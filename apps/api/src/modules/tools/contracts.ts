@@ -1,0 +1,96 @@
+import type { CreatedApproval } from '../approvals/create.js';
+import type { TimeContext } from '../time/context.js';
+import type { TimeFailure } from '../time/normalize.js';
+
+export interface ToolContext {
+  ownerId: string;
+  conversationId: string;
+  runId: string;
+  attemptId: string;
+  requestId: string;
+  allowlist: readonly string[];
+  confirmedTimezone: string | null;
+  anchorReceivedAtUtc: string;
+  receivedAtUtc: string;
+  foldChoice: 'first' | 'second' | 'none';
+  timeContext: TimeContext;
+}
+export interface ApprovalPayload {
+  kind: 'approval';
+  approval: CreatedApproval;
+  echo_text: string;
+  card_id: string;
+  original_text: string;
+}
+export interface ClarifyPayload {
+  kind: 'clarify';
+  reason: string;
+  phrase_key: string;
+  text: string;
+}
+export interface TimeErrorPayload {
+  kind: 'time_error';
+  error: TimeFailure;
+}
+export interface ListTasksPayload {
+  kind: 'list_tasks';
+  tasks: {
+    task_id: string;
+    note_preview: string;
+    fire_at_local_text: string;
+    timezone_id: string;
+    state: string;
+  }[];
+  has_more: boolean;
+}
+export interface BriefPayload {
+  kind: 'brief';
+  brief_id: string;
+  date: string;
+  cards: {
+    card_id: string;
+    kind: string;
+    title: string;
+    body_text: string;
+    source_refs: string[];
+    presentation_version: string;
+  }[];
+}
+export interface PrefsPayload {
+  kind: 'prefs';
+  timezone_id: string | null;
+  alias_version: string;
+  quiet_hours: null;
+  locale: null;
+}
+// Internal non-transactional evidence, not a registered product tool.
+export interface EvidencePayload {
+  kind: 'effect_evidence';
+  evidence_ref: string;
+}
+export type ToolPayload =
+  | ApprovalPayload
+  | ClarifyPayload
+  | TimeErrorPayload
+  | ListTasksPayload
+  | BriefPayload
+  | PrefsPayload
+  | EvidencePayload;
+export type ToolResult =
+  | { status: 'ok'; result: ToolPayload }
+  | { status: 'denied'; error: { code: string; message: string } }
+  | { status: 'failed'; error: { code: string; message: string } }
+  | { status: 'unknown'; error: { code: string; message: string } };
+export type ToolOutcome = ToolResult & { invocationId: string; replayed: boolean };
+export type ExecutionKind = 'local' | 'read_only' | 'non_transactional';
+export interface InvocationInput {
+  invocationId: string;
+  toolId: string;
+  args: unknown;
+}
+export interface ReservationInput {
+  callKey: string;
+  toolId: string;
+  args: unknown;
+  executionKind: ExecutionKind;
+}

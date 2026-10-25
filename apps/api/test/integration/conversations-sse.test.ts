@@ -14,7 +14,7 @@ import {
   type StartResult,
 } from '../../src/modules/conversations/service.js';
 import { listRunEvents } from '../../src/modules/conversations/repository.js';
-import { invokeTool, type ToolContext } from '../../src/modules/tools/gateway.js';
+import { invokeTool, reserveToolInvocation } from '../../src/modules/tools/gateway.js';
 import { confirmApproval } from '../../src/modules/approvals/confirm.js';
 import { getApprovalDetail } from '../../src/modules/approvals/service.js';
 import { getTaskDetail } from '../../src/modules/tasks/service.js';
@@ -38,22 +38,6 @@ async function seedUser(pool: Pool): Promise<string> {
     [id, `tester-${id}@along.test`],
   );
   return id;
-}
-
-function toolContext(ownerId: string, runId: string, allowlist: string[]): ToolContext {
-  return {
-    ownerId,
-    conversationId: randomUUID(),
-    runId,
-    attemptId: null,
-    requestId: randomUUID(),
-    allowlist,
-    confirmedTimezone: 'Asia/Shanghai',
-    anchorReceivedAtUtc: new Date().toISOString(),
-    receivedAtUtc: new Date().toISOString(),
-    foldChoice: 'none',
-    timeContext,
-  };
 }
 
 async function collect(
@@ -663,12 +647,15 @@ maybe('conversation runtime', () => {
       { raw_text: '你好', confirmed_timezone: 'Asia/Shanghai' },
       randomUUID(),
     );
-    const outcome = await invokeTool(
-      pool,
-      toolContext(ownerId, started.runId, ['list_tasks']),
-      'propose_task',
-      { raw_time_text: '明天 9:20', note: '喝水', occurrence: 'once' },
-    );
+    if (!started.context) throw new Error('expected a fresh run');
+    const ctx = { ...started.context, allowlist: ['list_tasks'] };
+    const args = { raw_time_text: '明天 9:20', note: '喝水', occurrence: 'once' };
+    const { invocationId } = await reserveToolInvocation(pool, ctx, {
+      callKey: 'deny/1',
+      toolId: 'propose_task',
+      args,
+    });
+    const outcome = await invokeTool(pool, ctx, { invocationId, toolId: 'propose_task', args });
     expect(outcome.status).toBe('denied');
     const { rows } = await pool.query(
       "SELECT decision, error_code FROM tool_calls WHERE run_id = $1 AND tool_id = 'propose_task'",

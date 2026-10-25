@@ -59,25 +59,27 @@ AgentRuntime.cancel(run_id)
 
 ### 实施与验证边界
 
-[Required] 真实模型、TS 工具产物、批准等待/取消与未知结果分别取证，见 11；不再以 TS/Cangjie 两个通用 Agent 竞赛决定仓颉是否转正。具体接口与结果账属于后续 #45/#46/#47，不在 #44 实现。
+[Required] 真实模型、TS 工具产物、批准等待/取消与未知结果分别取证，见 11。TS 调用账见下节；跨语言授权/消费者与等待合同归 #46/#47，不以本地结果原子性声明 R1 Harness 已完成。
 
-## 3. ToolGateway（白名单 + zod + 风险分级 + 审计）
+## 3. ToolGateway（稳定调用身份、本地原子结果与审计）
 
 ```text
-ToolGateway.invoke(tool, args, ctx) -> ToolResult
-  ctx
-    request_id / run_id / owner_id / approval_ref（敏感工具必填）
-  gate
-    allowlist_check      不在表 → 拒绝（审计记一笔）
-    zod_validate         参数结构校验
-    risk_class           read_only | write_local | sensitive（敏感必须有 approval consumed）
-    audit_append         调谁、何时、何参（脱敏）、何果
+reserveToolInvocation(pool, trustedContext, {callKey, toolId, args})
+  -> 持久预约 invocationId，绑定 Run/slot、原始 JSON 摘要与首次时间上下文
+invokeTool(pool, trustedContext, {invocationId, toolId, args})
+  -> 校验真实 owner/conversation/Run/attempt 及当前 allowlist
+  -> 已接受结果只读重放；未执行项核对 Run/attempt 资格与 strict schema
+  -> 本地工具、批准、接受结果、只追加审计同事务提交后返回
 ```
 
-- [Required] 三道闸顺序：白名单 → 参数校验 → 敏感 HITL；任一不过即停，不执行。
-- [Required] v0 不给任意代码执行/网页浏览；MCP 工具一律经网关，仓颉侧不直连 MCP Server。
-- [Required] 审计只追加；审计记录跨模块只传 id。
-- [Required] TS 网关保留工具定义/校验/授权/记录；memory/grep、MCP、PC/browser、办公 connector 均为 TS 能力。工具不可接收总目标后隐藏完整模型/工具循环冒充仓颉执行。
+- [Observed] 五个产品工具为本地实现：propose_task、request_cancel_task、list_tasks、read_brief_cards、get_user_prefs。三个 v0 分支互斥，使用持久 `v0-turn/1` slot；新逻辑动作新 slot，同参数不能充当身份。`(run_id, call_key)` 竞争只产生一个引用；更换 tool/原始参数为 STATE_CONFLICT，不执行。
+- [Required] 预约先于副作用独立提交；首次冻结接收时间、anchor、timezone、fold 与规则版本。参数做带版本 domain 的 SHA-256，对象键排序、数组序及字符串字节不改；缺省与显式 default 可不同。只存摘要/字节数，不存 raw args。
+- [Required] 本地 `reserved → completed`；锁序为 attempt → Run → invocation，沿公共用例取得执行资格，与取消/终结串行。已取消 Run/无效 attempt 不获新执行资格；当前权限遮蔽历史结果但不覆盖它，最初接受的 denied 不因放权变成执行。
+- [Required] 批准创建/取得、接受结果和审计共用同一 client/事务。审计、结果或提交失败全回滚，预约保留；明确领域失败回滚工具效果后保存脱敏 failed。提交回答丢失后查同引用，不另造调用；completed 结果不可改删。
+- [Required] 接受结果分类为 success、approval_pending、clarification、time_error、denied、failed。批准仅存引用及冻结校验材料，经 approvals 公共快照恢复原回显/期限/hash；不读动态详情，不因批准已 consumed/rejected/expired/superseded 重建。只读工具重放原安全快照，新引用才刷新。
+- [Observed] `tools/invocations.ts#executeNonTransactionalInvocation` 是可信 TS 内部的一次许可/只读核对边界，不是新增产品工具。独立提交 `reserved → unknown` 及 dispatch 审计；仅得到成功提交回答的当前栈可执行。并发、重启、丢回答及未知效果不重发；同引用/摘要绑定的只读证据才能完成，未证实继续 TOOL_EFFECT_UNKNOWN。临时文件 fsync/强杀只证明此共同边界，不证明不存在的 MCP/provider 或通用 external exactly-once。
+- [Required] tool_invocations 是身份/结果事实，tool_calls 仍只追加审计；不把 legacy args_hash 唯一键当调用去重。字段和迁移停写切换见 [schema](../schema/conversation-and-runs-schema.md#tool_invocations) 与 infra/migrations。failed/unknown 不能被 caller 当成功终结；事件补读不重做工具，也不自动恢复 Run。
+- [Required] TS 保留工具定义、校验、授权、记录；memory/grep、MCP、PC/browser、办公 connector 仍为 TS 能力。v0 不给任意代码执行/网页浏览；MCP 必须经网关，工具不隐藏完整模型/工具循环。既有确认消费、确定性时间、冻结展示、取消与回执合同不变。
 
 ## 4. Scheduler（schedule / claim lease + fencing / cancel）
 

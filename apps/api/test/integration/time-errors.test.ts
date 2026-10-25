@@ -389,25 +389,29 @@ maybe('A4 real HTTP and database boundaries', () => {
           key,
         );
         if (!started.context) throw new Error('new run required');
-        const auditPool =
-          fault === 'assistant_audit'
-            ? ({
-                query: async (sql: string, values?: unknown[]) => {
-                  if (sql.includes('INSERT INTO messages'))
-                    throw new Error('assistant audit unavailable');
-                  return pool.query(sql, values);
-                },
-              } as unknown as Pool)
-            : pool;
-        await executeRun(
-          { pool: auditPool, timeContext: healthy },
-          started.context,
-          async (event) => {
+        const faultName = `fail_assistant_${key.replaceAll('-', '')}`;
+        if (fault === 'assistant_audit') {
+          await pool.query(`
+            CREATE FUNCTION ${faultName}() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN RAISE EXCEPTION 'assistant audit unavailable'; END $$;
+            CREATE TRIGGER ${faultName} BEFORE INSERT ON messages
+            FOR EACH ROW WHEN (NEW.owner_id='${ownerId}'::uuid AND NEW.role='assistant')
+            EXECUTE FUNCTION ${faultName}();
+          `);
+        }
+        try {
+          await executeRun({ pool, timeContext: healthy }, started.context, async (event) => {
             if (event.type === 'thread.failed' && fault === 'writer_throw')
               throw new Error('socket gone after terminal checkpoint');
             return event.type !== 'thread.failed' || fault !== 'return_false';
-          },
-        );
+          });
+        } finally {
+          if (fault === 'assistant_audit') {
+            await pool.query(
+              `DROP TRIGGER ${faultName} ON messages; DROP FUNCTION ${faultName}();`,
+            );
+          }
+        }
         const events = await listRunEvents(pool, ownerId, started.runId);
         expect(events.map((event) => event.type)).toEqual(['thread.started', 'thread.failed']);
         expect(events.at(-1)).toMatchObject({

@@ -7,7 +7,7 @@
 推荐 migration 落地顺序（v0）[Required]：
 
 1. Identity 表（`users`、`sessions`，随 Better Auth Deferred 方案二选一 P0 定）。
-2. Conversation / Runs 表（`conversations`、`messages`、`agent_runs`、`run_attempts`、`run_checkpoints`、`conversation_idempotency`、`tool_calls`、`agent_revisions`、`prompt_versions`）。
+2. Conversation / Runs 表（`conversations`、`messages`、`agent_runs`、`run_attempts`、`run_checkpoints`、`conversation_idempotency`、`tool_invocations`、`tool_calls`、`agent_revisions`、`prompt_versions`）；工具身份/结果归tools，审计只追加。
 3. Commitments 表（`approvals`、`approval_revision_requests`、`tasks`、`task_events`、`outbox`、`notifications`、`task_leases`、`security_events`；统一 `outbox` 名，修改预约归 approvals）。
 
 Content 表（`briefs`、`cards`）为 v1 / Deferred，移出 v0 落地顺序（S0 #14 冻结：v0 简报为只读投影，不建表；详见 [content-schema.md](content-schema.md)）。
@@ -18,12 +18,12 @@ Content 表（`briefs`、`cards`）为 v1 / Deferred，移出 v0 落地顺序（
 - Conversation / Runs 是对话与执行存档底座，commitments 引用 `conversation_id` / `run_id`。
 - Commitments 含状态机与 outbox；P1 content（`briefs`/`cards`，只读投影，见 `docs/api/brief/brief_routes.md`）依赖 commitments，移出 v0 不阻塞主链路。
 
-| 分组                              | 文档                                                               | 表                                                                                                                                                           |
-| --------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Identity                          | [identity-schema.md](identity-schema.md)                           | `users`、`sessions`                                                                                                                                          |
-| Conversation / Runs               | [conversation-and-runs-schema.md](conversation-and-runs-schema.md) | `conversations`、`messages`、`agent_runs`、`run_attempts`、`run_checkpoints`、`conversation_idempotency`、`tool_calls`、`agent_revisions`、`prompt_versions` |
-| Commitments                       | [commitments-schema.md](commitments-schema.md)                     | `approvals`、`approval_revision_requests`、`tasks`、`task_events`、`outbox`、`notifications`、`task_leases`、`security_events`                               |
-| Content（v1 / Deferred，移出 v0） | [content-schema.md](content-schema.md)                             | `briefs`、`cards`                                                                                                                                            |
+| 分组                              | 文档                                                               | 表                                                                                                                                                                               |
+| --------------------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Identity                          | [identity-schema.md](identity-schema.md)                           | `users`、`sessions`                                                                                                                                                              |
+| Conversation / Runs               | [conversation-and-runs-schema.md](conversation-and-runs-schema.md) | `conversations`、`messages`、`agent_runs`、`run_attempts`、`run_checkpoints`、`conversation_idempotency`、`tool_invocations`、`tool_calls`、`agent_revisions`、`prompt_versions` |
+| Commitments                       | [commitments-schema.md](commitments-schema.md)                     | `approvals`、`approval_revision_requests`、`tasks`、`task_events`、`outbox`、`notifications`、`task_leases`、`security_events`                                                   |
+| Content（v1 / Deferred，移出 v0） | [content-schema.md](content-schema.md)                             | `briefs`、`cards`                                                                                                                                                                |
 
 引用：落地顺序对应 B03 微服务下沉原则与 B06 建表顺序（P3 vertical 切片）[B03][B06]。
 
@@ -49,7 +49,7 @@ Content 表（`briefs`、`cards`）为 v1 / Deferred，移出 v0 落地顺序（
 [Required]：
 
 - `task_events` 只追加：DB 禁 `UPDATE`/`DELETE`（trigger 落地，0005 `task_events_no_update_delete`）。
-- `agent_revisions`、`prompt_versions` 不可变：建后禁 `UPDATE`/`DELETE`（trigger 落地，0002；错了发新 revision/version）；`run_checkpoints` 只追加（trigger 落地，0002）；`tool_calls` 审计行随 #9 ToolGateway 落表，复用同一 trigger 形状。
+- `agent_revisions`、`prompt_versions`不可变；`run_checkpoints`及`tool_calls`只追加。`tool_invocations`身份/冻结上下文建后不可改，completed结果禁改删；合法状态迁移及新审计关联由0014约束，旧hash唯一不再代表调用身份。
 - `tasks` 除 `state` / `state_version` 外建后冻结；改时间必须走新 task（先断旧再立新，`recreated_from_task_id` 链接）。
 - `approvals` 消费后冻结；`consumed` 后任何字段禁改。
 - `outbox` 写后仅允许 `status`/`attempt_no` 流转更新，业务字段禁改。
