@@ -24,7 +24,7 @@ TS 模块化单体（`apps/api` 内按模块分目录，单镜像 `api|worker|al
 | approvals          | 确认门、显式修改的唯一后继及持久幂等；消费批准与创建任务或取消请求同事务                                                           | approvals；取消规则归 tasks 公共用例 | `approvals`、`approval_revision_requests`                    | 确认用例，不开放跨模块存储导入                        |
 | tasks              | 调度事实：saved→pending_schedule→scheduled→fired/missed；cancel_pending→cancelled；`UNIQUE(task_id,fire_at)`；`task_events` 只追加 | tasks                                | `tasks`、`task_events`（DB 禁 UPDATE/DELETE）                | `Scheduler.schedule/claim/cancel`（P1 接口化）        |
 | notifications      | send→回执+幂等；06 喝水提醒降级为本模块子用例（`task.kind=notify_only`，不走 LLM 先验调度）                                        | notifications                        | `notifications`（含幂等键、`provider_receipt`）              | `Notifier.send`（P1 接口化）                          |
-| tool-gateway       | 白名单+zod+风险分级+审计（v0 本地工具版）                                                                                          | tool-gateway                         | `tool_calls`（审计）、`tool_allowlist`                       | `ToolGateway.invoke`（P1 接口化）                     |
+| tool-gateway       | 白名单、strict zod、逻辑调用身份、接受结果与只追加审计；本地工具不直接建 task                                                      | tools                                | `tool_invocations`（身份/结果）、`tool_calls`（审计）        | 预约与执行公共函数；跨语言消费合同见 09               |
 | connector-vault    | secret 引用不出明文（v0 仅接口 + Fake）                                                                                            | connector-vault                      | `connector_secrets`（只存引用 `secret://…`）                 | P1 接口化                                             |
 | time-core          | 纯函数 `normalize(wall_time,timezone_id,fold_choice,ruleset)`；LLM 不算时间，展示层不换算                                          | time-core（零依赖）                  | 无表（`tzdb_version` 以常量+迁移声明）                       | 纯函数调用                                            |
 | outbox（横切）     | 领域事件外发：`outbox`（DB 事务内写，worker claimer 投递；旧名 `outbox_events` 作废，S0 #14 冻结）                                 | 各模块自写、worker 投递              | `outbox`                                                     | 内部 + 契约测试                                       |
@@ -34,12 +34,13 @@ TS 模块化单体（`apps/api` 内按模块分目录，单镜像 `api|worker|al
 - [Required] 目录表达规则所有权，沿现有具体函数、service/repository 组织；不强制每模块生成 routes/schema/outbox/接口的空壳层。
 - [Required] ID-first 约束身份与资源关联（如 task/approval/run ID），不是禁止 DTO：公共用例可接收显式参数并返回只读投影。写侧不任意操作他人表；跨模块读取优先所属模块公共入口，明确只读投影可在读取侧 join 并保留 owner 过滤。
 - [Required] 受控跨模块写事务是确认消费：创建批准消费 + task/created/outbox；取消批准消费 + tasks 公共取消用例的状态/事件/取消命令与旧工作失效。不得为旧“只有创建例外”的文字拆开取消事务；失败全回滚，撤销回执仍由 tasks 裁决。
+- [Required] 本地工具提议是另一项限定原子边界：tools 持有调用引用，经 conversations 公共用例锁定执行资格，同一 client 调用 approvals 创建/取得批准，再接受结果并追加审计；任一步失败全部回滚。此事务不消费批准、不建 task，也不把任意外部副作用纳入 PG 原子性；具体合同见 04 §3、06 §10。
 - [Observed] `conversations/service.ts` 同步调用 `tools/gateway.ts`；`tasks/service.ts#getTaskDetail` 同步调用 `notifications/service.ts#getTaskNotifications` 返回 DTO。这些公共调用不经 outbox，通知读取也不创建副作用。
 
 ## 2. 模块自有 schema / outbox 约定（Required）
 
 1. [Required] 表/迁移按领域归属管理；现有物理布局以已合并迁移为准，不为文档对齐改迁移。
-2. [Required] 写入规则归所属模块；只读投影必须明确跨模块来源、owner 范围和输出契约，不把存储行当可写共享对象。受控确认事务沿 §1，不是任意跨模块事务豁免。
+2. [Required] 写入规则归所属模块；只读投影必须明确跨模块来源、owner 范围和输出契约，不把存储行当可写共享对象。受控事务沿 §1，不是任意跨模块事务豁免。
 3. [Required] 需要事务后可靠异步执行的命令/领域事件（如 schedule/cancel/send）在业务事务内写 outbox，由 worker claim、核对版本和回执；不是所有同步用例、读取、流事件和工具请求都改 outbox。幂等投递不证明任意外部效果恰好一次。
 4. [Required] 真实新增/变化的跨进程合同在既有 contracts-dual 入口验证；[Observed] 当前 D8 是最小 healthz 双跑/partial，不证明仓颉合同已通过。
 

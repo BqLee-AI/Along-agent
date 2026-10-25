@@ -77,18 +77,33 @@ BEGIN
 END;
 $$;
 
--- RED: duplicate (run_id, tool_id, args_hash) must fail.
+-- GREEN: equal args are not an invocation identity; audit rows may repeat.
+INSERT INTO tool_calls (id, owner_id, run_id, attempt_id, tool_id, args_hash, decision)
+VALUES ('20000000-0000-0000-0000-000000000052', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        '20000000-0000-0000-0000-000000000031', '20000000-0000-0000-0000-000000000041',
+        'propose_task', 'args-1', 'allow');
+
+INSERT INTO tool_invocations (invocation_id, owner_id, conversation_id, run_id, call_key,
+  first_attempt_id, first_request_id, tool_id, args_hash, args_bytes, execution_kind, frozen_context)
+VALUES ('20000000-0000-0000-0000-000000000071', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+  '20000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000031', 'action/1',
+  '20000000-0000-0000-0000-000000000041', 'request-1', 'propose_task', repeat('a',64), 2, 'local', '{}'),
+  ('20000000-0000-0000-0000-000000000072', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+  '20000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000031', 'action/2',
+  '20000000-0000-0000-0000-000000000041', 'request-2', 'propose_task', repeat('a',64), 2, 'local', '{}');
+
+-- RED: the same durable Run/slot cannot reserve a second identity.
 DO $$
 BEGIN
   BEGIN
-    INSERT INTO tool_calls (id, owner_id, run_id, attempt_id, tool_id, args_hash, decision)
-    VALUES ('20000000-0000-0000-0000-000000000052', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
-            '20000000-0000-0000-0000-000000000031', '20000000-0000-0000-0000-000000000041',
-            'propose_task', 'args-1', 'allow');
-    RAISE EXCEPTION 'D6-FAIL: duplicate tool invocation unexpectedly succeeded' USING ERRCODE = 'P0999';
-  EXCEPTION
-    WHEN unique_violation THEN
-      RAISE NOTICE 'D6 ok: duplicate tool invocation rejected (%)', SQLSTATE;
+    INSERT INTO tool_invocations (invocation_id, owner_id, conversation_id, run_id, call_key,
+      first_attempt_id, first_request_id, tool_id, args_hash, args_bytes, execution_kind, frozen_context)
+    VALUES (gen_random_uuid(), 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      '20000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000031', 'action/1',
+      '20000000-0000-0000-0000-000000000041', 'request-3', 'propose_task', repeat('b',64), 2, 'local', '{}');
+    RAISE EXCEPTION 'D6-FAIL: duplicate logical call slot unexpectedly succeeded' USING ERRCODE = 'P0999';
+  EXCEPTION WHEN unique_violation THEN
+    RAISE NOTICE 'D6 ok: duplicate logical call slot rejected (%)', SQLSTATE;
   END;
 END;
 $$;

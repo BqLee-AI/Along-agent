@@ -1,23 +1,22 @@
 # 02 工具网关与 v0 工具
 
-| 状态     | 范围                                                              | 不包含                                                                       | 阶段标签                                           |
-| -------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------- | -------------------------------------------------- |
-| Proposed | ToolDefinition 契约、白名单注入、v0 五工具 schema、风险分级、审计 | Scheduler/Notifier/ConnectorVault 接口细节（design 真源）、MCP 聚合（P1 起） | v0：5 工具全为网关内建；P1 起网关独立进程+MCP 聚合 |
+| 状态                | 范围                                                                            | 不包含                                                   | 阶段标签                                            |
+| ------------------- | ------------------------------------------------------------------------------- | -------------------------------------------------------- | --------------------------------------------------- |
+| Observed / Required | 五个本地工具、持久调用身份、本地接受结果与只追加审计；ToolDefinition 为能力契约 | 调度/通知接口细节、外部产品工具、跨语言消费与自动Run恢复 | v0确定性调用；仓颉Harness及真实消费者见design/09/11 |
 
 ## ToolGateway 边界
 
 [Required] Agent 永不直调工具实现。调用路径唯一：
 
 ```text
-assistant tool-loop -> ToolGateway.invoke(tool_id, args, run_ctx)
-  -> 白名单校验（本次 run allowlist 是否含 tool_id）
-  -> zod 参数校验（extra=forbid，多余字段直接拒）
-  -> 风险分级门（low 直接执行 / high 产 approval 事件挂起 loop）
-  -> 执行（只读查库 / 只产 approval）
-  -> 审计落行（tool_invocation：run_id/tool_id/args_hash/ok/latency，敏感值只存引用）
+TS先预约 {callKey,toolId,args} -> 持久 invocationId
+assistant tool-loop -> ToolGateway.invoke({invocationId,toolId,args}, trusted run_ctx)
+  -> 真实 owner/conversation/Run/attempt 关联、当前白名单
+  -> 已接受结果重放；新执行再验资格、strict zod 与风险门
+  -> 同client执行本地工具/批准、接受结果、只追加审计，提交后返回
 ```
 
-- [Required] 运行绑定由运行时注入，不由 LLM 传：`user_id` / `conversation_id` / `run_id` / `request_id` 全部由网关从 `AgentRunRequest` 注入；LLM 传这些字段视为越权，拒绝并审计。
+- [Required] 运行绑定由可信 TS 注入，不由模型自报：owner/conversation/run/必填 attempt/request 与 allowlist 不在工具参数中。通过 conversations 公共用例核对归属和执行资格；同进程 ToolContext 不是远程授权协议。三个互斥 v0 分支使用固定 `v0-turn/1` slot，新逻辑动作才分配新 slot；更换 request_id/attempt_id 不另建调用。
 - [Required] `extra=forbid`：zod `strict()`，未知字段即拒；拒绝记审计，不进 LLM 重试循环（防参数嗅探）。
 - [Required] 输出脱敏：工具结果中的 secret/token/连接串一律以 `secret://…` 引用返回，不出明文（v0 无真实 secret，仅接口约束）。
 - [Proposed] P1 起网关独立进程，聚合外部 MCP Server；仓颉侧切 MCP Client，只认网关。MCP 工具经网关同样走白名单+zod+分级+审计。
@@ -97,11 +96,13 @@ assistant tool-loop -> ToolGateway.invoke(tool_id, args, run_ctx)
 
 ## 越权与审计
 
-- [Required] 越权矩阵：传注入型字段（user/conversation/run/request）/ 跨用户 task_id / `extra` 未知字段 / 非 allowlist 工具 → 网关拒绝（`TOOL_FORBIDDEN`），记 `audit_logs(tool.invoke_denied)`，LLM 侧收到结构化拒因，不自动重试。
-- [Required] 审计每行：`run_id, tool_id, args_hash, decision(allow/deny/approval_pending), ok, latency_ms, recorded_at_utc`；完整 args 不存（含原话的参数只存 hash+长度）。
+- [Required] 注入字段、额外参数、他人资源或未准工具不产生业务效果。allowlist外为TOOL_DENIED，失效执行资格为TOOL_FORBIDDEN，同引用改内容为STATE_CONFLICT；非法参数按工具合同拒绝/澄清，不执行。只追加tool_calls，不使用并不存在的audit_logs结果账；不会自动进入模型重试。
+- [Required] 审计关联 invocation_id/run/attempt/request、tool_id、args_hash、decision(allow/deny)、record_kind、outcome_kind 与批准/错误码；参数字节数在 tool_invocations，raw args/secret/异常栈不落账。接受结果由 tool_invocations 管理，不能把 hash 唯一或审计成功当执行去重。
+- [Required] 预约冻结首次时间/时区/fold/规则版本；重交不重算已接受结果。批准只存引用及冻结校验材料，详情状态另读；只读结果存有界安全快照。当前权限可遮蔽原结果但不覆写，恢复后返回同一事实；最初 denied 不升级执行。failed/unknown 不能当成功终结。
+- [Required] 非事务内部协调器先提交 unknown 与一次执行许可，仅成功提交的当前栈执行；丢回答/重启/并发不再写，只有引用/摘要绑定的只读证据能完成。五个产品工具仍为 local/read_only，未因此交付文件/MCP产品工具或外部exactly-once。
 - [Required] 副作用工具（high）绝不直接建 task：网关无建 task 通道；建 task 唯一入口是 `POST /approvals/{id}/actions/confirm` 事务。测试断言：调 `propose_task`/`request_cancel_task` 后 task 表行数不变，只增 approval 行。
 
 ## 与 design/04 的一致性
 
 - 本篇白名单+zod+风险分级+审计即 design/04 ToolGateway 节的 Agent 侧投影；接口签名以 design 为准。
-- v0 网关与 AgentRuntime 同进程模块（TS 模块化单体），P1 起可拆独立进程，契约不变（contracts 契约测试进程内/远程跑同一套）。
+- v0网关和确定性turn为同进程TS模块；本地结果账不等于跨语言授权协议。仓颉消费、同Run等待唤醒与对应contracts-dual增量归design/09/11及#46/#47；D8仍partial，不把healthz双跑当完整工具合同验收。

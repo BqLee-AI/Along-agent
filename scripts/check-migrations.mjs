@@ -10,10 +10,10 @@ const dir = join(root, 'infra/migrations');
 const failures = [];
 
 // 1. File naming: <seq>_<group>_*.sql; groups own disjoint sequence ranges
-// (identity 0001, conversation 0002, commitments 0003+). Other groups with
-// 0011 lands in the conversation group: conversation [2,11], commitments
-// [3,9998] unchanged (0011 reuses 0002 tables, per the #9 reuse contract).
-const groupRanges = { identity: [1, 1], conversation: [2, 11], commitments: [3, 9998] };
+// (identity 0001, conversation 0002, commitments 0003+).
+// Conversation-owned ledger additions extend through 0014; commitments keep
+// their existing [3,9998] range.
+const groupRanges = { identity: [1, 1], conversation: [2, 14], commitments: [3, 9998] };
 const files = readdirSync(dir)
   .filter((f) => f.endsWith('.sql'))
   .sort();

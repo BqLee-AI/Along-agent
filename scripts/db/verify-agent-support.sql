@@ -48,8 +48,9 @@ BEGIN
   PERFORM 1 FROM pg_constraint WHERE conname = 'tool_calls_decision_check';
   IF NOT FOUND THEN RAISE EXCEPTION 'tool_calls_decision_check missing'; END IF;
 
-  PERFORM 1 FROM pg_constraint WHERE conname = 'tool_calls_invocation_uniq';
-  IF NOT FOUND THEN RAISE EXCEPTION 'tool_calls_invocation_uniq missing'; END IF;
+  PERFORM 1 FROM pg_constraint WHERE conrelid = 'tool_invocations'::regclass
+    AND conname = 'tool_invocations_run_slot_uniq';
+  IF NOT FOUND THEN RAISE EXCEPTION 'tool_invocations run/slot uniqueness missing'; END IF;
 
   -- run_checkpoints widened kind set still present under the same name.
   PERFORM 1 FROM pg_constraint WHERE conname = 'run_checkpoints_kind_check';

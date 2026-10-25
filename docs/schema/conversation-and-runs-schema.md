@@ -1,6 +1,6 @@
 # Conversation & Runs Schema 设计
 
-> 状态：v0 存储合同；R1 未实现。范围：对话/Run/事件与不可变版本。不包含：新执行快照或工具结果账字段、通用恢复实现。阶段标签：TS 长期持有 PG/Run/checkpoint 存储，仓颉组织执行上下文（design/09/11）。
+> 状态：v0存储与TS调用身份/结果合同。范围：对话/Run/事件、不可变版本、工具接受结果与只追加审计。不包含：仓颉跨语言授权、执行上下文自动恢复。TS长期持有PG/Run/checkpoint，仓颉组织循环与当前上下文（design/09/11）。
 
 ## 设计依据
 
@@ -200,31 +200,63 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 - [Required] 首写与 conversation/message/run 同一事务；冲突时回滚并重放赢家。
 - 行可删除（仅重放台账，不是只追加账本）。
 
+## `tool_invocations`
+
+### 用途与字段
+
+[Required] tools拥有稳定逻辑调用身份及接受结果（0014）。不以参数、request或attempt定义身份，不把只追加审计当结果账；无短TTL/自动键复用。
+
+| 字段                                                    | 类型/约束                             | 用途                                                                             |
+| ------------------------------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------- |
+| invocation_id                                           | uuid PK                               | TS生成的持久调用引用                                                             |
+| owner_id / conversation_id / run_id                     | uuid not null                         | 逻辑归属，调用conversations公共用例验证；不跨模块建强FK                          |
+| call_key                                                | text，1–200字符                       | Run内动作slot；unique(run_id,call_key)                                           |
+| first_attempt_id / first_request_id                     | uuid / text not null                  | 首次预约追踪，重交不改身份                                                       |
+| tool_id / args_hash / args_bytes                        | text / 64位小写SHA256 / 非负integer   | domain版本化的原始JSON规范摘要与UTF8长度；不存raw args                           |
+| execution_kind                                          | local / read_only / non_transactional | 由可信TS绑定，不采纳远程自报风险                                                 |
+| frozen_context                                          | jsonb object not null                 | 首次接收/anchor、timezone、fold及规则/alias版本                                  |
+| state                                                   | reserved / unknown / completed        | 本地reserved→completed；非事务reserved→unknown→completed；许可前denied可直接完成 |
+| outcome_kind                                            | nullable封闭集                        | success / approval_pending / clarification / time_error / denied / failed        |
+| result_version / accepted_result                        | nullableinteger/jsonb                 | completed时版本1和非空object；DB上限262144字节，应用再做strict有界安全投影校验   |
+| approval_id                                             | nullableuuid逻辑引用                  | 仅approval_pending有值；不唯一，不复制批准正文                                   |
+| accepted_attempt_id / accepted_request_id / accepted_at | nullableuuid/text/timestamptz         | 首次接受追踪，completed时全部非空                                                |
+| evidence_ref                                            | nullabletext                          | 非事务确证的安全证据引用，不存原始provider响应                                   |
+| created_at                                              | timestamptz default now()             | 预约时间；index(owner_id,run_id,created_at)                                      |
+
+[Required] reserved/unknown不得带结果字段；unknown只适用于non_transactional。身份/摘要/冻结上下文建后不可改，DB trigger拒绝非法迁移、completed改写及删除。批准只保存ID、fireAt/hash/版本材料，由所属公开冻结快照用例恢复原输出；终态不使旧调用重新创建批准。
+
+[Required] 本地批准/接受结果/审计同事务，失败全部回滚，预约保留；未知外部效果不重发。当前归属/allowlist门先于结果披露，遮蔽不覆写已接受事实。完整执行与重放合同见design/04 §3、06 §10。
+
 ## `tool_calls`
 
 ### 用途
 
-[Required] ToolGateway 每次调用的审计行（迁移 0011）。只追加，`UPDATE/DELETE` 由 trigger 拒绝。
+[Required] ToolGateway每次提交的只追加审计（0011/0014）；UPDATE/DELETE由trigger拒绝。它不是工具效果或已接受结果的唯一性真源。
 
 ### 字段
 
-| 字段          | 类型          | 约束                                    | 说明                         |
-| ------------- | ------------- | --------------------------------------- | ---------------------------- |
-| `id`          | `uuid`        | primary key                             | 行 ID                        |
-| `owner_id`    | `uuid`        | not null, references `users(id)`        | 所属用户                     |
-| `run_id`      | `uuid`        | not null, references `agent_runs(id)`   | 所属 run                     |
-| `attempt_id`  | `uuid`        | nullable, references `run_attempts(id)` | 所属 attempt                 |
-| `tool_id`     | `text`        | not null                                | 工具名（含被拒的未知工具）   |
-| `args_hash`   | `text`        | not null                                | 参数规范化 SHA-256；不存原文 |
-| `decision`    | `text`        | not null                                | `allow` / `deny`             |
-| `approval_id` | `uuid`        | nullable, references `approvals(id)`    | 高风险工具产出的确认单       |
-| `error_code`  | `text`        | nullable                                | 拒绝/失败原因码              |
-| `created_at`  | `timestamptz` | not null, default `now()`               | 调用时间                     |
+| 字段            | 类型          | 约束                                             | 说明                                                                             |
+| --------------- | ------------- | ------------------------------------------------ | -------------------------------------------------------------------------------- |
+| `id`            | `uuid`        | primary key                                      | 行 ID                                                                            |
+| `owner_id`      | `uuid`        | not null, references `users(id)`                 | 所属用户                                                                         |
+| `run_id`        | `uuid`        | not null, references `agent_runs(id)`            | 所属 run                                                                         |
+| `attempt_id`    | `uuid`        | nullable, references `run_attempts(id)`          | 所属 attempt                                                                     |
+| `tool_id`       | `text`        | not null                                         | 工具名（含被拒的未知工具）                                                       |
+| `args_hash`     | `text`        | not null                                         | 参数规范摘要；新记录按带domain的SHA-256，旧行不伪回填                            |
+| `decision`      | `text`        | not null                                         | `allow` / `deny`                                                                 |
+| `approval_id`   | `uuid`        | nullable, references `approvals(id)`             | 高风险工具产出的确认单                                                           |
+| `error_code`    | `text`        | nullable                                         | 拒绝/失败原因码                                                                  |
+| `invocation_id` | `uuid`        | nullable，FK tool_invocations ON DELETE RESTRICT | legacy为空，新提交关联稳定引用                                                   |
+| `request_id`    | `text`        | nullable                                         | legacy为空，新提交追踪                                                           |
+| `record_kind`   | `text`        | not null，default legacy                         | legacy / accepted / replayed / denied / failed / dispatch / unknown / reconciled |
+| `outcome_kind`  | `text`        | nullable封闭集                                   | 六类接受结果或unknown                                                            |
+| `created_at`    | `timestamptz` | not null, default `now()`                        | 调用时间                                                                         |
 
 ### 约束与索引
 
-- `unique(run_id, tool_id, args_hash)`，同一 run 的重试幂等。
-- `index(run_id, created_at)`，按 run 回放。
+- `unique(run_id,tool_id,args_hash)`由0014删除；同参数新调用与多次提交审计均合法，唯一身份见tool_invocations。
+- `index(run_id,created_at)`和`index(invocation_id,created_at)`支持追踪；不从legacy行伪造已接受结果。
+- legacy记录的invocation/request均NULL；新record_kind必须同时含引用及request。只追加trigger保持不变；升级停旧写者，不能混跑仍依赖旧ON CONFLICT约束的程序（见迁移索引）。
 
 ## `agent_revisions`
 

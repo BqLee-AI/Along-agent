@@ -20,7 +20,8 @@ import {
   validationError,
   type HttpError,
 } from '../../http/errors.js';
-import { invokeTool, type ToolContext, type ToolPayload } from '../tools/gateway.js';
+import { invokeTool, reserveToolInvocation } from '../tools/gateway.js';
+import type { ToolContext, ToolPayload } from '../tools/contracts.js';
 import {
   ConversationEventsQuerySchema,
   SendMessageBodySchema,
@@ -398,6 +399,16 @@ function toolContextOf(session: RunSession, allowlist: readonly string[]): ToolC
   };
 }
 
+async function invokeTurnTool(pool: Pool, ctx: ToolContext, toolId: string, args: unknown) {
+  // These branches are mutually exclusive: one deterministic action per v0 Run.
+  const { invocationId } = await reserveToolInvocation(pool, ctx, {
+    callKey: 'v0-turn/1',
+    toolId,
+    args,
+  });
+  return invokeTool(pool, ctx, { invocationId, toolId, args });
+}
+
 function startPayload(session: RunSession) {
   return {
     conversation_id: session.context.conversationId,
@@ -617,12 +628,19 @@ async function runTurn(pool: Pool, session: RunSession, write: EventWriter): Pro
       });
       return;
     }
-    const outcome = await invokeTool(
+    const outcome = await invokeTurnTool(
       pool,
       toolContextOf(session, ['request_cancel_task', 'list_tasks']),
       'request_cancel_task',
       { task_id: taskId, reason_text: text },
     );
+    if (outcome.status === 'failed' || outcome.status === 'unknown') {
+      await failWith(pool, session, write, {
+        ...outcome.error,
+        http_status: outcome.status === 'unknown' ? 409 : 500,
+      });
+      return;
+    }
     if (outcome.status === 'denied') {
       await completeClarify(pool, session, write, '没有权限取消该任务；请确认任务 id。');
       return;
@@ -646,7 +664,7 @@ async function runTurn(pool: Pool, session: RunSession, write: EventWriter): Pro
       });
       return;
     }
-    const outcome = await invokeTool(
+    const outcome = await invokeTurnTool(
       pool,
       toolContextOf(session, ['propose_task', 'list_tasks', 'get_user_prefs']),
       'propose_task',
@@ -657,6 +675,13 @@ async function runTurn(pool: Pool, session: RunSession, write: EventWriter): Pro
         occurrence: 'once',
       },
     );
+    if (outcome.status === 'failed' || outcome.status === 'unknown') {
+      await failWith(pool, session, write, {
+        ...outcome.error,
+        http_status: outcome.status === 'unknown' ? 409 : 500,
+      });
+      return;
+    }
     if (outcome.status === 'denied') {
       await completeClarify(pool, session, write, '这条提醒没能处理；请重述日期、时间和时区。');
       return;
@@ -675,12 +700,19 @@ async function runTurn(pool: Pool, session: RunSession, write: EventWriter): Pro
 
   // Agent route: read-only lookup, never an approval.
   session.iterations += 1;
-  const outcome = await invokeTool(
+  const outcome = await invokeTurnTool(
     pool,
     toolContextOf(session, ['list_tasks', 'read_brief_cards', 'get_user_prefs']),
     'list_tasks',
     { limit: 5 },
   );
+  if (outcome.status === 'failed' || outcome.status === 'unknown') {
+    await failWith(pool, session, write, {
+      ...outcome.error,
+      http_status: outcome.status === 'unknown' ? 409 : 500,
+    });
+    return;
+  }
   if (outcome.status === 'ok' && outcome.result.kind === 'list_tasks') {
     await completeClarify(pool, session, write, listSummary(outcome.result));
     return;
