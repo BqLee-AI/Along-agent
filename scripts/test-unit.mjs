@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 // 双引号兼容 cmd 与 POSIX shell，避免单引号成为 Windows 下的 glob 字节。
 const UNIT_COMMAND =
-  'bun test --parallel=4 --path-ignore-patterns "**/test/integration/**" ./apps ./packages ./scripts/test';
+  'bun test --parallel=4 --path-ignore-patterns "**/test/{integration,contracts}/**" ./apps ./packages ./scripts/test';
 
 export function runUnit({ packagesPrepared = false } = {}) {
   const options = { cwd: process.cwd(), stdio: 'inherit', shell: true };

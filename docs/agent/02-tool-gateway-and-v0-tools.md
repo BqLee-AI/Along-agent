@@ -105,4 +105,4 @@ assistant tool-loop -> ToolGateway.invoke({invocationId,toolId,args}, trusted ru
 ## 与 design/04 的一致性
 
 - 本篇白名单+zod+风险分级+审计即 design/04 ToolGateway 节的 Agent 侧投影；接口签名以 design 为准。
-- v0网关和确定性turn为同进程TS模块；本地结果账不等于跨语言授权协议。仓颉消费、同Run等待唤醒与对应contracts-dual增量归design/09/11及#46/#47；D8仍partial，不把healthz双跑当完整工具合同验收。
+- v0网关和确定性turn为同进程TS模块；本地结果账不等于跨语言授权协议。仓颉消费、同Run等待唤醒与contracts-dual归design/09/11及#46/#47；D8只对正式消费者实测的范围enforced，其余接缝继续partial，不把healthz双跑或unknown核心探针当完整产品工具合同验收（design/13 §4.2）。

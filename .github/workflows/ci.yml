@@ -105,7 +105,8 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
       - uses: ./.github/actions/setup
-      - run: bun run test:contracts
+      - name: Build current native and run isolated production consumers
+        run: bun run test:contracts
 
   compose-smoke:
     runs-on: ubuntu-latest

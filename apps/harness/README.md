@@ -10,6 +10,14 @@ Linux/WSL 安装 Bun1.4.2、Docker 后执行根入口 `bun run build:harness`，
 
 `bun run harness:prepare /opt/along-toolchain` 是显式 Linux 下载入口，先校验再解包；依赖 bash/curl/sha256sum/tar/unzip，构建不运行 cjpm hooks 或下载隐式依赖。Docker builder 是正式编译环境；原生 Windows 和其他架构不在该 artifact lock 支持范围。
 
+仓库将 shell 脚本及其 `artifacts.lock` 固定为 LF，避免 Windows checkout 的 CRLF 使正式容器构建失败；不修改开发者全局 Git 配置。
+
+## 正式跨语言合同门
+
+Linux x64 / WSL 执行根 `bun run test:contracts`。入口从当前树构建生产镜像，在同一 Bun/native runtime 中运行真实本地公共用例与签名 HTTP 合同；自行建立私有网络、全新 PG16 和测试身份，不需要已有数据库或模型凭据。旧 healthz/契约包保留，必需消费者须在本次实际报告中唯一通过，缺失或跳过不能放行。成功、失败均清理本次容器、卷、网络和镜像标签。
+
+unknown 与取消后迟到调用另验证真实非事务调用核心到 native 的停止/资格边界；内部文件探针不是产品工具，其临时协议观察不是生产可恢复快照。D8 的有限 enforced 和 remaining/partial 规则见 `docs/design/13-p0-bootstrap-and-ci-rules.md` §4.2，不代表真实 provider、所有连接器或完整 R1。
+
 ## 模型传输配置
 
 安装 native 不会自动选供应商或启用 fixture。API 启动时读取：
