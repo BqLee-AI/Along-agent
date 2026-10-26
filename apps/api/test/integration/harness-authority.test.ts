@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, it, spyOn } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -48,6 +48,7 @@ import {
   ToolExecutionError,
   executeReadOnlyInvocation,
 } from '../../src/modules/tools/invocations.js';
+import * as gateway from '../../src/modules/tools/gateway.js';
 import { appendEvent, readSnapshot } from '../../src/modules/conversations/run-state.js';
 import {
   configureWorkspaceRegistry,
@@ -901,6 +902,15 @@ maybe('harness durable authority against PostgreSQL', () => {
       BEGIN PERFORM pg_advisory_xact_lock(46,${key}); RETURN NEW; END $$;
       CREATE TRIGGER ${name} BEFORE INSERT ON tool_calls FOR EACH ROW
       WHEN (NEW.owner_id='${fixture.actor.userId}'::uuid AND NEW.record_kind='accepted') EXECUTE FUNCTION ${name}()`);
+    const releaseResponse = Promise.withResolvers<void>();
+    const invokeTool = gateway.invokeTool;
+    // The real tool commits first; its caller must not receive the response
+    // until cancellation has committed, regardless of PostgreSQL lock scheduling.
+    const invocation = spyOn(gateway, 'invokeTool').mockImplementation(async (...input) => {
+      const outcome = await invokeTool(...input);
+      if (input[2].invocationId === reserved.invocation_id) await releaseResponse.promise;
+      return outcome;
+    });
     try {
       const invoking = fixture.frame(
         request('invoke', { invocation_id: reserved.invocation_id, tool_id: 'propose_task', args }),
@@ -927,6 +937,7 @@ maybe('harness durable authority against PostgreSQL', () => {
       await blocked(database.pool, executing);
       await blocker.query('SELECT pg_advisory_unlock(46,$1)', [key]);
       expect((await cancelling).status).toBe('cancelled');
+      releaseResponse.resolve();
       expect(await rejected).toBeInstanceOf(HttpError);
       const facts = await database.pool.query(
         `SELECT i.state,i.outcome_kind,a.state AS approval_state
@@ -943,6 +954,8 @@ maybe('harness durable authority against PostgreSQL', () => {
       ).toEqual(['thread.cancelled']);
     } finally {
       await blocker.query('SELECT pg_advisory_unlock(46,$1)', [key]);
+      releaseResponse.resolve();
+      invocation.mockRestore();
       blocker.release();
       await database.pool.query(`DROP TRIGGER ${name} ON tool_calls; DROP FUNCTION ${name}()`);
     }
