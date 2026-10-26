@@ -4,19 +4,7 @@
 // fire_at_utc/fold/offset) are rejected at the gateway and audited as deny.
 import { z } from 'zod';
 
-import { TOOL_IDS } from './contracts.js';
-
-export type ToolId = (typeof TOOL_IDS)[number];
-
-export const TASK_STATES = [
-  'saved',
-  'pending_schedule',
-  'scheduled',
-  'fired',
-  'missed',
-  'cancel_pending',
-  'cancelled',
-] as const;
+import { TASK_STATES } from './contracts.js';
 
 export const ProposeTaskInputSchema = z
   .object({
@@ -60,10 +48,31 @@ export const GetUserPrefsInputSchema = z.object({}).strict();
 
 export type GetUserPrefsInput = z.infer<typeof GetUserPrefsInputSchema>;
 
+export const WorkspaceListInputSchema = z.object({ path: z.string() }).strict();
+export const WorkspaceGrepInputSchema = z
+  .object({ path: z.string(), literal: z.string().min(1) })
+  .strict();
+export const WorkspaceReadInputSchema = z.object({ path: z.string().min(1) }).strict();
+export const WorkspaceProposeReplaceInputSchema = z
+  .object({
+    read_invocation_id: z.string().uuid(),
+    old_text: z.string().min(1),
+    new_text: z.string(),
+  })
+  .strict();
+export const WorkspaceApplyReplaceInputSchema = z
+  .object({ approval_id: z.string().uuid() })
+  .strict();
+
 export const TOOL_INPUT_SCHEMAS = {
   propose_task: ProposeTaskInputSchema,
   request_cancel_task: RequestCancelTaskInputSchema,
   list_tasks: ListTasksInputSchema,
   read_brief_cards: ReadBriefCardsInputSchema,
   get_user_prefs: GetUserPrefsInputSchema,
+  workspace_list: WorkspaceListInputSchema,
+  workspace_grep: WorkspaceGrepInputSchema,
+  workspace_read: WorkspaceReadInputSchema,
+  workspace_propose_replace: WorkspaceProposeReplaceInputSchema,
+  workspace_apply_replace: WorkspaceApplyReplaceInputSchema,
 } as const;

@@ -1,11 +1,16 @@
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { randomUUID } from 'node:crypto';
+import { afterAll, beforeAll, describe, expect, it, spyOn } from 'bun:test';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { z } from 'zod';
 import type { Pool } from 'pg';
 import {
   HARNESS_PROTOCOL_VERSION,
+  DocumentApprovalReceiptSchema,
   type HarnessRequest,
   type HarnessSnapshot,
+  type WorkspaceSummary,
 } from '@along/contracts';
 import type { ThreadEvent } from '@along/stream-protocol';
 import { HttpError } from '../../src/http/errors.js';
@@ -25,11 +30,14 @@ import type { HarnessSession } from '../../src/modules/conversations/harness-aut
 import {
   listRunEvents,
   listConversationEvents,
+  lockRun,
 } from '../../src/modules/conversations/repository.js';
 import { confirmApproval, rejectApproval } from '../../src/modules/approvals/confirm.js';
 import { reviseApproval } from '../../src/modules/approvals/revise.js';
 import { getApprovalDetail } from '../../src/modules/approvals/service.js';
 import { loadTimeContext } from '../../src/modules/time/context.js';
+import { confirmDocumentApproval } from '../../src/modules/approvals/document-actions.js';
+import { readDocumentApprovalDetail } from '../../src/modules/approvals/document-service.js';
 import { seedSession } from '../../src/modules/identity/seed.js';
 import type { SeededSession } from '../../src/modules/identity/seed.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
@@ -38,8 +46,21 @@ import {
   executeNonTransactionalInvocation,
   reserveInvocation,
   ToolExecutionError,
+  executeReadOnlyInvocation,
 } from '../../src/modules/tools/invocations.js';
-import { appendEvent, lockRun } from '../../src/modules/conversations/run-state.js';
+import * as gateway from '../../src/modules/tools/gateway.js';
+import { appendEvent, readSnapshot } from '../../src/modules/conversations/run-state.js';
+import {
+  configureWorkspaceRegistry,
+  getWorkspaceGrant,
+  readWorkspaceFile,
+} from '../../src/modules/workspaces/service.js';
+import {
+  assertToolRunBinding,
+  lockToolEffectAcceptanceBinding,
+  lockToolRunBinding,
+} from '../../src/modules/conversations/tool-binding.js';
+import { BUSINESS_TOOL_IDS, TOOL_IDS } from '../../src/modules/tools/contracts.js';
 
 const maybe = databaseUrl ? describe : describe.skip;
 const idReply = z.object({ invocation_id: z.string().uuid() });
@@ -154,7 +175,7 @@ maybe('harness durable authority against PostgreSQL', () => {
     });
     const approvalId = proposalReply.parse(invoked.outcome).result.approval.approvalId;
     const snapshot: HarnessSnapshot = {
-      version: 1,
+      version: 2,
       message_refs: [fixture.context.userMessageId],
       tool_refs: [invoked.invocationId],
       next_call_no: 2,
@@ -178,6 +199,145 @@ maybe('harness durable authority against PostgreSQL', () => {
       snapshot,
       checkpointId: checkpoint.checkpoint_ref,
     };
+  }
+  async function workspaceWaiting(legacyWithoutSummary = false) {
+    const root = await mkdtemp(join(tmpdir(), 'along-run-history-'));
+    const actor = await seedSession(database.pool, {});
+    const summary = {
+      workspace_id: 'history',
+      label: 'Original managed project',
+      readable_paths: ['brief.txt'],
+      writable_paths: ['brief.txt'],
+    };
+    await writeFile(join(root, 'brief.txt'), 'Original brief.\n');
+    await configureWorkspaceRegistry([{ ...summary, owner_id: actor.userId, root }]);
+    const started = await startConversationRun(
+      deps,
+      actor.userId,
+      randomUUID(),
+      {
+        execution: 'harness',
+        workspace_id: summary.workspace_id,
+        raw_text: 'Replace Original with Updated in the brief.',
+        idempotency_key: randomUUID(),
+      },
+      null,
+    );
+    if (!started.context) throw new Error('workspace history context missing');
+    let context = started.context;
+    if (legacyWithoutSummary) {
+      // Reconstruct pre-summary accepted storage at INSERT, respecting the
+      // production trigger that forbids rewriting any Run's frozen authority.
+      const runId = randomUUID();
+      const attemptId = randomUUID();
+      await database.pool.query(
+        `WITH legacy AS (
+          INSERT INTO agent_runs (id,owner_id,conversation_id,agent_revision,mode,status,
+            budget_max_iterations,budget_max_tokens,execution,tools_allowlist,frozen_context,input_message_id)
+          SELECT $2,owner_id,conversation_id,agent_revision,mode,'running',
+            budget_max_iterations,budget_max_tokens,execution,tools_allowlist,
+            frozen_context-'workspaceSummary',input_message_id FROM agent_runs WHERE id=$1
+          RETURNING id,owner_id
+        ) INSERT INTO run_attempts (id,owner_id,run_id,attempt_no,status)
+          SELECT $3,owner_id,id,1,'running' FROM legacy`,
+        [context.runId, runId, attemptId],
+      );
+      context = { ...context, runId, attemptId };
+    }
+    const session = await createHarnessSession(
+      deps,
+      context,
+      async () => true,
+      new AbortController().signal,
+    );
+    const readArgs = { path: 'brief.txt' };
+    const read = idReply.parse(
+      await session.handleRequest(
+        request('reserve', { call_key: 'harness/1', tool_id: 'workspace_read', args: readArgs }),
+      ),
+    );
+    await executeReadOnlyInvocation(
+      database.pool,
+      context,
+      { invocationId: read.invocation_id, toolId: 'workspace_read', args: readArgs },
+      async () => ({
+        status: 'ok',
+        result: await readWorkspaceFile(actor.userId, context.workspaceGrant!, 'brief.txt'),
+      }),
+    );
+    const args = {
+      read_invocation_id: read.invocation_id,
+      old_text: 'Original',
+      new_text: 'Updated',
+    };
+    const proposed = idReply.parse(
+      await session.handleRequest(
+        request('reserve', {
+          call_key: 'harness/2',
+          tool_id: 'workspace_propose_replace',
+          args,
+        }),
+      ),
+    );
+    const outcome = z
+      .object({
+        status: z.literal('ok'),
+        result: z.object({
+          kind: z.literal('document_approval'),
+          approval: DocumentApprovalReceiptSchema,
+        }),
+      })
+      .parse(
+        await session.handleRequest(
+          request('invoke', {
+            invocation_id: proposed.invocation_id,
+            tool_id: 'workspace_propose_replace',
+            args,
+          }),
+        ),
+      );
+    const receipt = outcome.result.approval;
+    const checkpoint = checkpointReply.parse(
+      await session.handleRequest(
+        request('snapshot', {
+          context: {
+            version: 2,
+            message_refs: [context.userMessageId],
+            tool_refs: [read.invocation_id, proposed.invocation_id],
+            next_call_no: 3,
+            usage: { iterations: 2, tokens: null },
+            waiting: { invocation_id: proposed.invocation_id, approval_id: receipt.approval_id },
+          },
+        }),
+      ),
+    );
+    await session.handleRequest(
+      request('suspend', {
+        checkpoint_ref: checkpoint.checkpoint_ref,
+        invocation_id: proposed.invocation_id,
+        approval_id: receipt.approval_id,
+      }),
+    );
+    return { actor, root, summary, context, session, receipt, checkpoint };
+  }
+  async function revokeWorkspace(
+    fixture: { actor: SeededSession; root: string; summary: WorkspaceSummary },
+    mode: 'removed' | 'changed',
+  ) {
+    await configureWorkspaceRegistry(
+      mode === 'removed'
+        ? []
+        : [
+            {
+              ...fixture.summary,
+              label: 'Replacement registration, not historical authority',
+              readable_paths: ['replacement.txt'],
+              writable_paths: [],
+              owner_id: fixture.actor.userId,
+              root: fixture.root,
+            },
+          ],
+    );
   }
   async function resume(fixture: WaitingFixture, key = randomUUID()) {
     return resumeConversationRun(
@@ -326,7 +486,7 @@ maybe('harness durable authority against PostgreSQL', () => {
     const fixture = await fresh();
     const invocation = await invoke(fixture);
     const snapshot: HarnessSnapshot = {
-      version: 1,
+      version: 2,
       message_refs: [fixture.context.userMessageId],
       tool_refs: [invocation.invocationId],
       next_call_no: 2,
@@ -369,6 +529,99 @@ maybe('harness durable authority against PostgreSQL', () => {
       [fixture.context.attemptId, 'harness_snapshot'],
     );
     expect(stored.rows[0]?.n).toBe(1);
+  });
+
+  it('reads a historical task-only snapshot1 as snapshot2 without rewriting history or exposing it as an event', async () => {
+    const fixture = await fresh();
+    const invoked = await invoke(fixture, 'propose_task', {
+      raw_time_text: fixture.context.inputText,
+      timezone_hint: 'Asia/Shanghai',
+      note: '喝水',
+      occurrence: 'once',
+    });
+    const approvalId = proposalReply.parse(invoked.outcome).result.approval.approvalId;
+    // Persisted v1 history is a read-only compatibility input, never a v2 wire writer.
+    const legacy = {
+      version: 1,
+      message_refs: [fixture.context.userMessageId],
+      tool_refs: [invoked.invocationId],
+      next_call_no: 2,
+      usage: { iterations: 1, tokens: null },
+      waiting: { invocation_id: invoked.invocationId, approval_id: approvalId },
+    };
+    const checkpointId = randomUUID();
+    await database.pool.query(
+      `INSERT INTO run_checkpoints(id,owner_id,attempt_id,seq,kind,payload,stream_protocol_version)
+      SELECT $1,$2,$3,COALESCE(max(seq),0)::int+1,'harness_snapshot',$4::jsonb,'harness/v1'
+      FROM run_checkpoints WHERE attempt_id=$3`,
+      [checkpointId, fixture.actor.userId, fixture.context.attemptId, JSON.stringify(legacy)],
+    );
+    const client = await database.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const locked = await lockRun(client, fixture.context);
+      expect(await readSnapshot(client, locked.run, checkpointId)).toEqual({
+        ...legacy,
+        version: 2,
+      });
+      await client.query('COMMIT');
+    } finally {
+      await client.query('ROLLBACK');
+      client.release();
+    }
+    await fixture.frame(
+      request('suspend', {
+        checkpoint_ref: checkpointId,
+        invocation_id: invoked.invocationId,
+        approval_id: approvalId,
+      }),
+    );
+    expect(await listRunEvents(database.pool, fixture.actor.userId, fixture.context.runId)).toEqual(
+      fixture.events,
+    );
+    expect(
+      await listConversationEvents(database.pool, {
+        ownerId: fixture.actor.userId,
+        conversationId: fixture.context.conversationId,
+        afterSeq: null,
+        limit: 100,
+      }),
+    ).toEqual(fixture.events);
+    await rejectApproval({ pool: database.pool }, fixture.actor.userId, approvalId, {
+      idempotency_key: randomUUID(),
+    });
+    const resumed = await resumeConversationRun(
+      deps,
+      fixture.actor.userId,
+      fixture.context.conversationId,
+      fixture.context.runId,
+      randomUUID(),
+      { checkpoint_id: checkpointId, idempotency_key: randomUUID() },
+    );
+    if (!resumed.context) throw new Error('historical task resume context missing');
+    const session = await createHarnessSession(
+      deps,
+      resumed.context,
+      async () => true,
+      new AbortController().signal,
+    );
+    expect(session.start.protocol).toBe('harness/v2');
+    expect(session.start.snapshot).toEqual({ ...legacy, version: 2 });
+    expect(session.start.approval).toEqual({
+      kind: 'task',
+      approval_id: approvalId,
+      status: 'rejected',
+      task_id: null,
+      successor_id: null,
+    });
+    expect(
+      (
+        await database.pool.query(
+          'SELECT payload,stream_protocol_version FROM run_checkpoints WHERE id=$1',
+          [checkpointId],
+        )
+      ).rows,
+    ).toEqual([{ payload: legacy, stream_protocol_version: 'harness/v1' }]);
   });
 
   it('persists suspension without completed, pending resume rejects, GET and same inbound key do not execute or allocate attempts', async () => {
@@ -500,6 +753,7 @@ maybe('harness durable authority against PostgreSQL', () => {
         new AbortController().signal,
       );
       expect(session.start.approval).toMatchObject({
+        kind: 'task',
         approval_id: fixture.approvalId,
         status,
         task_id: taskId,
@@ -648,6 +902,15 @@ maybe('harness durable authority against PostgreSQL', () => {
       BEGIN PERFORM pg_advisory_xact_lock(46,${key}); RETURN NEW; END $$;
       CREATE TRIGGER ${name} BEFORE INSERT ON tool_calls FOR EACH ROW
       WHEN (NEW.owner_id='${fixture.actor.userId}'::uuid AND NEW.record_kind='accepted') EXECUTE FUNCTION ${name}()`);
+    const releaseResponse = Promise.withResolvers<void>();
+    const invokeTool = gateway.invokeTool;
+    // The real tool commits first; its caller must not receive the response
+    // until cancellation has committed, regardless of PostgreSQL lock scheduling.
+    const invocation = spyOn(gateway, 'invokeTool').mockImplementation(async (...input) => {
+      const outcome = await invokeTool(...input);
+      if (input[2].invocationId === reserved.invocation_id) await releaseResponse.promise;
+      return outcome;
+    });
     try {
       const invoking = fixture.frame(
         request('invoke', { invocation_id: reserved.invocation_id, tool_id: 'propose_task', args }),
@@ -674,6 +937,7 @@ maybe('harness durable authority against PostgreSQL', () => {
       await blocked(database.pool, executing);
       await blocker.query('SELECT pg_advisory_unlock(46,$1)', [key]);
       expect((await cancelling).status).toBe('cancelled');
+      releaseResponse.resolve();
       expect(await rejected).toBeInstanceOf(HttpError);
       const facts = await database.pool.query(
         `SELECT i.state,i.outcome_kind,a.state AS approval_state
@@ -690,6 +954,8 @@ maybe('harness durable authority against PostgreSQL', () => {
       ).toEqual(['thread.cancelled']);
     } finally {
       await blocker.query('SELECT pg_advisory_unlock(46,$1)', [key]);
+      releaseResponse.resolve();
+      invocation.mockRestore();
       blocker.release();
       await database.pool.query(`DROP TRIGGER ${name} ON tool_calls; DROP FUNCTION ${name}()`);
     }
@@ -944,7 +1210,7 @@ maybe('harness durable authority against PostgreSQL', () => {
       const snapshotting = fixture.frame(
         request('snapshot', {
           context: {
-            version: 1,
+            version: 2,
             message_refs: [fixture.context.userMessageId],
             tool_refs: [],
             next_call_no: 1,
@@ -975,7 +1241,7 @@ maybe('harness durable authority against PostgreSQL', () => {
         fixture.frame(
           request('snapshot', {
             context: {
-              version: 1,
+              version: 2,
               message_refs: [fixture.context.userMessageId],
               tool_refs: [],
               next_call_no: 1,
@@ -1098,5 +1364,430 @@ maybe('harness durable authority against PostgreSQL', () => {
       await client.query('ROLLBACK');
       client.release();
     }
+  });
+  for (const mode of ['removed', 'changed'] as const) {
+    it(`retains frozen workspace Run history after registry ${mode}`, async () => {
+      const f = await workspaceWaiting();
+      try {
+        await confirmDocumentApproval(deps, f.actor.userId, f.receipt.approval_id, {
+          presentation_hash: f.receipt.presentation_hash,
+          seen_content: f.receipt.preview.body,
+          idempotency_key: randomUUID(),
+        });
+        expect(
+          await getRunView(deps, f.actor.userId, f.context.conversationId, f.context.runId),
+        ).toMatchObject({ can_resume: true, workspace: f.summary });
+        await revokeWorkspace(f, mode);
+        const view = await getRunView(
+          deps,
+          f.actor.userId,
+          f.context.conversationId,
+          f.context.runId,
+        );
+        expect(view).toMatchObject({
+          status: 'suspended_approval',
+          workspace: f.summary,
+          can_resume: false,
+          waiting: { approval_id: f.receipt.approval_id, approval_kind: 'document' },
+        });
+        expect(JSON.stringify(view)).not.toContain(f.root);
+        expect(JSON.stringify(view)).not.toContain('registration_digest');
+        await expect(
+          createHarnessSession(deps, f.context, async () => true, new AbortController().signal),
+        ).rejects.toMatchObject({ httpStatus: 409 });
+        await expect(
+          f.session.handleRequest(
+            request('reserve', {
+              call_key: 'harness/3',
+              tool_id: 'workspace_read',
+              args: { path: 'brief.txt' },
+            }),
+          ),
+        ).rejects.toMatchObject({ httpStatus: 409 });
+        await expect(
+          resumeConversationRun(
+            deps,
+            f.actor.userId,
+            f.context.conversationId,
+            f.context.runId,
+            randomUUID(),
+            { checkpoint_id: f.checkpoint.checkpoint_ref, idempotency_key: randomUUID() },
+          ),
+        ).rejects.toMatchObject({ httpStatus: 403 });
+        expect(
+          (
+            await database.pool.query('SELECT count(*)::int n FROM run_attempts WHERE run_id=$1', [
+              f.context.runId,
+            ])
+          ).rows[0]?.n,
+        ).toBe(1);
+        expect(
+          (
+            await database.pool.query(
+              'SELECT count(*)::int n FROM harness_resumes WHERE run_id=$1',
+              [f.context.runId],
+            )
+          ).rows[0]?.n,
+        ).toBe(0);
+        expect(
+          (
+            await database.pool.query(
+              'SELECT count(*)::int n FROM tool_invocations WHERE run_id=$1',
+              [f.context.runId],
+            )
+          ).rows[0]?.n,
+        ).toBe(2);
+      } finally {
+        await configureWorkspaceRegistry([]);
+        await rm(f.root, { recursive: true, force: true });
+      }
+    });
+    it(`persists cancellation and its receipt after workspace registry ${mode}`, async () => {
+      const f = await workspaceWaiting();
+      try {
+        await revokeWorkspace(f, mode);
+        const key = randomUUID();
+        const cancel = () =>
+          cancelConversationRun(
+            deps,
+            f.actor.userId,
+            f.context.conversationId,
+            f.context.runId,
+            randomUUID(),
+            { idempotency_key: key },
+          );
+        expect(await cancel()).toMatchObject({
+          status: 'cancelled',
+          workspace: f.summary,
+          waiting: null,
+        });
+        expect(await cancel()).toMatchObject({ status: 'cancelled', workspace: f.summary });
+        expect(
+          (
+            await database.pool.query(
+              'SELECT status,waiting_checkpoint_id FROM agent_runs WHERE id=$1',
+              [f.context.runId],
+            )
+          ).rows[0],
+        ).toEqual({ status: 'cancelled', waiting_checkpoint_id: null });
+        expect(
+          (
+            await database.pool.query(
+              'SELECT count(*)::int n FROM harness_cancellations WHERE run_id=$1 AND idempotency_key=$2',
+              [f.context.runId, key],
+            )
+          ).rows[0]?.n,
+        ).toBe(1);
+        const events = await listRunEvents(database.pool, f.actor.userId, f.context.runId);
+        expect(events.filter((event) => event.type === 'thread.cancelled')).toHaveLength(1);
+        await expect(
+          resumeConversationRun(
+            deps,
+            f.actor.userId,
+            f.context.conversationId,
+            f.context.runId,
+            randomUUID(),
+            { checkpoint_id: f.checkpoint.checkpoint_ref, idempotency_key: randomUUID() },
+          ),
+        ).rejects.toMatchObject({ httpStatus: 409 });
+      } finally {
+        await configureWorkspaceRegistry([]);
+        await rm(f.root, { recursive: true, force: true });
+      }
+    });
+    it(`reads frozen document detail but denies new authorization after registry ${mode}`, async () => {
+      const f = await workspaceWaiting();
+      try {
+        await revokeWorkspace(f, mode);
+        const client = await database.pool.connect();
+        try {
+          expect(
+            await readDocumentApprovalDetail(client, f.actor.userId, f.receipt.approval_id),
+          ).toMatchObject({ ...f.receipt, state: 'pending', effect: { status: 'not_started' } });
+          const outsider = await seedSession(database.pool, {});
+          await expect(
+            readDocumentApprovalDetail(client, outsider.userId, f.receipt.approval_id),
+          ).rejects.toMatchObject({ httpStatus: 403 });
+        } finally {
+          client.release();
+        }
+        await expect(
+          confirmDocumentApproval(deps, f.actor.userId, f.receipt.approval_id, {
+            presentation_hash: f.receipt.presentation_hash,
+            seen_content: f.receipt.preview.body,
+            idempotency_key: randomUUID(),
+          }),
+        ).rejects.toMatchObject({ httpStatus: 403 });
+        expect(
+          (
+            await database.pool.query(
+              'SELECT state,apply_invocation_id FROM document_approvals WHERE id=$1',
+              [f.receipt.approval_id],
+            )
+          ).rows[0],
+        ).toEqual({ state: 'pending', apply_invocation_id: null });
+      } finally {
+        await configureWorkspaceRegistry([]);
+        await rm(f.root, { recursive: true, force: true });
+      }
+    });
+  }
+  it('keeps legacy workspace Runs without a frozen summary readable and cancellable without substituting current metadata', async () => {
+    const f = await workspaceWaiting(true);
+    try {
+      await revokeWorkspace(f, 'changed');
+      const view = await getRunView(
+        deps,
+        f.actor.userId,
+        f.context.conversationId,
+        f.context.runId,
+      );
+      expect(view.status).toBe('suspended_approval');
+      expect(view.workspace).toBeUndefined();
+      const cancelled = await cancelConversationRun(
+        deps,
+        f.actor.userId,
+        f.context.conversationId,
+        f.context.runId,
+        randomUUID(),
+        { idempotency_key: randomUUID() },
+      );
+      expect(cancelled.status).toBe('cancelled');
+      expect(cancelled.workspace).toBeUndefined();
+    } finally {
+      await configureWorkspaceRegistry([]);
+      await rm(f.root, { recursive: true, force: true });
+    }
+  });
+  it('freezes the owner registry grant, exposes only its safe summary, and binds new workspace hashes without changing old requests', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'along-run-workspace-'));
+    const firstRoot = await mkdtemp(join(directory, 'first-'));
+    const secondRoot = await mkdtemp(join(directory, 'second-'));
+    const actor = await seedSession(database.pool, {});
+    const outsider = await seedSession(database.pool, {});
+    const summary = {
+      workspace_id: 'first',
+      label: 'Managed project',
+      readable_paths: ['brief.txt'],
+      writable_paths: ['brief.txt'],
+    };
+    try {
+      await configureWorkspaceRegistry([
+        { ...summary, owner_id: actor.userId, root: firstRoot },
+        { ...summary, workspace_id: 'second', owner_id: actor.userId, root: secondRoot },
+      ]);
+      for (const invalid of [
+        { execution: 'business', workspace_id: 'first' },
+        { workspace_id: 'first' },
+        { execution: 'harness', workspace_id: 'missing' },
+        { execution: 'harness', workspace_id: 'first', root: firstRoot },
+      ]) {
+        await expect(
+          startConversationRun(
+            deps,
+            actor.userId,
+            randomUUID(),
+            {
+              raw_text: 'Read the project.',
+              ...invalid,
+            },
+            null,
+          ),
+        ).rejects.toBeInstanceOf(HttpError);
+      }
+      await expect(
+        startConversationRun(
+          deps,
+          outsider.userId,
+          randomUUID(),
+          {
+            execution: 'harness',
+            workspace_id: 'first',
+            raw_text: 'Read the project.',
+          },
+          null,
+        ),
+      ).rejects.toMatchObject({ httpStatus: 403 });
+      expect(
+        (
+          await database.pool.query('SELECT count(*)::int n FROM agent_runs WHERE owner_id=$1', [
+            actor.userId,
+          ])
+        ).rows[0]?.n,
+      ).toBe(0);
+      const key = randomUUID();
+      const body = {
+        execution: 'harness',
+        workspace_id: 'first',
+        raw_text: 'Read the project.',
+        idempotency_key: key,
+      };
+      const started = await startConversationRun(deps, actor.userId, randomUUID(), body, null);
+      const context = started.context!;
+      expect(context.workspaceGrant).toEqual(getWorkspaceGrant(actor.userId, 'first'));
+      expect(context.allowlist).toEqual(TOOL_IDS);
+      const stored = (
+        await database.pool.query(
+          'SELECT frozen_context,tools_allowlist FROM agent_runs WHERE id=$1',
+          [context.runId],
+        )
+      ).rows[0];
+      expect(stored.frozen_context.workspaceGrant).toEqual(context.workspaceGrant);
+      expect(stored.tools_allowlist).toEqual(TOOL_IDS);
+      const session = await createHarnessSession(
+        deps,
+        { ...context, workspaceGrant: getWorkspaceGrant(actor.userId, 'second') },
+        async () => true,
+        new AbortController().signal,
+      );
+      expect(session.start.workspace).toEqual(summary);
+      expect<readonly string[]>(session.start.tools.map((tool) => tool.name)).toEqual(TOOL_IDS);
+      const view = await getRunView(deps, actor.userId, context.conversationId, context.runId);
+      expect(view.workspace).toEqual(summary);
+      expect(JSON.stringify({ start: session.start, view })).not.toContain(firstRoot);
+      expect(JSON.stringify({ start: session.start, view })).not.toContain('registration_digest');
+      const client = await database.pool.connect();
+      try {
+        await expect(
+          assertToolRunBinding(client, {
+            ...context,
+            workspaceGrant: getWorkspaceGrant(actor.userId, 'second'),
+          }),
+        ).rejects.toMatchObject({ httpStatus: 403 });
+        await expect(
+          assertToolRunBinding(client, { ...context, workspaceGrant: null }),
+        ).rejects.toMatchObject({ httpStatus: 403 });
+      } finally {
+        client.release();
+      }
+      const requestHash = (
+        await database.pool.query(
+          'SELECT request_hash FROM conversation_idempotency WHERE owner_id=$1 AND idempotency_key=$2',
+          [actor.userId, key],
+        )
+      ).rows[0]?.request_hash;
+      expect(requestHash).toBe(
+        createHash('sha256')
+          .update('harness/workspace/v2\0')
+          .update(JSON.stringify([null, body.raw_text, null, 'none', 'first']))
+          .digest('hex'),
+      );
+      await expect(
+        startConversationRun(
+          deps,
+          actor.userId,
+          randomUUID(),
+          { ...body, workspace_id: 'second' },
+          null,
+        ),
+      ).rejects.toMatchObject({ httpStatus: 409 });
+      const legacyKey = randomUUID();
+      const legacy = await startConversationRun(
+        deps,
+        actor.userId,
+        randomUUID(),
+        {
+          execution: 'harness',
+          raw_text: 'Original five tools.',
+          idempotency_key: legacyKey,
+        },
+        null,
+      );
+      expect(legacy.context?.allowlist).toEqual(BUSINESS_TOOL_IDS);
+      expect(
+        (
+          await database.pool.query(
+            'SELECT request_hash FROM conversation_idempotency WHERE owner_id=$1 AND idempotency_key=$2',
+            [actor.userId, legacyKey],
+          )
+        ).rows[0]?.request_hash,
+      ).toBe(
+        createHash('sha256')
+          .update('harness/v1\0')
+          .update(JSON.stringify([null, 'Original five tools.', null, 'none']))
+          .digest('hex'),
+      );
+      await configureWorkspaceRegistry([]);
+      const acceptance = await database.pool.connect();
+      await acceptance.query('BEGIN');
+      try {
+        await expect(lockToolRunBinding(acceptance, context)).rejects.toMatchObject({
+          httpStatus: 403,
+        });
+        await expect(lockToolEffectAcceptanceBinding(acceptance, context)).resolves.toEqual({
+          canExecute: false,
+        });
+        await expect(
+          lockToolEffectAcceptanceBinding(acceptance, { ...context, workspaceGrant: null }),
+        ).rejects.toMatchObject({ httpStatus: 403 });
+      } finally {
+        await acceptance.query('ROLLBACK');
+        acceptance.release();
+      }
+      await expect(
+        session.handleRequest(
+          request('model', {
+            messages: [{ role: 'user', content: 'Read now.' }],
+            remaining_tokens: 8000,
+          }),
+        ),
+      ).rejects.toMatchObject({ httpStatus: 403 });
+      expect(
+        (
+          await database.pool.query(
+            'SELECT count(*)::int n FROM tool_invocations WHERE run_id=$1',
+            [context.runId],
+          )
+        ).rows[0]?.n,
+      ).toBe(0);
+      expect<readonly string[]>(
+        (
+          await createHarnessSession(
+            deps,
+            legacy.context!,
+            async () => true,
+            new AbortController().signal,
+          )
+        ).start.tools.map((tool) => tool.name),
+      ).toEqual(BUSINESS_TOOL_IDS);
+    } finally {
+      await configureWorkspaceRegistry([]);
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+  it('rejects an aggregate model frame above1MiB before contacting the provider or reserving a tool', async () => {
+    const fixture = await fresh();
+    let modelCalls = 0;
+    const session = await createHarnessSession(
+      {
+        ...deps,
+        harness: {
+          ...deps.harness!,
+          model: async () => {
+            modelCalls++;
+            return { message: { content: 'unexpected', tool_calls: [] }, usage: null };
+          },
+        },
+      },
+      fixture.context,
+      async () => true,
+      new AbortController().signal,
+    );
+    await expect(
+      session.handleRequest(
+        request('model', {
+          messages: [{ role: 'user', content: 'x'.repeat(1024 * 1024) }],
+          remaining_tokens: fixture.context.maxTokens,
+        }),
+      ),
+    ).rejects.toMatchObject({ errorCode: 'HARNESS_CONTEXT_LIMIT', httpStatus: 422 });
+    expect(modelCalls).toBe(0);
+    expect(
+      (
+        await database.pool.query('SELECT count(*)::int n FROM tool_invocations WHERE run_id=$1', [
+          fixture.context.runId,
+        ])
+      ).rows[0]?.n,
+    ).toBe(0);
   });
 });

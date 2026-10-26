@@ -45,6 +45,33 @@ issue → Spec 章节 → OpenSpec change（如需）→ 分支 → PR → CI �
 - 契约校验：`openspec validate <name> --strict`（如 `openspec validate v0-safety-contract --strict`）
 - 环境变量：`DATABASE_URL`、`TZDB_VERSION`（缺失则 `/readyz` 503 `TZDB_UNAVAILABLE`，属预期行为）。
 
+## 受管项目资料与文档批准
+
+- 用正式 Linux x64 镜像运行 API/native/MCP。部署者通过 `WORKSPACE_REGISTRY_FILE` 指定 JSON 登记文件；未配置、无效或相互重叠的工作区不开放，不影响无工作区的业务。
+- 登记按登录用户隔离，只开放逐项列出的相对文件路径。`writable_paths` 必须是 `readable_paths` 的子集；文件必须为普通、非链接、严格 UTF-8 文本。模型、Web 和 MCP 不取得宿主绝对路径。
+- Compose 的 `workspace_data` 卷挂载到 `/var/lib/along/workspaces`。先在卷中放置有权使用的资料和目标文件、设置受控目录权限，再通过进程环境传入登记文件位置；登记在 API 启动时加载，不提供 Web 新增目录或热更新接口。
+
+登记文件示例；将 `owner_id` 换成实际登录用户 ID，目录及文件须已存在：
+
+```json
+[
+  {
+    "workspace_id": "project-brief",
+    "label": "项目资料",
+    "owner_id": "<owner-id>",
+    "root": "/var/lib/along/workspaces/project-brief",
+    "readable_paths": ["sources/decision.md", "brief.md"],
+    "writable_paths": ["brief.md"]
+  }
+]
+```
+
+- 部署者配置 `HARNESS_MODEL_BASE_URL`、`HARNESS_MODEL` 和需要时的 `HARNESS_MODEL_API_KEY`；用户在 Web 选择工作区，不填写 provider/key。`HARNESS_MAX_ITERATIONS` 默认 `24`、`HARNESS_MAX_TOKENS` 默认 `64000`；两者须为正安全整数，在 Run 接受时冻结，批准后继续不重置累计使用量。
+- 身份认证仍使用既有 `BETTER_AUTH_SECRET`，由部署者传入 API。模型 transport 显式关闭并行工具提议；provider 若仍返回多个调用则明确失败，不截取第一项继续执行。
+- Web 中的完整预览冻结原始版本和确切新内容。确认只授权，不立即写文件；返回原会话点“继续”，由原 Run 执行唯一写调用，再以新读取核对结果。拒绝、版本冲突和结果未知不是保存成功；文件系统与 PostgreSQL 不构成原子事务，未知结果不自动重写。
+- 发布时先停旧写者、应用迁移 `0016`，再成套发布 TS/native/Web；只执行 `harness/v2`。旧 task 快照仅作受限读取迁移，不给历史 Run 增加工作区。详情见 [R1 设计](docs/design/14-r1-document-task-loop.md)、[HTTP 合同](docs/api/README.md#8-r1-工作区与文档批准-required)。
+- 目录边界依赖受管部署和协作写者；不把任意非协作外部写入者描述成受操作系统原子 CAS 保护。发布失败停写前滚，不降回不理解文档结果的旧写者。
+
 ## 安全
 
 - 不提交 secret、`.env`、用户数据；配置走 `.env.example` 占位。

@@ -1,10 +1,16 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { z } from 'zod';
+import { workspaceGrantSchema } from '@along/contracts';
+import { validateWorkspaceGrant } from '../workspaces/service.js';
 import { withTransaction } from '../../db/transaction.js';
 import { forbidden, notFound, stateConflict, HttpError } from '../../http/errors.js';
 import { readFrozenToolApproval } from '../approvals/tool-result.js';
-import { assertToolRunBinding, lockToolRunBinding } from '../conversations/tool-binding.js';
+import {
+  assertToolRunBinding,
+  lockToolRunBinding,
+  lockToolEffectAcceptanceBinding,
+} from '../conversations/tool-binding.js';
 import type {
   InvocationInput,
   ReservationInput,
@@ -13,6 +19,17 @@ import type {
   ToolResult,
 } from './contracts.js';
 import { approvalReceiptSchema, parseResult, resultKind } from './result-schema.js';
+import { bindDocumentApprovalApply } from '../approvals/document-service.js';
+import { readDocumentApprovalReceipt } from '../approvals/decision.js';
+import { WorkspaceApplyReplaceInputSchema } from './schemas.js';
+
+const documentReceiptSchema = z
+  .object({
+    kind: z.literal('document_approval_receipt'),
+    approval_id: z.string().uuid(),
+    presentation_hash: z.string().regex(/^[a-f0-9]{64}$/),
+  })
+  .strict();
 
 const HASH_DOMAIN = 'along/tool-args/v1\0';
 const frozenSchema = z
@@ -25,6 +42,8 @@ const frozenSchema = z
     tzdbVersion: z.string(),
     aliasVersion: z.string(),
     available: z.boolean(),
+    workspaceGrant: workspaceGrantSchema.nullable().optional(),
+    documentApprovalId: z.string().uuid().optional(),
   })
   .strict();
 const invocationSchema = z.object({
@@ -105,10 +124,26 @@ function freezeContext(ctx: ToolContext): z.infer<typeof frozenSchema> {
     tzdbVersion: ctx.timeContext.tzdb_version,
     aliasVersion: ctx.timeContext.available ? ctx.timeContext.aliases.version : 'unavailable',
     available: ctx.timeContext.available,
+    workspaceGrant: ctx.workspaceGrant ?? null,
   };
 }
+function workspaceAuthorized(ctx: ToolContext, row: Invocation): boolean {
+  if (!row.tool_id.startsWith('workspace_')) return true;
+  const grant = row.frozen_context.workspaceGrant;
+  if (!grant || canonicalJson(grant) !== canonicalJson(ctx.workspaceGrant ?? null)) return false;
+  try {
+    validateWorkspaceGrant(ctx.ownerId, grant);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function executionContext(ctx: ToolContext, row: Invocation): ToolContext {
   const frozen = row.frozen_context;
+  if (canonicalJson(frozen.workspaceGrant ?? null) !== canonicalJson(ctx.workspaceGrant ?? null))
+    throw forbidden('workspace grant differs from frozen invocation');
+  if (frozen.workspaceGrant) validateWorkspaceGrant(ctx.ownerId, frozen.workspaceGrant);
   if (
     frozen.available &&
     (!ctx.timeContext.available ||
@@ -120,6 +155,7 @@ function executionContext(ctx: ToolContext, row: Invocation): ToolContext {
   }
   return {
     ...ctx,
+    workspaceGrant: frozen.workspaceGrant ?? null,
     confirmedTimezone: frozen.confirmedTimezone,
     anchorReceivedAtUtc: frozen.anchorReceivedAtUtc,
     receivedAtUtc: frozen.receivedAtUtc,
@@ -163,6 +199,7 @@ export async function reserveInvocation(
       return { invocationId: row.invocation_id };
     }
     if (!binding.canExecute) throw stateConflict('Run/attempt cannot reserve new tool execution');
+    if (ctx.workspaceGrant) validateWorkspaceGrant(ctx.ownerId, ctx.workspaceGrant);
     const invocationId = randomUUID();
     await client.query(
       `INSERT INTO tool_invocations (invocation_id, owner_id, conversation_id, run_id, call_key,
@@ -180,9 +217,26 @@ export async function reserveInvocation(
         digest.argsHash,
         digest.argsBytes,
         input.executionKind,
-        JSON.stringify(freezeContext(ctx)),
+        JSON.stringify({
+          ...freezeContext(ctx),
+          ...(input.toolId === 'workspace_apply_replace'
+            ? { documentApprovalId: WorkspaceApplyReplaceInputSchema.parse(input.args).approval_id }
+            : {}),
+        }),
       ],
     );
+    if (input.toolId === 'workspace_apply_replace') {
+      const args = WorkspaceApplyReplaceInputSchema.parse(input.args);
+      if (!ctx.workspaceGrant || input.executionKind !== 'non_transactional') throw forbidden();
+      await bindDocumentApprovalApply(client, {
+        ownerId: ctx.ownerId,
+        conversationId: ctx.conversationId,
+        runId: ctx.runId,
+        workspaceGrant: ctx.workspaceGrant,
+        approvalId: args.approval_id,
+        invocationId,
+      });
+    }
     return { invocationId };
   });
 }
@@ -191,8 +245,11 @@ async function loadInvocation(
   client: PoolClient,
   ctx: ToolContext,
   input: InvocationInput,
+  acceptingExternalFact = false,
 ): Promise<{ row: Invocation; canExecute: boolean }> {
-  const binding = await lockToolRunBinding(client, ctx);
+  const binding = await (
+    acceptingExternalFact ? lockToolEffectAcceptanceBinding : lockToolRunBinding
+  )(client, ctx);
   const result = await client.query(
     `SELECT * FROM tool_invocations WHERE invocation_id = $1 AND owner_id = $2 AND run_id = $3 AND conversation_id = $4 FOR UPDATE`,
     [input.invocationId, ctx.ownerId, ctx.runId, ctx.conversationId],
@@ -238,7 +295,16 @@ async function audit(
 }
 async function replay(client: PoolClient, ctx: ToolContext, row: Invocation): Promise<ToolResult> {
   if (row.result_version !== 1) throw stateConflict('unsupported tool result version');
-  if (row.approval_id) {
+  if (row.approval_id && row.tool_id === 'workspace_propose_replace') {
+    const receipt = documentReceiptSchema.parse(row.accepted_result);
+    if (receipt.approval_id !== row.approval_id)
+      throw stateConflict('document receipt reference conflict');
+    const approval = await readDocumentApprovalReceipt(client, ctx.ownerId, row.approval_id);
+    if (approval.presentation_hash !== receipt.presentation_hash || approval.run_id !== ctx.runId)
+      throw stateConflict('document receipt differs from frozen approval');
+    return { status: 'ok', result: { kind: 'document_approval', approval } };
+  }
+  if (row.approval_id && row.tool_id !== 'workspace_apply_replace') {
     const receipt = approvalReceiptSchema.parse(row.accepted_result);
     if (receipt.approvalId !== row.approval_id)
       throw stateConflict('approval result reference conflict');
@@ -280,6 +346,7 @@ export async function readInvocationSnapshots(
     const row = invocations.get(invocationId);
     if (!row) throw notFound('tool invocation not found');
     if (row.state !== 'completed') throw stateConflict('tool invocation has no accepted result');
+    if (!workspaceAuthorized(ctx, row)) throw forbidden('workspace authorization revoked');
     const accepted = parseResult(await replay(client, ctx, row));
     if (resultKind(accepted) !== row.outcome_kind)
       throw stateConflict('invalid accepted tool result');
@@ -296,6 +363,14 @@ const runInvocationStateSchema = z
   .object({
     invocation_id: z.string().uuid(),
     call_key: z.string(),
+    tool_id: z.string(),
+    approval_ref: z
+      .object({
+        kind: z.enum(['task', 'document']),
+        approval_id: z.string().uuid(),
+      })
+      .strict()
+      .nullable(),
     state: z.enum(['reserved', 'unknown', 'completed']),
     outcome_kind: z
       .enum(['success', 'approval_pending', 'clarification', 'time_error', 'denied', 'failed'])
@@ -307,16 +382,30 @@ export type RunInvocationState = z.infer<typeof runInvocationStateSchema>;
 
 export async function readRunInvocationStates(
   client: PoolClient,
-  ctx: ToolContext,
+  ctx: Pick<ToolContext, 'ownerId' | 'conversationId' | 'runId'>,
 ): Promise<RunInvocationState[]> {
   await assertToolRunBinding(client, ctx);
   const { rows } = await client.query(
-    `SELECT invocation_id, call_key, state, outcome_kind, approval_id FROM tool_invocations
+    `SELECT invocation_id, call_key, tool_id, state, outcome_kind, approval_id FROM tool_invocations
      WHERE owner_id = $1 AND conversation_id = $2 AND run_id = $3
      ORDER BY created_at, invocation_id`,
     [ctx.ownerId, ctx.conversationId, ctx.runId],
   );
-  return rows.map((row) => runInvocationStateSchema.parse(row));
+  return rows.map((row) => {
+    const approvalRef =
+      row.approval_id && row.outcome_kind === 'approval_pending'
+        ? {
+            kind: row.tool_id === 'workspace_propose_replace' ? 'document' : 'task',
+            approval_id: row.approval_id,
+          }
+        : null;
+    if (
+      approvalRef?.kind === 'task' &&
+      !['propose_task', 'request_cancel_task'].includes(row.tool_id)
+    )
+      throw stateConflict('invalid task approval tool reference');
+    return runInvocationStateSchema.parse({ ...row, approval_ref: approvalRef });
+  });
 }
 async function accept(
   client: PoolClient,
@@ -343,6 +432,26 @@ async function accept(
       throw stateConflict('tool approval differs from frozen receipt');
     stored = receipt;
     approvalId = approval.approvalId;
+  }
+  if (result.status === 'ok' && result.result.kind === 'document_approval') {
+    if (row.tool_id !== 'workspace_propose_replace')
+      throw stateConflict('invalid document proposal tool');
+    const approval = await readDocumentApprovalReceipt(
+      client,
+      ctx.ownerId,
+      result.result.approval.approval_id,
+    );
+    if (
+      canonicalJson(approval) !== canonicalJson(result.result.approval) ||
+      approval.run_id !== ctx.runId
+    )
+      throw stateConflict('document approval differs from frozen receipt');
+    approvalId = approval.approval_id;
+    stored = {
+      kind: 'document_approval_receipt',
+      approval_id: approvalId,
+      presentation_hash: approval.presentation_hash,
+    };
   }
   const serialized = JSON.stringify(stored);
   if (Buffer.byteLength(serialized, 'utf8') > 240000)
@@ -383,6 +492,10 @@ async function gate(
     };
     await audit(client, ctx, row, 'denied', conflict, digest.argsHash);
     return { ...conflict, invocationId: row.invocation_id, replayed: false };
+  }
+  if (!workspaceAuthorized(ctx, row) || ctx.signal?.aborted) {
+    await audit(client, ctx, row, 'denied', denied);
+    return { ...denied, invocationId: row.invocation_id, replayed: false };
   }
   if (!ctx.allowlist.includes(row.tool_id)) {
     if (row.state === 'reserved') await accept(client, ctx, row, permissionDenied, 'denied');
@@ -438,6 +551,52 @@ export async function executeLocalInvocation(
   });
 }
 
+// External reads hold no attempt, Run or invocation locks while waiting for IO.
+// Concurrent reads may observe different versions; only the first acceptance is
+// authoritative, and later readers return that immutable snapshot.
+export async function executeReadOnlyInvocation(
+  pool: Pool,
+  ctx: ToolContext,
+  input: InvocationInput,
+  execute: (frozenContext: ToolContext) => Promise<ToolResult>,
+): Promise<ToolOutcome> {
+  const qualified = await withTransaction(pool, async (client) => {
+    const { row, canExecute } = await loadInvocation(client, ctx, input);
+    const gated = await gate(client, ctx, row, input, canExecute);
+    if (gated) return { outcome: gated, frozen: null };
+    if (row.execution_kind !== 'read_only' || row.state !== 'reserved')
+      throw stateConflict('invocation is not a reserved read');
+    return { outcome: null, frozen: executionContext(ctx, row) };
+  });
+  if (qualified.outcome) return qualified.outcome;
+  let observed: ToolResult;
+  try {
+    ctx.signal?.throwIfAborted();
+    observed = await execute(qualified.frozen!);
+  } catch (error) {
+    if (!(error instanceof ToolExecutionError) && !ctx.signal?.aborted) throw error;
+    observed = failed;
+  }
+  return withTransaction(pool, async (client) => {
+    const { row, canExecute } = await loadInvocation(client, ctx, input);
+    // Revalidate before replay, too: a read which was already in flight must
+    // not disclose its peer's accepted content after cancellation/revocation.
+    if (!canExecute || ctx.signal?.aborted) {
+      await audit(client, ctx, row, 'denied', denied);
+      return { ...denied, invocationId: row.invocation_id, replayed: false };
+    }
+    const gated = await gate(client, ctx, row, input, canExecute);
+    if (gated) return gated;
+    executionContext(ctx, row);
+    const accepted = await accept(client, ctx, row, observed, 'accepted');
+    return { ...accepted, invocationId: row.invocation_id, replayed: false };
+  }).catch((error: unknown) => {
+    if (error instanceof HttpError && error.httpStatus === 403)
+      return { ...denied, invocationId: input.invocationId, replayed: false };
+    throw error;
+  });
+}
+
 export interface EffectBinding {
   invocationId: string;
   argsHash: string;
@@ -451,6 +610,11 @@ export interface NotAppliedEvidence extends EffectBinding {
   notApplied: true;
 }
 export interface NonTransactionalCapabilities {
+  validateDispatch?: (
+    client: PoolClient,
+    context: ToolContext,
+    binding: EffectBinding,
+  ) => Promise<void>;
   execute: (binding: EffectBinding) => Promise<EffectEvidence | NotAppliedEvidence>;
   reconcile?: (binding: EffectBinding) => Promise<EffectEvidence | NotAppliedEvidence | null>;
 }
@@ -481,6 +645,7 @@ export async function executeNonTransactionalInvocation(
   input: InvocationInput,
   capabilities: NonTransactionalCapabilities,
 ): Promise<ToolOutcome> {
+  let permitPrepared = false;
   const dispatch = await withTransaction(pool, async (client) => {
     const { row, canExecute } = await loadInvocation(client, ctx, input);
     const gated = await gate(client, ctx, row, input, canExecute);
@@ -497,12 +662,24 @@ export async function executeNonTransactionalInvocation(
       await audit(client, ctx, row, 'unknown', unknown);
       return { outcome: null, permission: false, binding };
     }
-    executionContext(ctx, row);
+    const frozen = executionContext(ctx, row);
+    await capabilities.validateDispatch?.(client, frozen, binding);
     await client.query("UPDATE tool_invocations SET state = 'unknown' WHERE invocation_id = $1", [
       row.invocation_id,
     ]);
     await audit(client, ctx, row, 'dispatch', unknown);
+    permitPrepared = true;
     return { outcome: null, permission: true, binding };
+  }).catch((error: unknown) => {
+    if (!permitPrepared) throw error;
+    return {
+      outcome: { ...unknown, invocationId: input.invocationId, replayed: false },
+      permission: false,
+      binding: {
+        invocationId: input.invocationId,
+        argsHash: digestInvocationArgs(input.args).argsHash,
+      },
+    };
   });
   if (dispatch.outcome) return dispatch.outcome;
   let observed: EffectEvidence | NotAppliedEvidence | null;
@@ -525,13 +702,31 @@ export async function executeNonTransactionalInvocation(
   )
     throw stateConflict('effect evidence does not bind invocation/content');
   const result = 'notApplied' in evidence ? failed : parseResult(evidence.result);
-  if (result.status === 'unknown' || (result.status === 'ok' && result.result.kind === 'approval'))
+  if (
+    result.status === 'unknown' ||
+    (result.status === 'ok' &&
+      (result.result.kind === 'approval' || result.result.kind === 'document_approval'))
+  )
     throw stateConflict('invalid external effect evidence');
+  if (
+    result.status === 'ok' &&
+    (result.result.kind === 'applied' || result.result.kind === 'conflict')
+  ) {
+    if (
+      result.result.invocation_id !== dispatch.binding.invocationId ||
+      result.result.args_hash !== dispatch.binding.argsHash
+    )
+      throw stateConflict('workspace effect payload does not bind invocation/content');
+  }
   return withTransaction(pool, async (client) => {
-    const { row } = await loadInvocation(client, ctx, input);
+    const { row, canExecute } = await loadInvocation(client, ctx, input, true);
+    const disclose =
+      ctx.allowlist.includes(row.tool_id) &&
+      workspaceAuthorized(ctx, row) &&
+      (!row.tool_id.startsWith('workspace_') || (canExecute && !ctx.signal?.aborted));
     // Record external facts even after cancellation, but never disclose them
     // through a currently revoked allowlist.
-    if (row.state === 'completed' && !ctx.allowlist.includes(row.tool_id)) {
+    if (row.state === 'completed' && !disclose) {
       await audit(client, ctx, row, 'denied', permissionDenied);
       return { ...permissionDenied, invocationId: row.invocation_id, replayed: false };
     }
@@ -551,10 +746,15 @@ export async function executeNonTransactionalInvocation(
       dispatch.permission ? 'accepted' : 'reconciled',
       evidence.evidenceRef,
     );
-    if (!ctx.allowlist.includes(row.tool_id)) {
+    if (!disclose) {
       await audit(client, ctx, row, 'denied', permissionDenied);
       return { ...permissionDenied, invocationId: row.invocation_id, replayed: false };
     }
     return { ...accepted, invocationId: row.invocation_id, replayed: false };
+  }).catch((error: unknown) => {
+    if (error instanceof HttpError) throw error;
+    // A durable once-permit already committed. Acceptance/COMMIT failure does
+    // not permit redispatch, nor can it turn external evidence into success.
+    return { ...unknown, invocationId: input.invocationId, replayed: false };
   });
 }

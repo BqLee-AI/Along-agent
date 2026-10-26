@@ -4,19 +4,30 @@ import { once } from 'node:events';
 import { createServer } from 'node:http';
 import type { Server } from 'node:http';
 import { z } from 'zod';
-import { RunViewSchema } from '@along/contracts';
+import {
+  HarnessApprovalDecisionSchema,
+  HarnessModelMessageSchema,
+  RunViewSchema,
+} from '@along/contracts';
 import { ThreadEventSchema } from '@along/stream-protocol';
 import type { ThreadEvent } from '@along/stream-protocol';
 import { handleRequest } from '../../src/http/app.js';
 import { createHarnessModelTransport } from '../../src/modules/conversations/harness-model.js';
 import { seedSession } from '../../src/modules/identity/seed.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
-import { frames, started, pending, jsonBody, listen } from '../helpers/harness-consumer.js';
+import {
+  findModelObservation,
+  frames,
+  started,
+  pending,
+  jsonBody,
+  listen,
+} from '../helpers/harness-consumer.js';
 
 const binaryPath = process.env.HARNESS_BINARY ?? '';
 const maybe = binaryPath && databaseUrl ? describe : describe.skip;
 const ModelBody = z.object({
-  messages: z.array(z.object({ role: z.string(), content: z.string() })),
+  messages: z.array(HarnessModelMessageSchema),
 });
 const Detail = z.object({
   data: z.object({
@@ -26,7 +37,6 @@ const Detail = z.object({
   }),
 });
 const Run = z.object({ data: RunViewSchema });
-const Decision = z.object({ approval_id: z.string().uuid(), task_id: z.string().uuid() });
 const Observation = z.object({
   status: z.string(),
   result: z.object({ kind: z.string(), timezone_id: z.string().optional() }).passthrough(),
@@ -69,12 +79,8 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
           res.write('{"choices":[', () => gate.started.resolve());
           return;
         }
-        const observed = body.messages.findLast((message) =>
-          message.content.startsWith('Actual tool outcome: '),
-        );
-        const actualDecision = body.messages.findLast((message) =>
-          message.content.startsWith('Actual approval decision'),
-        );
+        const observed = findModelObservation(body.messages, Observation);
+        const actualDecision = findModelObservation(body.messages, HarnessApprovalDecisionSchema);
         let content: string | null = null;
         let calls: {
           id: string;
@@ -85,17 +91,36 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
         if (longAnswer) {
           content = longAnswer.content;
         } else if (actualDecision) {
-          const value = Decision.parse(
-            JSON.parse(actualDecision.content.slice(actualDecision.content.indexOf('{'))),
-          );
-          content = `记录结果 task:${value.task_id}`;
+          if (actualDecision.kind !== 'task' || actualDecision.status !== 'consumed')
+            throw new Error('expected consumed task decision');
+          content = `记录结果 task:${actualDecision.task_id}`;
         } else if (observed && kind !== 'loop') {
-          const value = Observation.parse(
-            JSON.parse(observed.content.slice('Actual tool outcome: '.length)),
-          );
-          content = `${value.result.kind}:${value.result.timezone_id}`;
+          if (
+            kind === 'plan' &&
+            !body.messages.some(
+              (message) =>
+                message.role === 'assistant' && message.content === '先读取偏好，再核对结果。',
+            )
+          )
+            throw new Error('visible plan was not retained in native model context');
+          if (kind === 'plan') {
+            const call = body.messages
+              .flatMap((message) => ('tool_calls' in message ? message.tool_calls : []))
+              .at(-1);
+            const outcome = body.messages.findLast((message) => message.role === 'tool');
+            if (
+              !call ||
+              !outcome ||
+              outcome.tool_call_id !== call.id ||
+              call.function.name !== 'get_user_prefs' ||
+              call.function.arguments !== '{}'
+            )
+              throw new Error('provider requires a real function-call conversation');
+          }
+          content = `${observed.result.kind}:${observed.result.timezone_id}`;
         } else {
           const name = kind === 'create' ? 'propose_task' : 'get_user_prefs';
+          if (kind === 'plan') content = '先读取偏好，再核对结果。';
           const args =
             kind === 'create'
               ? {
@@ -271,6 +296,19 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
     expect(effects.rows).toEqual([
       { tool_id: 'get_user_prefs', call_key: 'harness/1', state: 'completed' },
     ]);
+  });
+
+  it('native publishes tool-call content as visible progress and retains it alongside the real next-round observation', async () => {
+    const { headers } = await actor();
+    const id = randomUUID();
+    const response = await post('/api/v1/conversations/messages', input(id, 'plan'), headers);
+    expect(response.status).toBe(200);
+    const events = frames(await response.text());
+    expect(
+      events.filter((event) => event.type === 'message.delta').map((event) => event.payload.delta),
+    ).toEqual(['先读取偏好，再核对结果。', 'prefs:Europe/London']);
+    expect(events.at(-1)?.type).toBe('thread.completed');
+    expect(modelCalls.get(id)).toBe(2);
   });
 
   it('approval waits without completed, then one concurrent resume consumes the original real task result', async () => {

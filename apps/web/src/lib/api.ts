@@ -1,15 +1,9 @@
 // Server-side API access. The browser uses the same-origin proxy at
 // /api/v1/*; server components forward the incoming session cookie.
 import { cookies } from 'next/headers';
+import { EnvelopeSchema, type Envelope } from '@along/contracts';
 
 const API_BASE = process.env.API_BASE ?? 'http://127.0.0.1:3000';
-
-interface Envelope<T> {
-  code: number;
-  data: T;
-  msg: string;
-  error: { code: string; message: string } | null;
-}
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; status: number; message: string };
 
@@ -24,14 +18,14 @@ export async function apiGet<T>(path: string): Promise<ApiResult<T>> {
   } catch {
     return { ok: false, status: 0, message: '无法连接 API，请确认服务已启动。' };
   }
-  let envelope: Envelope<T> | null = null;
+  let envelope: Envelope | null = null;
   try {
-    envelope = (await response.json()) as Envelope<T>;
+    envelope = EnvelopeSchema.parse(await response.json());
   } catch {
     envelope = null;
   }
   if (response.ok && envelope && envelope.code === 0) {
-    return { ok: true, data: envelope.data };
+    return { ok: true, data: envelope.data as T };
   }
   const message =
     envelope?.error?.message ??

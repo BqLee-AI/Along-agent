@@ -114,7 +114,7 @@ test('D8.wire-rejection', async () => {
     try {
       child.stdin.write(
         `${JSON.stringify(
-          kind === 'start-version' ? { ...start, protocol: 'harness/v999' } : start,
+          kind === 'start-version' ? { ...start, protocol: 'harness/v1' } : start,
         )}\n`,
       );
       for await (const line of lines) {

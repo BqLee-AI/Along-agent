@@ -1,6 +1,6 @@
 # API 总览与通用约定
 
-> 状态：草稿，可评审。范围：v0 MVP 对外 HTTP API 全表与通用约定（Web 先行，同一份 Next.js 后续套 Electron）。不包含：五缝内部接口（AgentRuntime / ToolGateway / Scheduler / Notifier / ConnectorVault，见 design）、CangjieMagic 远程实现细节、计费与运营接口。阶段标签：v0。
+> 范围：v0 MVP 与 R1 受管文档闭环的对外 HTTP API 全表及通用约定（Web 先行，同一份 Next.js 后续套 Electron）。不包含：五缝内部接口（AgentRuntime / ToolGateway / Scheduler / Notifier / ConnectorVault，见 design）、CangjieMagic 远程实现细节、计费与运营接口。
 >
 > 蓝图引用：B06（v0 切片=简报→卡片→对话→确认→调度→触发→通知→活动页）；B03（TS 模块化单体 api|worker|all）；远期形态以后用 Electron 套同一份 Next.js，不定本期契约。
 >
@@ -9,12 +9,13 @@
 ## 1. Base Path 与路由总数 [Required]
 
 - Base Path：`/api/v1`。下文路由表省略该前缀，如 `GET /me` 即 `GET /api/v1/me`。
-- 对外共 16 个业务端点 + 2 个探针：既有 v0 的13个业务端点（含 approvals revise）及正式 Harness 的3个 Run 入口，与 design/03 一致：
+- 对外共 20 个业务端点 + 2 个探针：既有 v0 的13个业务端点、正式 Harness 的3个 Run 入口，以及 R1 的4个工作区/文档批准入口：
   - auth：`GET /me`（1）。
   - brief：`GET /brief`（1）。
   - conversations：`POST /conversations/messages`（SSE）、`GET /conversations/{id}`，加 Run 查询、取消和有限批准恢复（5；见 conversations §3）。
   - approvals：`GET /approvals`、`GET /approvals/{id}`、`POST /approvals/{id}/actions/confirm`、`POST /approvals/{id}/actions/reject`、`POST /approvals/{id}/actions/revise`（5；revise 见 approvals §6）。
   - tasks：`GET /tasks`、`GET /tasks/{id}`、`POST /tasks/{id}/actions/cancel`、`GET /tasks/{id}/events`（4）。
+  - R1：`GET /workspaces`、文档批准详情、确认和拒绝（4；见 §8）。不提供工作区登记写接口或任意文件读写 HTTP 入口。
 - 探针：`GET /healthz`、`GET /readyz`（不计入业务端点，不走 envelope，见 §6）。
 - Web 单端为 v0 唯一客户端；Electron 套壳后复用同一份路由，不新增端点 [Deferred：移动端/公开 OpenAPI 未定]。
 
@@ -64,7 +65,7 @@
 - [Deferred] 鉴权方案二选一（自建 vs OIDC）在 P0 确定，见 auth/auth_routes.md。v0 文档只定以下行为，不猜字段：
   - 未定字段一律不写：token 形态、cookie 名、session 有效期、OIDC provider、注册/登录流程均不在 v0 API 契约内。
 - [Required] 已定行为：
-  - `GET /me` 之外的 12 个业务端点均为受保护路由，需有效会话；无有效会话返回 `401`（见 §5）。
+  - 全部业务端点均需有效会话；`GET /me` 自检也不匿名披露 actor。无有效会话返回 `401`（见 §5）。
   - 有会话但无权访问他人资源返回 `403`（多租户隔离，服务端按 `owner_id` 强制过滤，不依赖客户端传参）。
   - 所有 `POST` 写操作需要 CSRF 防护。默认机制：Cookie session + `X-CSRF-Token` 请求头（token 来源见 `GET /me`，方案确定前为 [Proposed]，字段名可换但“写操作必校验”不变）。
   - `GET` 与探针不要求 CSRF。
@@ -138,8 +139,25 @@
 | 14  | GET  | `/conversations/{cid}/runs/{rid}`                | 是           | 否   | —      | owner-scoped Run/attempt/有效等待点，不执行  | conversations/conversations_routes.md §3 |
 | 15  | POST | `/conversations/{cid}/runs/{rid}/actions/cancel` | 是           | 是   | 是     | 先持久取消，再通知/终止执行                  | conversations/conversations_routes.md §3 |
 | 16  | POST | `/conversations/{cid}/runs/{rid}/actions/resume` | 是           | 是   | 是     | 最后有效批准等待点，同 Run 新 attempt；SSE   | conversations/conversations_routes.md §3 |
+| 17  | GET  | `/workspaces`                                    | 是           | 否   | —      | 当前 owner 的可选受管工作区摘要              | §8                                       |
+| 18  | GET  | `/document-approvals/{id}`                       | 是           | 否   | —      | 冻结全文预览、授权状态及实际效果             | §8                                       |
+| 19  | POST | `/document-approvals/{id}/actions/confirm`       | 是           | 是   | body   | 核对完整预览，只记录授权，不写文件           | §8                                       |
+| 20  | POST | `/document-approvals/{id}/actions/reject`        | 是           | 是   | body   | 记录拒绝，不自动创建替代批准                 | §8                                       |
 
-## 8. 维护方式
+## 8. R1 工作区与文档批准 [Required]
+
+- 行为与范围见 [design/14](../design/14-r1-document-task-loop.md)，唯一 DTO/schema 为 `packages/contracts/src/workspaces.ts`、`document-approvals.ts` 和 `harness.ts`，不由 Web 复制类型。
+- `GET /workspaces` 的 `data` 为 `{ "items": [...] }`。每项只有 `workspace_id`、`label`、`readable_paths`、`writable_paths`；不披露宿主 root、物理 identity、owner 或登记摘要。没有有效登记返回空列表，不自动开放整个目录。
+- `POST /conversations/messages` 仅在 `execution: "harness"` 时接受可选 `workspace_id`。新 Run 冻结精确授权；后续请求不能换目录或扩大工具范围。省略工作区保留原业务工具，不开放文件工具。
+- `GET /document-approvals/{id}` 返回完整冻结 receipt，加独立 `state` 和 `effect`。`state` 仅为 `pending/approved/rejected`；`effect.status` 为 `not_started/reserved/unknown/failed/conflict/applied/verified`。批准不是执行成功；`verified` 必须有绑定写回执及其后的新读取。
+- 确认 body 严格为 `{ "presentation_hash": "<冻结哈希>", "seen_content": "<preview.body 原文>", "idempotency_key": "<uuid>" }`。不 trim、不换算、不以改后内容单独替代完整预览；请求仍受131072原始 UTF-8 字节限制，提议阶段会拒绝生成无法完整确认的预览。
+- 拒绝 body 为 `{ "idempotency_key": "<uuid>", "reason": "<可选，最多2000字符>" }`。两个动作仅认 body 的幂等键，不以 header 或 request_id 补缺；返回 `{ "approval_id": "...", "status": "approved|rejected", "duplicate": false }`，持久重放返回原决定并标记重复，冲突 body/目标不覆盖既有决定。
+- 确认只授权。用户显式调用原 Run 的 resume，增加 attempt 而非新 Run；真实 native 随后可调用唯一 apply，再独立读取。pending、普通 checkpoint、取消或终态 Run 不成为通用恢复点。
+- 历史 Run、取消和冻结批准详情不因登记撤销而不可访问；仍按 owner 验证。登记撤销或更改后禁止新动作，批准后的 `can_resume` 也须反映实时执行资格。
+- 版本冲突必须零写；后继修改要求新的真实全文读取和批准。`unknown` 保留未知事实，正常终结为 `TOOL_EFFECT_UNKNOWN`，不生成可恢复 unknown checkpoint、不凭相同 hash 补报成功或分配新调用重写。
+- 写入口沿用先身份/CSRF、后收集有限 body 的顺序；所有结果使用通用 envelope。文档批准不创建 task、调度事件或 outbox。
+
+## 9. 维护方式
 
 - design 为真源、prd 跟随：路由增删、权限/CSRF/幂等语义、envelope 或错误码变化时，先改 design/03，再同步本文档与各分组文档。
 - 本目录只定 HTTP 契约，不写实现代码；字段级 zod schema 以 `packages/stream-protocol`（SSE 事件）与服务端 schema 为准，文档引用其版本号。

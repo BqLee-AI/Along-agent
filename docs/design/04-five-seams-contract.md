@@ -4,7 +4,7 @@
 
 - **状态**：设计真源（design 为真源，prd 跟随）
 - **范围**：五个重点能力边界、同步公共用例/DTO/读取投影、受控确认事务、可靠异步 outbox 与跨语言职责
-- **不包含**：完整 R1、供应商与密钥、具体 SQL
+- **不包含**：真实模型/用户材料/产物验收结论、供应商与密钥、具体 SQL；R1 文档闭环规范见 14
 - **阶段标签**：确定性 business 与正式仓颉 Harness 分列；不要求全模块远程化
 
 ## 引用
@@ -25,18 +25,18 @@
 | 缝             | 职责一句话                                                  | v0 落点                                                                          | P1+                                                  |
 | -------------- | ----------------------------------------------------------- | -------------------------------------------------------------------------------- | ---------------------------------------------------- |
 | AgentRuntime   | 仓颉唯一组织模型/工具循环、当前上下文、预算、等待/恢复/停止 | 显式 execution 分派；business 确定性业务、harness 正式 native；TS 存储与资格裁决 | 真实 provider/完整 R1 分别验收，不保留 TS 第二 Agent |
-| ToolGateway    | 白名单 + 校验 + 风险分级 + 审计                             | 本地 5 工具：提醒提议、取消请求、任务列表、简报卡片、用户偏好；无外部 MCP        | MCP 经网关聚合，仓颉只认网关                         |
+| ToolGateway    | 白名单 + 校验 + 风险分级 + 审计                             | 既有5业务工具；选workspace的Harness另授5有限工具，纯读经TS MCP，写回需文档授权   | 外部 MCP 经网关聚合，仓颉只认网关                    |
 | Scheduler      | 登记 schedule / 认领 lease + fencing / cancel               | PG lease（见 08），无 Redis                                                      | 量大再议 Redis 延后项                                |
 | Notifier       | send → 回执 + 幂等                                          | 站内信（应用内通知）先行                                                         | 邮件/推送后期，接口不变                              |
 | ConnectorVault | secret 引用不出明文                                         | 仅接口 + Fake，无真实连接                                                        | 第 1~2 真实连接按评审接入                            |
 
 ## 2. AgentRuntime（正式 native 与 TS 可信边界）
 
-[Required] 用户 API 见 conversations 路由，内部 `harness/v1` strict NDJSON 见共享 contracts/harness.ts。每有效 attempt 一个固定原生进程；model/reserve/invoke/snapshot/suspend/answer/finish 仅请求动作，TS 恢复可信 owner/Run/权限，不发布可自报授权的同进程 ctx。不另保留目标示意 API 或第二份状态机（design/09 §2–§4）。
+[Required] 用户 API 见 conversations 路由，内部 `harness/v2` strict NDJSON 见共享 contracts/harness.ts，新快照仅version=2。历史task snapshot1仅经限定读取迁移，不混跑旧writer。每有效 attempt 一个固定原生进程；model/reserve/invoke/snapshot/suspend/answer/finish 仅请求动作，TS 恢复可信 owner/Run/权限，不发布可自报授权的同进程 ctx。不另保留第二份循环或状态机（design/09 §2–§4、14）。
 
 - [Required] 仓颉组织本次上下文和执行转移，经 TS 接口保存/读取运行快照与已接受结果；TS 存储不独立选择下一模型/工具步骤，仓颉不另建可独立裁决的事实库。
 - [Required] 仓颉强制累计迭代/可得 usage，缺 usage 保留未知；TS 冻结预算和执行资格，不复制循环、不字符估算。时间/费用 SLA 随真实 provider/负载单独验收。
-- [Required] 敏感工具经 TS 冻结批准门。harness 在有限快照后挂起，同 Run 显式恢复原调用及真实决议；拒绝/过期/替代不跟 successor 或同义绕拒绝。确定性 business 提议后结束，不伪称同 Run 模型等待。
+- [Required] 敏感工具经 TS 冻结批准门。harness 在有限快照后挂起，同 Run 显式恢复原调用及可信typed决议：task consumed带真实task_id，document approved仅授权原批准的唯一apply。拒绝/过期/替代不跟 successor 或同义绕拒绝；确定零写文档冲突后的新读/新批准是14限定路径。确定性 business 提议后结束，不伪称同 Run 模型等待。
 - [Required] 跨语言消费者门复用 contracts-dual；D8 按实际 fresh 构建/生产者消费者/结果纳入/执行资格拒绝证据限定升级，最小 healthz 双跑本身仍只证明 partial。
 - [Deferred] 多 Agent 线性协同、`@execution` 自定义 plan：远期，不在本契约加方法。
 
@@ -55,12 +55,12 @@ invokeTool(pool, trustedContext, {invocationId, toolId, args})
   -> 本地工具、批准、接受结果、只追加审计同事务提交后返回
 ```
 
-- [Observed] 五个产品工具为本地实现：propose_task、request_cancel_task、list_tasks、read_brief_cards、get_user_prefs。三个 v0 分支互斥，使用持久 `v0-turn/1` slot；新逻辑动作新 slot，同参数不能充当身份。`(run_id, call_key)` 竞争只产生一个引用；更换 tool/原始参数为 STATE_CONFLICT，不执行。
+- [Observed] 既有五业务工具为propose_task、request_cancel_task、list_tasks、read_brief_cards、get_user_prefs；带受管workspace的Harness另有workspace_list/grep/read/propose_replace/apply_replace（见末节）。三个v0分支互斥，使用持久 `v0-turn/1` slot；新逻辑动作新slot，同参数不能充当身份。`(run_id,call_key)`竞争只产生一个引用；更换tool/原始参数为STATE_CONFLICT，不执行。
 - [Required] 预约先于副作用独立提交；首次冻结接收时间、anchor、timezone、fold 与规则版本。参数做带版本 domain 的 SHA-256，对象键排序、数组序及字符串字节不改；缺省与显式 default 可不同。只存摘要/字节数，不存 raw args。
 - [Required] 本地 `reserved → completed`；锁序为 attempt → Run → invocation，沿公共用例取得执行资格，与取消/终结串行。已取消 Run/无效 attempt 不获新执行资格；当前权限遮蔽历史结果但不覆盖它，最初接受的 denied 不因放权变成执行。
 - [Required] 批准创建/取得、接受结果和审计共用同一 client/事务。审计、结果或提交失败全回滚，预约保留；明确领域失败回滚工具效果后保存脱敏 failed。提交回答丢失后查同引用，不另造调用；completed 结果不可改删。
-- [Required] 接受结果分类为 success、approval_pending、clarification、time_error、denied、failed。批准仅存引用及冻结校验材料，经 approvals 公共快照恢复原回显/期限/hash；不读动态详情，不因批准已 consumed/rejected/expired/superseded 重建。只读工具重放原安全快照，新引用才刷新。
-- [Observed] `tools/invocations.ts#executeNonTransactionalInvocation` 是可信 TS 内部的一次许可/只读核对边界，不是新增产品工具。独立提交 `reserved → unknown` 及 dispatch 审计；仅得到成功提交回答的当前栈可执行。并发、重启、丢回答及未知效果不重发；同引用/摘要绑定的只读证据才能完成，未证实继续 TOOL_EFFECT_UNKNOWN。临时文件 fsync/强杀只证明此共同边界，不证明不存在的 MCP/provider 或通用 external exactly-once。
+- [Required] 接受结果分类仍为 success、approval_pending、clarification、time_error、denied、failed，不因文档新增事件词或结果账。task批准保存冻结校验引用；document提议保存typed receipt引用，经所属公共读取恢复原完整冻结预览，不因动态批准状态重建。只读工具重放原安全快照，新引用才刷新；接受结果应用JSON上限240000字节。
+- [Observed] `tools/invocations.ts#executeNonTransactionalInvocation` 为可信TS一次许可/只读核对边界，R1产品写工具workspace_apply_replace复用它。独立提交 `reserved→unknown` 及dispatch审计，仅明确取得COMMIT回答的当前栈可执行。并发、重启、丢回答及未知效果不重发；引用/摘要绑定的可信只读证据才能完成，未证实为TOOL_EFFECT_UNKNOWN。普通内容相等不是效果证据，不证明外部通用exactly-once。
 - [Required] tool_invocations 是身份/结果事实，tool_calls 仍只追加审计；不把 legacy args_hash 唯一键当调用去重。字段和迁移停写切换见 [schema](../schema/conversation-and-runs-schema.md#tool_invocations) 与 infra/migrations。failed/unknown 不能被 caller 当成功终结；事件补读不重做工具，也不自动恢复 Run。
 - [Required] TS 保留工具定义、校验、授权、记录；memory/grep、MCP、PC/browser、办公 connector 仍为 TS 能力。v0 不给任意代码执行/网页浏览；MCP 必须经网关，工具不隐藏完整模型/工具循环。既有确认消费、确定性时间、冻结展示、取消与回执合同不变。
 
@@ -125,6 +125,13 @@ outbox（可靠异步命令/事件；投递状态可变，非只追加账本）
 | 展示层换算时间     | 摆与存对不上            | [Required] 展示只读冻结字段（见 06）                          |
 | cancel 可复活      | 取消后仍响              | [Required] 取消终态，核对“曾排上”也不复活                     |
 
-## R1 文件与 MCP 增量（Proposed）
+## R1 文件与 MCP 增量 [Required]
 
-[14 §4–§8](14-r1-document-task-loop.md) 定义五个有限 workspace 工具、不可变读取观察、类型化文档批准及 MCP 边界。纯读采用短事务检查、事务外 MCP、短事务首次接受，不持 Run 锁等待 IO；文档 apply 复用非事务一次许可，并在同一许可事务校验原批准及唯一调用绑定。普通内容相等不是指定调用的效果证据；未知不重发。旧五工具及其批准/审计合同不变。
+规范详情见 [14](14-r1-document-task-loop.md)，HTTP/DTO见 [API 索引 §8](../api/README.md#8-r1-工作区与文档批准-required)，存储见 [Schema 索引](../schema/README.md#r1-文档批准)；既有task确认/审计合同不变。
+
+- 有效部署登记是workspace授权来源；新Harness请求可选workspace_id并进入请求hash，冻结精确grant和独立安全摘要。历史Run/取消/冻结文档批准详情按owner可读，摘要不随当前登记重建；新批准/拒绝、resume、工具动作仍核对当前登记。普通用户不配置provider/BYOK，部署固定provider。
+- 五个有限工具中workspace_list/grep/read为read_only：短事务验资格、事务外TS MCP IO、短事务首次接受，不持Run锁等待Server；workspace_propose_replace为local，批准/receipt/接受结果/审计同事务。仓颉只组织循环，TS工具不藏第二个循环；不是开放任意MCP/浏览器/Office能力。
+- workspace_apply_replace为non_transactional：预约事务绑定唯一apply_invocation_id，在同一dispatch许可事务复验原Run、精确grant、approved状态及原绑定。取消先提交则不获许可；许可先提交则既成或迟到效果可记录，不能假撤销文件。
+- 文档批准独立存储，按钮只授权，既有approval_required带document种类即可跳转；不造task/时间卡或调度事件。可信提议receipt决定typed decision，native不能自报批准种类/权限。
+- 只有已接受绑定的applied加之后新创建且新接受的完整read才能证明完成；conflict须明确zero_write并经新读/新批准形成唯一后继。unknown正常失败终结，不重写、不用同hash补成功、不制造可恢复unknown checkpoint。
+- HTTP原始JSON限131072字节；提议必须保证完整确认body再次序列化（含转义preview.body、hash、UUID键）也不超过131072，完整工具结果不超过240000字节；超限不截断预览。上述实现合同不替代真实模型/真实材料与产物的独立验收。

@@ -1,5 +1,14 @@
 import { z } from 'zod';
 import type { ToolPayload, ToolResult } from './contracts.js';
+import {
+  workspaceListResultSchema,
+  workspaceSearchResultSchema,
+  workspaceReadResultSchema,
+  workspaceOperationErrorSchema,
+  workspaceAppliedResultSchema,
+  workspaceConflictResultSchema,
+} from '@along/contracts';
+import { DocumentApprovalReceiptSchema } from '@along/contracts';
 
 const text = z.string().max(8192);
 const small = z.string().max(512);
@@ -112,6 +121,15 @@ export const payloadSchema = z.discriminatedUnion('kind', [
     })
     .strict(),
   z.object({ kind: z.literal('effect_evidence'), evidence_ref: small }).strict(),
+  workspaceListResultSchema,
+  workspaceSearchResultSchema,
+  workspaceReadResultSchema,
+  workspaceOperationErrorSchema,
+  workspaceAppliedResultSchema,
+  workspaceConflictResultSchema,
+  z
+    .object({ kind: z.literal('document_approval'), approval: DocumentApprovalReceiptSchema })
+    .strict(),
 ]);
 export const resultSchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('ok'), result: payloadSchema }).strict(),
@@ -133,7 +151,8 @@ export function parseResult(value: unknown): ToolResult {
 export function resultKind(result: ToolResult): string {
   if (result.status !== 'ok') return result.status;
   const payload: ToolPayload = result.result;
-  if (payload.kind === 'approval') return 'approval_pending';
+  if (payload.kind === 'approval' || payload.kind === 'document_approval')
+    return 'approval_pending';
   if (payload.kind === 'clarify') return 'clarification';
   if (payload.kind === 'time_error') return 'time_error';
   return 'success';

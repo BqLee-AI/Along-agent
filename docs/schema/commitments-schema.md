@@ -1,6 +1,6 @@
 # Commitments Schema 设计
 
-> 状态：v0 schema 合同。范围：`approvals`、`approval_revision_requests`、`tasks`、`task_events`、`outbox`、`notifications`；合同不表示迁移或真实验收已执行。不包含：重复提醒、日历授权、投递对账网关（v1 盒子）。阶段标签：v0。
+> 状态：既有 task 与 R1 独立文档批准 schema 合同。范围：`approvals`、`approval_revision_requests`、`document_approvals`、`document_approval_decisions`、`tasks`、`task_events`、`outbox`、`notifications`；合同不表示迁移演练或真实模型/用户材料验收已通过。不包含：重复提醒、日历授权、投递对账网关（v1 盒子）。
 
 ## 设计依据
 
@@ -283,8 +283,37 @@ tasks 1 ── 0..1 tasks       (recreated_from_task_id 自引用)
 
 - [Required] 一年留存，不跟 task 走，不留内容原文；破 0 即记，人复核放行。
 
-## R1 文档批准与决议（Proposed）
+## R1 文档批准与决议 [Required]
 
-新增 `document_approvals` 与 `document_approval_decisions` 归 approvals；完整字段、约束与操作序列真源见 [design/14 §5](../design/14-r1-document-task-loop.md)，不把新文档事实塞入旧 task 批准的非空时间字段。
+`0016_document_approvals.sql` 新增两表，均归 approvals；规范行为见 [design/14 §5–§7](../design/14-r1-document-task-loop.md)，发布/版本边界见 [Schema 索引](README.md#r1-文档批准)，路由/DTO 见 [API 索引 §8](../api/README.md#8-r1-工作区与文档批准-required)。不修改旧 task 批准表，不为文档伪造非空时间字段、task、调度事件或 outbox。
 
-批准冻结原 Run、workspace/登记摘要、相对目标、已接受全文引用/基线版本、确切完整目标/版本和展示材料；状态为 pending/approved/rejected，`apply_invocation_id` 一次绑定且唯一。可空的不可变唯一前驱 `replaces_approval_id` 仅连接同目标的可信零写 conflict，不能覆盖 unknown 或未尝试动作。决议关系只负责 owner/目标/规范请求摘要/幂等裁决，不另建效果账；文件写入事实仍在 `tool_invocations`。迁移新增不改旧文件，旧 task/事件/outbox 合同不变。
+### `document_approvals`
+
+| 字段                                                 | 类型/约束                                        | 所有权与语义                                                                                   |
+| ---------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| `id / owner_id`                                      | uuid PK / uuid not null                          | 原批准身份与owner                                                                              |
+| `conversation_id / run_id`                           | uuid not null，跨模块逻辑引用                    | 原会话/Run，不能以新Run继承授权                                                                |
+| `workspace_id / workspace_grant / relative_path`     | 非空text / jsonb object / 非空text               | 冻结精确grant（workspace/owner/registration_digest/root_identity）及规范相对目标，不存宿主root |
+| `base_read_invocation_id / base_version`             | uuid not null逻辑引用 / 64位小写hex              | 同Run已接受全文读与原字节SHA-256                                                               |
+| `exact_new_content / new_version`                    | text not null / 64位小写hex                      | 完整目标内容与SHA-256，base/new版本必须不同                                                    |
+| `presentation_version / presentation_hash / preview` | document_replace.v1 / 64位小写hex / jsonb object | 完整before/after/body冻结，原文BOM、CRLF和空白不归一                                           |
+| `state`                                              | pending / approved / rejected                    | 只允许pending到approved或rejected，不可反转；无task的consumed/expired                          |
+| `apply_invocation_id`                                | nullable uuid UNIQUE，跨模块逻辑引用             | 仅approved可绑定，一次从NULL绑定后不可换                                                       |
+| `replaces_approval_id`                               | nullable uuid UNIQUE FK本表，不能自指            | 同目标冲突链前驱，建后不可改；每个前驱最多一个直接后继                                         |
+| `created_at`                                         | timestamptz not null                             | 默认DB clock_timestamp()                                                                       |
+
+会话、Run、基线读和apply只保存跨模块ID，归属、资格及接受结果由公共用例验证，不建立跨模块强FK；前驱与决议保留 approvals 模块内FK。表禁止DELETE，除state和一次apply绑定外全部不可变。INSERT trigger要求新行pending/unbound；前驱须已approved、已绑定，且owner/conversation/Run/workspace/grant/path完全相同。DB并不单独证明冲突：公共用例还核验已接受 `conflict` 的绑定和 `zero_write=true`，以及冲突接受之后新创建且新接受的全文读，才可生成后继；unknown、未尝试和拒绝不能用新批准绕开。
+
+### `document_approval_decisions`
+
+固定 `(owner_id,idempotency_key uuid)` 主键；`target_approval_id` 为本模块FK，`action=confirm|reject`、`request_hash` 为64位小写hex、`decision=approved|rejected`、`created_at` 默认DB clock_timestamp()。check约束动作与决定一致；全表只追加、禁止UPDATE/DELETE，不增TTL或第二份执行账。
+
+摘要对固定字段序JSON `{action,approval_id,...确认hash/seen_content或可选reason}` 的UTF-8做SHA-256；不trim、不Unicode归一。同owner/key跨目标、跨动作或异body返回409，同请求持久重放原决定。新决议先锁原Run再锁批准，验当前可授权Run及精确登记；已完成决定可在Run终态或登记撤销后按owner重放，不能据此取得新动作资格。
+
+### 授权、效果与限额
+
+批准详情冻结receipt可在登记撤销后读取，但 `state=approved` 不是效果证明。`apply_invocation_id` 在调用预约事务原子绑定，在reserved→unknown的一次许可事务内再验原批准；文件替换和PG接受非原子，unknown不重写，也不以相同文件hash补报成功。
+
+`effect` 是公共证据投影，不是新增存储列/状态机：`not_started/reserved/unknown/failed/conflict/applied/verified`，并带apply/read/successor引用。tools通过 `readRunDocumentEvidence` 提供真实结果；verified要求绑定applied之后新创建且新接受的独立全文read，目标、登记摘要、完整内容、版本和字节数一致。冲突链只有最终后继获新批准并完成applied+新read，才可支撑Run完成。
+
+提议须同时保证完整工具结果序列化不超过240000 UTF-8字节，以及完整确认JSON（含再次转义的preview.body、hash、UUID键）不超过131072字节；超界返回 `range_too_large`，不截断预览生成无法完整确认的批准。HTTP131072是原始JSON累计限额，既有task的有效期/修改/创建取消事务及事件合同保持不变。

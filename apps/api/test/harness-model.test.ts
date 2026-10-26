@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { createServer, type Server, type RequestListener } from 'node:http';
 import { createHarnessModelTransport } from '../src/modules/conversations/harness-model.js';
+import { loadHarnessServices } from '../src/modules/conversations/harness-config.js';
 import { failEnvelope, HttpError } from '../src/http/errors.js';
 
 const servers: Server[] = [];
@@ -29,7 +30,7 @@ async function request(baseUrl: string, signal = new AbortController().signal) {
   const model = createHarnessModelTransport({ baseUrl, model: 'contract-model' });
   return model(
     {
-      protocol: 'harness/v1',
+      protocol: 'harness/v2',
       type: 'model',
       request_ref: 'm1',
       messages: [{ role: 'user', content: 'hello' }],
@@ -114,5 +115,19 @@ describe('harness actual model HTTP rejection boundary', () => {
     controller.abort();
     expect(await result).toEqual({ accepted: false });
     expect(await closed.promise).toEqual({ ended: false, destroyed: true });
+  });
+});
+
+describe('harness deployment-only cumulative budgets', () => {
+  const environment = {
+    HARNESS_MODEL_BASE_URL: 'http://127.0.0.1:9000/v1',
+    HARNESS_MODEL: 'deployment-model',
+    HARNESS_BINARY: process.execPath,
+  };
+  test('invalid deployment budgets fail closed instead of enabling a fallback', () => {
+    for (const value of ['0', '-1', '1.5', 'NaN', 'Infinity', '9007199254740992']) {
+      expect(loadHarnessServices({ ...environment, HARNESS_MAX_ITERATIONS: value })).toBeNull();
+      expect(loadHarnessServices({ ...environment, HARNESS_MAX_TOKENS: value })).toBeNull();
+    }
   });
 });

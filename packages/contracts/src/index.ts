@@ -11,6 +11,9 @@ export {
   RunStatusSchema,
   HarnessUsageSchema,
   HarnessSnapshotSchema,
+  HistoricalHarnessSnapshotSchema,
+  HarnessTaskApprovalDecisionSchema,
+  HarnessDocumentApprovalDecisionSchema,
   HarnessToolSchema,
   HarnessModelMessageSchema,
   HarnessModelReplySchema,
@@ -33,3 +36,5 @@ export type {
   HarnessApprovalDecision,
   RunView,
 } from './harness.js';
+export * from './workspaces.js';
+export * from './document-approvals.js';

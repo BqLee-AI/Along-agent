@@ -1,6 +1,6 @@
 # 仓颉原生 Harness
 
-生产源位于本目录，目标平台 Linux x86_64，仅使用继承的 stdin/stdout 交换 `harness/v1`。不监听端口、不持有模型凭据、不包含 fixture 或网络 transport。准确 wire DTO 见 `packages/contracts/src/harness.ts`；身份、授权、调用预约、效果、批准与持久事实由 TypeScript 裁决。
+生产源位于本目录，目标平台 Linux x86_64，仅使用继承的 stdin/stdout 交换 `harness/v2`，不执行或写出 v1；snapshot 仅接受/输出 `version: 2`。不监听端口、不持有模型凭据、不包含 fixture 或网络 transport。准确 wire DTO 见 `packages/contracts/src/harness.ts`；身份、授权、调用预约、效果、批准与持久事实由 TypeScript 裁决。
 
 ## 可复现构建与安装
 
@@ -16,27 +16,34 @@ Linux/WSL 安装 Bun1.4.2、Docker 后执行根入口 `bun run build:harness`，
 
 Linux x64 / WSL 执行根 `bun run test:contracts`。入口从当前树构建生产镜像，在同一 Bun/native runtime 中运行真实本地公共用例与签名 HTTP 合同；自行建立私有网络、全新 PG16 和测试身份，不需要已有数据库或模型凭据。旧 healthz/契约包保留，必需消费者须在本次实际报告中唯一通过，缺失或跳过不能放行。成功、失败均清理本次容器、卷、网络和镜像标签。
 
-unknown 与取消后迟到调用另验证真实非事务调用核心到 native 的停止/资格边界；内部文件探针不是产品工具，其临时协议观察不是生产可恢复快照。D8 的有限 enforced 和 remaining/partial 规则见 `docs/design/13-p0-bootstrap-and-ci-rules.md` §4.2，不代表真实 provider、所有连接器或完整 R1。
+unknown 与取消后迟到调用另验证真实非事务调用核心到 native 的停止/资格边界；内部文件探针不是产品工具。unknown 不生成 checkpoint，不能冒充生产可恢复快照。D8 的有限 enforced 和 remaining/partial 规则见 `docs/design/13-p0-bootstrap-and-ci-rules.md` §4.2，不代表真实 provider、所有连接器或完整 R1。
 
 ## 模型传输配置
 
-安装 native 不会自动选供应商或启用 fixture。API 启动时读取：
+安装 native 不会自动选供应商或启用 fixture。普通用户不配置 provider/BYOK；供应商、模型与预算由部署服务端固定。API 启动时读取：
 
 - `HARNESS_MODEL_BASE_URL`：OpenAI-compatible API 根地址，后接 `chat/completions`；仅显式服务端配置。
 - `HARNESS_MODEL`：模型名；`HARNESS_MODEL_API_KEY` 可选，只留 TS transport，不传给 native。
 - `HARNESS_BINARY`：默认 `/app/harness/bin/along-harness`；`HARNESS_LIBRARY_PATH`：默认 `/app/harness/lib`。
+- `HARNESS_MAX_ITERATIONS`：部署服务迭代预算，默认24；`HARNESS_MAX_TOKENS`：累计 token 预算，默认64000；均须为正安全整数，非法配置不启用 Harness。它们不是 Web/模型可覆盖的请求字段，Run 接纳后冻结，跨批准恢复的 attempt 累计，不因部署配置后来变化重置。当前默认值不等于真实 R1 预算已获校准或全链验收。
 
-缺模型配置或不可执行产物时新 harness Run 在写入/SSE 前503 `HARNESS_UNAVAILABLE`，默认 business 不受此可选配置影响，不回退到 TS Agent/fixture。部署者设置变量；不将真实值写入仓库 `.env`。服务端起步8迭代/8000 token 在 Run 接受时冻结；未知 usage 不能保证可证明的费用上限。
+缺模型配置或不可执行产物时新 harness Run 在写入/SSE 前503 `HARNESS_UNAVAILABLE`，默认 business 不受此可选配置影响，不回退到 TS Agent/fixture。部署者设置变量；不将真实值写入仓库 `.env`。服务端提供并在 Run 接受时冻结迭代/token 预算；native 不另设 R1 默认轮数，未知 usage 不能保证可证明的费用上限。
 
 ## 执行与失败合同
 
 - 两端验证有界 UTF-8 NDJSON、版本、精确字段、唯一请求引用和对应回答。每次仅一个请求等待且立即 flush；帧上限1MiB。不完整帧、等待输入时 EOF、畸形/错配/超限失败并返回脱敏错误，不将 raw stderr/provider body 暴露给用户。
-- native 从可信消息/工具描述/实际接受观察构造上下文，解析最多一个提议，预约 `harness/N`，以原 UUID invoke，消费真实结果后继续/停止。并行提议明确失败，参数仍经 TS strict schema 重验。
-- 累计迭代和可得 tokens 由 native 强制，缺 usage 后累计 tokens 保留 null，无字符/费用估算。停止或超限后不安排后续步骤，已发生事实保留。
-- 批准结果先保存原 invocation/批准及有限上下文，再在 suspend ack 后退出。恢复读取原接受事实与真实当前决议；consumed 纳入真实 task ID 后正常继续原预算/计数，不再 invoke 原动作；拒绝/过期/替代立即停止，不跟 successor 或同义绕拒绝。
-- snapshot 保存有限引用、usage、next_call_no 与等待身份，不保存工具参数或完整推理链。unknown/denied/failed 不伪装成功终结。
+- 聚合 bootstrap/快照观察与 model 请求按实际 JSON 序列化核验1MiB，native 另累计转义后消息字节并在发帧前核验；无法完整承载时以 `HARNESS_CONTEXT_LIMIT` 有界失败，不截断历史或发出超限帧。64个已接受工具引用达到上限后不再预约；等待快照先核验其等价 bootstrap，恢复在分配新 attempt 前再次核验，不建立无法承载的恢复点。
+- native 从可信消息/工具描述/实际接受观察构造上下文，解析最多一个提议，预约 `harness/N`，以原 UUID invoke，逐次等待真实结果后才选择下一步；即使独立读取也不并行。TS transport 发送 `parallel_tool_calls:false`，但该参数不保证供应商遵守；provider 回复 schema、共享回复 schema 与 native 均拒绝单响应多个调用，不只取第一项。参数仍经 TS strict schema 重验。工具调用同时附带的非空 model content 先经原 `answer` 通道展示，并保留为 assistant 模型历史；这是简短可调整的可见计划/进度，不是隐藏推理。
+- 当前 attempt 的函数历史由 native 保持标准结构：`assistant.tool_calls` 保存实际提议，`role=tool` 以原 `tool_call_id` 配对真实结果；不把工具提议拼成普通 assistant 文本来替代调用。TS 原样传输该消息结构，不组织历史或选择后续工具。批准恢复的 bootstrap 可将已接受事实作为明确数据摘要纳入上下文；snapshot 仍只保存事实引用，不持久化完整函数历史。
+- `start.workspace` 可省略或为 null；非空仅接受 `{workspace_id,label,readable_paths,writable_paths}`。native 严格拒绝额外字段（包括 root）、空标识/标签、重复路径、非规范 POSIX 相对文件路径及不属于 readable_paths 的 writable_paths；安全摘要作为可信上下文传给模型，真实 root 不进入 native。
+- workspace 工具仅为 `workspace_list/workspace_grep/workspace_read/workspace_propose_replace/workspace_apply_replace`。前三个只读经 TS 的薄 MCP 能力；提案绑定本 Run 接受的全文 read，批准只授权原冻结替换。每个批准只绑定一个 `non_transactional` apply invocation，成功仍须新 read 证明结果；TS 在 done 前核对真实效果链，不代替模型编排。冻结历史可读不等于新动作获权：恢复与每次新动作仍核验当前 workspace 登记。
+- 累计迭代和可得 tokens 由 native 强制，批准恢复从 snapshot2 延续 usage 和 next_call_no，不重置预算；缺 usage 后累计 tokens 保留 null，无字符/费用估算。停止或超限后不安排后续步骤，已发生事实保留。
+- task `kind=approval` 的 `approval.approvalId` 与 document `kind=document_approval` 的 `approval.approval_id` 均先保存原 invocation/批准及有限上下文，再在 suspend ack 后退出。waiting 仅含 invocation_id/approval_id，不由 native 声明批准种类。
+- 恢复读取原接受事实与带明确 kind 的真实当前决议。task consumed 必须有真实 task_id，纳入结果后继续原预算/计数，不再 invoke 原动作；pending/拒绝/过期/替代立即停止，不跟 successor 或同义绕拒绝。document 决议仅含 kind、approval_id、pending|approved|rejected 和可空 apply_invocation_id，不伪造 task_id；pending/rejected 不调用模型或重提，approved 作为授权观察继续同一 bootstrap，由模型选择原批准的 `workspace_apply_replace({approval_id})`，再新调用 `workspace_read` 核验，不将批准当写入完成，也不由 TS 固定编排工具。
+- snapshot2 保存有限已接受引用、usage、next_call_no 与等待身份，不保存工具参数或完整推理链。收到 unknown 立即 `finish(failed,TOOL_EFFECT_UNKNOWN)`，不加入 toolRefs、不推进调用号、不发 checkpoint/suspend、不再模型/预约；已接受的 denied/failed 仍保存 checkpoint 后按原错误正常失败，均不伪装成功。
+- 历史 snapshot1 仅由 TS 在无 workspace grant、引用均为已完成的旧业务/task 能力且不含 document 批准时读取并构造 snapshot2 bootstrap；不改写历史行，不把 v1 发给 native，不保留旧执行器回退。
 - TS 先持久取消再通知/终止 native 并 abort 模型请求；native 观察 cancel 后不继续。终止进程不撤销已接受工具或已消费按钮确认的任务。
 
 ## 证据边界
 
-fresh 构建与 pipe smoke 证据必须绑定源和二进制 hash；仅 leaf pipe 不证明 API/PG 原子性、Web、真实 provider、完整 R1/模型质量、任意崩溃恢复或其他架构。最小接入、跨语言消费者门、完整 R1 分级边界见 `docs/design/11-cangjie-runtime-spike.md` §4。
+fresh 构建与 pipe smoke 证据必须绑定源和二进制 hash；仅 leaf pipe 不证明 API/PG 原子性、Web、真实 provider、完整 R1/模型质量、任意崩溃恢复或其他架构。真实模型的隔离探针只证明该次模型/传输行为，不是 Web→TS→native→工具→实际文档/新回读的全链验收；受控模型合同同样不冒充真模型。最小接入、跨语言消费者门、完整 R1 分级边界见 `docs/design/11-cangjie-runtime-spike.md` §4。

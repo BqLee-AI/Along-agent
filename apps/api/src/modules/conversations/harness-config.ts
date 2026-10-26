@@ -18,11 +18,22 @@ export function loadHarnessServices(
     return null;
   }
   const apiKey = environment.HARNESS_MODEL_API_KEY;
+  // Deployment service budgets are frozen at acceptance and cumulative across
+  // approval attempts. The document loop needs more than eight model rounds.
+  const maxIterations = Number(environment.HARNESS_MAX_ITERATIONS ?? 24);
+  const maxTokens = Number(environment.HARNESS_MAX_TOKENS ?? 64000);
+  if (
+    !Number.isSafeInteger(maxIterations) ||
+    maxIterations < 1 ||
+    !Number.isSafeInteger(maxTokens) ||
+    maxTokens < 1
+  )
+    return null;
   return {
     binaryPath,
     libraryPath: environment.HARNESS_LIBRARY_PATH || '/app/harness/lib',
-    maxIterations: 8,
-    maxTokens: 8000,
+    maxIterations,
+    maxTokens,
     model: createHarnessModelTransport({ baseUrl, model, ...(apiKey ? { apiKey } : {}) }),
   };
 }

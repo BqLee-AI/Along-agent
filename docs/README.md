@@ -36,14 +36,14 @@
 
 ## 三、API（6 篇）
 
-| 序号 | 文档                                                    | 作用                                                      |
-| ---- | ------------------------------------------------------- | --------------------------------------------------------- |
-| 1    | [API 索引与约定](api/README.md)                         | 13 业务端点 + 2 探针全表、envelope、幂等、错误码总表      |
-| 2    | [auth 与 me](api/auth/auth_routes.md)                   | 鉴权 Deferred 二选一、GET /me、401/403                    |
-| 3    | [brief 简报与卡片](api/brief/brief_routes.md)           | GET /brief、card schema_version                           |
-| 4    | [对话与 SSE](api/conversations/conversations_routes.md) | execution 分派、Run 读/取消/有限批准恢复、SSE 与补读隔离  |
-| 5    | [确认门](api/approvals/approvals_routes.md)             | 列表/详情/confirm\|reject\|revise、持久修改重放、重新确认 |
-| 6    | [任务与事件](api/tasks/tasks_routes.md)                 | 列表/详情/cancel 幂等/events 只读按 recorded_at           |
+| 序号 | 文档                                                    | 作用                                                       |
+| ---- | ------------------------------------------------------- | ---------------------------------------------------------- |
+| 1    | [API 索引与约定](api/README.md)                         | 20 业务端点 + 2 探针、workspace/文档批准、envelope与错误码 |
+| 2    | [auth 与 me](api/auth/auth_routes.md)                   | 鉴权 Deferred 二选一、GET /me、401/403                     |
+| 3    | [brief 简报与卡片](api/brief/brief_routes.md)           | GET /brief、card schema_version                            |
+| 4    | [对话与 SSE](api/conversations/conversations_routes.md) | execution 分派、Run 读/取消/有限批准恢复、SSE 与补读隔离   |
+| 5    | [确认门](api/approvals/approvals_routes.md)             | 列表/详情/confirm\|reject\|revise、持久修改重放、重新确认  |
+| 6    | [任务与事件](api/tasks/tasks_routes.md)                 | 列表/详情/cancel 幂等/events 只读按 recorded_at            |
 
 ## 四、Schema（5 篇）
 

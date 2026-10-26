@@ -20,6 +20,8 @@
     "@along/scheduler-core": "workspace:*",
     "@along/stream-protocol": "workspace:*",
     "@along/time-core": "workspace:*",
+    "@modelcontextprotocol/client": "2.4.0",
+    "@modelcontextprotocol/server": "2.4.0",
     "better-auth": "1.7.10",
     "pg": "8.23.1",
     "zod": "3.25.76"

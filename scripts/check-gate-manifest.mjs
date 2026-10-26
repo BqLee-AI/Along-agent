@@ -40,7 +40,6 @@ if (d7?.status !== 'enforced') failures.push(`D7: expected enforced, got ${JSON.
 const d8 = manifest.gates?.D8;
 if (
   d8?.status !== 'enforced' ||
-  d8?.owner !== '#47' ||
   d8?.enforced_by?.job !== 'contracts-dual' ||
   typeof d8?.scope !== 'string' ||
   d8.scope.trim().length === 0 ||

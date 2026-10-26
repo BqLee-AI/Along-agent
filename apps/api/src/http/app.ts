@@ -13,6 +13,8 @@ import {
   unauthorized,
 } from './errors.js';
 import { handleApprovalRoute } from '../modules/approvals/routes.js';
+import { handleDocumentApprovalRoute } from '../modules/approvals/document-routes.js';
+import { handleWorkspaceRoute } from '../modules/workspaces/routes.js';
 import { handleConversationRoute } from '../modules/conversations/routes.js';
 import { handleTaskRoute } from '../modules/tasks/routes.js';
 import { handleBriefRoute } from '../modules/brief/routes.js';
@@ -116,6 +118,7 @@ export async function handleRequest(
     req.method === 'POST' &&
     (pathname === '/api/v1/approvals' ||
       pathname.startsWith('/api/v1/approvals/') ||
+      pathname.startsWith('/api/v1/document-approvals/') ||
       pathname.startsWith('/api/v1/conversations/') ||
       pathname === '/api/v1/tasks' ||
       pathname.startsWith('/api/v1/tasks/'));
@@ -132,6 +135,7 @@ export async function handleRequest(
       pathname === '/api/v1/conversations/messages' ||
       /^\/api\/v1\/conversations\/[^/]+\/runs\/[^/]+\/actions\/(?:cancel|resume)$/.test(pathname) ||
       /^\/api\/v1\/approvals\/[^/]+\/actions\/(?:confirm|reject|revise)$/.test(pathname) ||
+      /^\/api\/v1\/document-approvals\/[^/]+\/actions\/(?:confirm|reject)$/.test(pathname) ||
       /^\/api\/v1\/tasks\/[^/]+\/actions\/cancel$/.test(pathname);
     if (!writeRoute) {
       closeUnreadRequest(req, res);
@@ -213,6 +217,24 @@ export async function handleRequest(
       requestId,
       { 'cache-control': 'no-store' },
     );
+    return;
+  }
+
+  if (pathname === '/api/v1/workspaces') {
+    if (await handleWorkspaceRoute(req, res, url, { resolveActor })) return;
+  }
+
+  if (pathname.startsWith('/api/v1/document-approvals/')) {
+    if (
+      await handleDocumentApprovalRoute(req, res, url, {
+        pool: deps.pool,
+        resolveActor,
+        body,
+      })
+    )
+      return;
+    closeUnreadRequest(req, res);
+    sendJson(res, 404, failEnvelope(notFound(), requestId), requestId);
     return;
   }
 

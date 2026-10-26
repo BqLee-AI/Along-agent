@@ -231,6 +231,8 @@ maybe('read-only accepted invocation bootstrap', () => {
         expect(states).toContainEqual({
           invocation_id: fact.invocationId,
           call_key: expect.any(String),
+          tool_id: fact.toolId,
+          approval_ref: null,
           state: 'completed',
           outcome_kind: 'success',
           approval_id: null,
@@ -238,6 +240,8 @@ maybe('read-only accepted invocation bootstrap', () => {
         expect(states).toContainEqual({
           invocation_id: reserved.invocationId,
           call_key: 'pending/1',
+          tool_id: 'get_user_prefs',
+          approval_ref: null,
           state: 'reserved',
           outcome_kind: null,
           approval_id: null,
@@ -245,6 +249,8 @@ maybe('read-only accepted invocation bootstrap', () => {
         expect(states).toContainEqual({
           invocation_id: unknown.invocationId,
           call_key: 'unknown/1',
+          tool_id: 'get_user_prefs',
+          approval_ref: null,
           state: 'unknown',
           outcome_kind: null,
           approval_id: null,

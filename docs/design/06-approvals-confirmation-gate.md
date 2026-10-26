@@ -3,7 +3,7 @@
 ## 文档状态
 
 - **状态**：设计真源（design 为真源，prd 跟随）
-- **范围**：approval 对象、快照冻结、状态机、确认规则、presentation_hash 幂等消费、显式完整修改、持久预约和唯一后继
+- **范围**：既有 task 批准的冻结/消费/修改合同，以及 R1 独立文档批准的授权、唯一 apply 绑定和效果证明
 - **不包含**：task 调度触发细则（见 08）、事件账词汇（见 07）、time-core 归一（见 05）；实现代码
 - **阶段标签**：v0 / P0（P1 起为三差异化之首常驻）
 
@@ -17,6 +17,7 @@
 - [Required] v0 只认确认按钮；整句文本确认不参与意图解析（S0 #14，见 §4）。
 - [Required] 确认绑定三样：`approval_id` + 当时看到的完整内容 + `presentation_hash`；对不上即 PRESENTATION_MISMATCH。
 - [Required] 批准消费与创建任务或取消请求保持受控单事务；同步公共用例/只读投影/异步 outbox 的适用范围见 02 §1–§2。
+- [Required] §1–§10 的时间/有效期/consumed和创建取消事务专属既有task批准；R1文档批准见§11，按钮只授权，不创建task、不写文件、不套用task非空时间字段。
 
 ## 1. approval 对象（字段到名）
 
@@ -196,6 +197,18 @@ Web 只在本人 pending create_task 显示“修改这条提议”，预填原�
 
 [Required] 同调用引用顺序/并发/丢回答重交只接受一次结果；合法新引用允许同参数新动作。取消提议继续复用既有 pending 批准的业务规则，两次新调用可以关联同一个批准，不能给 approval_id 强加唯一调用约束。调用账、当前权限遮蔽与迁移边界见 design/04 §3。
 
-## 11. R1 文档授权（Proposed）
+## 11. R1 文档授权 [Required]
 
-[14 §5–§6](14-r1-document-task-loop.md) 定义独立 `document_approvals`/`document_approval_decisions`、精确基线/完整目标预览、按钮授权、唯一 apply 绑定与确定零写冲突的新批准前驱。按钮不写文件、不建 task；approved 不是效果回执。旧 task 的 consumed、有效期、修改和创建/取消单事务保持原合同，不把文件 rename 塞进该事务。对文档的 apply 唯一约束不套用到既有可复用 pending task 批准的提议调用。
+规范流程见 [design/14 §5–§7](14-r1-document-task-loop.md)，路由/DTO及body见 [API 索引 §8](../api/README.md#8-r1-工作区与文档批准-required)，两张新表及0016约束见 [Schema 索引](../schema/README.md#r1-文档批准) 与 [commitments](../schema/commitments-schema.md#r1-文档批准与决议-required)。实现入口为 `approvals/document-*`、`decision.ts`；不据此声称真实模型/材料/产物验收通过。
+
+- `workspace_propose_replace` 只能引用本owner/conversation/Run、相同登记及目标的已接受精确全文read，旧字面量须恰好出现一次；TS校验当前基线后冻结完整before/after、目标版本、`document_replace.v1` 和展示hash，local批准/receipt/审计同事务。
+- 独立 `document_approvals` 状态仅 `pending → approved | rejected`，不可反转，无task consumed、24h/触发到期或调度含义。目标、grant、全文及预览建后不可变；`document_approval_decisions` 只追加，owner/key绑定目标/动作/请求hash，异请求409，不复制工具效果账。
+- `GET /document-approvals/{id}` 为owner-scoped冻结历史读取，不因登记撤销不可读；状态与效果分开。`actions/confirm` 严格核对路径ID、`presentation_hash` 和完整 `seen_content=preview.body`，不trim或改写空白。新确认/拒绝先验原Run活授权及当前精确登记；已完成决议可重放但不授新动作。按钮确认不执行文件替换，也不建task/事件/outbox。
+- 普通用户只选受管workspace；provider来自部署固定配置，不要求用户BYOK。对外仍用既有 `approval_required`，带 `approval_kind:"document"`，不发送假时间/任务卡或增加事件词；显式resume复用原Run、新attempt。可信提议receipt决定读取哪种决议：task consumed带真实task_id；document approved只允许后续apply，不制造task_id。
+- `workspace_apply_replace` 预约与 `apply_invocation_id` 唯一绑定同事务，非事务一次许可内再验原Run/登记/approved/相同invocation。另一个slot不能复用同批准；提交 `reserved→unknown` 后仅获明确COMMIT回答的当前栈可写。文件替换不塞进PG确认事务，授权状态不是写入回执。
+- 只有旧apply已接受绑定的 `conflict` 且 `zero_write=true`，才能在冲突之后以新创建且新接受的全文read生成同目标唯一后继 `replaces_approval_id`，重新展示并批准。前驱不可改，拒绝、unknown、未执行不得生成同义后继绕过门禁。
+- 详情 `effect.status=not_started|reserved|unknown|failed|conflict|applied|verified` 是tools公共证据投影，不是批准状态。verified须有原invocation绑定的applied及其后新创建/接受的独立全文read，登记/目标/完整内容/版本/字节数全部一致；普通文件内容相等不是某调用已写的证据。Run完成按同一证据检查冲突链最终结果。
+- unknown以 `TOOL_EFFECT_UNKNOWN` 失败终结，不重写、不制造可恢复unknown checkpoint，不凭hash补成功；登记撤销/Run取消仍保留历史和迟到真实事实，不能启动新动作或假撤销文件效果。
+- HTTP仍限131072原始JSON字节；工具接受结果应用限额240000 UTF-8字节。提议须另验完整确认body再次序列化（包括JSON转义后的preview.body、hash、UUID键）不超过131072；完整工具结果也须不超过240000。超限为 `range_too_large`，不能截断确认材料。
+
+旧task consumed、有效期、修改及创建/取消受控单事务保持原合同；文档apply的唯一绑定不套用到可复用pending task批准的提议调用。
