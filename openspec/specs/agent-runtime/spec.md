@@ -46,7 +46,7 @@ TS SHALL 原子保存运行资格、被接受的状态转移及消息/事件投�
 
 ### Requirement: 批准等待与同一 Run 显式恢复
 
-仓颉 SHALL 在真实待批准结果后保存有限上下文并等待；TS 验证对应调用/批准后原子保存等待点。批准决议后只能按有效等待点恢复同一个 Run，不新造逻辑动作或绕过拒绝。见 `docs/design/09-agent-runtime-and-checkpoint.md` §6 与 `docs/design/06-approvals-confirmation-gate.md` 冻结确认合同。
+仓颉 SHALL 在真实待批准结果后保存有限上下文并等待；TS 验证对应调用/批准后原子保存等待点。批准决议按任务与文档种类分别解释，只能按有效等待点恢复同一个 Run，不新造逻辑动作或绕过拒绝。任务批准保留真实消费/任务语义；文档批准只授权后续冻结写入，不能伪造任务结果。见 `docs/design/09-agent-runtime-and-checkpoint.md` §6、`docs/design/06-approvals-confirmation-gate.md` 及 `docs/design/14-r1-document-task-loop.md` §5、§7。
 
 #### Scenario: I3 确认后继续
 
@@ -65,7 +65,7 @@ TS SHALL 原子保存运行资格、被接受的状态转移及消息/事件投�
 
 ### Requirement: 执行上下文与事件补读分离
 
-系统 SHALL 将仓颉有限等待快照与对外事件投影分开。快照只追加、引用受当前 owner/Run 校验，预算及逻辑调用进度不倒退；事件补读不启动执行。字段及过滤见 `docs/schema/conversation-and-runs-schema.md` 与 `docs/design/09-agent-runtime-and-checkpoint.md` §3、§6、§8，外部七事件及冻结展示不扩张。
+系统 SHALL 将仓颉有限等待快照与对外事件投影分开。快照只追加、仅引用已接受且受当前 owner/Run 校验的调用，预算及逻辑调用进度不倒退；事件补读不启动执行。非事务 unknown 正常失败，不构造可恢复的未知快照。字段及过滤见 `docs/schema/conversation-and-runs-schema.md`、`docs/design/09-agent-runtime-and-checkpoint.md` §3、§6、§8 和 `docs/design/14-r1-document-task-loop.md` §7.3；外部七事件及冻结展示不扩张。
 
 #### Scenario: I4 GET 或入站幂等补读
 
@@ -81,6 +81,11 @@ TS SHALL 原子保存运行资格、被接受的状态转移及消息/事件投�
 
 - **WHEN** 调用者提交他人、旧等待点、普通中间 checkpoint 或已取消 Run 的恢复请求
 - **THEN** 不启动新 attempt、不重放工具；仅本阶段明确定义的有效批准等待点可继续
+
+#### Scenario: R1 未知效果正常终结（D8/D10）
+
+- **WHEN** 正式文件工具返回没有已接受结果的 unknown
+- **THEN** native 正常失败并保留真实未知调用，不将其加入恢复快照或继续模型/工具；GET 只读，终态恢复被拒绝
 
 ### Requirement: 复用工具事实与所属模块业务规则
 
@@ -114,3 +119,31 @@ TS SHALL 原子保存运行资格、被接受的状态转移及消息/事件投�
 
 - **WHEN** 原生产物、运行库、模型连接或协议前提缺失/不兼容
 - **THEN** 正式仓颉路径明确失败，无旧产物、测试替身、业务 Agent 或 fixture 隐式回退；原确定性业务仍独立可用
+
+### Requirement: 文档批准后的原运行继续
+
+系统 SHALL 将文档授权决议纳入原运行，并由仓颉选择执行冻结写入及新读取；批准本身不等于效果完成。见 `docs/design/14-r1-document-task-loop.md` §5–§7。
+
+#### Scenario: R1 文档批准后继续（D6/D8）
+
+- **WHEN** 用户核对冻结文档预览并确认，随后从原会话显式继续
+- **THEN** 唯一新 attempt 属于原 Run，模型观察真实授权并使用原批准执行，之后实际新读取核对；不新建任务、批准或 Run
+
+#### Scenario: R1 待决、早决议与拒绝（D6/D8）
+
+- **WHEN** 决议仍 pending、早于挂起提交、被拒绝或继续请求并发重交
+- **THEN** pending 不启动；早决议从持久事实读取，重复继续不分叉；拒绝停止原动作而不重提同义效果
+
+### Requirement: 真实观察驱动计划与预算
+
+正式仓颉 SHALL 将真实资料、冲突和操作失败纳入后续模型上下文，展示简短可调整的用户可见计划，并执行跨批准继续累计的预算和取消裁决；TS 只提供 transport 和单步能力。见 `docs/design/14-r1-document-task-loop.md` §7–§11。
+
+#### Scenario: R1 任务变体改变选择（D8）
+
+- **WHEN** 真实模型在现有 Web 执行资料任务，资料位置、证据日期冲突或一次读取失败发生变化
+- **THEN** 后续选择反映实际观察，必要时查证/改变检索，计划可见而非固定调用回放或隐藏 TS Agent
+
+#### Scenario: R1 批准不重置预算（D8/D9）
+
+- **WHEN** 运行在批准继续后达到预算，或取消已先提交
+- **THEN** 不开始新的模型、MCP 或文件动作，预算不因新 attempt 重置；在途或既成效果保留真实已知/未知状态
