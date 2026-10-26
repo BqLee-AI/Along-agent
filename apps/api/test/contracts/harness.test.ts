@@ -162,6 +162,7 @@ async function approval(mode: ConsumerMode) {
   const transcript = structuredClone(fixture.transcripts.get(id));
   expect(transcript).toHaveLength(2);
   expect(findModelObservation(transcript![1]!, HarnessApprovalDecisionSchema)).toEqual({
+    kind: 'task',
     approval_id: approvalId,
     status: 'consumed',
     task_id: confirmed.task_id,

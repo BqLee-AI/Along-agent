@@ -191,19 +191,8 @@ test('D8.unknown-core-native', async () => {
   ).toEqual(['model', 'reserve', 'invoke']);
   expect(requests.filter((request) => ['answer', 'suspend'].includes(request.type))).toEqual([]);
   const saved = (await fileLines(journal)).map((line) => savedObservation.parse(JSON.parse(line)));
-  const snapshot = saved.find((entry) => entry.request.type === 'snapshot');
-  if (snapshot) {
-    expect(snapshot.checkpoint_ref).toEqual(expect.any(String));
-    expect(snapshot.request).toMatchObject({
-      type: 'snapshot',
-      context: {
-        message_refs: [messageId],
-        tool_refs: [invocationId],
-        next_call_no: 2,
-        waiting: null,
-      },
-    });
-  }
+  expect(requests.filter((request) => request.type === 'snapshot')).toEqual([]);
+  expect(saved.map((entry) => entry.request.type)).toEqual(['finish']);
   expect(saved.filter((entry) => entry.request.type === 'finish')).toEqual([
     {
       checkpoint_ref: null,
@@ -464,3 +453,76 @@ test('D8.cancelled-core-native', async () => {
     ).rows,
   ).toEqual([{ record_kind: 'denied', decision: 'deny', error_code: 'TOOL_FORBIDDEN' }]);
 }, 30_000);
+
+test('native terminates boundedly when valid bootstrap observations cannot fit serialized model history', async () => {
+  const messageId = randomUUID();
+  const observations = Array.from({ length: 4 }, () => ({
+    invocation_id: randomUUID(),
+    tool_id: 'workspace_read',
+    result: {
+      status: 'ok',
+      result: {
+        kind: 'read',
+        path: 'brief.txt',
+        version: 'a'.repeat(64),
+        byte_length: 120000,
+        content: '\\'.repeat(120000),
+      },
+    },
+  }));
+  const start = HarnessStartSchema.parse({
+    protocol: HARNESS_PROTOCOL_VERSION,
+    type: 'start',
+    messages: [{ message_id: messageId, role: 'user', content: 'Use accepted read observations.' }],
+    tools: [
+      {
+        name: 'workspace_read',
+        description: 'Read the managed text.',
+        parameters: {},
+        risk: 'low',
+      },
+    ],
+    workspace: {
+      workspace_id: 'managed',
+      label: 'Managed',
+      readable_paths: ['brief.txt'],
+      writable_paths: [],
+    },
+    budget: { max_iterations: 12, max_tokens: 1000 },
+    snapshot: {
+      version: 2,
+      message_refs: [messageId],
+      tool_refs: observations.map((item) => item.invocation_id),
+      next_call_no: 5,
+      usage: { iterations: 4, tokens: 4 },
+      waiting: null,
+    },
+    observations,
+    approval: null,
+  });
+  expect(Buffer.byteLength(JSON.stringify(start), 'utf8')).toBeLessThan(1024 * 1024);
+  const requests: HarnessRequest[] = [];
+  await runNativeHarness({
+    services: {
+      binaryPath,
+      libraryPath: process.env.HARNESS_LIBRARY_PATH,
+      maxIterations: 12,
+      maxTokens: 1000,
+      model: async () => {
+        throw new Error('oversized context must not call model transport');
+      },
+    },
+    start,
+    signal: new AbortController().signal,
+    handleRequest: async (request) => {
+      requests.push(request);
+      expect(request).toMatchObject({
+        type: 'finish',
+        outcome: 'failed',
+        error: { code: 'HARNESS_CONTEXT_LIMIT' },
+      });
+      return { accepted: true };
+    },
+  });
+  expect(requests).toHaveLength(1);
+});

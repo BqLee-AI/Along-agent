@@ -1,101 +1,24 @@
 import type { PoolClient } from 'pg';
-import { HarnessSnapshotSchema } from '@along/contracts';
-import type { ExecutionKind, HarnessSnapshot, RunView } from '@along/contracts';
+import { HistoricalHarnessSnapshotSchema } from '@along/contracts';
+import type { HarnessApprovalDecision, HarnessSnapshot, RunView } from '@along/contracts';
 import {
   THREAD_PROTOCOL_VERSION,
   ThreadEventSchema,
   type ThreadEvent,
 } from '@along/stream-protocol';
-import { forbidden, notFound, stateConflict } from '../../http/errors.js';
-import { appendCheckpoint, finishAttempt, insertMessage } from './repository.js';
+import { stateConflict } from '../../http/errors.js';
+import {
+  appendCheckpoint,
+  finishAttempt,
+  insertMessage,
+  type LockedRun,
+  type RunRow,
+} from './repository.js';
 import type { RunContext } from './contracts.js';
-import { readApprovalDecision } from '../approvals/decision.js';
-import { isActiveOwner } from '../identity/preferences.js';
-
-export interface RunRow {
-  id: string;
-  owner_id: string;
-  conversation_id: string;
-  execution: ExecutionKind;
-  status: RunView['status'];
-  budget_max_iterations: number;
-  budget_max_tokens: number;
-  tools_allowlist: string[];
-  frozen_context: FrozenContext | null;
-  input_message_id: string | null;
-  waiting_checkpoint_id: string | null;
-  waiting_invocation_id: string | null;
-  waiting_approval_id: string | null;
-}
-export interface FrozenContext {
-  confirmedTimezone: string | null;
-  anchorReceivedAtUtc: string;
-  receivedAtUtc: string;
-  foldChoice: 'first' | 'second' | 'none';
-  rulesetId: string;
-  tzdbVersion: string;
-  aliasVersion: string | null;
-}
-export interface LockedRun {
-  run: RunRow;
-  attempt: { id: string; attempt_no: number; status: string };
-}
-
-// Never lock a Run before its attempt. Callers retry latest-attempt discovery
-// outside the transaction when a concurrent resume has relocated execution.
-export async function lockRun(
-  client: PoolClient,
-  binding: Pick<RunContext, 'ownerId' | 'conversationId' | 'runId' | 'attemptId'>,
-  executable = true,
-  authorize = true,
-): Promise<LockedRun> {
-  const attempt = (
-    await client.query<{ id: string; attempt_no: number; status: string }>(
-      'SELECT id,attempt_no,status FROM run_attempts WHERE id=$1 AND run_id=$2 AND owner_id=$3 FOR UPDATE',
-      [binding.attemptId, binding.runId, binding.ownerId],
-    )
-  ).rows[0];
-  if (!attempt) throw notFound('Run attempt not found');
-  const run = (
-    await client.query<RunRow>(
-      `SELECT r.* FROM agent_runs r WHERE r.id=$1 AND r.owner_id=$2 AND r.conversation_id=$3
-      AND EXISTS (SELECT 1 FROM conversations c WHERE c.id=r.conversation_id AND c.owner_id=$2)
-      FOR UPDATE OF r`,
-      [binding.runId, binding.ownerId, binding.conversationId],
-    )
-  ).rows[0];
-  if (!run) throw notFound('Run not found');
-  const latest = (
-    await client.query<{ attempt_no: number }>(
-      'SELECT max(attempt_no)::int AS attempt_no FROM run_attempts WHERE run_id=$1',
-      [run.id],
-    )
-  ).rows[0]?.attempt_no;
-  if (latest !== attempt.attempt_no)
-    throw stateConflict('stale Run attempt', { reason: 'STALE_ATTEMPT' });
-  if (executable && (run.status !== 'running' || attempt.status !== 'running')) {
-    throw stateConflict('Run attempt cannot execute', { status: run.status });
-  }
-  if (authorize && run.execution === 'harness' && !(await isActiveOwner(client, run.owner_id))) {
-    throw forbidden('Run authorization revoked');
-  }
-  return { run, attempt };
-}
-
-export async function latestAttemptId(
-  client: Pick<PoolClient, 'query'>,
-  ownerId: string,
-  runId: string,
-): Promise<string> {
-  const id = (
-    await client.query<{ id: string }>(
-      'SELECT id FROM run_attempts WHERE run_id=$1 AND owner_id=$2 ORDER BY attempt_no DESC LIMIT 1',
-      [runId, ownerId],
-    )
-  ).rows[0]?.id;
-  if (!id) throw notFound('Run not found');
-  return id;
-}
+import { readApprovalDecision, readDocumentApprovalDecision } from '../approvals/decision.js';
+import { readRunInvocationStates } from '../tools/invocations.js';
+import { BUSINESS_TOOL_IDS } from '../tools/contracts.js';
+import { validateWorkspaceGrant, WorkspaceDeniedError } from '../workspaces/service.js';
 
 export async function appendEvent(
   client: PoolClient,
@@ -169,6 +92,39 @@ export async function commitTerminal(
   return event;
 }
 
+// Approval storage selection comes only from tools' immutable invocation
+// projection, never from a native kind claim or an untrusted approval UUID.
+export async function readRunApprovalDecision(
+  client: PoolClient,
+  binding: { ownerId: string; conversationId: string; runId: string },
+  invocationId: string,
+  approvalId: string,
+): Promise<HarnessApprovalDecision> {
+  const states = await readRunInvocationStates(client, binding);
+  const row = states.find((state) => state.invocation_id === invocationId);
+  if (
+    row?.state !== 'completed' ||
+    row.outcome_kind !== 'approval_pending' ||
+    !row.approval_ref ||
+    row.approval_ref.approval_id !== approvalId
+  )
+    throw stateConflict('invalid trusted approval invocation reference');
+  if (row.approval_ref.kind === 'document') {
+    if (row.tool_id !== 'workspace_propose_replace')
+      throw stateConflict('document approval tool mismatch');
+    const { run_id, ...decision } = await readDocumentApprovalDecision(
+      client,
+      binding.ownerId,
+      approvalId,
+    );
+    if (run_id !== binding.runId) throw stateConflict('document approval Run mismatch');
+    return decision;
+  }
+  if (row.tool_id !== 'propose_task' && row.tool_id !== 'request_cancel_task')
+    throw stateConflict('task approval tool mismatch');
+  return readApprovalDecision(client, binding.ownerId, approvalId);
+}
+
 export async function viewOf(client: PoolClient, locked: LockedRun): Promise<RunView> {
   const { run, attempt } = locked;
   const waiting =
@@ -180,8 +136,36 @@ export async function viewOf(client: PoolClient, locked: LockedRun): Promise<Run
         }
       : null;
   const decision = waiting
-    ? await readApprovalDecision(client, run.owner_id, waiting.approval_id)
+    ? await readRunApprovalDecision(
+        client,
+        {
+          ownerId: run.owner_id,
+          conversationId: run.conversation_id,
+          runId: run.id,
+        },
+        waiting.invocation_id,
+        waiting.approval_id,
+      )
     : null;
+  // Historical summaries are receipt facts, not current workspace authority.
+  // Pre-summary workspace Runs remain readable/cancellable without inventing
+  // metadata from a current registration that may represent different access.
+  const workspace = run.frozen_context?.workspaceGrant ? run.frozen_context.workspaceSummary : null;
+  let canResume =
+    run.execution === 'harness' &&
+    run.status === 'suspended_approval' &&
+    decision !== null &&
+    decision.status !== 'pending';
+  // Eligibility reflects current authority without making historical reads
+  // depend on it. Resume itself still validates before allocating an attempt.
+  if (canResume && run.frozen_context?.workspaceGrant) {
+    try {
+      validateWorkspaceGrant(run.owner_id, run.frozen_context.workspaceGrant);
+    } catch (error) {
+      if (!(error instanceof WorkspaceDeniedError)) throw error;
+      canResume = false;
+    }
+  }
   return {
     run_id: run.id,
     conversation_id: run.conversation_id,
@@ -189,12 +173,12 @@ export async function viewOf(client: PoolClient, locked: LockedRun): Promise<Run
     status: run.status,
     attempt_id: attempt.id,
     attempt_no: attempt.attempt_no,
-    waiting,
-    can_resume:
-      run.execution === 'harness' &&
-      run.status === 'suspended_approval' &&
-      decision !== null &&
-      decision.status !== 'pending',
+    waiting:
+      waiting && decision?.kind === 'document'
+        ? { ...waiting, approval_kind: 'document' }
+        : waiting,
+    ...(workspace ? { workspace } : {}),
+    can_resume: canResume,
   };
 }
 
@@ -211,5 +195,25 @@ export async function readSnapshot(
     )
   ).rows[0];
   if (!checkpoint) throw stateConflict('invalid harness checkpoint');
-  return HarnessSnapshotSchema.parse(checkpoint.payload);
+  const snapshot = HistoricalHarnessSnapshotSchema.parse(checkpoint.payload);
+  if (snapshot.version === 1) {
+    if (run.frozen_context?.workspaceGrant)
+      throw stateConflict('historical snapshot cannot gain workspace authority');
+    const states = await readRunInvocationStates(client, {
+      ownerId: run.owner_id,
+      conversationId: run.conversation_id,
+      runId: run.id,
+    });
+    for (const invocationId of snapshot.tool_refs) {
+      const row = states.find((state) => state.invocation_id === invocationId);
+      if (
+        !row ||
+        row.state !== 'completed' ||
+        !(BUSINESS_TOOL_IDS as readonly string[]).includes(row.tool_id) ||
+        row.approval_ref?.kind === 'document'
+      )
+        throw stateConflict('historical snapshot contains non-task capability');
+    }
+  }
+  return { ...snapshot, version: 2 };
 }

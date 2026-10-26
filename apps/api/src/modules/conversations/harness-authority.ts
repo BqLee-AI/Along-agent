@@ -2,12 +2,14 @@ import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import {
   HARNESS_PROTOCOL_VERSION,
+  HARNESS_MAX_FRAME_BYTES,
   HarnessSnapshotSchema,
+  HistoricalHarnessSnapshotSchema,
   HarnessStartSchema,
   type HarnessRequest,
   type HarnessSnapshot,
   type HarnessStart,
-  type HarnessTool,
+  type HarnessApprovalDecision,
   type RunView,
 } from '@along/contracts';
 import { THREAD_PROTOCOL_VERSION } from '@along/stream-protocol';
@@ -20,24 +22,31 @@ import {
   stateConflict,
   validationError,
 } from '../../http/errors.js';
-import { readApprovalDecision } from '../approvals/decision.js';
+import { validateDocumentApprovalsDone } from '../approvals/document-service.js';
 import { invokeTool, reserveToolInvocation } from '../tools/gateway.js';
 import { readInvocationSnapshots, readRunInvocationStates } from '../tools/invocations.js';
+import { readRunDocumentEvidence } from '../tools/query.js';
 import type { ToolContext, ToolPayload } from '../tools/contracts.js';
-import { TOOL_IDS } from '../tools/contracts.js';
+import { BUSINESS_TOOL_IDS, TOOL_IDS } from '../tools/contracts.js';
+import { HARNESS_TOOL_DEFINITIONS } from '../tools/catalog.js';
+import { validateWorkspaceGrant } from '../workspaces/service.js';
 import { runNativeHarness } from './harness-process.js';
 import type { ConversationDeps, EventWriter, RunContext, StartResult } from './contracts.js';
 import { CancelRunBodySchema, ResumeRunBodySchema } from './schemas.js';
-import { insertAttempt, listRunEvents } from './repository.js';
+import {
+  insertAttempt,
+  latestAttemptId,
+  listRunEvents,
+  lockRun,
+  type LockedRun,
+  type RunRow,
+} from './repository.js';
 import {
   appendEvent,
   commitTerminal,
-  latestAttemptId,
-  lockRun,
   readSnapshot,
+  readRunApprovalDecision,
   viewOf,
-  type LockedRun,
-  type RunRow,
 } from './run-state.js';
 
 export interface HarnessSession {
@@ -46,81 +55,6 @@ export interface HarnessSession {
 }
 
 const active = new Map<string, AbortController>();
-const parameters = (properties: Record<string, unknown>, required: string[] = []) => ({
-  type: 'object',
-  properties,
-  required,
-  additionalProperties: false,
-});
-const string = { type: 'string' };
-const TOOLS: readonly HarnessTool[] = [
-  {
-    name: 'propose_task',
-    description: '提出提醒批准；只有用户在冻结确认页确认后才能创建任务。',
-    risk: 'medium',
-    parameters: parameters(
-      {
-        raw_time_text: string,
-        timezone_hint: { type: ['string', 'null'] },
-        note: string,
-        occurrence: { const: 'once' },
-      },
-      ['raw_time_text', 'note', 'occurrence'],
-    ),
-  },
-  {
-    name: 'request_cancel_task',
-    description: '提出已有任务的取消批准，不直接取消。',
-    risk: 'medium',
-    parameters: parameters(
-      { task_id: { type: 'string', format: 'uuid' }, reason_text: { type: ['string', 'null'] } },
-      ['task_id'],
-    ),
-  },
-  {
-    name: 'list_tasks',
-    description: '读取当前用户提醒任务。',
-    risk: 'low',
-    parameters: parameters({
-      state: {
-        type: ['string', 'null'],
-        enum: [
-          'saved',
-          'pending_schedule',
-          'scheduled',
-          'fired',
-          'missed',
-          'cancel_pending',
-          'cancelled',
-          null,
-        ],
-      },
-      limit: { type: 'integer', minimum: 1, maximum: 50 },
-    }),
-  },
-  {
-    name: 'read_brief_cards',
-    description: '读取当前用户指定日期的简报。',
-    risk: 'low',
-    parameters: parameters(
-      {
-        date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
-        card_ids: {
-          type: ['array', 'null'],
-          items: { type: 'string', format: 'uuid' },
-          maxItems: 50,
-        },
-      },
-      ['date'],
-    ),
-  },
-  {
-    name: 'get_user_prefs',
-    description: '读取当前用户的时区与偏好。',
-    risk: 'low',
-    parameters: parameters({}),
-  },
-];
 
 function poolOf(deps: ConversationDeps): Pool {
   if (!deps.pool) throw notReady();
@@ -194,6 +128,7 @@ async function contextOf(
       (!deps.timeContext.available || deps.timeContext.aliases.version !== frozen.aliasVersion))
   )
     throw new HttpError(503, 503, 'TZDB_UNAVAILABLE', '接纳时的时间规则暂不可用。');
+  if (frozen.workspaceGrant) validateWorkspaceGrant(run.owner_id, frozen.workspaceGrant);
   return {
     ownerId: run.owner_id,
     conversationId: run.conversation_id,
@@ -210,7 +145,10 @@ async function contextOf(
     timeContext: deps.timeContext,
     maxIterations: run.budget_max_iterations,
     maxTokens: run.budget_max_tokens,
-    allowlist: run.tools_allowlist.filter((name) => (TOOL_IDS as readonly string[]).includes(name)),
+    allowlist: run.tools_allowlist.filter((name) =>
+      ((frozen.workspaceGrant ? TOOL_IDS : BUSINESS_TOOL_IDS) as readonly string[]).includes(name),
+    ),
+    ...(frozen.workspaceGrant ? { workspaceGrant: frozen.workspaceGrant } : {}),
     ...(checkpointId ? { resumeCheckpointId: checkpointId } : {}),
   };
 }
@@ -219,6 +157,37 @@ function eventPayload(context: RunContext) {
 }
 function toolContext(context: RunContext): ToolContext {
   return context;
+}
+
+function approvalAuthorizesActions(decision: HarnessApprovalDecision | null): boolean {
+  return (
+    decision === null ||
+    (decision.kind === 'task' ? decision.status === 'consumed' : decision.status === 'approved')
+  );
+}
+
+function buildHarnessStart(
+  context: RunContext,
+  snapshot: HarnessSnapshot | null,
+  observations: HarnessStart['observations'],
+  approval: HarnessApprovalDecision | null,
+): HarnessStart {
+  const start = HarnessStartSchema.parse({
+    protocol: HARNESS_PROTOCOL_VERSION,
+    type: 'start',
+    messages: [{ message_id: context.userMessageId, role: 'user', content: context.inputText }],
+    tools: HARNESS_TOOL_DEFINITIONS.filter((tool) => context.allowlist.includes(tool.name)),
+    budget: { max_iterations: context.maxIterations, max_tokens: context.maxTokens },
+    snapshot,
+    observations,
+    approval,
+    workspace: context.workspaceGrant
+      ? validateWorkspaceGrant(context.ownerId, context.workspaceGrant)
+      : null,
+  });
+  if (Buffer.byteLength(JSON.stringify(start), 'utf8') > HARNESS_MAX_FRAME_BYTES)
+    throw new HttpError(422, 422, 'HARNESS_CONTEXT_LIMIT', '工具上下文超过安全范围，已停下。');
+  return start;
 }
 
 export async function getRunView(
@@ -353,13 +322,23 @@ export async function resumeConversationRun(
       snapshot.waiting.approval_id !== run.waiting_approval_id
     )
       throw stateConflict('waiting checkpoint reference conflict');
-    const decision = await readApprovalDecision(client, ownerId, run.waiting_approval_id);
+    const decision = await readRunApprovalDecision(
+      client,
+      { ownerId, conversationId, runId },
+      snapshot.waiting.invocation_id,
+      run.waiting_approval_id,
+    );
     if (decision.status === 'pending')
       throw stateConflict('approval still pending', { status: 'pending' });
     if (!deps.harness) throw unavailable();
     const attemptId = randomUUID();
     const context = await contextOf(client, deps, run, attemptId, requestId, input.checkpoint_id);
-    await readInvocationSnapshots(client, toolContext(context), snapshot.tool_refs);
+    const observations = await readInvocationSnapshots(
+      client,
+      toolContext(context),
+      snapshot.tool_refs,
+    );
+    buildHarnessStart(context, snapshot, observations, decision);
     await insertAttempt(client, {
       attemptId,
       ownerId,
@@ -410,22 +389,23 @@ export async function createHarnessSession(
       ? await readInvocationSnapshots(client, toolContext(context), snapshot.tool_refs)
       : [];
     const approval = snapshot?.waiting
-      ? await readApprovalDecision(client, context.ownerId, snapshot.waiting.approval_id)
+      ? await readRunApprovalDecision(
+          client,
+          context,
+          snapshot.waiting.invocation_id,
+          snapshot.waiting.approval_id,
+        )
       : null;
     return { context, snapshot, observations, approval };
   });
   const { context } = initial;
-  const tools = TOOLS.filter((tool) => context.allowlist.includes(tool.name));
-  const start = HarnessStartSchema.parse({
-    protocol: HARNESS_PROTOCOL_VERSION,
-    type: 'start',
-    messages: [{ message_id: context.userMessageId, role: 'user', content: context.inputText }],
-    tools,
-    budget: { max_iterations: context.maxIterations, max_tokens: context.maxTokens },
-    snapshot: initial.snapshot,
-    observations: initial.observations,
-    approval: initial.approval,
-  });
+  const start = buildHarnessStart(
+    context,
+    initial.snapshot,
+    initial.observations,
+    initial.approval,
+  );
+  const tools = start.tools;
   let stopped = false;
   let lastSnapshot = initial.snapshot;
   const delivered = new Set(initial.snapshot?.tool_refs ?? []);
@@ -435,6 +415,7 @@ export async function createHarnessSession(
     if (stopped || signal.aborted) throw stateConflict('harness attempt stopped');
     return withTransaction(pool, async (client) => {
       const locked = await lockRun(client, context);
+      if (context.workspaceGrant) validateWorkspaceGrant(context.ownerId, context.workspaceGrant);
       return action(client, locked);
     });
   }
@@ -442,8 +423,20 @@ export async function createHarnessSession(
     if (!(await write(event))) throw stateConflict('client disconnected');
   }
   async function approvalEvents(
-    payload: Extract<ToolPayload, { kind: 'approval' }>,
+    payload: Extract<ToolPayload, { kind: 'approval' | 'document_approval' }>,
   ): Promise<void> {
+    if (payload.kind === 'document_approval') {
+      const event = await guarded((client) =>
+        appendEvent(client, context, 'approval_required', {
+          ...eventPayload(context),
+          approval_id: payload.approval.approval_id,
+          card_id: `document-approval:${payload.approval.approval_id}`,
+          presentation_hash: payload.approval.presentation_hash,
+        }),
+      );
+      await send(event);
+      return;
+    }
     const events = await guarded(async (client) => [
       await appendEvent(client, context, 'card.proposed', {
         ...eventPayload(context),
@@ -474,7 +467,11 @@ export async function createHarnessSession(
       accepted.some((row) => !snapshot.tool_refs.includes(row.invocation_id))
     )
       throw stateConflict('snapshot must retain accepted Run invocations');
-    await readInvocationSnapshots(client, toolContext(context), snapshot.tool_refs);
+    const observations = await readInvocationSnapshots(
+      client,
+      toolContext(context),
+      snapshot.tool_refs,
+    );
     const next = accepted.reduce((max, row) => {
       const match = /^harness\/([1-9]\d*)$/.exec(row.call_key);
       if (!match) throw stateConflict('invalid harness invocation slot');
@@ -489,7 +486,9 @@ export async function createHarnessSession(
         [context.runId],
       )
     ).rows[0];
-    const baseline = previous ? HarnessSnapshotSchema.parse(previous.payload) : lastSnapshot;
+    const baseline = previous
+      ? HistoricalHarnessSnapshotSchema.parse(previous.payload)
+      : lastSnapshot;
     if (
       baseline &&
       (snapshot.next_call_no < baseline.next_call_no ||
@@ -510,7 +509,8 @@ export async function createHarnessSession(
     for (const row of pending) {
       if (!row.approval_id) throw stateConflict('missing approval reference');
       if (
-        (await readApprovalDecision(client, context.ownerId, row.approval_id)).status === 'pending'
+        (await readRunApprovalDecision(client, context, row.invocation_id, row.approval_id))
+          .status === 'pending'
       )
         unresolved.push(row);
     }
@@ -525,15 +525,37 @@ export async function createHarnessSession(
       if (unresolved.some((pending) => pending.invocation_id !== row.invocation_id))
         throw stateConflict('snapshot omits unresolved approval');
     } else if (unresolved.length) throw stateConflict('snapshot omits unresolved approval');
+    buildHarnessStart(
+      context,
+      snapshot,
+      observations,
+      snapshot.waiting
+        ? await readRunApprovalDecision(
+            client,
+            context,
+            snapshot.waiting.invocation_id,
+            snapshot.waiting.approval_id,
+          )
+        : null,
+    );
   }
   return {
     start,
     handleRequest: async (request) => {
       await guarded(async () => undefined);
       if (request.type === 'model') {
+        if (!approvalAuthorizesActions(initial.approval))
+          throw forbidden('rejected approval cannot authorize another action');
         if (!deps.harness) throw unavailable();
         if (request.remaining_tokens > context.maxTokens)
           throw stateConflict('model request exceeds frozen token limit');
+        if (Buffer.byteLength(JSON.stringify(request), 'utf8') > HARNESS_MAX_FRAME_BYTES)
+          throw new HttpError(
+            422,
+            422,
+            'HARNESS_CONTEXT_LIMIT',
+            '模型上下文超过安全范围，已停下。',
+          );
         await guarded(async (client) => {
           const states = await readRunInvocationStates(client, toolContext(context));
           if (states.some((row) => row.state === 'unknown' || row.outcome_kind === 'failed'))
@@ -552,7 +574,7 @@ export async function createHarnessSession(
         return reply;
       }
       if (request.type === 'reserve') {
-        if (initial.approval && initial.approval.status !== 'consumed')
+        if (!approvalAuthorizesActions(initial.approval))
           throw forbidden('rejected approval cannot authorize another action');
         if (!context.allowlist.includes(request.tool_id))
           throw forbidden('tool outside frozen Run grant');
@@ -569,19 +591,30 @@ export async function createHarnessSession(
           )
             throw stateConflict('approval requires suspension before further actions');
           const accepted = states.filter((row) => row.state === 'completed').length;
+          if (accepted >= 64)
+            throw new HttpError(
+              422,
+              422,
+              'HARNESS_CONTEXT_LIMIT',
+              '工具引用达到安全上限，已停下。',
+            );
           if (request.call_key !== `harness/${accepted + 1}`)
             throw stateConflict('invalid next harness slot');
         });
-        const reserved = await reserveToolInvocation(pool, toolContext(context), {
-          callKey: request.call_key,
-          toolId: request.tool_id,
-          args: request.args,
-        });
+        const reserved = await reserveToolInvocation(
+          pool,
+          { ...toolContext(context), signal },
+          {
+            callKey: request.call_key,
+            toolId: request.tool_id,
+            args: request.args,
+          },
+        );
         await guarded(async () => undefined);
         return { invocation_id: reserved.invocationId };
       }
       if (request.type === 'invoke') {
-        if (initial.approval && initial.approval.status !== 'consumed')
+        if (!approvalAuthorizesActions(initial.approval))
           throw forbidden('rejected approval cannot authorize another action');
         if (initial.snapshot?.tool_refs.includes(request.invocation_id))
           throw stateConflict('resume consumes stored observations without reinvoking them');
@@ -599,16 +632,20 @@ export async function createHarnessSession(
           )
             throw stateConflict('approval requires suspension before further actions');
         });
-        const outcome = await invokeTool(pool, toolContext(context), {
-          invocationId: request.invocation_id,
-          toolId: request.tool_id,
-          args: request.args,
-        });
+        const outcome = await invokeTool(
+          pool,
+          { ...toolContext(context), signal },
+          {
+            invocationId: request.invocation_id,
+            toolId: request.tool_id,
+            args: request.args,
+          },
+        );
         await guarded(async () => undefined);
         if (
           !delivered.has(outcome.invocationId) &&
           outcome.status === 'ok' &&
-          outcome.result.kind === 'approval'
+          (outcome.result.kind === 'approval' || outcome.result.kind === 'document_approval')
         )
           await approvalEvents(outcome.result);
         delivered.add(outcome.invocationId);
@@ -708,7 +745,9 @@ export async function createHarnessSession(
             [context.runId],
           )
         ).rows[0];
-        const baseline = previous ? HarnessSnapshotSchema.parse(previous.payload) : lastSnapshot;
+        const baseline = previous
+          ? HistoricalHarnessSnapshotSchema.parse(previous.payload)
+          : lastSnapshot;
         if (
           baseline &&
           (request.usage.iterations < baseline.usage.iterations ||
@@ -720,6 +759,8 @@ export async function createHarnessSession(
         )
           throw stateConflict('terminal usage cannot move backwards');
         if (request.outcome === 'done') {
+          if (initial.approval?.kind === 'document' && !approvalAuthorizesActions(initial.approval))
+            throw forbidden('rejected approval cannot complete the original action');
           if (
             request.usage.iterations > context.maxIterations ||
             (request.usage.tokens !== null && request.usage.tokens > context.maxTokens)
@@ -732,8 +773,8 @@ export async function createHarnessSession(
             if (
               row.outcome_kind === 'approval_pending' &&
               row.approval_id &&
-              (await readApprovalDecision(client, context.ownerId, row.approval_id)).status ===
-                'pending'
+              (await readRunApprovalDecision(client, context, row.invocation_id, row.approval_id))
+                .status === 'pending'
             )
               throw stateConflict('Run has unresolved approval');
             if (
@@ -742,6 +783,11 @@ export async function createHarnessSession(
             )
               throw stateConflict('approval requires explicit suspension and resume');
           }
+          await validateDocumentApprovalsDone(
+            client,
+            context,
+            await readRunDocumentEvidence(client, context),
+          );
         }
         const payload =
           request.outcome === 'done'

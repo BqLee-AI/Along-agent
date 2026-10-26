@@ -1,5 +1,5 @@
 import type { Pool } from 'pg';
-import type { ExecutionKind } from '@along/contracts';
+import type { ExecutionKind, WorkspaceGrant } from '@along/contracts';
 import type { ThreadEvent } from '@along/stream-protocol';
 import type { TimeContext } from '../time/context.js';
 import type { HarnessServices } from './harness-process.js';
@@ -27,6 +27,7 @@ export interface RunContext {
   execution: ExecutionKind;
   userMessageId: string;
   allowlist: readonly string[];
+  workspaceGrant?: WorkspaceGrant | null;
   resumeCheckpointId?: string;
 }
 

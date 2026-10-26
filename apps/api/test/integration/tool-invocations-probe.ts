@@ -8,14 +8,18 @@ import type { Pool } from 'pg';
 import { loadTimeContext } from '../../src/modules/time/context.js';
 import type { ToolContext } from '../../src/modules/tools/contracts.js';
 import type { IntegrationDatabase } from './setup.js';
+import type { WorkspaceGrant } from '@along/contracts';
 
 export const toolId = 'internal.file-probe';
 export const args = { action: 'append-fsync' };
 const worker = fileURLToPath(new URL('./tool-invocations-file-worker.ts', import.meta.url));
 const phaseSchema = z.object({ phase: z.string() });
 
-export async function seedContext(pool: Pool): Promise<ToolContext> {
-  const ownerId = randomUUID(),
+export async function seedContext(
+  pool: Pool,
+  options: { ownerId?: string; workspaceGrant?: WorkspaceGrant } = {},
+): Promise<ToolContext> {
+  const ownerId = options.ownerId ?? randomUUID(),
     conversationId = randomUUID(),
     runId = randomUUID(),
     attemptId = randomUUID();
@@ -28,8 +32,13 @@ export async function seedContext(pool: Pool): Promise<ToolContext> {
     ownerId,
   ]);
   await pool.query(
-    "INSERT INTO agent_runs(id,owner_id,conversation_id,agent_revision,mode,budget_max_iterations,budget_max_tokens) VALUES($1,$2,$3,'probe','chat',1,100)",
-    [runId, ownerId, conversationId],
+    "INSERT INTO agent_runs(id,owner_id,conversation_id,agent_revision,mode,budget_max_iterations,budget_max_tokens,frozen_context) VALUES($1,$2,$3,'probe','chat',1,100,$4)",
+    [
+      runId,
+      ownerId,
+      conversationId,
+      options.workspaceGrant ? JSON.stringify({ workspaceGrant: options.workspaceGrant }) : null,
+    ],
   );
   await pool.query('INSERT INTO run_attempts(id,owner_id,run_id,attempt_no) VALUES($1,$2,$3,1)', [
     attemptId,
@@ -48,6 +57,7 @@ export async function seedContext(pool: Pool): Promise<ToolContext> {
     receivedAtUtc: '2026-10-17T00:00:00Z',
     foldChoice: 'none',
     timeContext: loadTimeContext('fixture-v1'),
+    ...(options.workspaceGrant ? { workspaceGrant: options.workspaceGrant } : {}),
   };
 }
 

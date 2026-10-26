@@ -1,6 +1,8 @@
 import { z } from 'zod';
+import { workspaceSummarySchema } from './workspaces.js';
+import { DocumentApprovalDecisionSchema } from './document-approvals.js';
 
-export const HARNESS_PROTOCOL_VERSION = 'harness/v1' as const;
+export const HARNESS_PROTOCOL_VERSION = 'harness/v2' as const;
 export const HARNESS_MAX_FRAME_BYTES = 1024 * 1024;
 
 const uuid = z.string().uuid();
@@ -21,16 +23,23 @@ export const HarnessUsageSchema = z
     tokens: z.number().int().nonnegative().nullable(),
   })
   .strict();
+const snapshotFields = {
+  message_refs: z.array(uuid).max(64),
+  tool_refs: z.array(uuid).max(64),
+  next_call_no: z.number().int().positive(),
+  usage: HarnessUsageSchema,
+  waiting: z.object({ invocation_id: uuid, approval_id: uuid }).strict().nullable(),
+};
 export const HarnessSnapshotSchema = z
-  .object({
-    version: z.literal(1),
-    message_refs: z.array(uuid).max(64),
-    tool_refs: z.array(uuid).max(64),
-    next_call_no: z.number().int().positive(),
-    usage: HarnessUsageSchema,
-    waiting: z.object({ invocation_id: uuid, approval_id: uuid }).strict().nullable(),
-  })
+  .object({ version: z.literal(2), ...snapshotFields })
   .strict();
+
+// Historical facts are readable, but only v2 may be written or executed. The
+// caller must verify legacy references are task receipts before bootstrapping.
+export const HistoricalHarnessSnapshotSchema = z.union([
+  HarnessSnapshotSchema,
+  z.object({ version: z.literal(1), ...snapshotFields }).strict(),
+]);
 export const HarnessToolSchema = z
   .object({
     name: reference,
@@ -39,25 +48,30 @@ export const HarnessToolSchema = z
     risk: z.enum(['low', 'medium', 'high']),
   })
   .strict();
-export const HarnessModelMessageSchema = z
-  .object({ role: z.enum(['system', 'user', 'assistant']), content: text })
+const modelToolCallSchema = z
+  .object({
+    id: reference,
+    type: z.literal('function'),
+    function: z.object({ name: reference, arguments: text }).strict(),
+  })
   .strict();
+export const HarnessModelMessageSchema = z.union([
+  z.object({ role: z.enum(['system', 'user', 'assistant']), content: text }).strict(),
+  z
+    .object({
+      role: z.literal('assistant'),
+      content: text,
+      tool_calls: z.array(modelToolCallSchema).length(1),
+    })
+    .strict(),
+  z.object({ role: z.literal('tool'), tool_call_id: reference, content: text }).strict(),
+]);
 export const HarnessModelReplySchema = z
   .object({
     message: z
       .object({
         content: text.nullable(),
-        tool_calls: z
-          .array(
-            z
-              .object({
-                id: reference,
-                type: z.literal('function'),
-                function: z.object({ name: reference, arguments: text }).strict(),
-              })
-              .strict(),
-          )
-          .max(1),
+        tool_calls: z.array(modelToolCallSchema).max(1),
       })
       .strict(),
     usage: z.object({ total_tokens: z.number().int().nonnegative() }).strict().nullable(),
@@ -118,14 +132,26 @@ export const HarnessRequestSchema = z.discriminatedUnion('type', [
     })
     .strict(),
 ]);
-export const HarnessApprovalDecisionSchema = z
+export const HarnessTaskApprovalDecisionSchema = z
   .object({
+    kind: z.literal('task'),
     approval_id: uuid,
     status: z.enum(['pending', 'consumed', 'rejected', 'expired', 'superseded']),
     task_id: uuid.nullable(),
     successor_id: uuid.nullable(),
   })
-  .strict();
+  .strict()
+  .refine((decision) => decision.status !== 'consumed' || decision.task_id !== null, {
+    message: 'consumed task approval requires its real task result',
+    path: ['task_id'],
+  });
+export const HarnessDocumentApprovalDecisionSchema = DocumentApprovalDecisionSchema.omit({
+  run_id: true,
+});
+export const HarnessApprovalDecisionSchema = z.union([
+  HarnessTaskApprovalDecisionSchema,
+  HarnessDocumentApprovalDecisionSchema,
+]);
 export const HarnessStartSchema = z
   .object({
     protocol: z.literal(HARNESS_PROTOCOL_VERSION),
@@ -148,6 +174,7 @@ export const HarnessStartSchema = z
       .array(z.object({ invocation_id: uuid, tool_id: reference, result: z.unknown() }).strict())
       .max(64),
     approval: HarnessApprovalDecisionSchema.nullable(),
+    workspace: workspaceSummarySchema.nullable().optional(),
   })
   .strict();
 export const HarnessReplySchema = z.union([
@@ -184,9 +211,19 @@ export const RunViewSchema = z
     attempt_id: uuid,
     attempt_no: z.number().int().positive(),
     waiting: z
-      .object({ checkpoint_id: uuid, invocation_id: uuid, approval_id: uuid })
-      .strict()
+      .union([
+        z.object({ checkpoint_id: uuid, invocation_id: uuid, approval_id: uuid }).strict(),
+        z
+          .object({
+            checkpoint_id: uuid,
+            invocation_id: uuid,
+            approval_id: uuid,
+            approval_kind: z.literal('document'),
+          })
+          .strict(),
+      ])
       .nullable(),
+    workspace: workspaceSummarySchema.optional(),
     can_resume: z.boolean(),
   })
   .strict();

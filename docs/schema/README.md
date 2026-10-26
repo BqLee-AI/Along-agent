@@ -23,9 +23,20 @@ Content 表（`briefs`、`cards`）为 v1 / Deferred，移出 v0 落地顺序（
 | Identity                          | [identity-schema.md](identity-schema.md)                           | `users`、`sessions`                                                                                                                                     |
 | Conversation / Runs               | [conversation-and-runs-schema.md](conversation-and-runs-schema.md) | 对话/消息、冻结 Run/attempt、只追加 checkpoint、conversation_idempotency、harness_resumes/cancellations、tool_invocations/calls、不可变 revision/prompt |
 | Commitments                       | [commitments-schema.md](commitments-schema.md)                     | `approvals`、`approval_revision_requests`、`tasks`、`task_events`、`outbox`、`notifications`、`task_leases`、`security_events`                          |
+| Documents（R1）                   | [design/14](../design/14-r1-document-task-loop.md)                 | `document_approvals`、`document_approval_decisions`；迁移 `0016`，归 approvals，不占 task 批准表                                                        |
 | Content（v1 / Deferred，移出 v0） | [content-schema.md](content-schema.md)                             | `briefs`、`cards`                                                                                                                                       |
 
 引用：落地顺序对应 B03 微服务下沉原则与 B06 建表顺序（P3 vertical 切片）[B03][B06]。
+
+## R1 文档批准
+
+- `0016_document_approvals.sql` 只新增文档批准和只追加决议账，不改旧迁移、已接受工具结果或历史 Run。发布顺序为停旧写者、迁移、同批发布 TS/native/Web。
+- `document_approvals` 冻结 owner/conversation/Run、精确 workspace grant、相对目标、已接受全文读的 invocation、基线 SHA-256、确切新内容及其 SHA-256、完整预览和展示哈希。BOM、CRLF、空格均是原文内容，不在保存/确认时归一化。
+- 授权状态仅 `pending → approved | rejected`，不可反转；完整展示及目标建后不可改。`apply_invocation_id` 唯一且一旦绑定不可换，`replaces_approval_id` 唯一且限同 owner/Run/工作区/目标的已批准已绑定前驱；后继还须由公共用例核验接受的零写冲突及后来的真实全文读。
+- `document_approval_decisions` 以 `(owner_id,idempotency_key)` 为主键，记录目标、动作、请求哈希和原决定，禁止更新/删除。它不复用 task 消费、有效期、调度事件或 outbox。
+- 工具执行结果仍只归 `tool_invocations`；文档批准只保存授权和唯一绑定，不另建文件效果账。批准详情和 Run 完成条件通过 tools 的公共只读证据核对 applied/conflict/unknown 及后续新读取，不直读 tools 私表。
+- Run 的 workspace grant 和安全摘要放既有 `frozen_context`。摘要用于历史展示，不把登记撤销变成历史 GET/取消失败；新动作与批准后继续须重新核对精确 grant。新执行/快照为 harness/v2/snapshot2，旧 task snapshot1 仅作不扩权的读取迁移。
+- FS 替换与 PG 接受非原子：许可后不确定结果保留 `unknown`，不因文件 hash 相同就补写成功。完整效果及回读规则见 [design/14 §§5–7](../design/14-r1-document-task-loop.md)。
 
 ## Enum 策略
 

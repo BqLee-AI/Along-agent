@@ -1,6 +1,6 @@
 # Conversations 路由：对话与 SSE
 
-> 状态：对话与正式 Harness 用户合同。范围：消息 SSE、只读补读、Run 查询、显式取消与批准等待恢复。不包含：任意崩溃自动恢复或完整 R1。
+> 状态：对话与正式 Harness 用户合同，含 R1 工作区选择和文档批准等待。范围：消息 SSE、只读补读、Run 查询、显式取消与批准等待恢复。不包含：任意崩溃自动恢复；合同不代表真实模型/用户材料/产物验收通过。
 >
 > 蓝图引用：B06（对话→确认；“明天”=服务端首次接收时刻+已确认时区并冻结；06 喝水用例）；B03（实时对话 SSE；WS+ws-ticket P2 起；packages/stream-protocol 版本化 zod，事件名开工对照 thread-stream.schema.json）。
 >
@@ -36,7 +36,8 @@
 - `card_ref`：可选，围绕某卡片追问时带；服务端只做关联，不做授权旁路。
 - `raw_text`：用户原话，按不可信输入解析，原样进回显引用。
 - `execution`：可选 `business | harness`，省略为兼容的确定性业务。harness 明确进入正式仓颉，`mode=chat` 不作隐式分派；缺实际依赖在任何新写入/SSE 前503 `HARNESS_UNAVAILABLE`，不自动改走 TS/fixture。
-- 入站幂等仍为同 owner/key：business 沿历史 hash 材料，harness 用 `harness/v1` 域分隔。同键换 execution 为409，不重复创建另一 Run；冻结输入/权限不从 body 的 owner、allowlist 等额外字段取得。
+- 入站幂等仍为同 owner/key：business 沿历史 hash 材料；无 workspace 的 harness 保持 `harness/v1\0` 域，带 workspace 则用 `harness/workspace/v2\0`，将 `workspace_id` 追加到原规范数组后计算 SHA-256。这里是请求 hash 域，不是执行协议版本（执行为 `harness/v2`）。同键换 execution、workspace 或其他绑定输入为409，不重复创建另一 Run；冻结输入/权限不从 body 的 owner、allowlist 等额外字段取得。
+- `workspace_id`：可选非空字符串，仅允许显式 `execution=harness`，business/省略 execution 时携带为400。新 Run 从当前本人有效部署登记取得精确授权，并冻结安全摘要；省略不授 workspace 工具。选择与新动作授权、历史展示的区别见 §5。
 - `confirmed_timezone` / `confirmed_timezone_id`：schema 均已有、可空，取 `confirmed_timezone_id ?? confirmed_timezone`；未给本轮值可使用会话先前明确冻结值，仍缺失则澄清，不猜。原文单个明确已知别名/规范 ID 优先于本轮确认值，本轮确认值优先于会话默认值；未知显式别名即使已有 Shanghai 也失败，多个不同已知时区则澄清，完整优先级见 design/05 §9.2。
 - `fold_choice`：`first | second | none`，默认 `none`；只有结构化字段决定选择，原话“第一次/第二次”不自动覆盖。歧义未选为 `AMBIGUOUS_LOCAL_TIME`；候选字段仍是 fold_choice，成功的现有归一结果与快照 `fold` 为 `0 | 1`，不混为字符串列。
 - “明天”锚定：服务端首次接收时刻 + 已确认时区解析一次并冻结，后续不再重算（跨午夜追问具体日期；延迟线 1min/15min 语义见 design time-core）。
@@ -72,7 +73,8 @@ data: {"protocol_version":"v1","seq":12,"type":"approval_required","payload":{"c
 `GET /conversations/{cid}/runs/{rid}` 返回通用 envelope `data`，由共享 `RunViewSchema` 校验：
 
 - `run_id/conversation_id/execution/status/attempt_id/attempt_no`；
-- `waiting=null | {checkpoint_id,invocation_id,approval_id}` 与 `can_resume`，不泄漏凭据/权限/内部推理；
+- `waiting=null | {checkpoint_id,invocation_id,approval_id}`；文档等待额外带 `approval_kind:"document"`，旧 task 等待不加此字段。`can_resume` 表示当前是否可显式继续，不泄漏凭据/内部推理；
+- 可选 `workspace={workspace_id,label,readable_paths,writable_paths}` 为接纳 Run 时冻结的安全摘要，不是当前登记的动态替代，也不返回 root/物理 identity/登记摘要。历史缺摘要不从当前登记补造；
 - owner-scoped，不存在或他人 Run 返回404。读取不执行，不因状态可继续而自动唤醒。
 
 ### 显式取消
@@ -86,6 +88,7 @@ strict body `{checkpoint_id,idempotency_key}`，仅 harness Run 的最后有效�
 - consumed：同 Run 新递增 attempt，将原 invocation/批准和真实 task ID 交给 native，原接受结果不改写、不重执行；
 - rejected/expired/superseded：将决议交给 native 停止原动作，不追 successor/同义绕拒绝；
 - 同等待点唯一有效恢复。并发、同键回答丢失重交或换键不得分配第二进程；已恢复且仍运行时409，已结束同键只补读原恢复 attempt 的帧。
+- 恢复决议按可信提议结果区分 `kind=task|document`，不是让客户端指定查表。task consumed 仍携真实 `task_id`；document 仅 `pending|approved|rejected`，approved 带原 `apply_invocation_id|null`，只授权后续唯一 apply，不能伪装 consumed 或 task 结果。文档 rejected 停止原动作，不生成同义后继；批准/拒绝可早于 suspend，仍按同一等待点恢复。
 
 Web 批准链接保留原 conversation/Run，并明确打开新标签页；在批准到达但 native 等待点尚未提交时也保留原会话和在途流，普通断连取消规则不变。确认/拒绝/修改沿原冻结按钮合同，之后读取原运行并明确继续；刷新或重试恢复不重做确认、不发新消息、不创建新 Run。
 
@@ -100,8 +103,13 @@ Web 批准链接保留原 conversation/Run，并明确打开新标签页；在�
 - [Required · #30] Web保留原输入与服务端wall_time/timezone_id，展示两候选+数值偏移；点击first/second只以新幂等键、新请求和相应fold_choice重提议，保留纽约不能回退/me上海，日期/时区修改须清除旧候选。服务端重归一并沿既有锚点/跨午夜规则，不接受客户端UTC作为权威；成功pending后仍须按钮三件套确认，选择候选不等于建task。
 - 时间归一由服务端 time-core 纯函数执行，LLM 不算时间，展示层不换算 [Required]。真实三zone/2026–2027有限覆盖、未知用户时区与缺规则区分、readyz/DB及D7兼容见design/05 §5；真实回归/部署缺失取证见§10，不把mock故障当部署演练。
 
-## 5. R1 工作区选择与文档等待（Proposed）
+## 5. R1 工作区选择与文档等待 [Required]
 
-字段及接口真源见 [design/14 §3.2、§7](../../design/14-r1-document-task-loop.md)：本人只读 `GET /api/v1/workspaces` 提供安全登记项；harness 消息可选 `workspace_id`，选择进入入站 hash 和 Run 冻结上下文，business 携带则拒绝。旧无 workspace 请求不改 hash 材料；RunView 只增加安全工作区摘要和明确的文档等待种类，不返回宿主 root。
+路由、DTO 与确认 body 的规范详情见 [API 索引 §8](../README.md#8-r1-工作区与文档批准-required)，行为见 [design/14](../../design/14-r1-document-task-loop.md)。
 
-文档批准仍经原 Run 显式 resume：approved 只允许后续 apply，不能作为 consumed task_id；pending 不启动，拒绝终止，早决议/并发/重交复用同等待点。仍使用既有七词 `approval_required` 跳转独立文档批准页，不发假时间卡片；unknown 按正常失败终结，不能恢复未知快照。对应增量不是既有 task 接口字段变更。
+- 本人只读 `GET /api/v1/workspaces` 返回 `{items:[{workspace_id,label,readable_paths,writable_paths}]}`；无有效登记返回空列表，不披露宿主 root 或开放任意目录。普通用户只选已登记工作区，不配置 provider/BYOK。
+- 新 Run 在既有 `frozen_context` 冻结精确 grant（workspace/owner/registration_digest/root_identity）及独立安全摘要；同入站键补读、历史 Run 查询、取消和冻结文档批准详情仍按 owner 可读，不因撤销登记而失败。`can_resume` 遇撤销/登记变更为 false；新批准/拒绝、新恢复和工具动作仍验当前登记与原精确 grant，不能凭历史展示恢复权限。
+- 独立文档页使用 `GET /document-approvals/{id}` 和 `actions/confirm|reject`；确认仅记录授权，不写文件、不建 task、不产生调度事件/outbox。仍用既有 `approval_required`（带 `approval_kind:"document"`）跳页，不发文档 `card.proposed` 或假时间卡片，不增加 SSE 事件词。
+- 详情将授权 `state` 与实际 `effect` 分开；`approved` 不等于已写，`applied` 仍须 apply 接受之后创建且接受的新 `workspace_read` 才能为 `verified`。只在可信零写 conflict 后，按更新后的真实全文读生成唯一后继并重新批准；拒绝、unknown 或未执行不能走此路径。
+- `unknown` 正常以 `TOOL_EFFECT_UNKNOWN` 失败终结，保留既有事实，不重写、不凭相同文件 hash 补报成功、不制造可恢复 unknown checkpoint。GET/入站重放和已完成文档决议重放均不是执行恢复。
+- HTTP 原始 JSON 累计上限仍为131072字节，工具接受结果应用限额为240000字节（不是240KiB）。提议还须保证完整确认 body（含再次 JSON 转义的 `seen_content=preview.body`、hash、UUID键）不超过131072字节；不能只按改后文本或 receipt 大小判断。详见 design/14 与 API 索引。

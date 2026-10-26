@@ -113,17 +113,17 @@ Observed / Required / Proposed / Deferred 同 01。
 | 公共 DTO 与 native wire      | 额外权威字段、非法版本/关联引用/结果结构被各自真正消费者拒绝；公共 HTTP 拒绝在 SSE/写入前发生，不假装 HTTP 客户端可提交内部 pipe 帧                                           |
 | unknown 核心子合同           | 真实非事务调用核心的许可与实际 fsync 效果后强杀，重交得到真实 unknown；正式 native 消费后停下，不再次模型/预约/调用；原调用仍 unknown、无 accepted_result，实际文件字节不重复 |
 
-unknown 子合同使用测试专用协议对端连接真实调用核心和正式 native，不把内部探针注册成产品工具。对端如需确认 snapshot/finish，必须先真实保存本次协议观察，不回随机未落地引用或手写 accepted 业务结果；保存位置属于测试夹具，不作为生产可恢复快照。该项不证明生产 RunAuthority 接受 unknown 快照、unknown 跨请求恢复或产品 HTTP 外部工具。五个产品工具的 local/read_only 合同及通用非事务调用核心的合同分开声明。
+unknown 子合同使用测试专用协议对端连接真实调用核心和正式 native，不把内部探针注册成产品工具。对端如需确认 snapshot/finish，必须先真实保存本次协议观察，不回随机未落地引用或手写 accepted 业务结果；保存位置属于测试夹具，不作为生产可恢复快照。该项不证明生产 RunAuthority 接受 unknown 快照、unknown 跨请求恢复或产品 HTTP 外部工具。原业务工具的 local/read_only 合同、通用非事务调用核心合同与 §4.3 的文件产品合同分别声明。
 
 `ci/gates.json` 的 D8 沿用 `status/scope/owner/enforced_by`，只新增必需消费者 case ID 列表及 remaining 的 partial 范围，不建立通用能力注册表。case ID 是执行证据接口，不锁定测试描述或生产函数名。根入口要求本次 Bun 实际报告中每个必需 ID 唯一通过且非 skipped；本地、HTTP 与独立子合同各有自己的 ID。缺报告、缺 case、重复或跳过、消费者非零退出均失败，旧 healthz/契约包绿色不能补足。报告放本次唯一目录，不读旧报告；static 仅校验声明、证据文件及报告解析边界，不启动 PG/native。
 
 必要步骤负例在隔离临时源/构建上下文中运行，不给生产代码加 bypass 开关。省略当前 native 构建、移除消费者集合或其执行步骤，根入口必须失败；这类前置/发现失败不冒充业务 Red。分别省略真实结果纳入和执行资格裁决后，同一消费者必须因错误结果或具体越权效果变红，而非缺依赖、格式错误或超时。记录 baseline、单项变异和恢复后的实际结果；变异证据不冒充测试先行。
 
-有限 enforced 只覆盖上述实测行为。其余工具/连接器合同、真实 provider/MCP、完整 R1 产物与模型质量、任意崩溃恢复、unknown 的完整产品恢复及通用 external exactly-once 保持 partial/Deferred；不能由 scope 文案、文件存在或绿色 job 名升级。
+有限 enforced 只覆盖 manifest 明列且本次正式消费者实测的行为。未列入的工具/连接器合同、真实 provider 任务质量、完整 R1 用户材料验收、任意崩溃恢复、unknown 的通用产品恢复及 external exactly-once 保持 partial/Deferred；不能由 scope 文案、文件存在或绿色 job 名升级。
 
-### 4.3 R1 文件/MCP 扩展的证据准入（Proposed）
+### 4.3 R1 文件/MCP 扩展的证据准入（Required）
 
-[14 §11](14-r1-document-task-loop.md) 的文件、文档批准和实际 MCP 消费者继续使用既有根入口及五门；按本次正式 native/SDK/PG/真实文件结果追加精确 case ID，不新建 CI 平台。设计 PR 不提升 `ci/gates.json` 的覆盖范围，也不预填运行通过。unknown 产品路径、冲突后新批准及取消先提交的实际零新增动作须分别验证；受控模型只证反馈合同，真实 provider/产物另取证。
+[14 §11](14-r1-document-task-loop.md) 的文件、文档批准和实际 MCP 消费者沿用既有根入口及五门；精确 case ID 与本次报告共同限定 `ci/gates.json` 的执行范围，不新建 CI 平台。文件产品消费者覆盖原生循环中的实际 SDK 观察、精确批准、唯一替换、独立新读、写前冲突的新批准链，以及写后接受失败的 unknown；已写入但缺少新读取时必须拒绝完成。取消先提交的零新增动作另取真实等待及竞争证据。受控模型只证明这些反馈合同，真实 provider 的任务质量、实际产物和用户材料验收分别取证。
 
 ## 引用
 

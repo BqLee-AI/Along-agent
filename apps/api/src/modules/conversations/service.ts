@@ -11,8 +11,9 @@ import {
   getRunView,
   resumeConversationRun,
 } from './harness-authority.js';
-import { appendEvent, commitTerminal, lockRun } from './run-state.js';
-import { TOOL_IDS } from '../tools/contracts.js';
+import { appendEvent, commitTerminal } from './run-state.js';
+import { BUSINESS_TOOL_IDS, TOOL_IDS } from '../tools/contracts.js';
+import { getWorkspaceGrant, validateWorkspaceGrant } from '../workspaces/service.js';
 import { findReminderDirective } from '@along/time-core';
 import { requireTimeContext } from '../time/context.js';
 import { THREAD_PROTOCOL_VERSION, type ThreadEvent } from '@along/stream-protocol';
@@ -45,6 +46,7 @@ import {
   insertRun,
   listConversationEvents,
   listRunEvents,
+  lockRun,
   type ConversationRow,
 } from './repository.js';
 
@@ -81,15 +83,19 @@ function requestHashOf(input: {
   timezone: string | null;
   fold: string;
   execution: ExecutionKind;
+  workspaceId?: string;
 }): string {
-  const canonical = JSON.stringify([
-    input.conversationId ?? null,
-    input.text,
-    input.timezone,
-    input.fold,
-  ]);
+  const material = [input.conversationId ?? null, input.text, input.timezone, input.fold];
+  if (input.workspaceId !== undefined) material.push(input.workspaceId);
+  const canonical = JSON.stringify(material);
   return createHash('sha256')
-    .update(input.execution === 'harness' ? 'harness/v1\0' : '')
+    .update(
+      input.workspaceId !== undefined
+        ? 'harness/workspace/v2\0'
+        : input.execution === 'harness'
+          ? 'harness/v1\0'
+          : '',
+    )
     .update(canonical, 'utf8')
     .digest('hex');
 }
@@ -121,6 +127,7 @@ export async function startConversationRun(
     timezone,
     fold: input.fold_choice,
     execution,
+    ...(input.workspace_id !== undefined ? { workspaceId: input.workspace_id } : {}),
   });
   const pool = requirePool(deps);
 
@@ -146,6 +153,12 @@ export async function startConversationRun(
       }
       if (execution === 'harness' && !deps.harness)
         throw new HttpError(503, 503, 'HARNESS_UNAVAILABLE', '原生 Agent 暂不可用。');
+      const workspaceGrant =
+        input.workspace_id !== undefined ? getWorkspaceGrant(ownerId, input.workspace_id) : null;
+      const workspaceSummary = workspaceGrant
+        ? validateWorkspaceGrant(ownerId, workspaceGrant)
+        : null;
+      const allowlist = workspaceGrant ? TOOL_IDS : BUSINESS_TOOL_IDS;
 
       let conversation: ConversationRow | null = null;
       if (input.conversation_id) {
@@ -205,6 +218,7 @@ export async function startConversationRun(
         rulesetId: deps.timeContext.ruleset_id,
         tzdbVersion: deps.timeContext.tzdb_version,
         aliasVersion: deps.timeContext.available ? deps.timeContext.aliases.version : null,
+        ...(workspaceGrant ? { workspaceGrant, workspaceSummary } : {}),
       };
       await insertRun(client, {
         runId,
@@ -215,7 +229,7 @@ export async function startConversationRun(
         maxIterations,
         maxTokens,
         execution,
-        allowlist: TOOL_IDS,
+        allowlist,
         frozenContext,
         inputMessageId: userMessageId,
       });
@@ -253,7 +267,8 @@ export async function startConversationRun(
           maxTokens,
           execution,
           userMessageId,
-          allowlist: TOOL_IDS,
+          allowlist,
+          ...(workspaceGrant ? { workspaceGrant } : {}),
           timeContext: deps.timeContext,
         },
       };

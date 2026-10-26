@@ -6,7 +6,7 @@
 
 - B03 §4.1 在线对话数据流：BFF 拉上下文 → 调 Agent → SSE → 落库本轮对话 [B03]。
 - a13n 落点：`run/attempt` fenced 执行、`checkpoint/display` 每个安全边界提交、不可变 revision、AG-UI 投影（`packages/stream-protocol` 版本化 zod，事件名开工对照 `thread-stream.schema.json`）[AF]。
-- B06 v0 只跑干净单次提醒；混合与摘要进 v1，故本篇 run 只服务提醒路澄清/归一，不做通用规划器表。
+- 既有 business 提醒路保持 v0；R1 harness 复用同一 Run/attempt/调用账，增加有限工作区和独立文档批准，不把文件动作变成调度 task（见 design/14）。
 
 ## 表关系
 
@@ -88,25 +88,25 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 
 ### 字段
 
-| 字段                    | 类型          | 约束                                                        | 说明                                                       |
-| ----------------------- | ------------- | ----------------------------------------------------------- | ---------------------------------------------------------- |
-| `id`                    | `uuid`        | primary key                                                 | run ID                                                     |
-| `owner_id`              | `uuid`        | not null                                                    | 所属用户，查询必带                                         |
-| `conversation_id`       | `uuid`        | not null, references `conversations(id)` on delete restrict | 所属会话                                                   |
-| `agent_revision`        | `text`        | not null                                                    | 不可变 agent 版本号（逻辑引用 `agent_revisions.revision`） |
-| `mode`                  | `text`        | not null                                                    | 按 `chat/task` 约束（v0 提醒路多为 `task`，纯问为 `chat`） |
-| `status`                | `text`        | not null, default `'running'`                               | 按 `running/suspended_approval/done/failed/cancelled` 约束 |
-| `budget_max_iterations` | `integer`     | not null                                                    | 接受时冻结；harness 的累计模型迭代上限                     |
-| `budget_max_tokens`     | `integer`     | not null                                                    | 可得 usage 的起步上限；缺 usage 不冒充可证明费用           |
-| `execution`             | `text`        | not null, default business                                  | business/harness，禁止执行中切换                           |
-| `tools_allowlist`       | `jsonb`       | not null, array                                             | 冻结服务端工具范围；历史 business 为[]，不伪造授权         |
-| `frozen_context`        | `jsonb`       | harness 必须 object                                         | 接受时的输入时间/规则上下文；不是模型推理链                |
-| `input_message_id`      | `uuid`        | nullable FK messages；harness 必填                          | 该 Run 实际接受的用户消息                                  |
-| `waiting_checkpoint_id` | `uuid`        | nullable FK run_checkpoints                                 | 最后有效批准等待点                                         |
-| `waiting_invocation_id` | `uuid`        | nullable                                                    | 同 Run 已接受批准提议调用                                  |
-| `waiting_approval_id`   | `uuid`        | nullable                                                    | 原冻结批准；当前决议另从公共读取获取                       |
-| `created_at`            | `timestamptz` | not null, default `now()`                                   | 创建时间                                                   |
-| `ended_at`              | `timestamptz` | nullable                                                    | 结束时间                                                   |
+| 字段                    | 类型          | 约束                                                        | 说明                                                                            |
+| ----------------------- | ------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `id`                    | `uuid`        | primary key                                                 | run ID                                                                          |
+| `owner_id`              | `uuid`        | not null                                                    | 所属用户，查询必带                                                              |
+| `conversation_id`       | `uuid`        | not null, references `conversations(id)` on delete restrict | 所属会话                                                                        |
+| `agent_revision`        | `text`        | not null                                                    | 不可变 agent 版本号（逻辑引用 `agent_revisions.revision`）                      |
+| `mode`                  | `text`        | not null                                                    | 按 `chat/task` 约束（v0 提醒路多为 `task`，纯问为 `chat`）                      |
+| `status`                | `text`        | not null, default `'running'`                               | 按 `running/suspended_approval/done/failed/cancelled` 约束                      |
+| `budget_max_iterations` | `integer`     | not null                                                    | 接受时冻结；harness 的累计模型迭代上限                                          |
+| `budget_max_tokens`     | `integer`     | not null                                                    | 可得 usage 的起步上限；缺 usage 不冒充可证明费用                                |
+| `execution`             | `text`        | not null, default business                                  | business/harness，禁止执行中切换                                                |
+| `tools_allowlist`       | `jsonb`       | not null, array                                             | 冻结服务端工具范围；历史 business 为[]，不伪造授权                              |
+| `frozen_context`        | `jsonb`       | harness 必须 object                                         | 接受时输入时间/规则；选工作区时另冻 workspaceGrant/workspaceSummary，不是推理链 |
+| `input_message_id`      | `uuid`        | nullable FK messages；harness 必填                          | 该 Run 实际接受的用户消息                                                       |
+| `waiting_checkpoint_id` | `uuid`        | nullable FK run_checkpoints                                 | 最后有效批准等待点                                                              |
+| `waiting_invocation_id` | `uuid`        | nullable                                                    | 同 Run 已接受批准提议调用                                                       |
+| `waiting_approval_id`   | `uuid`        | nullable                                                    | 原冻结批准；当前决议另从公共读取获取                                            |
+| `created_at`            | `timestamptz` | not null, default `now()`                                   | 创建时间                                                                        |
+| `ended_at`              | `timestamptz` | nullable                                                    | 结束时间                                                                        |
 
 ### 约束与索引
 
@@ -178,7 +178,7 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 
 - [Required] 只追加，禁 `UPDATE`/`DELETE`。
 - [Required] `payload` 不存敏感值原文；tool 参数摘要脱敏。
-- [Required] harness_snapshot 保存版本、已接受消息/工具结果引用、usage/next_call_no/等待引用，不保存 raw args、provider body、密钥或完整推理链；TS 验证同 owner/Run、真实接受事实与单调进度。
+- [Required] 新写入/执行仅 `harness/v2`、snapshot `version=2`；harness_snapshot 保存已接受消息/工具结果引用、usage/next_call_no/等待引用，不保存 raw args、provider body、密钥或完整推理链。TS 验证同 owner/Run、真实接受事实与单调进度；旧 task snapshot1 的限定读取迁移见本篇 R1 节。
 - [Required] 同 conversation 先持 NO KEY UPDATE 锁再分配游标，并保持至提交，避免小游标晚提交被客户端永久漏掉，并与终态消息插入取得的外键 KEY SHARE 兼容。内部快照不交给外部 ThreadEventSchema；GET/同入站键只读不启动执行。
 
 ## `harness_resumes` / `harness_cancellations`
@@ -190,7 +190,7 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 | harness_resumes       | owner_id/idempotency_key 主键；run_id/checkpoint_id/attempt_id 外键；checkpoint_id、attempt_id 各唯一；created_at | 同等待点仅一次有效恢复，同键丢回答定位原 attempt，不另启动 |
 | harness_cancellations | owner_id/idempotency_key 主键；run_id 外键；reason、created_at                                                    | 同键同 Run/reason 回原裁决，冲突409；终态只返回真实状态    |
 
-所有读写均先验证 owner/conversation/Run 和当前权限；resume 只允许最后有效等待点与真实已决批准，拒绝普通/他人/旧引用、business 或终态。取消事实先提交才通知 native；取消和恢复的幂等身份不代替 invocation_id。
+所有读写均验证owner/conversation/Run；历史Run/取消/冻结详情读取不以当前workspace登记为前提，新恢复与工具动作另验当前精确授权。resume只允许最后有效等待点与真实已决批准，拒绝普通/他人/旧引用、business或终态。取消事实先提交才通知native；取消和恢复的幂等身份不代替invocation_id。
 
 ## `conversation_idempotency`
 
@@ -200,16 +200,16 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 
 ### 字段
 
-| 字段              | 类型          | 约束                                     | 说明                                                                                                 |
-| ----------------- | ------------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `owner_id`        | `uuid`        | not null, references `users(id)`         | 所属用户                                                                                             |
-| `idempotency_key` | `text`        | not null                                 | 客户端键；缺省回退 body `idempotency_key` 或 `request_id`                                            |
-| `request_hash`    | `text`        | not null                                 | business 保留历史材料；harness/v1 域分隔，同 owner/key 换执行类型或其他绑定内容为409，不另开幂等空间 |
-| `conversation_id` | `uuid`        | not null, references `conversations(id)` | 命中的会话                                                                                           |
-| `run_id`          | `uuid`        | not null, references `agent_runs(id)`    | 命中的 run                                                                                           |
-| `user_message_id` | `uuid`        | nullable, references `messages(id)`      | 该次用户消息                                                                                         |
-| `created_at`      | `timestamptz` | not null, default `now()`                | 创建时间                                                                                             |
-| `expires_at`      | `timestamptz` | not null                                 | 24h 重放窗口                                                                                         |
+| 字段              | 类型          | 约束                                     | 说明                                                                                                                                |
+| ----------------- | ------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `owner_id`        | `uuid`        | not null, references `users(id)`         | 所属用户                                                                                                                            |
+| `idempotency_key` | `text`        | not null                                 | 客户端键；缺省回退 body `idempotency_key` 或 `request_id`                                                                           |
+| `request_hash`    | `text`        | not null                                 | business 保持历史材料；无workspace harness域为harness/v1，有workspace为harness/workspace/v2并追加workspace_id；同owner/key异输入409 |
+| `conversation_id` | `uuid`        | not null, references `conversations(id)` | 命中的会话                                                                                                                          |
+| `run_id`          | `uuid`        | not null, references `agent_runs(id)`    | 命中的 run                                                                                                                          |
+| `user_message_id` | `uuid`        | nullable, references `messages(id)`      | 该次用户消息                                                                                                                        |
+| `created_at`      | `timestamptz` | not null, default `now()`                | 创建时间                                                                                                                            |
+| `expires_at`      | `timestamptz` | not null                                 | 24h 重放窗口                                                                                                                        |
 
 ### 约束与索引
 
@@ -235,16 +235,16 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 | first_attempt_id / first_request_id                     | uuid / text not null                  | 首次预约追踪，重交不改身份                                                       |
 | tool_id / args_hash / args_bytes                        | text / 64位小写SHA256 / 非负integer   | domain版本化的原始JSON规范摘要与UTF8长度；不存raw args                           |
 | execution_kind                                          | local / read_only / non_transactional | 由可信TS绑定，不采纳远程自报风险                                                 |
-| frozen_context                                          | jsonb object not null                 | 首次接收/anchor、timezone、fold及规则/alias版本                                  |
+| frozen_context                                          | jsonb object not null                 | 首次时间/规则；workspace调用冻精确grant，apply另冻documentApprovalId             |
 | state                                                   | reserved / unknown / completed        | 本地reserved→completed；非事务reserved→unknown→completed；许可前denied可直接完成 |
 | outcome_kind                                            | nullable封闭集                        | success / approval_pending / clarification / time_error / denied / failed        |
-| result_version / accepted_result                        | nullableinteger/jsonb                 | completed时版本1和非空object；DB上限262144字节，应用再做strict有界安全投影校验   |
+| result_version / accepted_result                        | nullableinteger/jsonb                 | completed时版本1和非空object；DB上限262144字节，应用JSON序列化上限240000字节     |
 | approval_id                                             | nullableuuid逻辑引用                  | 仅approval_pending有值；不唯一，不复制批准正文                                   |
 | accepted_attempt_id / accepted_request_id / accepted_at | nullableuuid/text/timestamptz         | 首次接受追踪，completed时全部非空                                                |
 | evidence_ref                                            | nullabletext                          | 非事务确证的安全证据引用，不存原始provider响应                                   |
 | created_at                                              | timestamptz default now()             | 预约时间；index(owner_id,run_id,created_at)                                      |
 
-[Required] reserved/unknown不得带结果字段；unknown只适用于non_transactional。身份/摘要/冻结上下文建后不可改，DB trigger拒绝非法迁移、completed改写及删除。批准只保存ID、fireAt/hash/版本材料，由所属公开冻结快照用例恢复原输出；终态不使旧调用重新创建批准。
+[Required] reserved/unknown不得带结果字段；unknown只适用于non_transactional。身份/摘要/冻结上下文建后不可改，DB trigger拒绝非法迁移、completed改写及删除。task批准保存ID、fireAt/hash/版本材料；document提议保存`{kind:"document_approval_receipt",approval_id,presentation_hash}`，经approvals公共冻结receipt恢复完整结果，不复制批准正文到接受账。终态不使旧调用重新创建批准；新引用才产生新读取观察。
 
 [Required] 本地批准/接受结果/审计同事务，失败全部回滚，预约保留；未知外部效果不重发。当前归属/allowlist门先于结果披露，遮蔽不覆写已接受事实。完整执行与重放合同见design/04 §3、06 §10。
 
@@ -265,7 +265,7 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 | `tool_id`       | `text`        | not null                                         | 工具名（含被拒的未知工具）                                                       |
 | `args_hash`     | `text`        | not null                                         | 参数规范摘要；新记录按带domain的SHA-256，旧行不伪回填                            |
 | `decision`      | `text`        | not null                                         | `allow` / `deny`                                                                 |
-| `approval_id`   | `uuid`        | nullable, references `approvals(id)`             | 高风险工具产出的确认单                                                           |
+| `approval_id`   | `uuid`        | nullable, references `approvals(id)`             | 仅旧 task 确认单；文档批准 UUID 不写此列                                         |
 | `error_code`    | `text`        | nullable                                         | 拒绝/失败原因码                                                                  |
 | `invocation_id` | `uuid`        | nullable，FK tool_invocations ON DELETE RESTRICT | legacy为空，新提交关联稳定引用                                                   |
 | `request_id`    | `text`        | nullable                                         | legacy为空，新提交追踪                                                           |
@@ -328,8 +328,15 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 - [Required] 语言是独立维度：切语言重生成重确认，不复用旧 `presentation_hash`。
 - [Required] 旧模板有显示 bug → 作废旧 approval 重来，不悄悄替换模板内容。
 
-## R1 工作区与类型化等待增量（Proposed）
+## R1 工作区与类型化等待增量 [Required]
 
-字段/一致性真源见 [design/14 §3、§7、§10](../design/14-r1-document-task-loop.md)。既有 `frozen_context` 增加有限 workspace 授权引用；不保存真实 root，不给历史 Run 补授 workspace。等待 UUID 列复用，等待种类由可信原提议引用裁决，不让 native 任意指定查询表。
+规范行为见 [design/14](../design/14-r1-document-task-loop.md)，文档表及迁移边界见 [Schema 索引](README.md#r1-文档批准) 和 [commitments](commitments-schema.md#r1-文档批准与决议-required)；HTTP 形状见 [API 索引 §8](../api/README.md#8-r1-工作区与文档批准-required)。
 
-文档 receipt 和新 snapshot 版本随 `harness/v2` 同批切换；历史 task snapshot/receipt 只读解释后恢复原 Run/预算/工具范围，不混跑旧 writer。`tool_invocations` 继续唯一持有接受结果；文档 UUID 不写入 `tool_calls.approval_id` 的 task 外键。新增迁移落地必要约束，不改旧迁移或 completed 事实；文档批准表归 approvals，见 commitments 与 design/14 §5。
+- `agent_runs.frozen_context` 增加 `workspaceGrant={workspace_id,owner_id,registration_digest,root_identity}` 和独立 `workspaceSummary={workspace_id,label,readable_paths,writable_paths}`。不保存真实 root、不单建 workspace 表、不给历史 Run 补授工具。RunView 只投影冻结安全摘要；历史缺摘要不从当前登记补造。
+- 历史 Run/事件、取消及冻结文档批准详情可在登记撤销后继续 owner-scoped 读取；摘要不是当前授权。新批准/拒绝、新恢复、新工具动作均核对当前登记与原 grant，撤销/变更使 `can_resume=false`；工具历史结果披露仍有独立当前权限门，不因历史 GET 可读而绕过它。
+- 等待继续复用三个 UUID 列；可信已接受提议结果决定 `kind=task|document` 及批准读取入口。document 的 RunView waiting 额外含 `approval_kind:"document"`，旧 task 形状不变。恢复给 native 的 task decision 保留 consumed/task_id/successor_id；document decision 仅 approval_id/status/apply_invocation_id，不制造 task、时间字段或新事件词。
+- 新执行与新快照仅 `harness/v2` / snapshot2。读取 snapshot1 时拒绝携 workspace grant，并验证每个 tool_ref 都是 completed 的旧业务工具、非 document receipt；仅转换内存中的版本供 v2 启动，保留原 Run/预算/工具范围和历史行，不改旧 writer 或 completed 事实。
+- `workspace_list/grep/read` 为 read_only，事务外 MCP IO 后首次接受有界快照；`workspace_propose_replace` 为 local，批准/receipt/审计同事务；`workspace_apply_replace` 是 non_transactional，原批准唯一绑定在预约事务建立，在 dispatch 一次许可事务再验，先提交 unknown 才可写文件。
+- `tool_invocations` 唯一持有接受结果/真实效果；`tools/query.ts#readRunDocumentEvidence` 公开同 Run 安全证据投影，approvals/conversations 不另建效果账。只有绑定的 applied 与其后创建且接受的新全文 read（目标、版本、完整内容及字节数均匹配）才满足完成；conflict 后继须有零写证据、新读和新批准。unknown 不重写、不靠文件 hash 补报成功、不制造可恢复等待点。
+
+接受结果应用上限240000字节与DB262144字节后盾不同；HTTP仍限131072原始JSON字节，文档提议还验证完整确认body再次序列化后的限额。迁移0016新增文档授权/决议，不改既有task表与事件词；实现存在不代表已完成真实模型或用户材料验收。

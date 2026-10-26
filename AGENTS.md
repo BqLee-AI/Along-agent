@@ -7,7 +7,7 @@ TypeScript + Next.js（App Router）+ PostgreSQL 16 的云端个人助理；包�
 - 服务端：TS 模块化单体，一个镜像三种角色 `api|worker|all`；Postgres 唯一事实源，Redis 延后不引入。
 - 认证：Better Auth 自建 credential（#1 已定，单租户；v0 端点只暴露 `GET /me`）。
 - 布局：`apps/api`（服务端入口）、`apps/web`（Next.js）；`packages/time-core|scheduler-core|notifier-core|stream-protocol|contracts`；详见 `docs/design/01-tech-stack-and-repo-structure.md §2`。
-- 待定不猜：目标市场、LLM 供应商、推送通道、计费（见 `docs/prd/04-acceptance-open-questions.md`）。仓颉唯一 Harness 与 TS 长期能力/业务/存储分工已定（`docs/design/09-agent-runtime-and-checkpoint.md`、`docs/design/11-cangjie-runtime-spike.md`），R1 仍未实现。
+- 待定不猜：目标市场、LLM 供应商、推送通道、计费（见 `docs/prd/04-acceptance-open-questions.md`）。仓颉唯一 Harness 与 TS 长期能力/业务/存储分工见 design/09、11；R1 受管工作区与文档批准合同见 design/14，实现、受控合同和真实材料验收分别取证。
 
 ## 常用命令
 
@@ -17,7 +17,7 @@ TypeScript + Next.js（App Router）+ PostgreSQL 16 的云端个人助理；包�
 - 构建：`bun run build:packages`；`bun run build` 先包后应用，`bun run build:api` 构建 API 及依赖；其他需要产物的入口先构建依赖包。
 - 本地启动：`bun run dev`（`apps/api` 3000 `ROLE=all`、`apps/web` 3100；需 `DATABASE_URL`、`TZDB_VERSION`）
 - 类型检查：`bun run typecheck`；Lint：`bun run lint`（Oxlint 1.89.0）
-- 测试：`bun run test:unit`、`bun run test:contracts`（API 进程内/HTTP 双跑及契约包）、`bun run test:integration`（全部 9 个 DB 文件）、`bun run test:scheduler`（D9 指定集）；使用 `bun:test`，保持文件级隔离，不以文件内 concurrent 替代。
+- 测试：`bun run test:unit`、`bun run test:contracts`（API 进程内/HTTP 双跑及契约包）、`bun run test:integration`（全部 DB 集成文件）、`bun run test:scheduler`（D9 指定集）；使用 `bun:test`，保持文件级隔离，不以文件内 concurrent 替代。
 - 统一检查：`bun run verify`；格式修复/阻塞检查：`bun run format` / `bun run format:check`（Oxfmt 0.74.0）。
 - 契约校验：`openspec validate <name> --strict`（如 `openspec validate v0-safety-contract --strict`）
 

@@ -96,11 +96,11 @@
     },
     "D8": {
       "status": "enforced",
-      "scope": "current-tree production native; same local/signed-HTTP Run, approval/task observation, rejection, cancellation, replay and strict DTO consumers; native wire rejection; real non-transactional Core-to-native unknown/late-cancel contracts; current required-case report and required-step omission negatives",
-      "owner": "#47",
+      "scope": "controlled-model current-tree production native/MCP; local/signed-HTTP Run, task/document approval, actual file replacement, independent readback and zero-write conflict recovery; original rejection/cancellation/replay/strict DTO consumers, wire rejection, Core unknown/late-cancel and product HTTP post-write acceptance-failure unknown",
+      "owner": "#47, #62",
       "remaining": {
         "status": "partial",
-        "scope": "other tool/connector seams; product HTTP external unknown and production unknown snapshot recovery; real provider/MCP, full R1 artifacts/model quality, arbitrary crash recovery and generic external exactly-once"
+        "scope": "other external tool/connector seams; real-provider task quality, arbitrary crash recovery and generic external exactly-once"
       },
       "enforced_by": {
         "job": "contracts-dual",
@@ -111,7 +111,8 @@
           "scripts/test/gate-evidence.test.ts",
           "apps/api/test/contracts/harness.test.ts",
           "apps/api/test/contracts/harness-core-native.test.ts",
-          "apps/api/test/contracts/harness-wire.test.ts"
+          "apps/api/test/contracts/harness-wire.test.ts",
+          "apps/api/test/contracts/workspace.test.ts"
         ],
         "consumer_cases": [
           "D8.approval.local",
@@ -128,7 +129,13 @@
           "D8.tool-denied.http",
           "D8.unknown-core-native",
           "D8.cancelled-core-native",
-          "D8.wire-rejection"
+          "D8.wire-rejection",
+          "D8.workspace.local",
+          "D8.workspace.http",
+          "D8.workspace-conflict.local",
+          "D8.workspace-conflict.http",
+          "D8.workspace-unknown.http",
+          "D8.workspace-no-reread.http"
         ]
       }
     },

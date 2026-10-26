@@ -87,6 +87,7 @@ export function createHarnessModelTransport(config: HarnessModelConfig): Harness
         },
       })),
       stream: false,
+      parallel_tool_calls: false,
       max_tokens: request.remaining_tokens,
     });
     if (Buffer.byteLength(body, 'utf8') > HARNESS_MAX_FRAME_BYTES) throw modelProtocolError();

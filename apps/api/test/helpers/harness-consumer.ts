@@ -199,7 +199,7 @@ export class HarnessConsumer {
           await gate.release.promise;
         }
         const decision = findModelObservation(body.messages, HarnessApprovalDecisionSchema);
-        if (decision) {
+        if (decision?.kind === 'task') {
           res.end(
             JSON.stringify({
               choices: [

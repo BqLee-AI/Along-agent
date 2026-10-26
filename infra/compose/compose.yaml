@@ -25,11 +25,21 @@ services:
       PORT: '3000'
       TZDB_VERSION: ${TZDB_VERSION:-}
       DATABASE_URL: ${DATABASE_URL:-postgresql://along:along@postgres:5432/along}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-}
+      HARNESS_MODEL_BASE_URL: ${HARNESS_MODEL_BASE_URL:-}
+      HARNESS_MODEL: ${HARNESS_MODEL:-}
+      HARNESS_MODEL_API_KEY: ${HARNESS_MODEL_API_KEY:-}
+      HARNESS_MAX_ITERATIONS: ${HARNESS_MAX_ITERATIONS:-24}
+      HARNESS_MAX_TOKENS: ${HARNESS_MAX_TOKENS:-64000}
+      WORKSPACE_REGISTRY_FILE: ${WORKSPACE_REGISTRY_FILE:-}
     ports:
       - '3000:3000'
+    volumes:
+      - workspace_data:/var/lib/along/workspaces
     depends_on:
       postgres:
         condition: service_healthy
 
 volumes:
   pgdata:
+  workspace_data:
