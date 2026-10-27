@@ -189,3 +189,12 @@ AMBIGUOUS唯一共享结构引用A4 `docs/design/05-time-core.md` §9.1：`detai
 独立 `GET /api/v1/document-approvals/{id}` 及 `POST .../actions/confirm|reject` 的字段、冻结材料、幂等与锁序以 [design/14 §5.1–§5.4](../../design/14-r1-document-task-loop.md) 为真源。详情提供相对目标、原 Run、基线/完整目标及实际授权状态；确认检查精确预览/hash，只持久授权，不写文件/建 task。拒绝不撤销已经批准的在途效果。
 
 版本冲突后的新批准可引用明确零写的同目标前驱，旧授权及结果保持原事实。不得拿文档 UUID 调用旧 task confirm，或将其写入 task 批准外键；旧 approvals 的有效期、consumed、revise、时间展示与事务语义不变。
+
+## 8. R1 历史中的真实提醒结果（Proposed，#69）
+
+本节为 [design/17 §5](../../design/17-r1-conversation-history.md#5-批准与结果) 的待评审只读增量；不新增批准或执行入口，不改确认三件套、取消回执、修订或幂等合同。
+
+- `GET /approvals/{id}` 在保留既有详情字段的同时，增加 `result={task_id:UUID|null,successor_approval_id:UUID|null}`；公共详情 strict schema 归 `packages/contracts`，API/Web/合同消费者同批迁移，不保留重复 schema 或兼容别名。
+- consumed create_task 指向真实 `consumed_task_id`；consumed cancel_task 指向真实 `target_task_id`；superseded 指向原后继批准，其余相应值为 null。consumed 却缺真实结果为完整性错误，不能当“没有结果”成功返回。
+- 复用 approvals 所有的公共决议读取投影，状态和结果使用同一事实读取及有效时间，不出现详情 expired 而结果仍按 pending 判断。历史页可继续 GET 原 task，不能为取得 task ID 再 POST confirm。
+- 多个批准均可从原 Run 事件到达，不只保留最后一个。文档仍沿既有 DocumentApprovalDetail/effect，approved 不等于 applied/verified；读取失败与无结果分开反馈，不能调用工具重放或当前文件读取来制造旧调用成功。

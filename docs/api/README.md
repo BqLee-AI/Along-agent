@@ -168,3 +168,9 @@
 - 本目录只定 HTTP 契约，不写实现代码；字段级 zod schema 以 `packages/stream-protocol`（SSE 事件）与服务端 schema 为准，文档引用其版本号。
 - 不复制外部产物原文/token/DSN；不猜目标市场/推送通道/实际 LLM 供应商/计费。仓颉唯一 Harness 与 TS 长期能力/业务/存储已定；正式 pipe/用户 Run API 见 design/09/11，完整 R1 与通用恢复不据此自动通过。
 - 引用蓝图统一用 B00–B06 / AF 代号。
+
+## 10. R1 会话历史读取增量（Proposed，#69）
+
+[design/17](../design/17-r1-conversation-history.md) 与 [conversation API §6](conversations/conversations_routes.md#6-r1-可发现历史与只读恢复proposed69) 建议增加三个带会话的 GET：会话集合、会话可见消息集合、会话 Run 集合；不新增业务写入端点。该 Proposed 增量不改变 §1、§7 的 25 端点 Required 基线，不代表三个新入口已实施。
+
+新集合共享严格分页 DTO、owner 作用域、no-store 和准确失败边界；旧事件查询新增可选 Run 筛选但保持响应。原任务批准详情的只读结果字段见 [approval API §8](approvals/approvals_routes.md#8-r1-历史中的真实提醒结果proposed69)。历史页仅 GET 恢复，403/依赖错误不跳登录；读完整历史不恢复工作区新动作权限。
