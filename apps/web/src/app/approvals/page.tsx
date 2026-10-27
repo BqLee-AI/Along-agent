@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { apiGet } from '../../lib/api';
 import type { ApprovalListItem } from '../../lib/types';
+import { pageReturnTo, type PageQuery } from '../../lib/account-navigation';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,8 +10,13 @@ interface Page {
   next_cursor: string | null;
 }
 
-export default async function ApprovalsPage() {
-  const result = await apiGet<Page>('/api/v1/approvals?limit=50');
+export default async function ApprovalsPage({
+  searchParams,
+}: {
+  searchParams: Promise<PageQuery>;
+}) {
+  const returnTo = pageReturnTo('/approvals', await searchParams);
+  const result = await apiGet<Page>('/api/v1/approvals?limit=50', returnTo);
   if (!result.ok) {
     return (
       <section>

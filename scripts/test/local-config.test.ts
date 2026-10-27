@@ -8,6 +8,8 @@ import {
   createConfig,
   loadConfig,
   saveConfig,
+  loadPrivateJson,
+  savePrivateJson,
   updateConfig,
   validateConfig,
 } from '../local/config.mjs';
@@ -285,4 +287,31 @@ describe('strict local configuration', () => {
     });
     expect(await readFile(file)).toEqual(bytes);
   }, 120_000);
+
+  it('publishes private registry JSON without clobbering existing bytes or configuration', async () => {
+    const { directory, file } = await location();
+    await saveConfig(file, fixture());
+    const originalConfig = await readFile(file);
+    const registry = join(directory, 'workspace-registry.json');
+    const input = [
+      {
+        workspace_id: 'existing',
+        owner_id: 'original',
+        root: '/original/root',
+        label: 'Original',
+        readable_paths: ['notes.txt'],
+        writable_paths: [],
+      },
+    ];
+    await savePrivateJson(registry, input, { exclusive: true });
+    const originalRegistry = await readFile(registry);
+    expect(await loadPrivateJson(registry)).toEqual(input);
+    await privateAccess(registry, false);
+    await expect(savePrivateJson(registry, [], { exclusive: true })).rejects.toMatchObject({
+      code: 'CONFIG_EXISTS',
+    });
+    expect(await readFile(registry)).toEqual(originalRegistry);
+    expect(await readFile(file)).toEqual(originalConfig);
+    expect((await readdir(directory)).sort()).toEqual(['local.json', 'workspace-registry.json']);
+  }, 60_000);
 });

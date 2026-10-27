@@ -13,12 +13,14 @@ const usage = `本机生命周期（Bun 1.4.2 / Windows + Docker Linux x64）
   bun --no-env-file run local:start [--config <私有 JSON>]
   bun --no-env-file run local:stop [--config <私有 JSON>]
   bun --no-env-file run local:upgrade [--config <私有 JSON>]
+  bun --no-env-file run local:account [--config <私有 JSON>]
 已有配置时 local:init 只复用，不覆盖；首次 --new/--adopt 通过终端输入。
 未登录、缺模型或工作区均独立提示；启动不自动发模型请求。`;
 
 function options(args) {
   const [action, ...rest] = args;
-  if (!['init', 'start', 'stop', 'upgrade'].includes(action)) throw failure('ARGUMENT_INVALID');
+  if (!['init', 'start', 'stop', 'upgrade', 'account'].includes(action))
+    throw failure('ARGUMENT_INVALID');
   const value = { action, mode: null, file: null, help: false };
   for (let index = 0; index < rest.length; index++) {
     const flag = rest[index];
@@ -173,6 +175,24 @@ const explanations = {
   DOCKER_UNAVAILABLE: 'Docker 不可用；检查正在使用的 Docker Desktop Linux 引擎。',
   DOCKER_PLATFORM: '需要 Linux x64 Docker 引擎，不回退到另一 native 路径。',
   COMPOSE_VERSION: '需要 Docker Compose 2.24.4 或更高版本。',
+  ACCOUNT_TERMINAL_REQUIRED: '账户维护需要交互终端；口令不通过 argv 或输出传输。',
+  ACCOUNT_POSTGRES_REQUIRED: '请先使用同一配置运行 local:start；账户入口不另建或接管数据库。',
+  ACCOUNT_SELECTION_INVALID: '请选择列表中的明确可用序号，不默认认领或输入 owner ID。',
+  ACCOUNT_CONFIRMATION_REQUIRED: '未收到明确确认；没有替你选择或授权。',
+  ACCOUNT_PASSWORD_MISMATCH: '两次口令不一致；口令未提交。',
+  ACCOUNT_INSTALLATION_CHANGED: '安装事实已变化；重新读取并显式维护，不自动重试。',
+  WORKSPACE_REGISTRY_INVALID:
+    '登记无效；保留原文件，修复其格式、有限路径或原 root 后重试 local:account。',
+  WORKSPACE_REGISTRY_ABSENT: '原配置指定的登记文件缺失；恢复原私有文件，不另建或覆盖原登记。',
+  WORKSPACE_REGISTRY_UNREADABLE: '登记不可读；恢复同一私有文件及权限后重试，不覆盖原件。',
+  WORKSPACE_OWNER_MISSING: '原登记没有已绑定管理员的工作区；不修改其他 owner，请核对原登记来源。',
+  WORKSPACE_ROOT_INVALID: '新 root 必须是原受管资料卷中的明确子目录，不能默认授权整个卷。',
+  WORKSPACE_IDENTITY_CHANGED:
+    '登记或 root 物理身份已变化；保持原材料，重新核对，不能复制新 root 代替。',
+  WORKSPACE_LOAD_FAILED: '配置已保存但登记未确认加载；账户保留，修复后仅重试 local:account 收尾。',
+  UNAUTHENTICATED: '原口令不符或账户不活跃；不会重置口令或激活原用户，请核对原材料。',
+  STATE_CONFLICT: '原 credential、登录名或管理员绑定冲突；保留原身份，按维护说明核对，不自动合并。',
+  NOT_READY: '账户依赖或提交结果不可核验；保留原安装，修复后读取真实绑定，不重复开户。',
 };
 
 try {
@@ -194,43 +214,53 @@ try {
         initialInput = await newInstallationInput(request.mode);
       }
     }
-    const runtime = await import('./runtime.mjs');
-    const actions = {
-      init: runtime.initializeInstallation,
-      start: runtime.startInstallation,
-      stop: runtime.stopInstallation,
-      upgrade: runtime.upgradeInstallation,
-    };
-    const result = await actions[request.action](file, initialInput);
-    console.log(
-      result.phase === 'prepared'
-        ? '本安装已准备；API/worker/Web 未由初始化启动。'
-        : result.phase === 'stopped'
-          ? '本安装已停止；配置、数据卷和资料保留。'
-          : `Web 已启动：${result.webUrl}`,
-    );
-    if (result.phase !== 'stopped') {
-      console.log('账户状态未核验；正式开户由后续账户入口完成。');
+    if (request.action === 'account') {
+      const { maintainAccount, createAccountTerminalIO } = await import('./account.mjs');
+      const io = createAccountTerminalIO();
+      try {
+        await maintainAccount(file, io);
+      } finally {
+        io.close();
+      }
+    } else {
+      const runtime = await import('./runtime.mjs');
+      const actions = {
+        init: runtime.initializeInstallation,
+        start: runtime.startInstallation,
+        stop: runtime.stopInstallation,
+        upgrade: runtime.upgradeInstallation,
+      };
+      const result = await actions[request.action](file, initialInput);
       console.log(
-        result.model === 'unconfigured'
-          ? '模型尚未配置，资料任务能力不可用。'
-          : '模型已配置但真实调用未核验；启动没有发出模型请求。',
+        result.phase === 'prepared'
+          ? '本安装已准备；API/worker/Web 未由初始化启动。'
+          : result.phase === 'stopped'
+            ? '本安装已停止；配置、数据卷和资料保留。'
+            : `Web 已启动：${result.webUrl}`,
       );
-      const workspace =
-        typeof result.workspace === 'string'
-          ? result.workspace
-          : result.workspace?.state === 'loaded' && result.workspace.accepted === 0
-            ? 'unconfigured'
-            : result.workspace?.state;
-      console.log(
-        ['unconfigured', 'unverified'].includes(workspace)
-          ? workspace === 'unconfigured'
-            ? '工作区尚未配置。'
-            : '工作区登记已指定，尚未核验。'
-          : workspace === 'loaded'
-            ? '工作区登记已加载；访问仍受原 owner 和有限路径规则控制。'
-            : '工作区登记读取或资格校验失败，失效项未开放；核对私有登记和原根目录。',
-      );
+      if (result.phase !== 'stopped') {
+        console.log('账户状态请在 Web 检查；首次建号/登录后用 local:account 完成本机登记。');
+        console.log(
+          result.model === 'unconfigured'
+            ? '模型尚未配置，资料任务能力不可用。'
+            : '模型已配置但真实调用未核验；启动没有发出模型请求。',
+        );
+        const workspace =
+          typeof result.workspace === 'string'
+            ? result.workspace
+            : result.workspace?.state === 'loaded' && result.workspace.accepted === 0
+              ? 'unconfigured'
+              : result.workspace?.state;
+        console.log(
+          ['unconfigured', 'unverified'].includes(workspace)
+            ? workspace === 'unconfigured'
+              ? '工作区尚未配置。'
+              : '工作区登记已指定，尚未核验。'
+            : workspace === 'loaded'
+              ? '工作区登记已加载；访问仍受原 owner 和有限路径规则控制。'
+              : '工作区登记读取或资格校验失败，失效项未开放；核对私有登记和原根目录。',
+        );
+      }
     }
   }
 } catch (error) {

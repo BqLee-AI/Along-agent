@@ -141,6 +141,21 @@ describe('same-origin Run proxy', () => {
   beforeAll(async () => {
     server = createServer((req, res) => {
       const kind = new URL(req.url!, 'http://upstream.test').searchParams.get('kind')!;
+      if (kind === 'auth') {
+        res.writeHead(503, {
+          'content-type': 'application/json',
+          'cache-control': 'no-store',
+          'set-cookie': ['first=session; Path=/; HttpOnly', 'second=state; Path=/; HttpOnly'],
+          'x-private-upstream': 'must-not-forward',
+        });
+        res.end(
+          JSON.stringify({
+            origin: req.headers.origin ?? null,
+            forwardedOrigin: req.headers['x-forwarded-origin'] ?? null,
+          }),
+        );
+        return;
+      }
       res.once('close', () => closed.get(kind)?.resolve(!res.writableEnded && res.destroyed));
       res.writeHead(200, { 'content-type': 'text/event-stream' });
       res.write('data: waiting\n\n');
@@ -167,6 +182,33 @@ describe('same-origin Run proxy', () => {
     server.close();
     await stopped;
   });
+
+  it.each(['http://web.test', undefined])(
+    'forwards only actual Origin %j, multiple cookies and no-store on auth errors',
+    async (origin) => {
+      const headers = new Headers({
+        'content-type': 'application/json',
+        'x-forwarded-origin': 'http://forged.test',
+      });
+      if (origin) headers.set('origin', origin);
+      const response = await proxyGet(
+        new NextRequest('http://web.test/api/v1/auth/sign-in?kind=auth', {
+          method: 'POST',
+          headers,
+          body: '{}',
+        }),
+        { params: Promise.resolve({ path: ['v1', 'auth', 'sign-in'] }) },
+      );
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({ origin: origin ?? null, forwardedOrigin: null });
+      expect(response.headers.get('cache-control')).toBe('no-store');
+      expect(response.headers.getSetCookie()).toEqual([
+        'first=session; Path=/; HttpOnly',
+        'second=state; Path=/; HttpOnly',
+      ]);
+      expect(response.headers.get('x-private-upstream')).toBeNull();
+    },
+  );
 
   it.each(['request', 'reader'] as const)(
     'closes the actual unfinished upstream HTTP response on %s cancellation',

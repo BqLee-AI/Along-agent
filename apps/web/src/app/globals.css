@@ -229,3 +229,89 @@ code {
   color: var(--muted);
   word-break: break-all;
 }
+
+:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.skip-link {
+  position: absolute;
+  left: 16px;
+  top: -100px;
+  z-index: 10;
+  background: var(--panel);
+  padding: 10px 16px;
+}
+
+.skip-link:focus {
+  top: 12px;
+}
+
+.site-header nav {
+  flex-wrap: wrap;
+}
+
+.account-page {
+  max-width: 620px;
+}
+
+.account-form .form-field {
+  margin-bottom: 20px;
+}
+
+.account-form label {
+  display: block;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+
+.account-form input,
+.account-form button,
+.account-form .actions a {
+  min-height: 44px;
+}
+
+.account-form .actions {
+  align-items: center;
+}
+
+.account-form .actions a {
+  display: inline-flex;
+  align-items: center;
+}
+
+.account-form input[aria-invalid='true'] {
+  border-color: var(--warn);
+}
+
+.account-form .checkbox-label {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.account-form input[type='checkbox'] {
+  width: 22px;
+  height: 22px;
+  min-height: 22px;
+  flex-shrink: 0;
+  margin-top: 3px;
+  accent-color: var(--accent);
+}
+
+.account-form .error p,
+.account-form .muted {
+  margin-top: 6px;
+}
+
+@media (max-width: 600px) {
+  .site-header {
+    padding: 16px 20px;
+    gap: 12px;
+  }
+
+  .site-header nav {
+    gap: 12px;
+  }
+}

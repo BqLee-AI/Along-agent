@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { requireClientSession } from '../../../lib/account-navigation';
 
 export default function CancelAction({
   taskId,
@@ -31,6 +32,7 @@ export default function CancelAction({
         },
         body: JSON.stringify({ idempotency_key: crypto.randomUUID() }),
       });
+      requireClientSession(response);
       const payload = (await response.json()) as {
         data?: { state?: string; duplicate?: boolean };
         error?: { message?: string };

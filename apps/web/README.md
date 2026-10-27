@@ -71,5 +71,41 @@ stack; unit coverage alone is not provider or complete R1 evidence.
 - v0 reads `GET /brief`, approvals, tasks, task events, and the
   conversation SSE endpoint. No client-side time conversion, no local task
   writes, no LLM brief.
-- Authentication UI is outside this surface; the existing signed Better Auth
-  session cookie is forwarded unchanged.
+- Account access uses the reviewed narrow `/auth/status`, `/auth/initialize`,
+  `/auth/claim`, `/auth/sign-in`, `/auth/sign-out` endpoints and `GET /me`.
+
+## Accounts and recovery
+
+- Open **账户** (`/account`) to read installation and workspace state. Only a
+  verified `setup_required` status enables the `/setup` administrator form;
+  unavailable/invalid status never implies an empty installation.
+- `/claim` explicitly confirms only the current eligible signed legacy actor.
+  A development bridge cannot claim. Without an eligible old session, the
+  deployer must use the original installation's `local:account` command to
+  explicitly select and confirm the original account. Existing passwords are
+  not overwritten and other owners are not merged.
+- `/login` uses the bound administrator's credentials. Passwords retain leading
+  and trailing spaces, support paste/password managers, and are never put in a
+  URL or browser storage. Sessions expire after seven fixed days; reads do not
+  extend them.
+- `/logout` requires an explicit submission and reports success only after the
+  API confirms revocation. A failed/unknown response is not a completed logout;
+  keep the page and inspect the actual state rather than assuming closing a tab
+  revokes the session.
+- Protected server reads, client actions and initial SSE HTTP 401 responses go
+  to login with a safe in-site original path/query. Login's own 401 stays a form
+  error; 403, 503 and established stream failures keep their actual meaning.
+  Re-login restores only GET reads. It never saves or automatically replays a
+  message, confirmation, cancellation or resume; existing same-tab explicit
+  action retry keys are removed at the expired-session boundary.
+- Account setup/claim success explicitly reports `pending_local_configuration`.
+  This is not workspace/model readiness. `/account` distinguishes unconfigured,
+  loaded, invalid and unreadable registration. The deployer completes/checks
+  registration and reload through `local:account`, preserving the original
+  owner, directories and secrets; file/reload failure does not undo the account.
+- The proxy forwards the real request Origin without constructing one, preserves
+  multiple Set-Cookie/no-store, and retains the existing streaming/abort path.
+  `test/account-navigation.test.ts` covers navigation boundaries and actual
+  protected/SSE response consumers; proxy regressions extend the existing real
+  HTTP proxy tests. Real browser keyboard/paste/error/re-login and zero business
+  POST replay still require integration acceptance.

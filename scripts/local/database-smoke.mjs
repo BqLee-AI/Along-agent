@@ -109,7 +109,7 @@ VALUES ('00000000-0000-4000-8000-000000000008','00000000-0000-4000-8000-00000000
  */
 export async function runDatabaseSmoke({
   connectionString,
-  migrationsDirectory = DEFAULT_MIGRATIONS,
+  migrationsDirectory: sourceMigrationsDirectory = DEFAULT_MIGRATIONS,
   report = () => {},
 }) {
   // Validate before opening an administrative connection.
@@ -117,6 +117,16 @@ export async function runDatabaseSmoke({
   const created = new Set();
   const reports = [];
   const temp = await mkdtemp(path.join(tmpdir(), 'along-lifecycle67-'));
+  // Keep the original #67 0016 scenarios fixed even when this checkout ships 0017.
+  const migrationsDirectory = path.join(temp, 'legacy0016');
+  await mkdir(migrationsDirectory);
+  for (const name of await readdir(sourceMigrationsDirectory)) {
+    if (/^\d{4}_[a-z0-9_]+\.sql$/.test(name) && name.slice(0, 4) <= '0016')
+      await writeFile(
+        path.join(migrationsDirectory, name),
+        await readFile(path.join(sourceMigrationsDirectory, name)),
+      );
+  }
   let stage = 'admin_connect';
   const record = (name) => {
     reports.push({ scenario: name, status: 'passed' });
@@ -322,6 +332,95 @@ export async function runDatabaseSmoke({
       await withDeployment(url, { migrationsDirectory }, (database) => database.assertLease());
       record('concurrent_lease_external_client_fence_disconnect_fail_closed_and_release');
     });
+    await fresh('account0017_explicit_upgrade_preserves_original_facts', async (url) => {
+      await baseline(url);
+      await withClient(url, (client) => client.query(CANARIES));
+      const originalFacts = await withClient(
+        url,
+        async (client) =>
+          (
+            await client.query(`SELECT jsonb_build_object(
+        'users',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM users t),
+        'accounts',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM auth_accounts t),
+        'sessions',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM sessions t),
+        'tasks',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM tasks t)) AS value`)
+          ).rows[0].value,
+      );
+      await withDeployment(
+        url,
+        { migrationsDirectory: sourceMigrationsDirectory },
+        async (database) => {
+          assert.equal(database.targetVersion, '0017');
+          assert.deepEqual(await database.classify(), {
+            kind: 'supported',
+            version: '0016',
+            reason: 'explicit_upgrade_required',
+          });
+          await rejectsCode(() => database.initialize(), 'explicit_upgrade_required');
+          assert.equal((await database.upgrade()).version, '0017');
+        },
+      );
+      await withClient(url, async (client) => {
+        const after = (
+          await client.query(`SELECT jsonb_build_object(
+          'users',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM users t),
+          'accounts',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM auth_accounts t),
+          'sessions',(SELECT jsonb_agg(to_jsonb(t)-'ip_address'-'user_agent' ORDER BY id) FROM sessions t),
+          'tasks',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM tasks t)) AS value`)
+        ).rows[0].value;
+        assert.deepEqual(after, originalFacts);
+        assert.equal(
+          (await client.query('SELECT count(*)::int AS count FROM installation_admin')).rows[0]
+            .count,
+          0,
+        );
+        const before = await signature(client);
+        for (let restart = 0; restart < 2; restart++) {
+          await withDeployment(
+            url,
+            { migrationsDirectory: sourceMigrationsDirectory },
+            async (database) => {
+              assert.equal((await database.classify()).version, '0017');
+              assert.equal((await database.initialize()).version, '0017');
+              assert.equal((await database.upgrade()).version, '0017');
+            },
+          );
+        }
+        assert.deepEqual(await signature(client), before);
+      });
+      record('account0017_explicit_upgrade_preserves_original_facts_two_readonly_restarts');
+    });
+    for (const [name, mutation] of [
+      ['missing_admin_table', 'DROP TABLE installation_admin'],
+      ['missing_standard_column', 'ALTER TABLE sessions DROP COLUMN ip_address'],
+      [
+        'wrong_admin_singleton',
+        'ALTER TABLE installation_admin DROP CONSTRAINT installation_admin_singleton_check; ALTER TABLE installation_admin ADD CONSTRAINT installation_admin_singleton_check CHECK (singleton OR user_id IS NOT NULL)',
+      ],
+      [
+        'wrong_admin_foreign_key',
+        'ALTER TABLE installation_admin DROP CONSTRAINT installation_admin_user_id_fkey; ALTER TABLE installation_admin ADD CONSTRAINT installation_admin_user_id_fkey FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE',
+      ],
+      ['unstamped_account_schema', "DELETE FROM schema_migrations WHERE version='0017'"],
+      ['future_account_ledger', "INSERT INTO schema_migrations(version) VALUES('0018')"],
+    ]) {
+      await fresh(`account0017_${name}`, async (url) => {
+        await withDeployment(url, { migrationsDirectory: sourceMigrationsDirectory }, (database) =>
+          database.initialize(),
+        );
+        await withClient(url, (client) => client.query(mutation));
+        await withDeployment(
+          url,
+          { migrationsDirectory: sourceMigrationsDirectory },
+          async (database) => {
+            assert.equal((await database.classify()).kind, 'unknown');
+            await rejectsCode(() => database.upgrade(), 'unsupported_upgrade_source');
+            await rejectsCode(() => database.initialize(), 'unknown_database_refused');
+          },
+        );
+        record(`account0017_${name}_refused`);
+      });
+    }
     // Create an extension migration set outside the repository. The first step
     // commits a canary once. The second step fails or is terminated mid-transaction.
     const extended = path.join(temp, 'migrations'),

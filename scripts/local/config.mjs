@@ -229,9 +229,20 @@ export async function loadConfig(file) {
     throw new LocalConfigError(error.code === 'ENOENT' ? 'CONFIG_MISSING' : 'CONFIG_READ_FAILED');
   }
 }
+/** Read without normalization or rewriting; caller may preserve the original file bytes. */
+export async function loadPrivateJson(file) {
+  const target = resolve(file);
+  const status = await checkRegularFile(target);
+  await assertPrivate(target, status);
+  return JSON.parse(await readFile(target, 'utf8'));
+}
 
-export async function saveConfig(file, config, { exclusive = false } = {}) {
-  const validated = validateConfig(config);
+export async function saveConfig(file, config, options = {}) {
+  return savePrivateJson(file, validateConfig(config), options);
+}
+
+/** Private JSON publication shared by configuration and host registry maintenance. */
+export async function savePrivateJson(file, value, { exclusive = false } = {}) {
   let temporary;
   let handle;
   try {
@@ -242,7 +253,7 @@ export async function saveConfig(file, config, { exclusive = false } = {}) {
     temporary = join(directory, `.along-config-${randomUUID()}.tmp`);
     handle = await open(temporary, 'wx', 0o600);
     if (process.platform === 'win32') await windowsAcl(temporary, false);
-    await handle.writeFile(`${JSON.stringify(validated, null, 2)}\n`, 'utf8');
+    await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`, 'utf8');
     await handle.sync();
     await handle.close();
     handle = null;

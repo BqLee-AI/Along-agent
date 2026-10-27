@@ -2,12 +2,14 @@
 // /api/v1/*; server components forward the incoming session cookie.
 import { cookies } from 'next/headers';
 import { EnvelopeSchema, type Envelope } from '@along/contracts';
+import { redirect } from 'next/navigation';
+import { protectedLoginHref } from './account-navigation';
 
 const API_BASE = process.env.API_BASE ?? 'http://127.0.0.1:3000';
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; status: number; message: string };
 
-export async function apiGet<T>(path: string): Promise<ApiResult<T>> {
+export async function apiGet<T>(path: string, returnTo?: string): Promise<ApiResult<T>> {
   const cookie = (await cookies()).toString();
   let response: Response;
   try {
@@ -17,6 +19,10 @@ export async function apiGet<T>(path: string): Promise<ApiResult<T>> {
     });
   } catch {
     return { ok: false, status: 0, message: '无法连接 API，请确认服务已启动。' };
+  }
+  if (returnTo !== undefined) {
+    const login = protectedLoginHref(response.status, returnTo);
+    if (login) redirect(login);
   }
   let envelope: Envelope | null = null;
   try {

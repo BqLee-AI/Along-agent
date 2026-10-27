@@ -37,6 +37,7 @@ export function sendJson(
   res.writeHead(status, {
     'content-type': 'application/json',
     'x-request-id': requestId,
+    'cache-control': 'no-store',
     ...extraHeaders,
   });
   res.end(JSON.stringify(body));

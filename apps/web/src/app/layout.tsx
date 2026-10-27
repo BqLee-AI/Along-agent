@@ -12,19 +12,25 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="zh-CN">
       <body>
+        <a className="skip-link" href="#main-content">
+          跳到主要内容
+        </a>
         <header className="site-header">
           <Link className="brand" href="/">
             Along
           </Link>
-          <nav>
+          <nav aria-label="主要导航">
             <Link href="/">今日</Link>
             <Link href="/conversations">对话</Link>
             <Link href="/approvals">确认</Link>
             <Link href="/tasks">任务</Link>
             <Link href="/activity">活动</Link>
+            <Link href="/account">账户</Link>
           </nav>
         </header>
-        <main>{children}</main>
+        <main id="main-content" tabIndex={-1}>
+          {children}
+        </main>
       </body>
     </html>
   );

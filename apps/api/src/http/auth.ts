@@ -6,6 +6,7 @@ import {
   verifyCsrfToken,
   verifySignedCookieValue,
 } from '../modules/identity/crypto.js';
+import { notReady } from './errors.js';
 
 // Actor resolution for HTTP routes (issue #27). Production posture is
 // deny-by-default: the resolver returns null (-> 401 UNAUTHENTICATED) unless
@@ -105,14 +106,14 @@ export function createActorResolver(deps: ResolverDeps = { pool: null }): ActorR
       return { ownerId: devOwnerId, sessionId: null, displayName, timezoneId };
     }
     const pool = deps.pool;
-    if (!pool) return null;
     const token = sessionTokenOf(req);
     if (!token) return null;
+    if (!pool || !process.env.BETTER_AUTH_SECRET) throw notReady('session dependency unavailable');
     let row: SessionRow | null;
     try {
       row = await resolveSession(pool, token);
     } catch {
-      return null;
+      throw notReady('session dependency unavailable');
     }
     if (!row) return null;
     return {

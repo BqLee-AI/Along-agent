@@ -6,6 +6,7 @@ import { AmbiguousTimeDetailsSchema } from '@along/stream-protocol';
 import { z } from 'zod';
 import { conversationHref, readRun, runStatusLabel } from '../../../lib/conversation-run';
 import type { Me } from '../../../lib/types';
+import { requireClientSession } from '../../../lib/account-navigation';
 
 interface Props {
   approvalId: string;
@@ -167,6 +168,7 @@ export default function ApprovalActions({
         },
         body: JSON.stringify(body),
       });
+      requireClientSession(response);
       const payload = EnvelopeSchema.parse(await response.json());
       if (!response.ok || payload.code !== 0) {
         showFailure(payload, response.status);
@@ -248,6 +250,7 @@ export default function ApprovalActions({
         },
         body: JSON.stringify(body),
       });
+      requireClientSession(response);
       const payload = EnvelopeSchema.parse(await response.json());
       if (!response.ok || payload.code !== 0) {
         showFailure(payload, response.status);

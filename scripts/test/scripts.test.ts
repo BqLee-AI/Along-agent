@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -59,5 +59,23 @@ describe('governance scripts', () => {
     mkdirSync(join(target, 'test'), { recursive: true });
     writeFileSync(join(target, 'test', 'reject.test.ts'), 'const claim = "必达";');
     expect(run('scan-copy-claims.mjs', target).code).toBe(0);
+  });
+
+  it('permits exactly account migration 0017 without broadening identity ownership', () => {
+    for (const [name, accepted] of [
+      ['0017_identity_account_access.sql', true],
+      ['0016_identity_account_access.sql', false],
+      ['0018_identity_account_access.sql', false],
+      ['0017_identity_unapproved_change.sql', false],
+    ] as const) {
+      const target = mkdtempSync(join(tmpdir(), 'migration-account-'));
+      try {
+        mkdirSync(join(target, 'infra', 'migrations'), { recursive: true });
+        writeFileSync(join(target, 'infra', 'migrations', name), 'BEGIN; COMMIT;');
+        expect(run('check-migrations.mjs', target).code === 0).toBe(accepted);
+      } finally {
+        rmSync(target, { recursive: true, force: true });
+      }
+    }
   });
 });

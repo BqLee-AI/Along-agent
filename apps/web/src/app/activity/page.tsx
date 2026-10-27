@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { apiGet } from '../../lib/api';
 import type { TaskEventItem, TaskListItem } from '../../lib/types';
+import { pageReturnTo, type PageQuery } from '../../lib/account-navigation';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,8 +20,9 @@ interface Row extends TaskEventItem {
   taskState: string;
 }
 
-export default async function ActivityPage() {
-  const tasksResult = await apiGet<TaskPage>('/api/v1/tasks?status=all&limit=50');
+export default async function ActivityPage({ searchParams }: { searchParams: Promise<PageQuery> }) {
+  const returnTo = pageReturnTo('/activity', await searchParams);
+  const tasksResult = await apiGet<TaskPage>('/api/v1/tasks?status=all&limit=50', returnTo);
   if (!tasksResult.ok) {
     return (
       <section>
@@ -32,7 +34,7 @@ export default async function ActivityPage() {
   const pages = await Promise.all(
     tasksResult.data.items.map(async (task) => ({
       task,
-      events: await apiGet<EventPage>(`/api/v1/tasks/${task.task_id}/events?limit=50`),
+      events: await apiGet<EventPage>(`/api/v1/tasks/${task.task_id}/events?limit=50`, returnTo),
     })),
   );
   const rows: Row[] = [];
@@ -49,8 +51,19 @@ export default async function ActivityPage() {
       <p className="subtitle">
         只读展示服务端记录到的事件。没有外部凭据的行显示“服务端记录”，不声称用户已读。
       </p>
+      {pages.map(({ task, events }) =>
+        !events.ok ? (
+          <p key={task.task_id} className="error" role="alert">
+            {events.message}
+          </p>
+        ) : null,
+      )}
       {rows.length === 0 ? (
-        <div className="panel">还没有记录到活动。</div>
+        <div className="panel">
+          {pages.some(({ events }) => !events.ok)
+            ? '部分活动暂时无法读取，请刷新后再核验。'
+            : '还没有记录到活动。'}
+        </div>
       ) : (
         <table>
           <thead>

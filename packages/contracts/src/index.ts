@@ -38,3 +38,4 @@ export type {
 } from './harness.js';
 export * from './workspaces.js';
 export * from './document-approvals.js';
+export * from './auth.js';

@@ -20,6 +20,9 @@ import { handleTaskRoute } from '../modules/tasks/routes.js';
 import { handleBriefRoute } from '../modules/brief/routes.js';
 import { loadTimeContext, type TimeContext } from '../modules/time/context.js';
 import type { HarnessServices } from '../modules/conversations/harness-process.js';
+import { createAccountService, type AccountService } from '../modules/identity/account-service.js';
+import { handleAccountRoute } from '../modules/identity/routes.js';
+import { notReady } from './errors.js';
 
 export interface AppDeps {
   pool: Pool | null;
@@ -27,6 +30,7 @@ export interface AppDeps {
   tzdbVersion?: string;
   timeContext?: TimeContext;
   harness?: HarnessServices | null;
+  accountService?: AccountService;
 }
 
 interface TzdbOnlyOpts {
@@ -98,7 +102,7 @@ function readBody(req: IncomingMessage): Promise<{ body: unknown } | null> {
 // Async handler with injected deps (pool + actor resolver).
 // Keeps /healthz + /readyz behavior from S0.5; /me and the brief/tasks/
 // approvals/conversation routes are owner-scoped behind the actor resolver.
-export async function handleRequest(
+async function dispatchRequest(
   req: IncomingMessage,
   res: ServerResponse,
   opts: TzdbOnlyOpts | AppDeps,
@@ -114,6 +118,41 @@ export async function handleRequest(
   let resolveActor = deps.resolveActor ?? createActorResolver({ pool: deps.pool });
   let body: unknown;
   if (req.method !== 'GET' && req.method !== 'POST') closeUnreadRequest(req, res);
+  if (pathname.startsWith('/api/v1/auth/')) {
+    const known =
+      (req.method === 'GET' && pathname === '/api/v1/auth/status') ||
+      (req.method === 'POST' &&
+        [
+          '/api/v1/auth/initialize',
+          '/api/v1/auth/claim',
+          '/api/v1/auth/sign-in',
+          '/api/v1/auth/sign-out',
+        ].includes(pathname));
+    if (!known) throw notFound();
+    if (!deps.pool && !deps.accountService) throw notReady();
+    const service = deps.accountService ?? createAccountService(deps.pool!);
+    const result = await handleAccountRoute(
+      req,
+      res,
+      pathname,
+      {
+        service,
+        resolveActor,
+        origin: process.env.APP_ORIGIN ?? 'http://localhost:3000',
+        readBody: async () => {
+          const length = req.headers['content-length'];
+          if (typeof length === 'string' && Number(length) > MAX_BODY_BYTES)
+            throw new HttpError(413, 413, 'PAYLOAD_TOO_LARGE', 'request body too large');
+          const parsed = await readBody(req);
+          return parsed?.body;
+        },
+      },
+      requestId,
+    );
+    if (result.cookies?.length) res.setHeader('set-cookie', result.cookies);
+    sendJson(res, result.status, result.body, requestId);
+    return;
+  }
   const protectedPost =
     req.method === 'POST' &&
     (pathname === '/api/v1/approvals' ||
@@ -313,4 +352,21 @@ export async function handleRequest(
     },
     requestId,
   );
+}
+
+/** Catch dependency errors at the outer boundary, including pre-body gates. */
+export async function handleRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  opts: TzdbOnlyOpts | AppDeps,
+): Promise<void> {
+  try {
+    await dispatchRequest(req, res, opts);
+  } catch (error) {
+    if (res.headersSent || res.destroyed) return;
+    const failure = error instanceof HttpError ? error : notReady();
+    closeUnreadRequest(req, res);
+    const requestId = requestIdOf(req);
+    sendJson(res, failure.httpStatus, failEnvelope(failure, requestId), requestId);
+  }
 }

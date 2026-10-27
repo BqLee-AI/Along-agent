@@ -4,19 +4,26 @@ import { MeSchema } from '../../../lib/types';
 import { conversationHref } from '../../../lib/conversation-run';
 import { documentEffectLabel } from '../../../lib/document-loop';
 import DocumentActions from './DocumentActions';
+import { pageReturnTo, type PageQuery } from '../../../lib/account-navigation';
 
 export const dynamic = 'force-dynamic';
 const exactTextStyle = { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } as const;
 
 export default async function DocumentApprovalPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<PageQuery>;
 }) {
   const { id } = await params;
+  const returnTo = pageReturnTo(
+    `/document-approvals/${encodeURIComponent(id)}`,
+    await searchParams,
+  );
   const [detailResult, meResult] = await Promise.all([
-    apiGet<unknown>(`/api/v1/document-approvals/${encodeURIComponent(id)}`),
-    apiGet<unknown>('/api/v1/me'),
+    apiGet<unknown>(`/api/v1/document-approvals/${encodeURIComponent(id)}`, returnTo),
+    apiGet<unknown>('/api/v1/me', returnTo),
   ]);
   if (!detailResult.ok)
     return (
@@ -24,6 +31,15 @@ export default async function DocumentApprovalPage({
         <h1>文档批准</h1>
         <p className="error" role="alert">
           {detailResult.message}
+        </p>
+      </section>
+    );
+  if (!meResult.ok)
+    return (
+      <section>
+        <h1>文档批准</h1>
+        <p className="error" role="alert">
+          {meResult.message}
         </p>
       </section>
     );

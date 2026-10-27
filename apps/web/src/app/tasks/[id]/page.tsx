@@ -1,6 +1,7 @@
 import { apiGet } from '../../../lib/api';
 import type { Me, TaskDetail, TaskEventItem } from '../../../lib/types';
 import CancelAction from './CancelAction';
+import { pageReturnTo, type PageQuery } from '../../../lib/account-navigation';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,12 +10,19 @@ interface EventsPage {
   next_cursor: string | null;
 }
 
-export default async function TaskDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function TaskDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<PageQuery>;
+}) {
   const { id } = await params;
+  const returnTo = pageReturnTo(`/tasks/${encodeURIComponent(id)}`, await searchParams);
   const [detailResult, eventsResult, meResult] = await Promise.all([
-    apiGet<TaskDetail>(`/api/v1/tasks/${id}`),
-    apiGet<EventsPage>(`/api/v1/tasks/${id}/events?limit=50`),
-    apiGet<Me>('/api/v1/me'),
+    apiGet<TaskDetail>(`/api/v1/tasks/${id}`, returnTo),
+    apiGet<EventsPage>(`/api/v1/tasks/${id}/events?limit=50`, returnTo),
+    apiGet<Me>('/api/v1/me', returnTo),
   ]);
   if (!detailResult.ok) {
     return (
@@ -24,6 +32,15 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
       </section>
     );
   }
+  if (!meResult.ok)
+    return (
+      <section>
+        <h1>任务</h1>
+        <p className="error" role="alert">
+          {meResult.message}
+        </p>
+      </section>
+    );
   const task = detailResult.data;
   const events = eventsResult.ok ? eventsResult.data.items : [];
   return (
@@ -82,7 +99,11 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
         )}
       </section>
       <h2>事件账</h2>
-      {events.length === 0 ? (
+      {!eventsResult.ok ? (
+        <p className="error" role="alert">
+          {eventsResult.message}
+        </p>
+      ) : events.length === 0 ? (
         <p className="muted">还没有记录到事件。</p>
       ) : (
         <table>

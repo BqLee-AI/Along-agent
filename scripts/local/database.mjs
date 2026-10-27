@@ -485,8 +485,30 @@ export class DeploymentDatabase {
         if (Number(version) !== i + 1) fail('migration_inventory_invalid');
         const sql = await readFile(path.join(this.migrationsDirectory, name), 'utf8');
         let verify = null;
-        if (version > BASELINE)
-          verify = await readFile(path.join(this.verificationDirectory, `${version}.sql`), 'utf8');
+        if (version > BASELINE) {
+          try {
+            verify = JSON.parse(
+              await readFile(
+                path.join(this.verificationDirectory, `${version}-checks.json`),
+                'utf8',
+              ),
+            );
+            if (
+              verify.version !== version ||
+              !Array.isArray(verify.tables) ||
+              !Array.isArray(verify.columns) ||
+              !Array.isArray(verify.constraints)
+            )
+              fail('migration_inventory_invalid');
+          } catch (error) {
+            if (error.code !== 'ENOENT') throw error;
+            // Existing isolated upgrade fixtures and future SQL verifiers remain supported.
+            verify = await readFile(
+              path.join(this.verificationDirectory, `${version}.sql`),
+              'utf8',
+            );
+          }
+        }
         // Migration files own one explicit transaction. No rewriting of old SQL.
         const withoutComments = sql.replace(/--[^\n]*/g, '').trim();
         if (!/^BEGIN\s*;/i.test(withoutComments) || !/COMMIT\s*;\s*$/i.test(withoutComments))
@@ -556,10 +578,27 @@ export class DeploymentDatabase {
       if (last < BASELINE) return unknown('unsupported_legacy_database', last);
       try {
         await this.#verifyBaseline();
+        for (const migration of this.#migrations.filter((m) => m.version > last)) {
+          if (typeof migration.verify !== 'object' || !migration.verify) continue;
+          const pending = migration.verify;
+          const present = await this.#query(
+            `SELECT EXISTS (
+            SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+            WHERE n.nspname='public' AND c.relname=ANY($1::text[])
+            UNION ALL
+            SELECT 1 FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid
+            JOIN pg_namespace n ON n.oid=c.relnamespace
+            WHERE n.nspname='public' AND a.attnum>0 AND NOT a.attisdropped
+              AND (c.relname || '.' || a.attname)=ANY($2::text[])
+          ) AS present`,
+            [pending.tables, pending.columns.map((c) => `${c.table}.${c.name}`)],
+          );
+          if (present.rows[0].present) fail('baseline_unstamped_migration_objects');
+        }
         for (const migration of this.#migrations.filter(
           (m) => m.version > BASELINE && m.version <= last,
         ))
-          await this.#query(migration.verify);
+          await this.#verifyAdditional(migration.verify);
       } catch (error) {
         if (this.#lost) throw error;
         // Roll back an aborted verifier statement before returning the stable classification.
@@ -578,6 +617,80 @@ export class DeploymentDatabase {
           last === this.targetVersion ? 'target_schema_verified' : 'explicit_upgrade_required',
       };
     });
+  }
+  async #verifyAdditional(manifest) {
+    if (typeof manifest === 'string') return this.#query(manifest);
+    const tables = [...new Set(manifest.columns.map((c) => c.table))];
+    const columns = (
+      await this.#query(
+        `SELECT c.relname AS table_name,a.attname AS name,t.typname AS type,
+      a.attnotnull AS required,pg_get_expr(d.adbin,d.adrelid) AS default_value,c.relkind,c.relrowsecurity
+      FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+      JOIN pg_attribute a ON a.attrelid=c.oid JOIN pg_type t ON t.oid=a.atttypid AND t.typnamespace='pg_catalog'::regnamespace
+      LEFT JOIN pg_attrdef d ON d.adrelid=c.oid AND d.adnum=a.attnum
+      WHERE n.nspname='public' AND c.relname=ANY($1::text[]) AND a.attnum>0 AND NOT a.attisdropped`,
+        [tables],
+      )
+    ).rows;
+    for (const expected of manifest.columns) {
+      const actual = columns.find(
+        (c) => c.table_name === expected.table && c.name === expected.name,
+      );
+      if (
+        !actual ||
+        actual.type !== expected.type ||
+        actual.required !== expected.required ||
+        actual.relkind !== 'r' ||
+        actual.relrowsecurity ||
+        expression(actual.default_value ?? '') !== expression(expected.default)
+      )
+        fail('baseline_additional_columns_mismatch');
+    }
+    for (const table of manifest.tables) {
+      if (
+        columns.filter((c) => c.table_name === table).length !==
+        manifest.columns.filter((c) => c.table === table).length
+      )
+        fail('baseline_additional_columns_mismatch');
+    }
+    const constraints = (
+      await this.#query(
+        `SELECT c.relname AS table_name,k.conname AS name,k.contype AS type,
+      k.convalidated AS valid,k.condeferrable AS deferred,k.confdeltype AS delete_action,ref.relname AS target,
+      (ref.oid IS NULL OR ref.relnamespace='public'::regnamespace) AS target_public,
+      (k.conindid=0 OR EXISTS (SELECT 1 FROM pg_index ix WHERE ix.indexrelid=k.conindid AND ix.indisvalid AND ix.indisready)) AS index_valid,
+      ARRAY(SELECT a.attname::text FROM unnest(k.conkey) WITH ORDINALITY x(num,pos)
+        JOIN pg_attribute a ON a.attrelid=k.conrelid AND a.attnum=x.num ORDER BY x.pos) AS columns,
+      ARRAY(SELECT a.attname::text FROM unnest(k.confkey) WITH ORDINALITY x(num,pos)
+        JOIN pg_attribute a ON a.attrelid=k.confrelid AND a.attnum=x.num ORDER BY x.pos) AS target_columns,
+      pg_get_expr(k.conbin,k.conrelid) AS expression
+      FROM pg_constraint k JOIN pg_class c ON c.oid=k.conrelid JOIN pg_namespace n ON n.oid=c.relnamespace
+      LEFT JOIN pg_class ref ON ref.oid=k.confrelid WHERE n.nspname='public' AND c.relname=ANY($1::text[])`,
+        [manifest.tables],
+      )
+    ).rows;
+    if (constraints.length !== manifest.constraints.length)
+      fail('baseline_additional_constraints_mismatch');
+    for (const expected of manifest.constraints) {
+      const actual = constraints.find(
+        (c) => c.table_name === expected.table && c.name === expected.name,
+      );
+      if (
+        !actual ||
+        !actual.valid ||
+        actual.deferred ||
+        !actual.index_valid ||
+        !actual.target_public ||
+        actual.type !== expected.type ||
+        actual.columns.join(',') !== expected.columns.join(',') ||
+        (expected.expression !== undefined && actual.expression !== expected.expression) ||
+        (expected.target !== undefined &&
+          (actual.target !== expected.target ||
+            actual.target_columns.join(',') !== expected.target_columns.join(',') ||
+            actual.delete_action !== expected.delete_action))
+      )
+        fail('baseline_additional_constraints_mismatch');
+    }
   }
   async #verifyBaseline() {
     const columns = (

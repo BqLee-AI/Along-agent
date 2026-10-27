@@ -22,6 +22,7 @@
     "local:start": "bun --no-env-file --no-install scripts/local/cli.mjs start",
     "local:stop": "bun --no-env-file --no-install scripts/local/cli.mjs stop",
     "local:upgrade": "bun --no-env-file --no-install scripts/local/cli.mjs upgrade",
+    "local:account": "bun --no-env-file --no-install scripts/local/cli.mjs account",
     "typecheck": "bun run build:packages && bun run --bun --sequential --filter '*' typecheck",
     "lint": "oxlint .",
     "test": "bun run test:unit",
