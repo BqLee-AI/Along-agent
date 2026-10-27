@@ -44,6 +44,7 @@ issue → Spec 章节 → OpenSpec change（如需）→ 分支 → PR → CI �
 - 测试：`bun run test:unit`（非数据库与非 native 合同）、`bun run test:contracts`（Linux x64/WSL + Docker，当前生产 native 构建、自带隔离 PG、本地/签名 HTTP 消费者、原 healthz/契约包）、`bun run test:integration`（全部真实数据库文件）、`bun run test:scheduler`（D9 指定集）。契约入口不使用已有数据库或个人模型配置；其余数据库测试需 PostgreSQL 16 与明确测试环境，详见 [贡献指南](CONTRIBUTING.md)。
 - 契约校验：`openspec validate <name> --strict`（如 `openspec validate v0-safety-contract --strict`）
 - 环境变量：`DATABASE_URL`、`TZDB_VERSION`（缺失则 `/readyz` 503 `TZDB_UNAVAILABLE`，属预期行为）。
+- R1 固定初始化/启停/升级的目标合同见 [本地生命周期设计](docs/design/15-r1-local-lifecycle.md)（#67）；该合同不代表对应入口已实现，也不把上面的开发启动等同完整正式 native 环境。
 
 ## 受管项目资料与文档批准
 
