@@ -6,7 +6,7 @@
 
 推荐 migration 落地顺序（v0）[Required]：
 
-1. Identity 表（`users`、`sessions`，随 Better Auth Deferred 方案二选一 P0 定）。
+1. Identity 表（`users`、`sessions`、`auth_accounts`；Better Auth 自建 credential）。R1 #68 新增 `installation_admin` 合同及标准字段适配，见 identity-schema 的 R1 章节，不表示迁移已交付。
 2. Conversation / Runs 表（`conversations`、`messages`、`agent_runs`、`run_attempts`、`run_checkpoints`、`conversation_idempotency`、`harness_resumes`、`harness_cancellations`、`tool_invocations`、`tool_calls`、`agent_revisions`、`prompt_versions`）；工具身份/结果归 tools，审计只追加。
 3. Commitments 表（`approvals`、`approval_revision_requests`、`tasks`、`task_events`、`outbox`、`notifications`、`task_leases`、`security_events`；统一 `outbox` 名，修改预约归 approvals）。
 
@@ -20,7 +20,7 @@ Content 表（`briefs`、`cards`）为 v1 / Deferred，移出 v0 落地顺序（
 
 | 分组                              | 文档                                                               | 表                                                                                                                                                      |
 | --------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Identity                          | [identity-schema.md](identity-schema.md)                           | `users`、`sessions`                                                                                                                                     |
+| Identity                          | [identity-schema.md](identity-schema.md)                           | `users`、`sessions`、`auth_accounts`，#68 `installation_admin` 新增合同                                                                                 |
 | Conversation / Runs               | [conversation-and-runs-schema.md](conversation-and-runs-schema.md) | 对话/消息、冻结 Run/attempt、只追加 checkpoint、conversation_idempotency、harness_resumes/cancellations、tool_invocations/calls、不可变 revision/prompt |
 | Commitments                       | [commitments-schema.md](commitments-schema.md)                     | `approvals`、`approval_revision_requests`、`tasks`、`task_events`、`outbox`、`notifications`、`task_leases`、`security_events`                          |
 | Documents（R1）                   | [design/14](../design/14-r1-document-task-loop.md)                 | `document_approvals`、`document_approval_decisions`；迁移 `0016`，归 approvals，不占 task 批准表                                                        |

@@ -15,7 +15,7 @@
 | 4    | [风险约束与阶段门](prd/03-risk-constraints-and-stage-gates.md) | Top3 风险、指标、准入准出、不承诺口径                            |
 | 5    | [验收与待决事项](prd/04-acceptance-open-questions.md)          | v0/R1 验收、Deferred 清单、重开门槛                              |
 
-## 二、总体设计（真源，15 篇）
+## 二、总体设计（真源，16 篇）
 
 | 序号 | 文档                                                                     | 作用                                                                                                                   |
 | ---- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
@@ -34,24 +34,25 @@
 | 13   | [P0 开工与 CI 死规矩](design/13-p0-bootstrap-and-ci-rules.md)            | Bun/Ox 统一入口、依赖优先构建与串行类型检查、static 后四路隔离并行、正式 native 双入口消费者及本次执行证据、五门全成功 |
 | 14   | [R1 资料到简报任务闭环](design/14-r1-document-task-loop.md)              | 受管工作区、有限文件/MCP、精确文档批准、非事务写入与同 Run 回读；设计不替代运行证据                                    |
 | 15   | [R1 本地生命周期与配置复用](design/15-r1-local-lifecycle.md)             | #67 初始化/启停/升级目标合同、原配置与目录身份保留、数据库分流及 #68 接口；不代表运行验收                              |
+| 16   | [R1 账户与正式登录](design/16-r1-account-access.md)                      | #68 唯一管理员、原身份转正、库适配、固定会话、401 只读恢复及本机登记收尾合同；独立实验与验收                           |
 
 ## 三、API（6 篇）
 
-| 序号 | 文档                                                    | 作用                                                       |
-| ---- | ------------------------------------------------------- | ---------------------------------------------------------- |
-| 1    | [API 索引与约定](api/README.md)                         | 20 业务端点 + 2 探针、workspace/文档批准、envelope与错误码 |
-| 2    | [auth 与 me](api/auth/auth_routes.md)                   | 鉴权 Deferred 二选一、GET /me、401/403                     |
-| 3    | [brief 简报与卡片](api/brief/brief_routes.md)           | GET /brief、card schema_version                            |
-| 4    | [对话与 SSE](api/conversations/conversations_routes.md) | execution 分派、Run 读/取消/有限批准恢复、SSE 与补读隔离   |
-| 5    | [确认门](api/approvals/approvals_routes.md)             | 列表/详情/confirm\|reject\|revise、持久修改重放、重新确认  |
-| 6    | [任务与事件](api/tasks/tasks_routes.md)                 | 列表/详情/cancel 幂等/events 只读按 recorded_at            |
+| 序号 | 文档                                                    | 作用                                                                          |
+| ---- | ------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| 1    | [API 索引与约定](api/README.md)                         | 25 业务端点合同 + 2 探针、认证匿名例外、workspace/文档批准、envelope 与错误码 |
+| 2    | [auth 与 me](api/auth/auth_routes.md)                   | Better Auth credential、GET /me、#68 窄账户 API、固定会话与来源/CSRF          |
+| 3    | [brief 简报与卡片](api/brief/brief_routes.md)           | GET /brief、card schema_version                                               |
+| 4    | [对话与 SSE](api/conversations/conversations_routes.md) | execution 分派、Run 读/取消/有限批准恢复、SSE 与补读隔离                      |
+| 5    | [确认门](api/approvals/approvals_routes.md)             | 列表/详情/confirm\|reject\|revise、持久修改重放、重新确认                     |
+| 6    | [任务与事件](api/tasks/tasks_routes.md)                 | 列表/详情/cancel 幂等/events 只读按 recorded_at                               |
 
 ## 四、Schema（5 篇）
 
 | 序号 | 文档                                                 | 作用                                                                              |
 | ---- | ---------------------------------------------------- | --------------------------------------------------------------------------------- |
 | 1    | [Schema 索引](schema/README.md)                      | 落地顺序、enum text+check、append-only、owner_id、敏感约定                        |
-| 2    | [身份与租户](schema/identity-schema.md)              | users、sessions（随鉴权 Deferred）                                                |
+| 2    | [身份与租户](schema/identity-schema.md)              | users、sessions、auth_accounts 与 #68 installation_admin 合同                     |
 | 3    | [对话与运行](schema/conversation-and-runs-schema.md) | conversations/messages、agent_runs/run_attempts/run_checkpoints、revisions 不可变 |
 | 4    | [承诺与账本](schema/commitments-schema.md)           | approvals/修改预约/tasks/task_events/outbox/notifications 全字段                  |
 | 5    | [简报与卡片](schema/content-schema.md)               | briefs/cards 含 schema_version                                                    |
@@ -99,6 +100,7 @@
 - [ADR0009](adr/0009-cangjie-harness-ts-capabilities.md) 确定仓颉唯一 Harness/TS 长期能力，并局部修订0003的 outbox/确认事务绝对范围；历史 ADR/验收保留其适用边界。同步公共用例/DTO、只读投影、确认创建/取消单事务和可靠异步 outbox 分列，D1 不证明 SQL 所有权。正式实现与分级验收见 design/09/11，[native 构建/运行说明](../apps/harness/README.md) 不等于真实 provider/完整 R1 验收。
 - [R1 文档任务合同（#62）](design/14-r1-document-task-loop.md) 定义 Web 选择工作区、真实 TS MCP 检索、文档批准、写入与回读；行为真源为 [workspaces](../openspec/specs/workspaces/spec.md)、[agent-runtime](../openspec/specs/agent-runtime/spec.md) 和 [tool-gateway](../openspec/specs/tool-gateway/spec.md)。[归档记录](../openspec/changes/archive/2026-10-26-define-r1-document-task-loop/tasks.md) 分列正式消费者、真实模型与受管资料副本验收，不把 #45–#47 的底座证据或混合模型的成功矩阵扩大为单模型可靠性证明。
 - [R1 本地生命周期合同（#67）](design/15-r1-local-lifecycle.md) 的行为真源为 [local-lifecycle](../openspec/specs/local-lifecycle/spec.md)；[归档记录](../openspec/changes/archive/2026-10-27-close-r1-local-lifecycle/tasks.md)与[验证记录](local-lifecycle-verification-2026-10-27.md)分列生命周期、受控合同和真实模型证据。[本机使用指南](local-lifecycle.md)覆盖四入口、私有配置、原部署接入及停写维护，不将隔离身份验收冒充正式登录能力。
+- [R1 账户合同（#68）](design/16-r1-account-access.md) 的行为增量见 [close-r1-account-access](../openspec/changes/close-r1-account-access/proposal.md)，规划和后续实验/实现/验收清单见 [tasks](../openspec/changes/close-r1-account-access/tasks.md)。原身份保留、正式认证和本机登记收尾共同交付；合同校验不代表登录能力已经运行。
 - 冲突矩阵：行为/验收以 spec 为准，字段/路由以 design/api/schema 为准，why 以 ADR 为准。
 
 ## 维护约定
