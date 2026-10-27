@@ -1,6 +1,6 @@
 # Identity Schema 设计
 
-> 状态：v0 可开工（方案已定：Better Auth 自建 credential；v0 单租户）。范围：`users`、`sessions` 两表。不包含：密码哈希算法选型、计费/额度、推送 token。阶段标签：v0 MVP。
+> 状态：Required 合同；v0 字段与 R1 #68 变更分列，新增迁移须经实现验收。范围：`users`、`sessions`、`auth_accounts` 与单租户 `installation_admin`。不包含：OAuth、多租户/RBAC、计费/额度、推送 token。阶段标签：v0/R1；账户设计见 [design/16](../design/16-r1-account-access.md)。
 
 节内标记：Observed = 沿用业界既定做法；Required = v0 必须；Proposed = 推荐；Deferred = 延后。
 
@@ -94,19 +94,19 @@ users 1 ── 0..n <全业务表 via owner_id 逻辑引用>
 
 ### 用途
 
-[Required] Better Auth credential 支撑表（密码哈希存放处）。v0 无注册/登录 HTTP 端点，会话由服务端 `seed-session` CLI 直种；`password_hash` 恒为 NULL，登录密码哈希算法随登录端点落地定，不先猜。
+[Required] Better Auth credential 支撑表。原 v0 seed 的密码为空、account_id 为 seed 前缀；R1 只有经明确授权的原身份转正才修正 credential，不在迁移中批量改写。库标准 password 映射 password_hash，哈希/验证复用锁定 Better Auth，不另选密码系统。
 
 ### 字段
 
-| 字段            | 类型          | 约束                                                | 说明                                                 |
-| --------------- | ------------- | --------------------------------------------------- | ---------------------------------------------------- |
-| `id`            | `uuid`        | primary key                                         | 行 ID                                                |
-| `user_id`       | `uuid`        | not null, references `users(id)` on delete restrict | 所属用户                                             |
-| `provider_id`   | `text`        | not null, default `'credential'`                    | 按 `credential` 约束（v0 仅自建；OIDC 不在 v0 范围） |
-| `account_id`    | `text`        | not null                                            | 账号标识（v0 seed 形如 `seed:<user_id>`）            |
-| `password_hash` | `text`        | nullable                                            | 密码哈希；v0 恒 NULL（无登录端点）                   |
-| `created_at`    | `timestamptz` | not null, default `now()`                           | 创建时间                                             |
-| `updated_at`    | `timestamptz` | not null, default `now()`                           | 更新时间                                             |
+| 字段            | 类型          | 约束                                                | 说明                                                           |
+| --------------- | ------------- | --------------------------------------------------- | -------------------------------------------------------------- |
+| `id`            | `uuid`        | primary key                                         | 行 ID                                                          |
+| `user_id`       | `uuid`        | not null, references `users(id)` on delete restrict | 所属用户                                                       |
+| `provider_id`   | `text`        | not null, default `'credential'`                    | 按 `credential` 约束（v0 仅自建；OIDC 不在 v0 范围）           |
+| `account_id`    | `text`        | not null                                            | 正式 credential 等于原 users.id 文本；旧 seed 仅显式转正时修正 |
+| `password_hash` | `text`        | nullable                                            | 库密码哈希；未转正历史账户可为空，不静默补密码                 |
+| `created_at`    | `timestamptz` | not null, default `now()`                           | 创建时间                                                       |
+| `updated_at`    | `timestamptz` | not null, default `now()`                           | 更新时间                                                       |
 
 ### 约束与索引
 
@@ -116,11 +116,39 @@ users 1 ── 0..n <全业务表 via owner_id 逻辑引用>
 
 ### 写入规则
 
-- [Required] 不存密码明文；哈希算法随登录端点落地定。
+- [Required] 不存密码明文；哈希和验证使用锁定 Better Auth，不在此自研或替换算法。
 - [Required] 用户行永不物理删除（`users_no_delete` trigger），本表行随用户状态标记处理。
 
 ## Deferred 清单（不猜字段）
 
-- token 明文存储、OAuth 账号表（v0 不做 OIDC）仍 Deferred；`token_hash` HMAC 与 `auth_accounts` credential 表已随本 PR 落定。
+- token 明文存储禁止；OAuth、邮件验证/找回与多用户组织模型不在 R1 范围。`token_hash` HMAC 和 credential 合同保持。
 - 目标市场/计费/推送供应商字段一律不进 v0。
 - 组织/workspace 模型、多用户共享，P1 后定。
+
+## R1 账户与安装绑定（#68）
+
+以下是待实现的新增合同，不表示表或迁移已经存在；只新增下一序号 `0017_identity_account_access.sql`，不修改已合并迁移。对应 [design/16 §2–§7](../design/16-r1-account-access.md)。
+
+### installation_admin
+
+| 字段         | 类型          | 约束                                              | 说明                             |
+| ------------ | ------------- | ------------------------------------------------- | -------------------------------- |
+| `singleton`  | `boolean`     | primary key；CHECK 为 true                        | 固定单行键，不引入多租户安装分区 |
+| `user_id`    | `uuid`        | not null、unique、FK users(id) on delete restrict | 唯一绑定管理员的原用户 ID        |
+| `created_at` | `timestamptz` | not null，default now()                           | 绑定创建时刻                     |
+
+空安装无行；绑定后不提供公开重绑或删除入口。身份公共用例统一持 PG 事务级互斥，在同一 PoolClient 上完成空安装复查、user/credential/session/绑定并提交；唯一约束兜底，并发最多一套完整成功，失败无孤儿。COMMIT 未确认不发 Cookie。
+
+已有用户、业务历史 owner 或登记时不得匿名初始化。其他模块的 owner 事实由其公共只读投影提供；登记无效/不可读或孤立 owner 不当作空安装。原 user.id、history/tasks/approvals/workspace owner 不由身份迁移改写。
+
+### 标准字段与既有会话
+
+- account 的库标准 `password/createdAt/updatedAt` 分别映射既有 `password_hash/created_at/updated_at`，UUID 由服务端显式生成并与原列相容。旧非空 credential 不被覆盖；disabled 不自动激活。
+- session 的 `updatedAt` 复用既有 last_seen_at，不新增同义时间列；新会话提供库所需标准时间，不通过 GET 延长 expires_at。库的 ipAddress/userAgent 分别映射新增 nullable text `ip_address/user_agent`，不将两个标量混塞为同一 JSON 字段；确切库入参须经隔离 E1 核对。
+- 固定七天会话、禁滑动更新及 Cookie cache；只软撤销当前会话，不为退出改写 created_at/expires_at。保留原 token HMAC、原 secret 与既有会话身份，不批量转正或轮换认证材料。
+- adapter 只有在当前调用掌握 raw token 时才向库返回它；PG 永不存 raw token，不能把 token_hash 再当原 token 签 Cookie。按 ID 读取形状须先实测，不用全局缓存或逆解。
+- 发布配套 `scripts/local/baselines/0017.sql` 与 identity 迁移扫描规则，核验绑定表、列/约束及账本；旧 0016 核验继续有效。经 #67 显式升级停旧写者后迁移，失败保持停写，接受提交事实后前滚。
+
+### 数据库与文件边界
+
+管理员 PG 绑定不等于工作区登记完成。Windows 私有登记、registryFile 配置与 API reload 由正式本机维护入口分别发布及核验；API 不直接写宿主配置。收尾失败保留已提交账户，显式补做，不另建用户或改其他 owner；不把文件/重载伪装成同一 PG 事务。

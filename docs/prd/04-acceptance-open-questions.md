@@ -44,6 +44,17 @@
 - [Required] 按用户指南在受支持本机环境验证正式 Web/API/native/MCP/PG/模型路径；进程健康、配置齐备、真实模型调用分别取证，不自动付费探测。指南覆盖接入旧安装、配置保留、日常命令、升级与失败恢复，秘密不进仓库和普通输出。
 - [Required · 验收边界] #67 独立负责生命周期证据，沿用五门与认证/CSRF/owner/批准/取消/unknown；合同校验不算运行验收，#62 历史证据不转记为新入口可用。正式账户、历史发现、视觉/MVVM 和跨模块完整任务分别由 #68–#70 及 #66 收口，不扩展 R2。
 
+## R1 账户与正式登录（#68）
+
+- [Required] 空安装通过真实 Web 建立唯一管理员并登录；同一真实 PG 事务和唯一约束保证并发唯一、失败无孤儿。已有用户、历史 owner、登记或管理员时禁止匿名接管，依赖不能核验不猜空安装。合同见 [design/16](../design/16-r1-account-access.md)、[auth API §4](../api/auth/auth_routes.md#4-r1-账户访问68) 和 [identity 行为增量](../../openspec/changes/close-r1-account-access/specs/identity/spec.md)。
+- [Required] 有效旧签名会话经 CSRF/明确确认仅转正当前 owner；无会话由正式本机维护入口明确选原用户，不默选 seed、不手填 ID、不批量合并。原 users.id、历史、任务、批准及工作区 owner 保持；已有密码不被覆盖，disabled 不自动激活。
+- [Required] 复用锁定 Better Auth 密码/credential/Cookie 和现有 HMAC resolver；补齐标准字段、UUID、真实事务及 raw token/HMAC 边界。浏览器经正式 proxy 获得的 Cookie 必须被 /me 接受，PG 不存 raw token、响应不泄漏凭据。
+- [Required] 固定七天会话不滑动；过期正式重登同一人。退出确认 PG 撤销后才清 Cookie，库 success 或本地清理不代替服务端事实；DB 故障准确报错，不伪成功或误作会话过期。
+- [Required] 窄接口核对真实 Origin、适用会话 CSRF、严格输入和原始 body 上限；proxy 保留真实来源、多 Cookie、no-store、SSE 和 abort。错误密码/无 credential/disabled 等公开失败不可区分，原 owner/批准/取消/unknown 与五门保持。
+- [Required] 账户页面可用键盘、粘贴和密码管理器；401 保留安全原站内位置，重登后只读原状态，不重发消息、确认、取消、继续或其他 POST。403/503 不一律跳登录，错误可操作。
+- [Required] 账户提交、登记/配置保存与 #67 重载分层完成，失败不重开户。正式本机入口自动取绑定管理员 ID，保留原 root/登记/有限授权，不让浏览器/模型决定 owner 或直接写宿主配置。真实本机和 PG 的完整路径不得依赖助手、seed、临时服务或手工 Cookie。
+- [Required · 验收边界] 隔离确认锁定库字段/事务/token/退出/proxy 后完整实施 API、数据库、页面与本机收尾；只新增下一序号迁移并配套版本核验和扫描规则。合同不等于已运行，规划不冒充缺陷复现。七项验收齐备后独立归档只关闭 #68，不进入 #69/#70/R2、不提前关闭 #66。
+
 ## Deferred 清单（每条写明阻塞阶段）
 
 | #   | 事项             | 现状                                                                                                  | 阻塞阶段                                         |
