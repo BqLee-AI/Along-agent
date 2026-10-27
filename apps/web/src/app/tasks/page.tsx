@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { apiGet } from '../../lib/api';
 import type { TaskListItem } from '../../lib/types';
+import { pageReturnTo, type PageQuery } from '../../lib/account-navigation';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,8 +10,9 @@ interface Page {
   next_cursor: string | null;
 }
 
-export default async function TasksPage() {
-  const result = await apiGet<Page>('/api/v1/tasks?status=all&limit=50');
+export default async function TasksPage({ searchParams }: { searchParams: Promise<PageQuery> }) {
+  const returnTo = pageReturnTo('/tasks', await searchParams);
+  const result = await apiGet<Page>('/api/v1/tasks?status=all&limit=50', returnTo);
   if (!result.ok) {
     return (
       <section>

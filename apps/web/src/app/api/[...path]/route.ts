@@ -12,6 +12,7 @@ const FORWARD_REQUEST = [
   'idempotency-key',
   'x-request-id',
   'accept',
+  'origin',
 ];
 const FORWARD_RESPONSE = [
   'content-type',
@@ -70,7 +71,7 @@ async function proxy(req: NextRequest, context: RouteContext): Promise<Response>
         error: { code: 'BAD_GATEWAY', message: 'API 不可达', request_id: requestId },
         request_id: requestId,
       }),
-      { status: 502, headers: { 'x-request-id': requestId } },
+      { status: 502, headers: { 'x-request-id': requestId, 'cache-control': 'no-store' } },
     );
   }
 

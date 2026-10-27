@@ -55,7 +55,12 @@ export function installationEnvironment(config, image = 'along-local:unprepared'
   });
 }
 
-export async function compose(config, directory, args, { image, source = repositoryRoot } = {}) {
+export async function compose(
+  config,
+  directory,
+  args,
+  { image, source = repositoryRoot, input } = {},
+) {
   const registration = path.join(directory, 'registry.compose.json');
   await mkdir(directory, { recursive: true, mode: 0o700 });
   let readableRegistration = false;
@@ -102,7 +107,7 @@ export async function compose(config, directory, args, { image, source = reposit
       registration,
       ...args,
     ],
-    { env: installationEnvironment(config, image), code: 'COMPOSE_FAILED' },
+    { env: installationEnvironment(config, image), code: 'COMPOSE_FAILED', input },
   );
 }
 

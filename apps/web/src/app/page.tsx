@@ -2,11 +2,13 @@ import Link from 'next/link';
 import { apiGet } from '../lib/api';
 import { describeCard } from '../lib/presentation';
 import type { Brief } from '../lib/types';
+import { pageReturnTo, type PageQuery } from '../lib/account-navigation';
 
 export const dynamic = 'force-dynamic';
 
-export default async function HomePage() {
-  const result = await apiGet<Brief>('/api/v1/brief');
+export default async function HomePage({ searchParams }: { searchParams: Promise<PageQuery> }) {
+  const returnTo = pageReturnTo('/', await searchParams);
+  const result = await apiGet<Brief>('/api/v1/brief', returnTo);
   if (!result.ok) {
     return (
       <section>

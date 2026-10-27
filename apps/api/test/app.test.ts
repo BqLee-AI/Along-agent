@@ -38,6 +38,41 @@ function errorCode(payload: Record<string, unknown>): string {
 }
 
 describe('app', () => {
+  it('GET /auth/status without a database returns503 and no-store, never missing route or empty setup', async () => {
+    const { req, res, body } = fakePair('GET', '/api/v1/auth/status');
+    await handleRequest(req, res, { pool: null, tzdbVersion: '2024a' });
+    expect(res.status).toBe(503);
+    expect(errorCode(body())).toBe('NOT_READY');
+    expect(res.resHeaders['cache-control']).toBe('no-store');
+  });
+
+  it('unknown auth methods and library routes are404 even without database or Origin', async () => {
+    for (const [method, path] of [
+      ['PUT', '/api/v1/auth/status'],
+      ['GET', '/api/v1/auth/sign-in'],
+      ['POST', '/api/v1/auth/sign-up/email'],
+    ]) {
+      const { req, res, body } = fakePair(method!, path!);
+      await handleRequest(req, res, { pool: null, tzdbVersion: '2024a' });
+      expect(res.status).toBe(404);
+      expect(errorCode(body())).toBe('NOT_FOUND');
+      expect(res.resHeaders['cache-control']).toBe('no-store');
+    }
+  });
+
+  it('resolver failures before business write guards are503 rather than uncaught or401', async () => {
+    const { req, res, body } = fakePair('POST', '/api/v1/conversations/messages');
+    await handleRequest(req, res, {
+      pool: null,
+      tzdbVersion: '2024a',
+      resolveActor: async () => {
+        throw new Error('database offline');
+      },
+    });
+    expect(res.status).toBe(503);
+    expect(errorCode(body())).toBe('NOT_READY');
+  });
+
   it('GET /healthz returns 200 without env/DB', async () => {
     const { req, res, body } = fakePair('GET', '/healthz');
     await handleRequest(req, res, { tzdbVersion: undefined });

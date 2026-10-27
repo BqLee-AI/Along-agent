@@ -9,7 +9,7 @@
 
 identity 拥有安装管理员绑定、credential 和会话；复用锁定 Better Auth 1.7.10 的密码哈希/验证、Cookie 及现有 resolver，不挂载库的全量 handler。正式交付是 API、数据库、账户页面与本机维护的完整切片，不是登录表单或临时 Cookie 桥。
 
-[Observed · 源码] `identity/better-auth.ts` 配置七天会话，但标准 account password/时间映射与真实事务尚需补齐；`pg-adapter.ts` 使用 pool.query 并返回存储行；`seed.ts` 每次建立新用户，credential account_id 为 seed 前缀形式。生产 HTTP 未接入 credential 登录；Web proxy 保留多 Set-Cookie 和流式通道，但未转发 Origin。上述是源码观察，不能写成真实登录已失败或已成功。
+[Required] `identity/better-auth.ts` 与 `pg-adapter.ts` 负责库标准字段、真实事务和存储 HMAC 边界；HTTP 入口只开放批准的账户用例，Web proxy 保留实际 Origin、多 Set-Cookie 和流式通道。库返回值不能替代数据库提交或正式 Cookie 往返的证据。
 
 [Required] 原 users.id、历史、任务、批准与工作区 owner 保持。新增账户不能替代原身份；存在其他 owner 不代表允许将其数据合并给管理员。#67 的配置、原卷与认证密钥保持，不因登录补建另一套安装。
 
@@ -29,7 +29,7 @@ identity 增加单实例管理员绑定 `installation_admin`，字段与约束�
 
 已有密码不得被转正覆盖。重复/不一致 credential、登录名冲突、绑定冲突、disabled/deleted_requested 或找不到 users 的历史 owner，均停止并给维护说明，不默选、不激活、不批量修复或合并。已有合法 credential 的原用户必须先通过库验证原口令，再经明确本地授权绑定原人；这不是密码找回。
 
-无有效会话时，正式部署者入口拟定为 `bun --no-env-file run local:account --config <私有配置>`。这是本 Issue 待实现的命令，不是已有能力。它通过原配置及 identity 公共维护用例展示有限候选摘要，由部署者明确选择并再次确认；内部使用原 ID，不让用户复制或手填 owner ID，不根据“唯一/最新 seed”自动认领。口令隐藏输入，不放 argv、普通输出或日志。该入口也负责检查及完成工作区登记收尾，不运行常驻宿主服务。
+无有效会话时，正式部署者入口为 `bun --no-env-file run local:account --config <私有配置>`。它通过原配置及 identity 公共维护用例展示有限候选摘要，由部署者明确选择并再次确认；内部使用原 ID，不让用户复制或手填 owner ID，不根据“唯一/最新 seed”自动认领。口令隐藏输入，不放 argv、普通输出或日志。该入口也负责检查及完成工作区登记收尾，不运行常驻宿主服务；具体操作见[本机使用指南](../local-lifecycle.md)。
 
 ## 4. 库适配、固定会话与可信退出
 
@@ -62,7 +62,7 @@ PG 账户提交、Windows 私有登记/配置发布和 API 重载不是一个事
 
 ## 7. 迁移与隔离实验
 
-[Required] 只新增下一序号 `0017_identity_account_access.sql`；旧 0001–0016 不改。配套 `scripts/local/baselines/0017.sql` 核验及 identity 迁移扫描白名单，同批发布。#67 只有显式升级可以执行 DDL；新增绑定表、标准字段适配、约束与完整账本必须可核验。旧 seed/其他 owner 不自动变成管理员，旧认证密钥和 session HMAC 保持。
+[Required] 只新增下一序号 `0017_identity_account_access.sql`；旧 0001–0016 不改。配套 `scripts/local/baselines/0017-checks.json` 目录结构核验及 identity 迁移扫描白名单，同批发布；沿用 0016 JSON 核验约定，不引入第二份可执行 DDL。#67 只有显式升级可以执行 DDL；新增绑定表、标准字段适配、约束与完整账本必须可核验。旧 seed/其他 owner 不自动变成管理员，旧认证密钥和 session HMAC 保持。
 
 认证实施前，用锁定库与原迁移在隔离 PG 实验，不用用户库、secret 或模型：
 
@@ -74,11 +74,11 @@ PG 账户提交、Windows 私有登记/配置发布和 API 重载不是一个事
 | E4 撤销故障              | 对真实 PG 撤销制造失败，对照库状态/清 Cookie/旧会话可用性；窄入口必须准确失败，正常撤销后旧 Cookie 为 401。             |
 | E5 proxy/固定寿命        | 正式 Web/API 观察真实 Origin、多 Cookie、分块 UTF-8 上限、SSE/abort；七天到期且 GET 不续期。                            |
 
-[Observed · 静态风险] 库会签 adapter 返回的 session.token，signOut 会捕获撤销异常；这两项尚未运行复现。实验环境失败与字段前置失败不能冒充 token/退出缺陷的 Red。实验若影响公开合同，先修订合同再实施，不削弱验收。
+[Required] 库会签 adapter 返回的 session.token，signOut 的 success 不能作为撤销提交证据；调用方须守住 raw/HMAC 和数据库撤销边界。隔离实验先排除字段前置错误，再比较 Cookie 与 PG 事实；环境失败不能冒充 token/退出缺陷的 Red。实验若影响公开合同，先修订合同再实施，不削弱验收。
 
 ## 8. 交付与验收
 
-先独立合同文档 PR（Refs #68/#66），通过后停在单元边界。下一获准单元先做 E1–E5，再共同交付身份/新迁移及版本核验、窄 API/proxy、账户页面、所有受影响 401 调用者、本机维护和工作区收尾，不拆前后端半成品。最终独立归档，仅关闭 #68。
+合同、锁定库隔离实验、行为覆盖和正式使用路径分别取证；共同交付身份/新迁移及版本核验、窄 API/proxy、账户页面、所有受影响 401 调用者、本机维护和工作区收尾，不拆前后端半成品。完整验收后独立归档，仅关闭 #68。
 
 | #68 验收             | 合同与实施证据                                                                                                  |
 | -------------------- | --------------------------------------------------------------------------------------------------------------- |
@@ -91,3 +91,5 @@ PG 账户提交、Windows 私有登记/配置发布和 API 重载不是一个事
 | AC7 可独立日常使用   | 支持本机环境、真实 PG 与正式构建，开户/转正/维护绑定及两次启停无需助手、seed、临时服务或手工 Cookie/owner ID。  |
 
 行为确定处先观察目标缺失的 Red 再实现 Green，外部库未知先实验。纯合同校验、受控测试与真实用户路径分别取证。#68 不以调用真实模型代替认证验收，不重复 #62/#67 已适用的证据，不进入 #69/#70/R2，不提前关闭 #66。
+
+实施与验收依据见[账户与本机登记验证记录（2026-10-27）](../account-access-verification-2026-10-27.md)，分别标明库实验、自动化覆盖和真实用户路径。

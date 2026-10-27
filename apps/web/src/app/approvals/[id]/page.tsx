@@ -2,6 +2,7 @@ import { apiGet } from '../../../lib/api';
 import { describeApproval } from '../../../lib/presentation';
 import { ApprovalDetailSchema, MeSchema } from '../../../lib/types';
 import ApprovalActions from './ApprovalActions';
+import { pageReturnTo } from '../../../lib/account-navigation';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,9 +15,10 @@ export default async function ApprovalDetailPage({
 }) {
   const { id } = await params;
   const query = await searchParams;
+  const returnTo = pageReturnTo(`/approvals/${encodeURIComponent(id)}`, query);
   const [detailResult, meResult] = await Promise.all([
-    apiGet<unknown>(`/api/v1/approvals/${id}`),
-    apiGet<unknown>('/api/v1/me'),
+    apiGet<unknown>(`/api/v1/approvals/${id}`, returnTo),
+    apiGet<unknown>('/api/v1/me', returnTo),
   ]);
   if (!detailResult.ok) {
     return (
@@ -26,6 +28,15 @@ export default async function ApprovalDetailPage({
       </section>
     );
   }
+  if (!meResult.ok)
+    return (
+      <section>
+        <h1>确认</h1>
+        <p className="error" role="alert">
+          {meResult.message}
+        </p>
+      </section>
+    );
   const detail = ApprovalDetailSchema.parse(detailResult.data);
   const me = meResult.ok ? MeSchema.safeParse(meResult.data) : null;
   const view = describeApproval(detail);

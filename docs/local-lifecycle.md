@@ -2,8 +2,8 @@
 
 > 状态：Required；本机生命周期使用指南。
 > 范围：Windows Web、Docker Linux x64 的 PG16/API/native/MCP、私有安装配置。
-> 不包含：管理员开户、owner 绑定、历史入口、R2，以及删除数据或恢复备份的自动操作。
-> 阶段：R1；行为依据见 [design/15](design/15-r1-local-lifecycle.md)。
+> 包含：唯一管理员正式开户、原身份本机转正及有限路径工作区收尾；不包含历史发现、R2，以及删除数据或恢复备份的自动操作。
+> 阶段：R1；生命周期依据见 [design/15](design/15-r1-local-lifecycle.md)，账户依据见 [design/16](design/16-r1-account-access.md)。
 
 ## 环境与安装身份
 
@@ -26,7 +26,7 @@ bun --no-env-file run local:start
 
 `init` 建立一次配置、准备专用持久卷和成套产物，只有核实为空的新应用库才执行全套迁移。它不启动业务写者。已有配置再次 `init` 只复用，不重新生成密钥或覆盖登记。
 
-`start` 复用准备好的 API/native/Web，不安装、不构建、不执行 DDL。打开命令输出的 Web 地址；固定地址是认证 origin，不要自行把 `localhost` 与 `127.0.0.1` 混用。账户状态未核验、模型未配置、工作区未配置分别报告；这些提示不是进程启动失败，也不意味着能完成资料任务。正式开户与 owner 绑定归 #68，本入口不 seed 用户。
+`start` 复用准备好的 API/native/Web，不安装、不构建、不执行 DDL。打开命令输出的 Web 地址；固定地址是认证 origin，不要自行把 `localhost` 与 `127.0.0.1` 混用。在 Web 按“首次建号”创建唯一管理员，再运行下文 `local:account` 完成工作区登记。账户、模型、工作区是三个独立状态；账户成功不意味着资料任务已可用。本入口不 seed 用户。
 
 ## 接入原部署
 
@@ -50,6 +50,58 @@ bun --no-env-file run local:start
 已存在默认配置时，先核实是否就是原安装，不要覆盖或另建一套来掩盖缺失材料。要使用明确恢复的配置，可以给两个命令都加相同的 `--config`。原部署对外监听时，先由部署者明确处理监听与 origin，不能原样作为本机受支持安装接入。
 
 缺原密钥、卷或登记来源时，恢复原材料再试。不要生成替代认证密钥、复制新 root、创建同名空卷、修改 owner 或补写账本。空库不能作为“原部署”被自动初始化；部分初始化库也不自动清空或重放。
+
+## 正式账户、原身份转正与重登
+
+所有命令使用同一私有配置；以下用 `C:\AlongPrivate\local.json` 举例，不要把真实文件内容或口令贴到终端输出、issue 或聊天。命令不接受密码或 owner ID 参数：
+
+```powershell
+bun --no-env-file run local:account --help
+bun --no-env-file run local:start --config C:\AlongPrivate\local.json
+bun --no-env-file run local:account --config C:\AlongPrivate\local.json
+```
+
+- **全新空安装**：先在 Web 首次建号，填写登录名、展示名和口令；不通过 seed、临时 Cookie 或本机默认用户绕过初始化。Web 成功后账户已经提交且可登录，工作区仍可能待配置。
+- **保留原会话**：Web 可以在真实旧签名会话下明确确认转正当前用户；开发桥不是凭证，页面不能指定其他用户。
+- **原会话失效或没有会话**：在交互终端运行 `local:account`。命令显示有限候选摘要，必须明确输入序号，再输入对应的 `CONFIRM <序号>`；没有默认选择，不按唯一或最新 seed 认领，不让你复制/手填 owner ID。已有口令必须输入原口令验证，不做密码重置；无口令才设置并重复新口令。disabled、deleted_requested、credential 冲突或孤立历史 owner 不会被激活、合并或自动修复。候选只有相同展示名时请停止并先核对原材料，不猜选。
+
+登录名服务端 trim/lowercase，规范化后 1–128 字符；展示名 trim 后 1–128 字符。口令 8–128 字符，**不 trim**；本机口令输入隐藏，不放 argv、普通输出或日志。使用密码管理器妥善保存；本版本没有邮箱找回、公开重置、重绑或第二管理员入口。
+
+正式 Cookie 会话创建后固定 **7 天**，浏览/GET 不续期。退出或过期后在 Web 使用原正式账户重新登录，不重新建号或换 user ID。只有受保护请求的 HTTP 401 才引导登录；403 权限/CSRF 与 503 依赖故障应按原错误处理。重登仅 GET 恢复原任务、批准或 Run；原发送、确认、取消或继续等 POST 不会自动重放，必须重新读取事实再明确操作。
+
+## 工作区本机收尾
+
+`local:account` 是一次性维护，不运行常驻宿主服务。它读取原私有配置及 identity 公共服务中的已绑定管理员，自动派生登记 owner；浏览器、模型和维护参数都不能指定 owner。命令要求原 PG 已经由同一配置的 `local:start` 启动，且数据库完整核验为 `0017`；旧 `0016` 必须先显式 `local:upgrade`，维护不会执行 DDL。
+
+1. **已有正确登记**：核验管理员的原 workspace_id、root、有限权限及物理根身份，保留登记文件字节，不归并或修改其他 owner。配置已经指向同一登记时不重写配置。原登记无效、不可读或只有其他 owner 时停止，修复原来源再重试，不把坏文件当空白覆盖。
+2. **没有登记**：先由部署者在**原受管资料卷内**准备明确子目录及获授权资料；命令不创建/复制 root，也不默认授权整个卷。仅限刚刚通过本安装 `start` 核验的新安装，可在 PowerShell 使用原私有配置定位本安装容器并准备全新子目录，例如：
+
+   ```powershell
+   $local = Get-Content -Raw C:\AlongPrivate\local.json | ConvertFrom-Json
+   docker exec "$($local.project)-api-1" mkdir -p "$($local.workspaceMount)/documents"
+   # 将你有权授权的本机文件复制到刚准备的全新目录；不要替换原部署 root。
+   docker cp C:\YourDocuments\notes.txt "$($local.project)-api-1:$($local.workspaceMount)/documents/notes.txt"
+   Remove-Variable local
+   bun --no-env-file run local:account --config C:\AlongPrivate\local.json
+   ```
+
+   在维护提示输入 `CONFIGURE`，明确填写容器内子目录（默认挂载示例 `/var/lib/along/workspaces/documents`）、显示名、可读相对文件路径 JSON 数组（例如 `["notes.txt"]`）、可写数组（只读用 `[]`），最后输入 `REGISTER`。没有默认路径授权；写路径必须也在读路径中，不允许绝对路径、`..`、空路径或整个卷授权。工具复用正式工作区 schema/物理 root 校验器；目录权限不符应由部署者修复刚准备的目录，不更换原 root。
+
+3. **发布与加载**：私有原子发布到配置同目录的 `workspace-registry.json`，不覆盖已存在文件；经 `updateConfig` 保存 registryFile。释放安装锁和本次数据库连接后，单独 `reloadInstallation` 停本安装写者并核对加载结果。不会停未知服务、自动循环重试、发模型请求或执行 Agent。
+
+账户 PG 提交、宿主文件/配置发布、安装重载**不是同一事务**。请按明确阶段恢复，不重新开户：
+
+| 状态输出                                                         | 含义与恢复                                                                                         |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `account_unconfigured`                                           | 尚无绑定且没有可用原用户；空安装先 Web 首次建号，原安装恢复原材料。                                |
+| `account_committed` / `account_committed_workspace_unconfigured` | 账户已提交，工作区未完成；可以正式登录，继续本机有限路径收尾。                                     |
+| `registry_absent`                                                | 未指定登记时可以明确准备新有限登记；原配置已指定文件却缺失时停止，恢复原文件，不在原位置重建。     |
+| `registry_invalid` / `registry_unreadable`                       | 原登记坏/不可读；保留文件、root 和 owner，修复来源或私有权限后重试。                               |
+| `registry_published` 后保存失败                                  | 已发布登记、原配置保留；修复私有配置保存原因后重试同一命令，自动核验并复用该文件，不覆盖或再开户。 |
+| `config_saved_reload_failed`                                     | 配置已保存但重载/加载确认失败；账户和原资料保留。修复依赖或归属后仅重试同一命令收尾。              |
+| `registry_loaded`                                                | 登记已成功加载；访问仍受原 owner 和有限路径限制，不表示模型调用已验证。                            |
+
+账户写入/COMMIT 结果不确定时，先再次运行同一维护入口读取真实绑定；已绑定便只做收尾，不覆盖原口令。期间若发生其他生命周期操作、配置/登记或物理 root 变化，命令停止并要求重新读取事实；不要删除文件或反复自动重试来掩盖变化。
 
 ## 日常操作
 
@@ -99,7 +151,7 @@ launcher 退出不代表 PG 中的语句或事务已经结束。若仍提示部�
 
 `scripts/local/config.mjs` 提供 `loadConfig`、原子 `saveConfig` 和带安装锁的 `updateConfig`；更新失败保留旧值，安装身份、卷、数据库身份与认证密钥不可被更新接口替换。调用方在 checkout 外私有配置上操作，不新建第二份 owner/授权事实。
 
-#68 在完成明确授权的账户绑定、写入有效登记后，通过同一配置保存登记位置，再调用 `scripts/local/runtime.mjs` 的 `reloadInstallation`。重载核对归属、版本与部署许可，停止本安装写者后重新加载；不会恢复 Agent，也不决定管理员。不要在已经持有安装锁的回调内调用另一个自行加锁的更新入口。
+`local:account` 在完成明确授权的账户绑定、写入有效登记后，通过同一配置保存登记位置，再调用 `scripts/local/runtime.mjs` 的 `reloadInstallation(file, { expectedConfig })`。重载在自身锁内核对原配置、归属、版本与部署许可，停止本安装写者后重新加载；不会恢复 Agent，也不决定管理员。`updateConfig` 与 `reloadInstallation` 分别加锁，调用方先释放维护锁和数据库连接，不嵌套调用。`loadPrivateJson`/`savePrivateJson` 复用同一私有文件权限及原子发布约定。
 
 ## 实现验证记录
 

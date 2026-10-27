@@ -1,0 +1,59 @@
+{
+  "version": "0017",
+  "tables": ["installation_admin"],
+  "columns": [
+    { "table": "sessions", "name": "ip_address", "type": "text", "required": false, "default": "" },
+    { "table": "sessions", "name": "user_agent", "type": "text", "required": false, "default": "" },
+    {
+      "table": "installation_admin",
+      "name": "singleton",
+      "type": "bool",
+      "required": true,
+      "default": "true"
+    },
+    {
+      "table": "installation_admin",
+      "name": "user_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "installation_admin",
+      "name": "created_at",
+      "type": "timestamptz",
+      "required": true,
+      "default": "now()"
+    }
+  ],
+  "constraints": [
+    {
+      "table": "installation_admin",
+      "name": "installation_admin_pkey",
+      "type": "p",
+      "columns": ["singleton"]
+    },
+    {
+      "table": "installation_admin",
+      "name": "installation_admin_user_id_key",
+      "type": "u",
+      "columns": ["user_id"]
+    },
+    {
+      "table": "installation_admin",
+      "name": "installation_admin_user_id_fkey",
+      "type": "f",
+      "columns": ["user_id"],
+      "target": "users",
+      "target_columns": ["id"],
+      "delete_action": "r"
+    },
+    {
+      "table": "installation_admin",
+      "name": "installation_admin_singleton_check",
+      "type": "c",
+      "columns": ["singleton"],
+      "expression": "singleton"
+    }
+  ]
+}

@@ -86,9 +86,17 @@ export interface RegistryLoadReport {
   accepted: number;
   rejected: number;
 }
+let registryReport: RegistryLoadReport = { state: 'unconfigured', accepted: 0, rejected: 0 };
+export function getWorkspaceAccountStatus(): RegistryLoadReport & { ownerIds: string[] } {
+  return {
+    ...registryReport,
+    ownerIds: [...new Set([...registry.values()].map((item) => item.owner_id))],
+  };
+}
 export async function configureWorkspaceRegistry(input: unknown): Promise<RegistryLoadReport> {
   registry.clear();
-  if (!Array.isArray(input)) return { state: 'invalid', accepted: 0, rejected: 0 };
+  if (!Array.isArray(input))
+    return (registryReport = { state: 'invalid', accepted: 0, rejected: 0 });
   const candidates: ActiveRegistration[] = [];
   for (const value of input) {
     try {
@@ -163,28 +171,28 @@ export async function configureWorkspaceRegistry(input: unknown): Promise<Regist
       }
     }
   for (const item of candidates) if (!conflicts.has(item)) registry.set(item.workspace_id, item);
-  return {
+  return (registryReport = {
     state: registry.size === input.length ? 'loaded' : 'invalid',
     accepted: registry.size,
     rejected: input.length - registry.size,
-  };
+  });
 }
 export async function loadWorkspaceRegistry(
   file = process.env.WORKSPACE_REGISTRY_FILE,
 ): Promise<RegistryLoadReport> {
   if (!file) {
     registry.clear();
-    return { state: 'unconfigured', accepted: 0, rejected: 0 };
+    return (registryReport = { state: 'unconfigured', accepted: 0, rejected: 0 });
   }
   try {
     return await configureWorkspaceRegistry(JSON.parse(await readFile(file, 'utf8')));
   } catch (error) {
     registry.clear();
-    return {
+    return (registryReport = {
       state: error instanceof SyntaxError ? 'invalid' : 'unreadable',
       accepted: 0,
       rejected: 0,
-    };
+    });
   }
 }
 function selected(ownerId: string, grant: WorkspaceGrant): ActiveRegistration {

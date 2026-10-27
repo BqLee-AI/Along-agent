@@ -69,7 +69,7 @@
 
 ### 4.1 通用输入、输出与来源
 
-以下是新增 Required 合同，不表示实现已可用。Base Path 为 `/api/v1`；响应沿用统一 envelope/request_id，成功与失败均 `Cache-Control: no-store`。仅库生成的 Set-Cookie 携带签名会话，不在 JSON 返回 raw token、hash、auth_email 或完整账户对象；`GET /me` 仍是 actor 自检。
+Base Path 为 `/api/v1`；响应沿用统一 envelope/request_id，成功与失败均 `Cache-Control: no-store`。仅库生成的 Set-Cookie 携带签名会话，不在 JSON 返回 raw token、hash、auth_email 或完整账户对象；`GET /me` 仍是 actor 自检。
 
 所有 POST 使用 strict JSON，不接受额外 user_id/owner_id、rememberMe、callbackURL 或模型配置。登录名在服务端 trim+lowercase，规范化后长度 1–128；展示名 trim 后 1–128。密码不 trim，长度 8–128；长度以 JavaScript 字符串 UTF-16 code unit 计，密码哈希/验证复用锁定库。重复密码确认只在表单校验，不多传一份口令。
 
@@ -113,4 +113,4 @@ initialize 原子提交 user/credential/session/安装绑定后才发 Cookie。c
 
 重登后仅 GET 读取原任务、批准或 Run，不保存或自动重放消息、确认、取消、resume 等 POST。表单支持键盘、密码管理器及粘贴，密码不 trim，错误可操作。
 
-账户成功与工作区可用分开：`workspace_binding:pending_local_configuration` 指引部署者通过正式 `local:account`（待实现）检查/完成登记。程序从已绑定管理员获取 owner，复用 #67 私有配置与重载，不让浏览器/模型选择 owner、不要求手填 ID，不通过 API 写宿主私有文件。已有正确登记由本机核验后保留；文件、配置或重载失败不回滚已提交账户，不重新开户。完整阶段与实验边界见 design/16 §6–§8。
+账户成功与工作区可用分开：`workspace_binding:pending_local_configuration` 指引部署者通过正式 `local:account` 检查/完成登记，具体操作见[本机使用指南](../../local-lifecycle.md)。程序从已绑定管理员获取 owner，复用 #67 私有配置与重载，不让浏览器/模型选择 owner、不要求手填 ID，不通过 API 写宿主私有文件。已有正确登记由本机核验后保留；文件、配置或重载失败不回滚已提交账户，不重新开户。完整阶段与实验边界见 design/16 §6–§8。

@@ -1,6 +1,7 @@
 import { EnvelopeSchema, RunViewSchema, type RunView } from '@along/contracts';
 import { ThreadEventSchema, type ThreadEvent } from '@along/stream-protocol';
 import { z } from 'zod';
+import { requireClientSession } from './account-navigation';
 
 export const ConversationEventsSchema = z
   .object({
@@ -30,6 +31,7 @@ export function conversationHref(conversationId: string, runId: string): string 
 }
 
 export async function readEnvelope(response: Response): Promise<unknown> {
+  requireClientSession(response);
   const payload = EnvelopeSchema.parse(await response.json());
   if (!response.ok || payload.code !== 0) {
     const detail = payload.error;

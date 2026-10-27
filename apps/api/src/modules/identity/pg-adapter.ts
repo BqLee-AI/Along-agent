@@ -1,11 +1,5 @@
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { hashSessionToken } from './crypto.js';
-
-// Custom pg adapter for Better Auth (issue #27): raw `pg`, no Kysely/Drizzle.
-// The factory wrapper pre-transforms logical names to DB names, so this
-// layer receives DB table/column names. Token hashing happens here: the
-// library passes the raw token to findOne({field:"token"}); we hash before
-// comparing with sessions.token_hash (plaintext never persists).
 
 const COLUMNS: Record<string, Record<string, true>> = {
   users: {
@@ -31,6 +25,8 @@ const COLUMNS: Record<string, Record<string, true>> = {
     revoked_at: true,
     last_seen_at: true,
     client_info: true,
+    ip_address: true,
+    user_agent: true,
   },
   auth_accounts: {
     id: true,
@@ -42,112 +38,127 @@ const COLUMNS: Record<string, Record<string, true>> = {
     updated_at: true,
   },
 };
-
 export interface WhereClause {
   field: string;
   value: unknown;
   operator?: string;
   connector?: string;
 }
-
-function assertTable(model: string): void {
-  if (!(model in COLUMNS)) throw new Error(`pg-adapter: unknown table ${model}`);
-}
-
-function assertColumns(model: string, row: Record<string, unknown>): void {
+function columns(model: string, fields: readonly string[] = []): void {
   const allowed = COLUMNS[model];
   if (!allowed) throw new Error(`pg-adapter: unknown table ${model}`);
-  for (const key of Object.keys(row)) {
-    if (!allowed[key]) {
-      throw new Error(`pg-adapter: unknown column ${model}.${key}`);
-    }
-  }
+  for (const field of fields)
+    if (!allowed[field]) throw new Error(`pg-adapter: unknown column ${model}.${field}`);
 }
-
 function secretOf(): string {
   const secret = process.env.BETTER_AUTH_SECRET;
   if (!secret) throw new Error('BETTER_AUTH_SECRET is required');
   return secret;
 }
-
-// Map library-facing values to DB values. The factory wrapper pre-transforms
-// logical names to DB names, so session token values arrive under the
-// `token_hash` key (plaintext from the cookie); hash them before compare.
-// Accept the logical `token` key too for direct callers.
 export function mapValue(
   model: string,
   field: string,
   value: unknown,
+  secret?: string,
 ): { field: string; value: unknown } {
   if (model === 'sessions' && (field === 'token' || field === 'token_hash')) {
-    return { field: 'token_hash', value: hashSessionToken(String(value), secretOf()) };
+    return { field: 'token_hash', value: hashSessionToken(String(value), secret ?? secretOf()) };
   }
   return { field, value };
 }
-
-// Translate where clauses to parameterized SQL. Supports eq/ne/in/lt/lte/
-// gt/gte + IS NULL via {value: null}. Returns {sql, params} with 1-based
-// placeholders starting at `offset`.
 export function translateWhere(
   model: string,
   where: WhereClause[] | undefined,
   offset = 1,
+  secret?: string,
 ): { sql: string; params: unknown[] } {
-  if (!where || where.length === 0) return { sql: 'TRUE', params: [] };
-  const parts: string[] = [];
+  columns(model);
   const params: unknown[] = [];
-  let i = offset;
-  for (const w of where) {
-    const allowed = COLUMNS[model];
-    if (!allowed) throw new Error(`pg-adapter: unknown table ${model}`);
-    const mapped = mapValue(model, w.field, w.value);
-    if (!allowed[mapped.field]) {
-      throw new Error(`pg-adapter: unknown column ${model}.${mapped.field}`);
+  const parts = (where ?? []).map((clause, index) => {
+    const { field, value } = mapValue(model, clause.field, clause.value, secret);
+    columns(model, [field]);
+    const connector = (clause.connector ?? 'AND').toUpperCase();
+    if (connector !== 'AND' && connector !== 'OR') throw new Error('pg-adapter: invalid connector');
+    const prefix = index ? `${connector} ` : '';
+    const op = clause.operator ?? 'eq';
+    if (value === null) return `${prefix}"${field}" IS ${op === 'ne' ? 'NOT ' : ''}NULL`;
+    if (op === 'in' || op === 'not_in') {
+      if (!Array.isArray(value)) throw new Error('pg-adapter: IN needs an array');
+      if (!value.length) return `${prefix}${op === 'in' ? 'FALSE' : 'TRUE'}`;
+      const holders = value.map((v) => {
+        params.push(v);
+        return `$${offset + params.length - 1}`;
+      });
+      return `${prefix}"${field}" ${op === 'in' ? 'IN' : 'NOT IN'} (${holders.join(',')})`;
     }
-    const op = (w.operator ?? 'eq').toLowerCase();
-    const connector = parts.length === 0 ? '' : `${(w.connector ?? 'AND').toUpperCase()} `;
-    if (mapped.value === null) {
-      parts.push(`${connector}"${mapped.field}" IS ${op === 'ne' ? 'NOT ' : ''}NULL`);
-      continue;
-    }
-    if (op === 'in') {
-      if (!Array.isArray(mapped.value)) throw new Error('pg-adapter: IN needs an array');
-      const holders = mapped.value.map(() => `$${i++}`);
-      parts.push(`${connector}"${mapped.field}" IN (${holders.join(',')})`);
-      params.push(...(mapped.value as unknown[]));
-      continue;
-    }
-    const sqlOp =
-      op === 'eq'
-        ? '='
-        : op === 'ne'
-          ? '<>'
-          : op === 'lt'
-            ? '<'
-            : op === 'lte'
-              ? '<='
-              : op === 'gt'
-                ? '>'
-                : op === 'gte'
-                  ? '>='
-                  : null;
-    if (!sqlOp) throw new Error(`pg-adapter: unsupported operator ${w.operator}`);
-    parts.push(`${connector}"${mapped.field}" ${sqlOp} $${i++}`);
-    params.push(mapped.value);
-  }
-  return { sql: parts.join(' '), params };
+    const sqlOp = (
+      { eq: '=', ne: '<>', lt: '<', lte: '<=', gt: '>', gte: '>=' } as Record<string, string>
+    )[op];
+    if (!sqlOp) throw new Error(`pg-adapter: unsupported operator ${op}`);
+    params.push(value);
+    return `${prefix}"${field}" ${sqlOp} $${offset + params.length - 1}`;
+  });
+  return { sql: parts.join(' ') || 'TRUE', params };
 }
-
-function toJson(v: unknown): unknown {
-  if (v !== null && typeof v === 'object') return JSON.stringify(v);
-  return v;
-}
-
 export interface PgAdapterOptions {
-  pool: Pool;
+  pool: Pool | PoolClient;
+  secret?: string;
 }
-
-export function createPgAdapter({ pool }: PgAdapterOptions) {
+export function createPgAdapter({ pool, secret = secretOf() }: PgAdapterOptions) {
+  function input(model: string, data: Record<string, unknown>) {
+    columns(model, Object.keys(data));
+    return Object.fromEntries(
+      Object.entries(data).map(([field, value]) => {
+        const mapped = mapValue(model, field, value, secret);
+        return [
+          mapped.field,
+          (field === 'metadata' || field === 'client_info') && value !== null
+            ? JSON.stringify(value)
+            : mapped.value,
+        ];
+      }),
+    );
+  }
+  // Only a raw token supplied in this call can cross back into Better Auth.
+  // ID-only reads deliberately omit token; a persisted HMAC is never a token.
+  function output<T>(
+    model: string,
+    row: Record<string, unknown> | undefined,
+    raw?: unknown,
+  ): T | null {
+    if (!row) return null;
+    if (model !== 'sessions') return row as T;
+    return { ...row, token_hash: typeof raw === 'string' ? raw : undefined } as T;
+  }
+  const rawWhere = (where?: WhereClause[]) =>
+    where?.find((w) => w.field === 'token_hash' || w.field === 'token')?.value;
+  async function updateRows(
+    model: string,
+    where: WhereClause[] | undefined,
+    update: Record<string, unknown>,
+  ) {
+    const row = input(model, update);
+    const keys = Object.keys(row);
+    if (!keys.length) return [];
+    const { sql, params } = translateWhere(model, where, keys.length + 1, secret);
+    return (
+      await pool.query(
+        `UPDATE "${model}" SET ${keys.map((k, i) => `"${k}"=$${i + 1}`).join(',')} WHERE ${sql} RETURNING *`,
+        [...keys.map((k) => row[k]), ...params],
+      )
+    ).rows;
+  }
+  async function remove(model: string, where?: WhereClause[]) {
+    columns(model);
+    const { sql, params } = translateWhere(model, where, 1, secret);
+    const query =
+      model === 'sessions'
+        ? `UPDATE sessions SET revoked_at=COALESCE(revoked_at,now()) WHERE ${sql}`
+        : model === 'users'
+          ? `UPDATE users SET status='deleted_requested',updated_at=now() WHERE ${sql}`
+          : `DELETE FROM "${model}" WHERE ${sql}`;
+    return (await pool.query(query, params)).rowCount ?? 0;
+  }
   return {
     async create<T extends Record<string, unknown>>({
       model,
@@ -156,28 +167,14 @@ export function createPgAdapter({ pool }: PgAdapterOptions) {
       model: string;
       data: T;
     }): Promise<T> {
-      assertTable(model);
-      assertColumns(model, data);
-      const row: Record<string, unknown> = { ...data };
-      // Hash raw session tokens on the way in (arrive under `token_hash`
-      // key as plaintext after wrapper pre-transform; see mapValue).
-      if (model === 'sessions' && typeof row.token_hash === 'string') {
-        row.token_hash = hashSessionToken(row.token_hash, secretOf());
-      } else if (model === 'sessions' && typeof row.token === 'string') {
-        row.token_hash = hashSessionToken(row.token, secretOf());
-        delete row.token;
-      }
-      if (row.client_info !== undefined) row.client_info = toJson(row.client_info);
-      if (row.metadata !== undefined) row.metadata = toJson(row.metadata);
+      const row = input(model, data);
       const keys = Object.keys(row);
-      const holders = keys.map((_, idx) => `$${idx + 1}`);
       const { rows } = await pool.query(
-        `INSERT INTO "${model}" (${keys.map((k) => `"${k}"`).join(',')}) VALUES (${holders.join(',')}) RETURNING *`,
+        `INSERT INTO "${model}" (${keys.map((k) => `"${k}"`).join(',')}) VALUES (${keys.map((_, i) => `$${i + 1}`).join(',')}) RETURNING *`,
         keys.map((k) => row[k]),
       );
-      return (rows[0] ?? null) as T;
+      return output<T>(model, rows[0], data.token_hash) as T;
     },
-
     async findOne<T>({
       model,
       where,
@@ -185,31 +182,37 @@ export function createPgAdapter({ pool }: PgAdapterOptions) {
       model: string;
       where?: WhereClause[];
     }): Promise<T | null> {
-      assertTable(model);
-      const { sql, params } = translateWhere(model, where);
-      const { rows } = await pool.query(`SELECT * FROM "${model}" WHERE ${sql} LIMIT 1`, params);
-      return (rows[0] ?? null) as T | null;
+      const { sql, params } = translateWhere(model, where, 1, secret);
+      const { rows } = await pool.query(
+        `SELECT * FROM "${model}" WHERE (${sql})${model === 'sessions' ? ' AND revoked_at IS NULL' : ''} LIMIT 1`,
+        params,
+      );
+      return output<T>(model, rows[0], rawWhere(where));
     },
-
     async findMany<T>({
       model,
       where,
       limit,
+      offset,
+      sortBy,
     }: {
       model: string;
       where?: WhereClause[];
       limit?: number;
+      offset?: number;
+      sortBy?: { field: string; direction: 'asc' | 'desc' };
     }): Promise<T[]> {
-      assertTable(model);
-      const { sql, params } = translateWhere(model, where);
-      const lim = Math.min(Math.max(limit ?? 100, 1), 500);
+      const { sql, params } = translateWhere(model, where, 1, secret);
+      if (sortBy) columns(model, [sortBy.field]);
+      const order = sortBy
+        ? ` ORDER BY "${sortBy.field}" ${sortBy.direction === 'desc' ? 'DESC' : 'ASC'}`
+        : '';
       const { rows } = await pool.query(
-        `SELECT * FROM "${model}" WHERE ${sql} LIMIT $${params.length + 1}`,
-        [...params, lim],
+        `SELECT * FROM "${model}" WHERE (${sql})${model === 'sessions' ? ' AND revoked_at IS NULL' : ''}${order} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+        [...params, limit ?? 100, offset ?? 0],
       );
-      return rows as T[];
+      return rows.map((row) => output<T>(model, row, rawWhere(where)) as T);
     },
-
     async update<T>({
       model,
       where,
@@ -219,37 +222,13 @@ export function createPgAdapter({ pool }: PgAdapterOptions) {
       where?: WhereClause[];
       update: T;
     }): Promise<T | null> {
-      assertTable(model);
-      assertColumns(model, update as Record<string, unknown>);
-      const row: Record<string, unknown> = { ...(update as Record<string, unknown>) };
-      if (model === 'sessions' && typeof row.token_hash === 'string') {
-        row.token_hash = hashSessionToken(row.token_hash, secretOf());
-      } else if (model === 'sessions' && typeof row.token === 'string') {
-        row.token_hash = hashSessionToken(row.token, secretOf());
-        delete row.token;
-      }
-      if (row.client_info !== undefined) row.client_info = toJson(row.client_info);
-      if (row.metadata !== undefined) row.metadata = toJson(row.metadata);
-      // Soft-revoke sessions: delete becomes revoked_at=now.
-      if (model === 'sessions' && Object.keys(row).length === 0) {
-        const { sql, params } = translateWhere(model, where);
-        const { rows } = await pool.query(
-          `UPDATE "sessions" SET revoked_at = now(), expires_at = now() WHERE ${sql} RETURNING *`,
-          params,
-        );
-        return (rows[0] ?? null) as T | null;
-      }
-      const keys = Object.keys(row);
-      if (keys.length === 0) return null;
-      const { sql, params } = translateWhere(model, where, keys.length + 1);
-      const sets = keys.map((k, idx) => `"${k}" = $${idx + 1}`);
-      const { rows } = await pool.query(
-        `UPDATE "${model}" SET ${sets.join(',')} WHERE ${sql} RETURNING *`,
-        [...keys.map((k) => row[k]), ...params],
+      const rows = await updateRows(model, where, update as Record<string, unknown>);
+      return output<T>(
+        model,
+        rows[0],
+        (update as Record<string, unknown>).token_hash ?? rawWhere(where),
       );
-      return (rows[0] ?? null) as T | null;
     },
-
     async updateMany({
       model,
       where,
@@ -259,83 +238,20 @@ export function createPgAdapter({ pool }: PgAdapterOptions) {
       where?: WhereClause[];
       update: Record<string, unknown>;
     }): Promise<number> {
-      assertTable(model);
-      assertColumns(model, update);
-      const row: Record<string, unknown> = { ...update };
-      if (model === 'sessions' && typeof row.token_hash === 'string') {
-        row.token_hash = hashSessionToken(row.token_hash, secretOf());
-      } else if (model === 'sessions' && typeof row.token === 'string') {
-        row.token_hash = hashSessionToken(row.token, secretOf());
-        delete row.token;
-      }
-      if (row.client_info !== undefined) row.client_info = toJson(row.client_info);
-      if (row.metadata !== undefined) row.metadata = toJson(row.metadata);
-      const keys = Object.keys(row);
-      if (keys.length === 0) return 0;
-      const { sql, params } = translateWhere(model, where, keys.length + 1);
-      const sets = keys.map((k, idx) => `"${k}" = $${idx + 1}`);
-      const { rowCount } = await pool.query(
-        `UPDATE "${model}" SET ${sets.join(',')} WHERE ${sql}`,
-        [...keys.map((k) => row[k]), ...params],
-      );
-      return rowCount ?? 0;
+      return (await updateRows(model, where, update)).length;
     },
-
     async delete({ model, where }: { model: string; where?: WhereClause[] }) {
-      assertTable(model);
-      // Users: soft-delete via status (users_no_delete trigger backstop).
-      if (model === 'users') {
-        const { sql, params } = translateWhere(model, where);
-        await pool.query(
-          `UPDATE "users" SET status = 'deleted_requested', updated_at = now() WHERE ${sql}`,
-          params,
-        );
-        return;
-      }
-      // Sessions: soft-revoke, never hard-delete.
-      if (model === 'sessions') {
-        const { sql, params } = translateWhere(model, where);
-        await pool.query(
-          `UPDATE "sessions" SET revoked_at = now(), expires_at = now() WHERE ${sql}`,
-          params,
-        );
-        return;
-      }
-      const { sql, params } = translateWhere(model, where);
-      await pool.query(`DELETE FROM "${model}" WHERE ${sql}`, params);
+      await remove(model, where);
     },
-
     async deleteMany({ model, where }: { model: string; where?: WhereClause[] }): Promise<number> {
-      assertTable(model);
-      if (model === 'users') {
-        const { sql, params } = translateWhere(model, where);
-        const { rowCount } = await pool.query(
-          `UPDATE "users" SET status = 'deleted_requested', updated_at = now() WHERE ${sql}`,
-          params,
-        );
-        return rowCount ?? 0;
-      }
-      if (model === 'sessions') {
-        const { sql, params } = translateWhere(model, where);
-        const { rowCount } = await pool.query(
-          `UPDATE "sessions" SET revoked_at = now(), expires_at = now() WHERE ${sql}`,
-          params,
-        );
-        return rowCount ?? 0;
-      }
-      const { sql, params } = translateWhere(model, where);
-      const { rowCount } = await pool.query(`DELETE FROM "${model}" WHERE ${sql}`, params);
-      return rowCount ?? 0;
+      return remove(model, where);
     },
-
     async count({ model, where }: { model: string; where?: WhereClause[] }) {
-      assertTable(model);
-      const { sql, params } = translateWhere(model, where);
-      const { rows } = await pool.query(
-        `SELECT count(*)::int AS n FROM "${model}" WHERE ${sql}`,
-        params,
+      const { sql, params } = translateWhere(model, where, 1, secret);
+      return (
+        (await pool.query(`SELECT count(*)::int AS n FROM "${model}" WHERE ${sql}`, params)).rows[0]
+          ?.n ?? 0
       );
-      return rows[0]?.n ?? 0;
     },
   };
 }

@@ -378,8 +378,10 @@ export async function upgradeInstallation(file) {
 }
 
 // #68 calls this after updateConfig; no identity selection or Agent resume occurs.
-export async function reloadInstallation(file) {
+export async function reloadInstallation(file, { expectedConfig } = {}) {
   return withInstallation(file, async (config, directory) => {
+    if (expectedConfig && JSON.stringify(config) !== JSON.stringify(expectedConfig))
+      throw failure('ACCOUNT_INSTALLATION_CHANGED');
     const pending = await readJson(path.join(directory, 'upgrade.json'));
     if (pending && pending.phase !== 'complete') throw failure('UPGRADE_INCOMPLETE');
     await verifyVolumes(config, directory);

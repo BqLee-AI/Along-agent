@@ -127,7 +127,7 @@ users 1 ── 0..n <全业务表 via owner_id 逻辑引用>
 
 ## R1 账户与安装绑定（#68）
 
-以下是待实现的新增合同，不表示表或迁移已经存在；只新增下一序号 `0017_identity_account_access.sql`，不修改已合并迁移。对应 [design/16 §2–§7](../design/16-r1-account-access.md)。
+以下为 R1 新增合同，对应迁移 `0017_identity_account_access.sql`；不修改已合并迁移。设计依据见 [design/16 §2–§7](../design/16-r1-account-access.md)。
 
 ### installation_admin
 
@@ -147,7 +147,7 @@ users 1 ── 0..n <全业务表 via owner_id 逻辑引用>
 - session 的 `updatedAt` 复用既有 last_seen_at，不新增同义时间列；新会话提供库所需标准时间，不通过 GET 延长 expires_at。库的 ipAddress/userAgent 分别映射新增 nullable text `ip_address/user_agent`，不将两个标量混塞为同一 JSON 字段；确切库入参须经隔离 E1 核对。
 - 固定七天会话、禁滑动更新及 Cookie cache；只软撤销当前会话，不为退出改写 created_at/expires_at。保留原 token HMAC、原 secret 与既有会话身份，不批量转正或轮换认证材料。
 - adapter 只有在当前调用掌握 raw token 时才向库返回它；PG 永不存 raw token，不能把 token_hash 再当原 token 签 Cookie。按 ID 读取形状须先实测，不用全局缓存或逆解。
-- 发布配套 `scripts/local/baselines/0017.sql` 与 identity 迁移扫描规则，核验绑定表、列/约束及账本；旧 0016 核验继续有效。经 #67 显式升级停旧写者后迁移，失败保持停写，接受提交事实后前滚。
+- 发布配套 `scripts/local/baselines/0017-checks.json` 与 identity 迁移扫描规则，核验绑定表、列/约束及账本；沿用原 JSON 结构核验约定，旧 0016 核验继续有效。经 #67 显式升级停旧写者后迁移，失败保持停写，接受提交事实后前滚。
 
 ### 数据库与文件边界
 

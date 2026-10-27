@@ -14,19 +14,21 @@ const failures = [];
 // Conversation-owned ledger additions extend through 0014; commitments keep
 // their existing [3,9998] range.
 const groupRanges = { identity: [1, 1], conversation: [2, 14], commitments: [3, 9998] };
+// R1 identity owns exactly this next migration, not the intervening groups' range.
+const identityAccountMigration = '0017_identity_account_access.sql';
 const files = readdirSync(dir)
   .filter((f) => f.endsWith('.sql'))
   .sort();
 if (files.length === 0) failures.push('infra/migrations: no .sql files');
 for (const f of files) {
-  const m = /^(\d{4})_([a-z0-9_]+)_.+\.sql$/.exec(f);
+  const m = /^(\d{4})_([a-z0-9]+)_[a-z0-9_]+\.sql$/.exec(f);
   if (!m) {
     failures.push(`${f}: expected <seq>_<group>_*.sql (e.g. 0003_commitments_tasks.sql)`);
     continue;
   }
   const [, seq, group] = m;
   const range = groupRanges[group];
-  if (range && (+seq < range[0] || +seq > range[1])) {
+  if (range && (+seq < range[0] || +seq > range[1]) && f !== identityAccountMigration) {
     failures.push(`${f}: ${group} sequence ${seq} outside ${String(range[0]).padStart(4, '0')}+`);
   }
 }
