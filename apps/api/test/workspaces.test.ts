@@ -6,6 +6,7 @@ import type { PoolClient } from 'pg';
 import {
   canonicalRelativePath,
   configureWorkspaceRegistry,
+  loadWorkspaceRegistry,
   getWorkspaceGrant,
   listWorkspaces,
   readWorkspaceFile,
@@ -41,6 +42,51 @@ beforeEach(async () => {
 afterEach(async () => {
   await configureWorkspaceRegistry([]);
   await rm(root, { recursive: true, force: true });
+});
+
+describe('deployment registry diagnostics', () => {
+  test('missing configuration and an unreadable configured file are different and both revoke grants', async () => {
+    expect(await loadWorkspaceRegistry('')).toEqual({
+      state: 'unconfigured',
+      accepted: 0,
+      rejected: 0,
+    });
+    expect(listWorkspaces(owner)).toEqual([]);
+    await configureWorkspaceRegistry([registration()]);
+    expect(await loadWorkspaceRegistry(path.join(root, 'absent.json'))).toEqual({
+      state: 'unreadable',
+      accepted: 0,
+      rejected: 0,
+    });
+    expect(listWorkspaces(owner)).toEqual([]);
+  });
+  test('invalid JSON is diagnosed without retaining an old grant or leaking file contents', async () => {
+    const file = path.join(root, 'registry.json');
+    await writeFile(file, 'private-invalid-registry');
+    expect(await loadWorkspaceRegistry(file)).toEqual({
+      state: 'invalid',
+      accepted: 0,
+      rejected: 0,
+    });
+    expect(listWorkspaces(owner)).toEqual([]);
+  });
+  test('a mixed registration reports rejected entries and keeps only the valid original owner', async () => {
+    const file = path.join(root, 'registry.json');
+    await writeFile(
+      file,
+      JSON.stringify([
+        registration(),
+        { ...registration(), workspace_id: 'bad', root: path.join(root, 'absent') },
+      ]),
+    );
+    expect(await loadWorkspaceRegistry(file)).toEqual({
+      state: 'invalid',
+      accepted: 1,
+      rejected: 1,
+    });
+    expect(listWorkspaces(owner).map((item) => item.workspace_id)).toEqual(['workspace-test']);
+    expect(listWorkspaces('another-owner')).toEqual([]);
+  });
 });
 
 describe('trusted finite workspace boundary', () => {

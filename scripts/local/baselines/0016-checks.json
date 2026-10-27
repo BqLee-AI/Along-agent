@@ -1,0 +1,297 @@
+[
+  {
+    "table": "agent_runs",
+    "name": "agent_runs_execution_check",
+    "expression": "(execution = ANY (ARRAY['business'::text, 'harness'::text]))"
+  },
+  {
+    "table": "agent_runs",
+    "name": "agent_runs_harness_context_check",
+    "expression": "((jsonb_typeof(tools_allowlist) = 'array'::text) AND ((execution = 'business'::text) OR ((mode = 'chat'::text) AND (input_message_id IS NOT NULL) AND (frozen_context IS NOT NULL) AND (jsonb_typeof(frozen_context) = 'object'::text))))"
+  },
+  {
+    "table": "agent_runs",
+    "name": "agent_runs_mode_check",
+    "expression": "(mode = ANY (ARRAY['chat'::text, 'task'::text]))"
+  },
+  {
+    "table": "agent_runs",
+    "name": "agent_runs_status_check",
+    "expression": "(status = ANY (ARRAY['running'::text, 'suspended_approval'::text, 'done'::text, 'failed'::text, 'cancelled'::text]))"
+  },
+  {
+    "table": "agent_runs",
+    "name": "agent_runs_waiting_check",
+    "expression": "(((waiting_checkpoint_id IS NULL) AND (waiting_invocation_id IS NULL) AND (waiting_approval_id IS NULL) AND ((execution = 'business'::text) OR (status <> 'suspended_approval'::text))) OR ((execution = 'harness'::text) AND (status = 'suspended_approval'::text) AND (waiting_checkpoint_id IS NOT NULL) AND (waiting_invocation_id IS NOT NULL) AND (waiting_approval_id IS NOT NULL)))"
+  },
+  {
+    "table": "approval_revision_requests",
+    "name": "approval_revision_requests_check",
+    "expression": "((successor_approval_id IS NULL) OR (successor_approval_id <> target_approval_id))"
+  },
+  {
+    "table": "approval_revision_requests",
+    "name": "approval_revision_requests_request_hash_check",
+    "expression": "(request_hash ~ '^[0-9a-f]{64}$'::text)"
+  },
+  {
+    "table": "approvals",
+    "name": "approvals_cancel_target_check",
+    "expression": "(((kind = 'create_task'::text) AND (target_task_id IS NULL) AND (expected_state_version IS NULL)) OR ((kind = 'cancel_task'::text) AND (target_task_id IS NOT NULL) AND (expected_state_version IS NOT NULL)))"
+  },
+  {
+    "table": "approvals",
+    "name": "approvals_fold_check",
+    "expression": "(fold = ANY (ARRAY[0, 1]))"
+  },
+  {
+    "table": "approvals",
+    "name": "approvals_kind_check",
+    "expression": "(kind = ANY (ARRAY['create_task'::text, 'cancel_task'::text]))"
+  },
+  {
+    "table": "approvals",
+    "name": "approvals_occurrence_check",
+    "expression": "(occurrence = 'single'::text)"
+  },
+  {
+    "table": "approvals",
+    "name": "approvals_state_check",
+    "expression": "(state = ANY (ARRAY['pending'::text, 'consumed'::text, 'rejected'::text, 'expired'::text, 'superseded'::text]))"
+  },
+  {
+    "table": "auth_accounts",
+    "name": "auth_accounts_provider_check",
+    "expression": "(provider_id = 'credential'::text)"
+  },
+  {
+    "table": "conversations",
+    "name": "conversations_status_check",
+    "expression": "(status = ANY (ARRAY['open'::text, 'closed'::text]))"
+  },
+  {
+    "table": "document_approval_decisions",
+    "name": "document_approval_decisions_action_check",
+    "expression": "(action = ANY (ARRAY['confirm'::text, 'reject'::text]))"
+  },
+  {
+    "table": "document_approval_decisions",
+    "name": "document_approval_decisions_check",
+    "expression": "(((action = 'confirm'::text) AND (decision = 'approved'::text)) OR ((action = 'reject'::text) AND (decision = 'rejected'::text)))"
+  },
+  {
+    "table": "document_approval_decisions",
+    "name": "document_approval_decisions_decision_check",
+    "expression": "(decision = ANY (ARRAY['approved'::text, 'rejected'::text]))"
+  },
+  {
+    "table": "document_approval_decisions",
+    "name": "document_approval_decisions_request_hash_check",
+    "expression": "(request_hash ~ '^[0-9a-f]{64}$'::text)"
+  },
+  {
+    "table": "document_approvals",
+    "name": "document_approvals_base_version_check",
+    "expression": "(base_version ~ '^[0-9a-f]{64}$'::text)"
+  },
+  {
+    "table": "document_approvals",
+    "name": "document_approvals_check",
+    "expression": "((apply_invocation_id IS NULL) OR (state = 'approved'::text))"
+  },
+  {
+    "table": "document_approvals",
+    "name": "document_approvals_check1",
+    "expression": "((replaces_approval_id IS NULL) OR (replaces_approval_id <> id))"
+  },
+  {
+    "table": "document_approvals",
+    "name": "document_approvals_check2",
+    "expression": "(base_version <> new_version)"
+  },
+  {
+    "table": "document_approvals",
+    "name": "document_approvals_new_version_check",
+    "expression": "(new_version ~ '^[0-9a-f]{64}$'::text)"
+  },
+  {
+    "table": "document_approvals",
+    "name": "document_approvals_presentation_hash_check",
+    "expression": "(presentation_hash ~ '^[0-9a-f]{64}$'::text)"
+  },
+  {
+    "table": "document_approvals",
+    "name": "document_approvals_presentation_version_check",
+    "expression": "(presentation_version = 'document_replace.v1'::text)"
+  },
+  {
+    "table": "document_approvals",
+    "name": "document_approvals_preview_check",
+    "expression": "(jsonb_typeof(preview) = 'object'::text)"
+  },
+  {
+    "table": "document_approvals",
+    "name": "document_approvals_relative_path_check",
+    "expression": "(length(relative_path) > 0)"
+  },
+  {
+    "table": "document_approvals",
+    "name": "document_approvals_state_check",
+    "expression": "(state = ANY (ARRAY['pending'::text, 'approved'::text, 'rejected'::text]))"
+  },
+  {
+    "table": "document_approvals",
+    "name": "document_approvals_workspace_grant_check",
+    "expression": "(jsonb_typeof(workspace_grant) = 'object'::text)"
+  },
+  {
+    "table": "document_approvals",
+    "name": "document_approvals_workspace_id_check",
+    "expression": "(length(workspace_id) > 0)"
+  },
+  {
+    "table": "messages",
+    "name": "messages_role_check",
+    "expression": "(role = ANY (ARRAY['user'::text, 'assistant'::text, 'system'::text]))"
+  },
+  {
+    "table": "notifications",
+    "name": "notifications_channel_check",
+    "expression": "(channel = 'inapp'::text)"
+  },
+  {
+    "table": "notifications",
+    "name": "notifications_receive_binding_complete",
+    "expression": "((fire_at_utc IS NULL) = (expected_state_version IS NULL))"
+  },
+  {
+    "table": "notifications",
+    "name": "notifications_receive_version_positive",
+    "expression": "(expected_state_version > 0)"
+  },
+  {
+    "table": "notifications",
+    "name": "notifications_status_check",
+    "expression": "(status = ANY (ARRAY['pending'::text, 'sent'::text, 'failed'::text]))"
+  },
+  {
+    "table": "outbox",
+    "name": "outbox_ack_check_no_check",
+    "expression": "((ack_check_no >= 0) AND (ack_check_no <= 3))"
+  },
+  {
+    "table": "outbox",
+    "name": "outbox_status_check",
+    "expression": "(status = ANY (ARRAY['pending'::text, 'dispatched'::text, 'acked_unknown'::text, 'superseded'::text, 'failed_deadline'::text]))"
+  },
+  {
+    "table": "run_attempts",
+    "name": "run_attempts_status_check",
+    "expression": "(status = ANY (ARRAY['running'::text, 'done'::text, 'failed'::text, 'fenced_out'::text]))"
+  },
+  {
+    "table": "run_checkpoints",
+    "name": "run_checkpoints_kind_check",
+    "expression": "(kind = ANY (ARRAY['thinking'::text, 'tool_call'::text, 'tool_result'::text, 'approval_required'::text, 'answer'::text, 'thread.started'::text, 'message.delta'::text, 'card.proposed'::text, 'thread.completed'::text, 'thread.failed'::text, 'thread.cancelled'::text, 'harness_snapshot'::text]))"
+  },
+  {
+    "table": "security_events",
+    "name": "security_events_type_check",
+    "expression": "(type = 'cancel_breach'::text)"
+  },
+  {
+    "table": "sessions",
+    "name": "sessions_expiry_check",
+    "expression": "(expires_at > created_at)"
+  },
+  {
+    "table": "task_events",
+    "name": "task_events_type_check",
+    "expression": "(type = ANY (ARRAY['created'::text, 'scheduled'::text, 'fired'::text, 'missed'::text, 'cancel_requested'::text, 'cancelled'::text, 'reconciliation_run'::text]))"
+  },
+  {
+    "table": "tasks",
+    "name": "tasks_kind_check",
+    "expression": "(kind = 'notify_only'::text)"
+  },
+  {
+    "table": "tasks",
+    "name": "tasks_occurrence_check",
+    "expression": "(occurrence = 'once'::text)"
+  },
+  {
+    "table": "tasks",
+    "name": "tasks_state_check",
+    "expression": "(state = ANY (ARRAY['saved'::text, 'pending_schedule'::text, 'scheduled'::text, 'fired'::text, 'missed'::text, 'cancel_pending'::text, 'cancelled'::text]))"
+  },
+  {
+    "table": "tool_calls",
+    "name": "tool_calls_decision_check",
+    "expression": "(decision = ANY (ARRAY['allow'::text, 'deny'::text]))"
+  },
+  {
+    "table": "tool_calls",
+    "name": "tool_calls_outcome_kind_check",
+    "expression": "((outcome_kind IS NULL) OR (outcome_kind = ANY (ARRAY['success'::text, 'approval_pending'::text, 'clarification'::text, 'time_error'::text, 'denied'::text, 'failed'::text, 'unknown'::text])))"
+  },
+  {
+    "table": "tool_calls",
+    "name": "tool_calls_record_kind_check",
+    "expression": "(((record_kind = 'legacy'::text) AND (invocation_id IS NULL) AND (request_id IS NULL)) OR ((record_kind = ANY (ARRAY['accepted'::text, 'replayed'::text, 'denied'::text, 'failed'::text, 'dispatch'::text, 'unknown'::text, 'reconciled'::text])) AND (invocation_id IS NOT NULL) AND (request_id IS NOT NULL)))"
+  },
+  {
+    "table": "tool_invocations",
+    "name": "tool_invocations_args_bytes_check",
+    "expression": "(args_bytes >= 0)"
+  },
+  {
+    "table": "tool_invocations",
+    "name": "tool_invocations_args_hash_check",
+    "expression": "(args_hash ~ '^[0-9a-f]{64}$'::text)"
+  },
+  {
+    "table": "tool_invocations",
+    "name": "tool_invocations_call_key_check",
+    "expression": "((length(call_key) >= 1) AND (length(call_key) <= 200))"
+  },
+  {
+    "table": "tool_invocations",
+    "name": "tool_invocations_execution_kind_check",
+    "expression": "(execution_kind = ANY (ARRAY['local'::text, 'read_only'::text, 'non_transactional'::text]))"
+  },
+  {
+    "table": "tool_invocations",
+    "name": "tool_invocations_frozen_context_check",
+    "expression": "(jsonb_typeof(frozen_context) = 'object'::text)"
+  },
+  {
+    "table": "tool_invocations",
+    "name": "tool_invocations_outcome_kind_check",
+    "expression": "(outcome_kind = ANY (ARRAY['success'::text, 'approval_pending'::text, 'clarification'::text, 'time_error'::text, 'denied'::text, 'failed'::text]))"
+  },
+  {
+    "table": "tool_invocations",
+    "name": "tool_invocations_result_check",
+    "expression": "(((state = ANY (ARRAY['reserved'::text, 'unknown'::text])) AND (outcome_kind IS NULL) AND (result_version IS NULL) AND (accepted_result IS NULL) AND (approval_id IS NULL) AND (accepted_attempt_id IS NULL) AND (accepted_request_id IS NULL) AND (accepted_at IS NULL) AND (evidence_ref IS NULL)) OR ((state = 'completed'::text) AND (outcome_kind IS NOT NULL) AND (result_version = 1) AND (accepted_result IS NOT NULL) AND (jsonb_typeof(accepted_result) = 'object'::text) AND (octet_length((accepted_result)::text) <= 262144) AND (accepted_attempt_id IS NOT NULL) AND (accepted_request_id IS NOT NULL) AND (accepted_at IS NOT NULL) AND (((outcome_kind = 'approval_pending'::text) AND (approval_id IS NOT NULL)) OR ((outcome_kind <> 'approval_pending'::text) AND (approval_id IS NULL)))))"
+  },
+  {
+    "table": "tool_invocations",
+    "name": "tool_invocations_state_check",
+    "expression": "(state = ANY (ARRAY['reserved'::text, 'unknown'::text, 'completed'::text]))"
+  },
+  {
+    "table": "tool_invocations",
+    "name": "tool_invocations_unknown_check",
+    "expression": "((state <> 'unknown'::text) OR (execution_kind = 'non_transactional'::text))"
+  },
+  {
+    "table": "users",
+    "name": "users_auth_provider_check",
+    "expression": "((auth_provider IS NULL) OR (auth_provider = 'local'::text))"
+  },
+  {
+    "table": "users",
+    "name": "users_status_check",
+    "expression": "(status = ANY (ARRAY['active'::text, 'disabled'::text, 'deleted_requested'::text]))"
+  }
+]

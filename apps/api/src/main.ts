@@ -10,9 +10,15 @@ const role = parseRole(process.env.ROLE);
 // Main owns the request/scheduler pool; the worker owns its receive pool.
 const pool = createPool();
 if (role === 'api' || role === 'all') {
-  await loadWorkspaceRegistry().catch(() => {
-    console.error('Workspace registry unavailable; workspace access is disabled.');
-  });
+  const registry = await loadWorkspaceRegistry();
+  console.info(
+    'Workspace registry:',
+    registry.state,
+    'accepted:',
+    registry.accepted,
+    'rejected:',
+    registry.rejected,
+  );
 }
 const server =
   role === 'api' || role === 'all'

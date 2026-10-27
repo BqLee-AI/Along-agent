@@ -1,0 +1,245 @@
+import path from 'node:path';
+import { createRequire } from 'node:module';
+import { randomUUID } from 'node:crypto';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { createInterface } from 'node:readline/promises';
+import { Writable } from 'node:stream';
+import { failure, run } from './commands.mjs';
+
+const usage = `本机生命周期（Bun 1.4.2 / Windows + Docker Linux x64）
+  bun --no-env-file run local:init --new [--config <私有 JSON>]
+  bun --no-env-file run local:init --adopt [--config <私有 JSON>]
+  bun --no-env-file run local:start [--config <私有 JSON>]
+  bun --no-env-file run local:stop [--config <私有 JSON>]
+  bun --no-env-file run local:upgrade [--config <私有 JSON>]
+已有配置时 local:init 只复用，不覆盖；首次 --new/--adopt 通过终端输入。
+未登录、缺模型或工作区均独立提示；启动不自动发模型请求。`;
+
+function options(args) {
+  const [action, ...rest] = args;
+  if (!['init', 'start', 'stop', 'upgrade'].includes(action)) throw failure('ARGUMENT_INVALID');
+  const value = { action, mode: null, file: null, help: false };
+  for (let index = 0; index < rest.length; index++) {
+    const flag = rest[index];
+    if (flag === '--help' || flag === '-h') value.help = true;
+    else if (flag === '--config' && rest[index + 1] && !value.file)
+      value.file = path.resolve(rest[++index]);
+    else if (['--new', '--adopt'].includes(flag) && !value.mode && action === 'init')
+      value.mode = flag.slice(2);
+    else throw failure('ARGUMENT_INVALID');
+  }
+  return value;
+}
+
+async function prepareDependencies(action) {
+  const require = createRequire(import.meta.url);
+  try {
+    require.resolve('pg');
+    require.resolve('zod');
+  } catch {
+    if (action !== 'init') throw failure('PREPARATION_REQUIRED');
+    const cache = await mkdtemp(path.join(tmpdir(), 'along-dependencies-'));
+    try {
+      await run(
+        process.execPath,
+        [
+          '--no-env-file',
+          'install',
+          '--frozen-lockfile',
+          '--backend=copyfile',
+          '--cache-dir',
+          cache,
+        ],
+        { cwd: path.resolve(import.meta.dirname, '../..'), code: 'DEPENDENCY_INSTALL_FAILED' },
+      );
+    } finally {
+      await rm(cache, { recursive: true, force: true });
+    }
+  }
+}
+
+async function newInstallationInput(mode) {
+  if (!mode || !process.stdin.isTTY) throw failure('CONFIG_INPUT_REQUIRED');
+  const resource = JSON.parse(
+    await readFile(
+      new URL('../../apps/api/resources/time/fixture-v1.json', import.meta.url),
+      'utf8',
+    ),
+  );
+  let muted = false;
+  const output = new Writable({
+    write(chunk, encoding, done) {
+      if (!muted) process.stdout.write(chunk, encoding);
+      done();
+    },
+  });
+  const input = createInterface({ input: process.stdin, output, terminal: true });
+  const ask = async (label, fallback, hidden = false) => {
+    process.stdout.write(`${label}${fallback === undefined ? '' : ` [${fallback}]`}: `);
+    muted = hidden;
+    try {
+      const answer = await input.question('');
+      const text = hidden ? answer : answer.trim();
+      return text || fallback;
+    } finally {
+      muted = false;
+      if (hidden) process.stdout.write('\n');
+    }
+  };
+  try {
+    const values = {
+      mode,
+      ports: {
+        postgres: Number(await ask('PG loopback 端口', 55432)),
+        api: Number(await ask('API loopback 端口', 3000)),
+        web: Number(await ask('Web loopback 端口', 3100)),
+      },
+      tzdbVersion: await ask(
+        'TZDB_VERSION（必须与本版本时间资源相符）',
+        mode === 'new' ? resource.tzdb_version : undefined,
+      ),
+    };
+    if (mode === 'adopt') {
+      console.log('接入前请手动停止原 API/worker/Web；本入口不认领未知进程或创建替代数据。');
+      Object.assign(values, {
+        version: 1,
+        installationId: randomUUID(),
+        project: await ask('原 Compose 项目名'),
+        postgresVolume: await ask('原 PG 卷名'),
+        workspaceVolume: await ask('原资料卷名'),
+        workspaceMount: await ask('原资料容器挂载位置', '/var/lib/along/workspaces'),
+        database: {
+          user: await ask('原数据库用户'),
+          password: await ask('原数据库密码（隐藏输入）', undefined, true),
+          name: await ask('原数据库名'),
+        },
+        authSecret: await ask('原 BETTER_AUTH_SECRET（隐藏输入，不能遗失或替换）', undefined, true),
+        origin: await ask('原 APP_ORIGIN / Web origin（隐藏输入）', undefined, true),
+        registryFile: (await ask('原登记 JSON 绝对路径；原本无登记才可留空', '', true)) || null,
+        model: null,
+      });
+    }
+    const model = await ask(
+      mode === 'adopt'
+        ? '原部署有模型配置？有请填 y；原本无配置回车'
+        : '配置已授权模型？填 y；暂不配置回车',
+      'n',
+    );
+    if (model === 'y')
+      values.model = {
+        baseUrl: await ask('HARNESS_MODEL_BASE_URL（隐藏输入）', undefined, true),
+        name: await ask('HARNESS_MODEL（不提供默认替代值）', undefined, true),
+        apiKey: await ask('HARNESS_MODEL_API_KEY（隐藏输入；原服务无认证才留空）', '', true),
+        maxIterations: Number(await ask('HARNESS_MAX_ITERATIONS', 24)),
+        maxTokens: Number(await ask('HARNESS_MAX_TOKENS', 64000)),
+      };
+    return values;
+  } finally {
+    input.close();
+  }
+}
+
+const explanations = {
+  CONFIG_MISSING: '缺少私有配置；先运行 local:init --new 或 --adopt。不要重建原安装密钥。',
+  CONFIG_INPUT_REQUIRED:
+    '首次初始化需在交互终端显式选择 --new 或 --adopt。已有部署请先恢复原配置和登记。',
+  CONFIG_INVALID: '私有 JSON 缺少必填项或字段无效；核对指南，不要用新密钥补原安装。',
+  CONFIG_PERMISSIONS: '配置目录或文件不是当前用户专有；请使用专用私有目录并修复权限。',
+  CONFIG_EXISTS: '配置已存在；重用它，不覆盖原值。',
+  PORT_IN_USE: '固定端口已被占用；核实原进程归属并按原部署流程停写，不会抢端口或杀未知进程。',
+  UNKNOWN_PROCESS: '不能证明原进程归属；请手动核实并停止原 API/worker/Web，再接入或升级。',
+  LOCK_BUSY: '同一安装另有操作正在执行；等待它退出再重试，不删除标记或凭 PID 杀进程。',
+  LOCK_UNAVAILABLE: '安装锁的本机监听资源被占用；核实归属后处理，不自动抢占。',
+  PREPARATION_REQUIRED: '缺少成套产物或安装记录；先初始化，已准备安装用显式 local:upgrade 修复。',
+  UPGRADE_REQUIRED:
+    '源码、运行产物或数据库版本不一致；使用显式 local:upgrade，不在普通启动中迁移。',
+  UPGRADE_INCOMPLETE:
+    '上次升级未完成，写者保持停止；核对备份、账本和失败阶段后显式重试 local:upgrade。',
+  DATABASE_UNSUPPORTED:
+    '数据库不是完整受支持基线；先备份并人工核对，不猜版本、stamp、重放全量或清库。',
+  CONFIG_LOCATION_INVALID: '配置必须位于 checkout 外的专用私有目录，不能把秘密放入代码仓库。',
+  CONFIG_RELOAD_REQUIRED:
+    '已运行服务的固定地址与配置不同；先 local:stop，再按明确的新配置启动，不在线改绑或抢端口。',
+  CONNECTION_FAILED: '数据库不可连接或原认证材料不符；连接失败不是空库，核对原私有配置和 PG 状态。',
+  UNMANAGED_DATABASE_CLIENTS:
+    '仍有不属于本次停写的数据库客户端；手动核实原 API/worker，停稳后再升级。',
+  DEPLOYMENT_BUSY: '同一数据库已有部署操作持许可；待其结束再重试。',
+  DEPLOYMENT_LEASE_LOST: '数据库部署许可丢失；保持停写，核对账本后显式重试升级。',
+  ORIGINAL_VOLUME_MISSING: '找不到原持久卷；恢复原对象，不创建替代卷。',
+  VOLUME_IDENTITY_CHANGED:
+    '持久卷身份发生变化；恢复原卷并核对数据和 root 身份，不能以复制新目录修复。',
+  BUN_VERSION: '需要 Bun 1.4.2。',
+  DOCKER_UNAVAILABLE: 'Docker 不可用；检查正在使用的 Docker Desktop Linux 引擎。',
+  DOCKER_PLATFORM: '需要 Linux x64 Docker 引擎，不回退到另一 native 路径。',
+  COMPOSE_VERSION: '需要 Docker Compose 2.24.4 或更高版本。',
+};
+
+try {
+  const request = options(process.argv.slice(2));
+  if (request.help) {
+    console.log(usage);
+  } else {
+    await prepareDependencies(request.action);
+    const { defaultConfigPath, loadConfig } = await import('./config.mjs');
+    const file = request.file ?? defaultConfigPath();
+    const { assertExternalConfiguration } = await import('./compose.mjs');
+    assertExternalConfiguration(file);
+    let initialInput;
+    if (request.action === 'init') {
+      try {
+        await loadConfig(file);
+      } catch (error) {
+        if (error.code !== 'CONFIG_MISSING') throw error;
+        initialInput = await newInstallationInput(request.mode);
+      }
+    }
+    const runtime = await import('./runtime.mjs');
+    const actions = {
+      init: runtime.initializeInstallation,
+      start: runtime.startInstallation,
+      stop: runtime.stopInstallation,
+      upgrade: runtime.upgradeInstallation,
+    };
+    const result = await actions[request.action](file, initialInput);
+    console.log(
+      result.phase === 'prepared'
+        ? '本安装已准备；API/worker/Web 未由初始化启动。'
+        : result.phase === 'stopped'
+          ? '本安装已停止；配置、数据卷和资料保留。'
+          : `Web 已启动：${result.webUrl}`,
+    );
+    if (result.phase !== 'stopped') {
+      console.log('账户状态未核验；正式开户由后续账户入口完成。');
+      console.log(
+        result.model === 'unconfigured'
+          ? '模型尚未配置，资料任务能力不可用。'
+          : '模型已配置但真实调用未核验；启动没有发出模型请求。',
+      );
+      const workspace =
+        typeof result.workspace === 'string'
+          ? result.workspace
+          : result.workspace?.state === 'loaded' && result.workspace.accepted === 0
+            ? 'unconfigured'
+            : result.workspace?.state;
+      console.log(
+        ['unconfigured', 'unverified'].includes(workspace)
+          ? workspace === 'unconfigured'
+            ? '工作区尚未配置。'
+            : '工作区登记已指定，尚未核验。'
+          : workspace === 'loaded'
+            ? '工作区登记已加载；访问仍受原 owner 和有限路径规则控制。'
+            : '工作区登记读取或资格校验失败，失效项未开放；核对私有登记和原根目录。',
+      );
+    }
+  }
+} catch (error) {
+  const code =
+    typeof error.code === 'string' && /^[A-Z_][A-Z0-9_]{1,63}$/iu.test(error.code)
+      ? error.code.toUpperCase()
+      : 'LOCAL_OPERATION_FAILED';
+  console.error(
+    `[${code}] ${explanations[code] ?? '操作失败；检查依赖和专用私有目录内的诊断记录。不会自动清库、换密钥或回退旧写者。'}`,
+  );
+  process.exitCode = 1;
+}
