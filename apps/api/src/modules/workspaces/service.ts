@@ -81,9 +81,14 @@ async function checkedDirectory(directory: string): Promise<void> {
     }
   }
 }
-export async function configureWorkspaceRegistry(input: unknown): Promise<void> {
+export interface RegistryLoadReport {
+  state: 'unconfigured' | 'loaded' | 'invalid' | 'unreadable';
+  accepted: number;
+  rejected: number;
+}
+export async function configureWorkspaceRegistry(input: unknown): Promise<RegistryLoadReport> {
   registry.clear();
-  if (!Array.isArray(input)) return;
+  if (!Array.isArray(input)) return { state: 'invalid', accepted: 0, rejected: 0 };
   const candidates: ActiveRegistration[] = [];
   for (const value of input) {
     try {
@@ -158,18 +163,28 @@ export async function configureWorkspaceRegistry(input: unknown): Promise<void> 
       }
     }
   for (const item of candidates) if (!conflicts.has(item)) registry.set(item.workspace_id, item);
+  return {
+    state: registry.size === input.length ? 'loaded' : 'invalid',
+    accepted: registry.size,
+    rejected: input.length - registry.size,
+  };
 }
 export async function loadWorkspaceRegistry(
   file = process.env.WORKSPACE_REGISTRY_FILE,
-): Promise<void> {
+): Promise<RegistryLoadReport> {
   if (!file) {
     registry.clear();
-    return;
+    return { state: 'unconfigured', accepted: 0, rejected: 0 };
   }
   try {
-    await configureWorkspaceRegistry(JSON.parse(await readFile(file, 'utf8')));
-  } catch {
+    return await configureWorkspaceRegistry(JSON.parse(await readFile(file, 'utf8')));
+  } catch (error) {
     registry.clear();
+    return {
+      state: error instanceof SyntaxError ? 'invalid' : 'unreadable',
+      accepted: 0,
+      rejected: 0,
+    };
   }
 }
 function selected(ownerId: string, grant: WorkspaceGrant): ActiveRegistration {

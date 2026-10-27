@@ -98,7 +98,7 @@
 - [ADR 决策记录](adr/README.md)：0000 模板、0001–0005 种子 ADR、[0006 Bun + Ox 工具链](adr/0006-bun-ox-toolchain.md)（取代 0002）、[0007 CI 关键路径局部修订](adr/0007-ci-critical-path.md)（调整 0006 的编排/失败传播）及 [0008 static 内部调度](adr/0008-static-scheduling.md)（局部修订 0007 的内部并发边界）；Bun/Ox 选型和五门全成功不变，冻结决策正文保留，改口径另起新 ADR。
 - [ADR0009](adr/0009-cangjie-harness-ts-capabilities.md) 确定仓颉唯一 Harness/TS 长期能力，并局部修订0003的 outbox/确认事务绝对范围；历史 ADR/验收保留其适用边界。同步公共用例/DTO、只读投影、确认创建/取消单事务和可靠异步 outbox 分列，D1 不证明 SQL 所有权。正式实现与分级验收见 design/09/11，[native 构建/运行说明](../apps/harness/README.md) 不等于真实 provider/完整 R1 验收。
 - [R1 文档任务合同（#62）](design/14-r1-document-task-loop.md) 定义 Web 选择工作区、真实 TS MCP 检索、文档批准、写入与回读；行为真源为 [workspaces](../openspec/specs/workspaces/spec.md)、[agent-runtime](../openspec/specs/agent-runtime/spec.md) 和 [tool-gateway](../openspec/specs/tool-gateway/spec.md)。[归档记录](../openspec/changes/archive/2026-10-26-define-r1-document-task-loop/tasks.md) 分列正式消费者、真实模型与受管资料副本验收，不把 #45–#47 的底座证据或混合模型的成功矩阵扩大为单模型可靠性证明。
-- [R1 本地生命周期合同（#67）](design/15-r1-local-lifecycle.md) 的行为增量见 [close-r1-local-lifecycle](../openspec/changes/close-r1-local-lifecycle/proposal.md)；固定入口、迁移分流和验收为设计目标，不把根 dev、现有健康探针或 #62 的历史证据写成生命周期功能已交付。
+- [R1 本地生命周期合同（#67）](design/15-r1-local-lifecycle.md) 的行为增量见 [close-r1-local-lifecycle](../openspec/changes/close-r1-local-lifecycle/proposal.md)；[本机使用指南](local-lifecycle.md)覆盖四入口、私有配置、原部署接入及停写维护。进程健康、受控合同与真实模型证据分别记录，不能互相代替。
 - 冲突矩阵：行为/验收以 spec 为准，字段/路由以 design/api/schema 为准，why 以 ADR 为准。
 
 ## 维护约定

@@ -1,0 +1,33 @@
+services:
+  postgres:
+    restart: 'no'
+    labels:
+      io.along.installation: ${ALONG_INSTALLATION}
+    environment:
+      POSTGRES_USER: ${ALONG_DB_USER}
+      POSTGRES_PASSWORD: ${ALONG_DB_PASSWORD}
+      POSTGRES_DB: ${ALONG_DB_NAME}
+    ports: !override
+      - '127.0.0.1:${ALONG_DB_PORT}:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+  api:
+    image: ${ALONG_API_IMAGE}
+    restart: 'no'
+    labels:
+      io.along.installation: ${ALONG_INSTALLATION}
+    environment:
+      APP_ORIGIN: ${APP_ORIGIN}
+    ports: !override
+      - '127.0.0.1:${ALONG_API_PORT}:3000'
+    volumes: !override
+      - type: volume
+        source: workspace_data
+        target: ${ALONG_WORKSPACE_MOUNT}
+volumes:
+  pgdata:
+    external: true
+    name: ${ALONG_PG_VOLUME}
+  workspace_data:
+    external: true
+    name: ${ALONG_WORKSPACE_VOLUME}

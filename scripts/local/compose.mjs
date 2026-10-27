@@ -1,0 +1,259 @@
+import path from 'node:path';
+import { lstat, mkdir, open } from 'node:fs/promises';
+import net from 'node:net';
+import { failure, hostEnvironment, readJson, run, writeJson } from './commands.mjs';
+
+export const repositoryRoot = path.resolve(import.meta.dirname, '../..');
+export const installationDirectory = (file, config) =>
+  path.join(path.dirname(path.resolve(file)), 'installations', config.installationId);
+export const imageName = (config, digest) => `along-local-${config.installationId}:${digest}`;
+
+export function assertExternalConfiguration(file) {
+  const relative = path.relative(repositoryRoot, path.resolve(file));
+  if (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`))
+    throw failure('CONFIG_LOCATION_INVALID');
+}
+
+export function assertLoopbackBinding(container, servicePort, hostPort) {
+  const bindings = container.ports?.[`${servicePort}/tcp`];
+  if (
+    !Array.isArray(bindings) ||
+    bindings.length !== 1 ||
+    bindings[0].HostIp !== '127.0.0.1' ||
+    Number(bindings[0].HostPort) !== hostPort
+  )
+    throw failure('CONFIG_RELOAD_REQUIRED');
+}
+
+export function installationEnvironment(config, image = 'along-local:unprepared') {
+  const databaseUrl = new URL('postgresql://postgres:5432');
+  databaseUrl.username = config.database.user;
+  databaseUrl.password = config.database.password;
+  databaseUrl.pathname = `/${config.database.name}`;
+  return hostEnvironment({
+    ALONG_INSTALLATION: config.installationId,
+    ALONG_DB_USER: config.database.user,
+    ALONG_DB_PASSWORD: config.database.password,
+    ALONG_DB_NAME: config.database.name,
+    ALONG_DB_PORT: String(config.ports.postgres),
+    ALONG_API_PORT: String(config.ports.api),
+    ALONG_PG_VOLUME: config.postgresVolume,
+    ALONG_WORKSPACE_VOLUME: config.workspaceVolume,
+    ALONG_WORKSPACE_MOUNT: config.workspaceMount,
+    ALONG_API_IMAGE: image,
+    DATABASE_URL: databaseUrl.toString(),
+    BETTER_AUTH_SECRET: config.authSecret,
+    APP_ORIGIN: config.origin,
+    API_BASE: `http://127.0.0.1:${config.ports.api}`,
+    TZDB_VERSION: config.tzdbVersion,
+    HARNESS_MODEL_BASE_URL: config.model?.baseUrl ?? '',
+    HARNESS_MODEL: config.model?.name ?? '',
+    HARNESS_MODEL_API_KEY: config.model?.apiKey ?? '',
+    HARNESS_MAX_ITERATIONS: String(config.model?.maxIterations ?? 24),
+    HARNESS_MAX_TOKENS: String(config.model?.maxTokens ?? 64000),
+    WORKSPACE_REGISTRY_FILE: config.registryFile ? '/run/along-registry.json' : '',
+  });
+}
+
+export async function compose(config, directory, args, { image, source = repositoryRoot } = {}) {
+  const registration = path.join(directory, 'registry.compose.json');
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  let readableRegistration = false;
+  if (config.registryFile) {
+    try {
+      if ((await lstat(config.registryFile)).isFile()) {
+        const file = await open(config.registryFile, 'r');
+        await file.close();
+        readableRegistration = true;
+      }
+    } catch {
+      // Keep the configured in-container path absent. The API reports unreadable
+      // registration without taking unrelated authenticated business offline.
+    }
+  }
+  await writeJson(registration, {
+    services: {
+      api: {
+        volumes: readableRegistration
+          ? [
+              {
+                type: 'bind',
+                source: config.registryFile,
+                target: '/run/along-registry.json',
+                read_only: true,
+                bind: { create_host_path: false },
+              },
+            ]
+          : [],
+      },
+    },
+  });
+  return run(
+    'docker',
+    [
+      'compose',
+      '--project-name',
+      config.project,
+      '-f',
+      path.join(source, 'infra/compose/compose.yaml'),
+      '-f',
+      path.join(source, 'infra/compose/local.yaml'),
+      '-f',
+      registration,
+      ...args,
+    ],
+    { env: installationEnvironment(config, image), code: 'COMPOSE_FAILED' },
+  );
+}
+
+const inspectTemplate =
+  '{"id":{{json .Id}},"running":{{json .State.Running}},"labels":{{json .Config.Labels}},"image":{{json .Image}},"ports":{{json .HostConfig.PortBindings}}}';
+export async function projectContainers(config) {
+  const ids = (
+    await run(
+      'docker',
+      ['ps', '-aq', '--filter', `label=com.docker.compose.project=${config.project}`],
+      { code: 'DOCKER_UNAVAILABLE' },
+    )
+  )
+    .trim()
+    .split(/\s+/u)
+    .filter(Boolean);
+  return Promise.all(
+    ids.map(async (id) =>
+      JSON.parse(await run('docker', ['inspect', '--format', inspectTemplate, id])),
+    ),
+  );
+}
+
+export function assertOwned(containers, config, { adopting = false } = {}) {
+  for (const item of containers) {
+    if (item.labels?.['io.along.installation'] === config.installationId) continue;
+    if (
+      adopting &&
+      !item.running &&
+      ['api', 'postgres'].includes(item.labels?.['com.docker.compose.service'])
+    )
+      continue;
+    throw failure('UNKNOWN_PROCESS');
+  }
+}
+
+export async function assertNoForeignVolumeUsers(config) {
+  for (const volume of [config.postgresVolume, config.workspaceVolume]) {
+    const ids = (await run('docker', ['ps', '-q', '--filter', `volume=${volume}`]))
+      .trim()
+      .split(/\s+/u)
+      .filter(Boolean);
+    for (const id of ids) {
+      const item = JSON.parse(await run('docker', ['inspect', '--format', inspectTemplate, id]));
+      if (
+        item.labels?.['io.along.installation'] !== config.installationId ||
+        item.labels?.['com.docker.compose.project'] !== config.project
+      )
+        throw failure('UNKNOWN_PROCESS');
+    }
+  }
+}
+
+async function volumeInfo(name) {
+  try {
+    return JSON.parse(
+      await run('docker', [
+        'volume',
+        'inspect',
+        '--format',
+        '{"name":{{json .Name}},"created":{{json .CreatedAt}},"labels":{{json .Labels}}}',
+        name,
+      ]),
+    );
+  } catch {
+    return null;
+  }
+}
+
+export async function prepareVolumes(config, directory) {
+  const original = await readJson(path.join(directory, 'objects.json'));
+  const objects = {};
+  for (const [kind, name] of [
+    ['postgres', config.postgresVolume],
+    ['workspace', config.workspaceVolume],
+  ]) {
+    let info = await volumeInfo(name);
+    if (!info) {
+      if (config.mode !== 'new' || original) throw failure('ORIGINAL_VOLUME_MISSING');
+      await run('docker', [
+        'volume',
+        'create',
+        '--label',
+        `io.along.installation=${config.installationId}`,
+        name,
+      ]);
+      info = await volumeInfo(name);
+    } else if (
+      !original &&
+      config.mode === 'new' &&
+      info.labels?.['io.along.installation'] !== config.installationId
+    ) {
+      throw failure('VOLUME_NOT_OWNED');
+    }
+    if (!info?.created) throw failure('VOLUME_IDENTITY_UNAVAILABLE');
+    objects[kind] = { name: info.name, created: info.created };
+  }
+  if (original && JSON.stringify(original) !== JSON.stringify(objects))
+    throw failure('VOLUME_IDENTITY_CHANGED');
+  if (!original) await writeJson(path.join(directory, 'objects.json'), objects);
+}
+
+export async function verifyVolumes(config, directory) {
+  if (!(await readJson(path.join(directory, 'objects.json'))))
+    throw failure('PREPARATION_REQUIRED');
+  await prepareVolumes(config, directory);
+}
+
+export async function assertPortFree(port, { replacingOwned = false } = {}) {
+  // Windows can reject an exclusive bind for ~60s after Docker has stopped,
+  // even with no listener. Only a verified owned handoff may probe listeners
+  // instead; Docker still performs the actual bind and rejects any collision.
+  if (process.platform === 'win32' && replacingOwned) {
+    await new Promise((resolve, reject) => {
+      const socket = net.connect({ host: '127.0.0.1', port });
+      const finish = (occupied) => {
+        socket.destroy();
+        if (occupied) reject(failure('PORT_IN_USE'));
+        else resolve();
+      };
+      socket.once('connect', () => finish(true));
+      socket.once('error', (error) => finish(error.code !== 'ECONNREFUSED'));
+      socket.setTimeout(1000, () => finish(true));
+    });
+    return;
+  }
+  await new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.once('error', () => reject(failure('PORT_IN_USE')));
+    server.listen({ host: '127.0.0.1', port, exclusive: true }, () => server.close(resolve));
+  });
+}
+
+export async function checkDependencies() {
+  if (process.versions.bun !== '1.4.2') throw failure('BUN_VERSION');
+  const platform = (
+    await run('docker', ['info', '--format', '{{.OSType}}/{{.Architecture}}'], {
+      code: 'DOCKER_UNAVAILABLE',
+    })
+  ).trim();
+  if (!['linux/x86_64', 'linux/amd64'].includes(platform)) throw failure('DOCKER_PLATFORM');
+  const version = (
+    await run('docker', ['compose', 'version', '--short'], { code: 'COMPOSE_VERSION' })
+  )
+    .trim()
+    .replace(/^v/u, '')
+    .split('.')
+    .map(Number);
+  if (
+    version[0] < 2 ||
+    (version[0] === 2 && (version[1] < 24 || (version[1] === 24 && version[2] < 4)))
+  )
+    throw failure('COMPOSE_VERSION');
+}
