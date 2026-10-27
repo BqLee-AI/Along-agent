@@ -2,7 +2,7 @@
 
 ## 对象与边界
 
-- 对象：基于 `e9d2a6d` 的 `feat/68-account-access` 实现，对应 #68、design/16 和 `close-r1-account-access`，不等于 archive 或 Issue 收口。
+- 对象：基于 `e9d2a6d` 的账户实现，提交 `0da0b7ed2d6cf87de35d5e93717bd47ffd497594`，经 [PR #75](https://github.com/BqLee-AI/Along-agent/pull/75) squash 为 `5a035a89678133afa0f2ac5c2a7eccd569503e8e`；对应 #68、design/16 和 `close-r1-account-access`。本记录区分实现验收与独立归档，不将实现合并当作 Issue 收口。
 - 环境：Windows、Bun 1.4.2、正式 Next.js production Web、Compose API/worker、PostgreSQL 16；原生合同使用正式 Linux x64 仓颉构建。
 - 使用三个新建隔离安装，分别验证空安装、无会话的多原用户维护、有效旧签名会话转正。仅操作这些安装及独立测试数据库，未使用用户库、原认证密钥或模型配置；模型均未配置，没有模型调用。
 - 空安装实跑构建摘要：`41eaf42616042c391459d894bf349aa515c9683a7604fa06200ae24dadc60f66`。该构建之后的代码改动仅为集成测试服务器收尾；真实用户路径的运行代码未变化。
@@ -88,4 +88,12 @@ Windows Bun 1.4.2 的 PG 并行测试曾发生运行时 segmentation fault；它
 
 - 同一 Chromium context 对 `127.0.0.1` 的不同端口共享 Cookie；三安装验收按顺序登录并核对 HMAC 归属，未把跨安装 Cookie 覆盖造成的 401 当作重启失败。
 - 本记录是本地、隔离生产构建及受控实验结果，不冒充部署到用户原安装或 PR CI。PR 的 CI 结果单列在 PR Verification。
-- 不更换用户原模型/provider/路由，不进入 #69/#70/R2，不关闭 #66。实现 PR 只 Refs #68；archive 与关闭 #68 留给独立收口单元。
+- 不更换用户原模型/provider/路由，不进入 #69/#70/R2，不关闭 #66。本记录仅证明 #68 账户切片；[独立归档清单](../openspec/changes/archive/2026-10-27-close-r1-account-access/tasks.md)对应其七项验收，不代替 #66 全路径验收。
+
+## CI 与独立审阅（2026-10-27）
+
+- 实现提交 `0da0b7e` 的 [CI run 40492094141](https://github.com/BqLee-AI/Along-agent/actions/runs/40492094141) 中，static、migration-scan、scheduler-fault、contracts-dual、compose-smoke 五门全部通过。scheduler-fault 指定四文件为 32 pass、0 fail；不把它称为全部 29 文件集成重跑。
+- 用户要求的独立 reviewer 审阅基线为 `e9d2a6d`、目标为 `0da0b7e`，未发现满足“本 PR 新引入、影响可证明且可独立修复”标准的可操作缺陷。
+- 独立审阅实际采用只读 diff、源码与消费者追踪，并核对 #68、design/16、auth API §4 和 identity 合同；覆盖账户绑定/事务、库登录与 token/HMAC、撤销后清 Cookie、历史 owner、0017 结构核验、本机登记/配置/重载及 Web 401/SSE 恢复。没有新增动态复现、测试、构建、浏览器或数据库操作；未对系统 ACL、真实 Docker/网络故障、并发文件替换做运行时验证，不表示证明不存在缺陷。
+- CodeRabbit Free 只生成摘要，没有独立代码审查意见，不作为上述独立审阅的证据。
+- 收口仅归档合同、同步行为规格与引用，不改变运行代码、依赖、迁移或配置；沿用本记录中对应实现版本的有效验收证据，不重复运行没有新增证据价值的账户路径。

@@ -2,7 +2,7 @@
 
 本方案由 planner 静态调研后起草，主线程核对 `identity/better-auth.ts`、`pg-adapter.ts`、Web proxy 与 #67 版本核验路径。规划不是运行证据：正式登录 Cookie/HMAC 兼容性、库退出异常及真实事务须在隔离 PG 实验确认。
 
-设计真源为 [design/16](../../../docs/design/16-r1-account-access.md)，准确路由和字段分别见 [auth API](../../../docs/api/auth/auth_routes.md#4-r1-账户访问68) 与 [identity schema](../../../docs/schema/identity-schema.md#r1-账户与安装绑定68)，这里仅记录取舍和实施顺序，不复制 DTO/DDL。
+设计真源为 [design/16](../../../../docs/design/16-r1-account-access.md)，准确路由和字段分别见 [auth API](../../../../docs/api/auth/auth_routes.md#4-r1-账户访问68) 与 [identity schema](../../../../docs/schema/identity-schema.md#r1-账户与安装绑定68)，这里仅记录取舍和实施顺序，不复制 DTO/DDL。
 
 ## Goals / Non-Goals
 

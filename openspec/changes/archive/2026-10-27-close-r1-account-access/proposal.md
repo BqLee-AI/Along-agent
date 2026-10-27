@@ -14,7 +14,7 @@ R1 本地生命周期已提供稳定入口，但正式 credential 登录链尚�
 
 ## Spec
 
-- [design/16](../../../docs/design/16-r1-account-access.md) §1–§8 是设计真源；[auth API](../../../docs/api/auth/auth_routes.md) §4、[identity schema](../../../docs/schema/identity-schema.md) 的 R1 合同同步。
+- [design/16](../../../../docs/design/16-r1-account-access.md) §1–§8 是设计真源；[auth API](../../../../docs/api/auth/auth_routes.md) §4、[identity schema](../../../../docs/schema/identity-schema.md) 的 R1 合同同步。
 - 行为增量为 identity；保留业务鉴权、session-bound CSRF、owner 隔离、精确批准、取消、unknown 及 #67 升级边界。
 - 只新增下一序号迁移及对应版本核验/identity 扫描规则，不改旧迁移。
 
