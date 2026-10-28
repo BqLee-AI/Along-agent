@@ -11,7 +11,7 @@
 | ---- | -------------------------------------------------------------- | ---------------------------------------------------------------- |
 | 1    | [PRD 索引入口](prd/README.md)                                  | 依赖链：简报→卡片→对话→提议→确认→调度→通知→活动账；Required 列表 |
 | 2    | [产品概览与范围](prd/01-overview-and-scope.md)                 | 定位、P0–P5 范围、非目标、差异化三点                             |
-| 3    | [核心循环与页面](prd/02-core-loop-and-pages.md)                | v0 闭环、喝水与每日简报场景、五视图、活动页                      |
+| 3    | [核心循环与页面](prd/02-core-loop-and-pages.md)                | v0 闭环、R1 蓝墨任务书桌全页面、精确批准与只读恢复边界           |
 | 4    | [风险约束与阶段门](prd/03-risk-constraints-and-stage-gates.md) | Top3 风险、指标、准入准出、不承诺口径                            |
 | 5    | [验收与待决事项](prd/04-acceptance-open-questions.md)          | v0/R1 验收、Deferred 清单、重开门槛                              |
 
@@ -19,7 +19,7 @@
 
 | 序号 | 文档                                                                     | 作用                                                                                                                   |
 | ---- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
-| 01   | [技术栈与仓库结构](design/01-tech-stack-and-repo-structure.md)           | TS 模块化单体、Bun workspaces、依赖优先构建、依赖方向、复用优先                                                        |
+| 01   | [技术栈与仓库结构](design/01-tech-stack-and-repo-structure.md)           | TS/Bun 依赖方向；shadcn new-york/Radix + Tailwind v4、RSC/client/controller/data 与全站 Web 边界                       |
 | 02   | [模块化单体与拆分触发](design/02-modular-monolith-and-split-triggers.md) | 模块所有权、确认/工具结果的限定原子事务、拆分判据与D1边界                                                              |
 | 03   | [v0 垂直切片](design/03-v0-vertical-slice.md)                            | 简报→卡片→对话→按钮确认→调度→站内通知详情投影→活动账；真实取消回执与七步证据边界                                       |
 | 04   | [五缝契约](design/04-five-seams-contract.md)                             | 稳定工具调用、原子接受结果、只追加审计与非事务未知边界；其余能力端口                                                   |
@@ -39,14 +39,14 @@
 
 ## 三、API（6 篇）
 
-| 序号 | 文档                                                    | 作用                                                                          |
-| ---- | ------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| 1    | [API 索引与约定](api/README.md)                         | 28 业务端点合同 + 2 探针、认证匿名例外、workspace/文档批准、envelope 与错误码 |
-| 2    | [auth 与 me](api/auth/auth_routes.md)                   | Better Auth credential、GET /me、#68 窄账户 API、固定会话与来源/CSRF          |
-| 3    | [brief 简报与卡片](api/brief/brief_routes.md)           | GET /brief、card schema_version                                               |
-| 4    | [对话与 SSE](api/conversations/conversations_routes.md) | execution 分派、Run 读/取消/有限批准恢复、SSE 与补读隔离                      |
-| 5    | [确认门](api/approvals/approvals_routes.md)             | 列表/详情/confirm\|reject\|revise、持久修改重放、重新确认                     |
-| 6    | [任务与事件](api/tasks/tasks_routes.md)                 | 列表/详情/cancel 幂等/events 只读按 recorded_at                               |
+| 序号 | 文档                                                    | 作用                                                                             |
+| ---- | ------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| 1    | [API 索引与约定](api/README.md)                         | 28 业务端点合同 + 2 探针、认证匿名例外、workspace/文档批准、Web 消费边界与错误码 |
+| 2    | [auth 与 me](api/auth/auth_routes.md)                   | Better Auth credential、GET /me、#68 窄账户 API、固定会话与来源/CSRF             |
+| 3    | [brief 简报与卡片](api/brief/brief_routes.md)           | GET /brief、card schema_version                                                  |
+| 4    | [对话与 SSE](api/conversations/conversations_routes.md) | execution 分派、Run 读/取消/有限批准恢复、SSE 与补读隔离                         |
+| 5    | [确认门](api/approvals/approvals_routes.md)             | 列表/详情/confirm\|reject\|revise、持久修改重放、重新确认                        |
+| 6    | [任务与事件](api/tasks/tasks_routes.md)                 | 列表/详情/cancel 幂等/events 只读按 recorded_at                                  |
 
 ## 四、Schema（5 篇）
 
@@ -70,7 +70,7 @@
 | 6    | [对话运行与预算](agent/05-chat-runtime-flow-and-budget.md)  | Run/attempt/调用边界、native 累计预算、同 Run 批准恢复与取消       |
 | 7    | [评测夹具](agent/06-eval-fixtures.md)                       | 50 条时间表达集、200 卡片集版本化、指标口径                        |
 
-## 六、Demo、收口规划与验收记录（12 篇）
+## 六、Demo、收口规划与验收记录（13 篇）
 
 | 序号 | 文档                                                                             | 作用                                                                      |
 | ---- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
@@ -86,6 +86,7 @@
 | 10   | [2026-10-21 A2 修改与重新确认](demo/v0-approval-revision-evidence-2026-10-21.md) | 真实原子替代、丢响应重放、明确新确认、原生双击及first-v2补充              |
 | 11   | [2026-10-23 v0 完整验收记录](demo/v0-closeout-evidence-2026-10-23.md)            | 新字面 A1 自然到点、真实页面/活动链、A1–A4 证据映射与收口保证边界         |
 | 12   | [2026-10-27 账户与本机登记验收](account-access-verification-2026-10-27.md)       | #68 库实验、真实 Web/PG、本机维护、固定会话与原身份两次重启保留           |
+| 13   | [2026-10-28 蓝墨任务书桌验证](web-task-experience-verification-2026-10-28.md)    | #70 生产页面矩阵、受控交互/分页/SSE、源码摘要与原安装未验证边界           |
 
 ## 七、References（3 篇）
 
@@ -104,6 +105,7 @@
 - [R1 本地生命周期合同（#67）](design/15-r1-local-lifecycle.md) 的行为真源为 [local-lifecycle](../openspec/specs/local-lifecycle/spec.md)；[归档记录](../openspec/changes/archive/2026-10-27-close-r1-local-lifecycle/tasks.md)与[验证记录](local-lifecycle-verification-2026-10-27.md)分列生命周期、受控合同和真实模型证据。[本机使用指南](local-lifecycle.md)覆盖四入口、私有配置、原部署接入及停写维护，不将隔离身份验收冒充正式登录能力。
 - [R1 账户合同（#68）](design/16-r1-account-access.md) 的行为真源为 [identity](../openspec/specs/identity/spec.md)；[归档清单](../openspec/changes/archive/2026-10-27-close-r1-account-access/tasks.md)与[验证记录](account-access-verification-2026-10-27.md)分列库实验、行为覆盖、真实 Web/PG、本机登记和独立静态审阅。原身份保留、正式认证与本机收尾共同交付，不将账户验收扩大为 #66 全路径验收。
 - [R1 会话历史（#69）](design/17-r1-conversation-history.md) 的行为真源为 [conversations](../openspec/specs/conversations/spec.md)，覆盖服务端发现、可见原文/回复、全部批准和结果、旧深链与只读重登；[使用说明](local-lifecycle.md#找回会话run-和真实结果)、[验证记录](conversation-history-verification-2026-10-28.md)和[归档清单](../openspec/changes/archive/2026-10-28-close-r1-conversation-history/tasks.md)分别记录使用、版本化运行证据与六项验收。`0018` 四个非唯一查询索引含旧原话回退查找，新增索引和单次事件聚合有独立补证；不改变执行/工作区/身份主规格，不替代 #66 全路径验收。
+- [R1 蓝墨任务书桌](design/01-tech-stack-and-repo-structure.md#6-r1-web蓝墨任务书桌与职责边界) 与[页面 PRD](prd/02-core-loop-and-pages.md#r1-蓝墨任务书桌)记录全站入口、shadcn/ui/Tailwind v4、React 职责、精确批准和原 Run 显式继续；[Web 使用说明](../apps/web/README.md)与[本机任务流程](local-lifecycle.md#开始任务与审阅文档)说明实际操作与原安装边界。[版本化验证记录](web-task-experience-verification-2026-10-28.md)分列生产页面与受控 HTTP 证据、正式安装/真实模型/文件闭环缺口，不将长期合同或源码说明当作验收。
 - 冲突矩阵：行为/验收以 spec 为准，字段/路由以 design/api/schema 为准，why 以 ADR 为准。
 
 ## 维护约定

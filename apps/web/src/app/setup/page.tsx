@@ -1,4 +1,4 @@
-import AccountScreen from '../account/AccountScreen';
+import AccountScreen from '@/features/account/AccountScreen';
 import type { PageQuery } from '../../lib/account-navigation';
 
 export const dynamic = 'force-dynamic';

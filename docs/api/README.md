@@ -177,3 +177,10 @@
 [design/17](../design/17-r1-conversation-history.md) 与 [conversation API §6](conversations/conversations_routes.md#6-r1-可发现历史与只读恢复69) 定义三个带会话的 GET：会话集合、会话可见消息集合、会话 Run 集合；不新增业务写入端点，计入 §1、§7 的 28 端点 Required 合同。
 
 新集合共享严格分页 DTO、owner 作用域、no-store 和准确失败边界；旧事件查询提供可选 Run 筛选但保持响应。原任务批准详情的只读结果字段见 [approval API §8](approvals/approvals_routes.md#8-r1-历史中的真实提醒结果69)。历史页仅 GET 恢复，403/依赖错误不跳登录；读完整历史不恢复工作区新动作权限。
+
+## 11. 蓝墨任务书桌的消费者边界 [Required]
+
+- Web 布局与交互重构不新增端点或 DTO。页面与功能控制器复用本索引、公开 schema 和 [design/01 §6](../design/01-tech-stack-and-repo-structure.md#6-r1-web蓝墨任务书桌与职责边界)；`intent`、活动页 `task_id` 只选择展示，不扩业务请求或授权。
+- 今日简报、会话、消息、Run、提醒确认、任务及事件各自按原 GET 与游标读取。读取、翻页、展开、刷新和登录返回不自动补发业务 POST；活动只读取选中任务的事件，不无界扇出。
+- 文档校样完整呈现冻结内容，确认直接提交原 `preview.body`。确认仅授权，原 Run 的显式 resume 才进入后续执行；授权、效果与 Run 状态分别读取。`can_resume=false` 不提供原因，Web 不据此猜测未批准或撤权；`unknown` 不开放盲目重做。
+- 提醒详情仅沿实际 task/后继引用导航，不从 URL 附带参数构造原会话关联。401 才引导安全登录；403、404、依赖失败与无效响应保留各自类别，不能解释为成功空集合或模型缺配置。账户操作继续遵守 auth 合同的原身份与撤销回执边界。

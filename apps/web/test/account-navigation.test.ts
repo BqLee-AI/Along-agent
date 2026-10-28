@@ -7,6 +7,10 @@ import {
 } from '../src/lib/account-navigation';
 import { consumeThreadStream, readEnvelope } from '../src/lib/conversation-run';
 import type { ThreadEvent } from '@along/stream-protocol';
+import {
+  submitAccountOperation,
+  validateAccountFields,
+} from '../src/features/account/account-operation';
 
 const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
 afterEach(() => {
@@ -80,6 +84,11 @@ describe('safe read-only re-login destinations', () => {
     '/tasks/%2e%2e/login',
     '/setup',
     '/logout',
+    '/claim',
+    '/CLAIM?returnTo=/tasks',
+    '/%63laim',
+    '/%2563laim',
+    '/tasks/../claim',
     '/api/v1/auth/sign-out',
     '/tasks\n//evil.example',
     '/tasks/%0a',
@@ -193,5 +202,177 @@ describe('actual protected response consumers at the re-login boundary', () => {
     );
     expect(events.map((value) => value.type)).toEqual(['thread.failed']);
     expect(browser.navigations).toEqual([]);
+  });
+});
+
+describe('account operation response boundaries', () => {
+  it('validates with the public contract without trimming passwords or sending confirmation fields', () => {
+    const fields = new FormData();
+    fields.set('display_name', '  原用户  ');
+    fields.set('login_name', '  Admin  ');
+    fields.set('password', ' password ');
+    fields.set('password_confirmation', ' password ');
+    expect(validateAccountFields('initialize', fields)).toEqual({
+      ok: true,
+      body: { display_name: '原用户', login_name: 'admin', password: ' password ' },
+    });
+    fields.set('password_confirmation', 'password');
+    const mismatch = validateAccountFields('initialize', fields);
+    expect(mismatch.ok).toBe(false);
+    if (!mismatch.ok) expect(Object.keys(mismatch.fieldErrors)).toContain('password_confirmation');
+  });
+
+  it('requires explicit confirmation for claim and sends no target identity', () => {
+    const fields = new FormData();
+    fields.set('login_name', 'Admin');
+    fields.set('password', 'password');
+    fields.set('password_confirmation', 'password');
+    expect(validateAccountFields('claim', fields).ok).toBe(false);
+    fields.set('confirmed', 'on');
+    expect(validateAccountFields('claim', fields)).toEqual({
+      ok: true,
+      body: { login_name: 'admin', password: 'password', confirmed: true },
+    });
+  });
+
+  it.each([403, 503])(
+    'does not sign out, redirect or discard retry state on HTTP%i',
+    async (status) => {
+      const browser = browserLocation();
+      const requests: Array<{
+        path: string;
+        method?: string;
+        csrf: string | null;
+        body?: BodyInit | null;
+      }> = [];
+      const outcome = await submitAccountOperation(
+        'sign-out',
+        {},
+        'current-csrf',
+        async (input, init) => {
+          requests.push({
+            path: String(input),
+            method: init?.method,
+            csrf: new Headers(init?.headers).get('x-csrf-token'),
+            body: init?.body,
+          });
+          return failedResponse(status);
+        },
+      );
+      expect(outcome.kind).toBe(status === 503 ? 'unconfirmed' : 'rejected');
+      expect(requests).toEqual([
+        {
+          path: '/api/v1/auth/sign-out',
+          method: 'POST',
+          csrf: 'current-csrf',
+          body: '{}',
+        },
+      ]);
+      expect(browser.navigations).toEqual([]);
+      expect(browser.storage['run-resume:conversation:run']).toBeDefined();
+    },
+  );
+
+  it('keeps a lost sign-out response unknown without retrying the POST', async () => {
+    let requests = 0;
+    const outcome = await submitAccountOperation('sign-out', {}, 'current-csrf', async () => {
+      requests++;
+      throw new TypeError('connection lost');
+    });
+    expect(outcome.kind).toBe('unconfirmed');
+    expect(requests).toBe(1);
+  });
+
+  it('requires the signed-out acknowledgement rather than any successful HTTP response', async () => {
+    const outcome = await submitAccountOperation('sign-out', {}, 'current-csrf', async () =>
+      Response.json({
+        code: 0,
+        msg: 'ok',
+        request_id: 'request-account',
+        data: { authenticated: true },
+      }),
+    );
+    expect(outcome.kind).toBe('unconfirmed');
+  });
+
+  it('reads canonical identity after login and never carries an account body into the GET', async () => {
+    const requests: Array<{ path: string; method: string; body: BodyInit | null | undefined }> = [];
+    const outcome = await submitAccountOperation(
+      'sign-in',
+      { login_name: 'admin', password: ' password ' },
+      null,
+      async (input, init) => {
+        requests.push({ path: String(input), method: init?.method ?? 'GET', body: init?.body });
+        return Response.json({
+          code: 0,
+          msg: 'ok',
+          request_id: 'request-account',
+          data:
+            String(input) === '/api/v1/me'
+              ? {
+                  user: { id: '11111111-1111-4111-8111-111111111111', display_name: '原用户' },
+                  csrf_token: 'current-csrf',
+                  confirmed_timezone: null,
+                }
+              : { authenticated: true },
+        });
+      },
+    );
+    expect(outcome).toEqual({ kind: 'authenticated', workspacePending: false });
+    expect(requests).toEqual([
+      {
+        path: '/api/v1/auth/sign-in',
+        method: 'POST',
+        body: JSON.stringify({ login_name: 'admin', password: ' password ' }),
+      },
+      { path: '/api/v1/me', method: 'GET', body: undefined },
+    ]);
+  });
+
+  it('preserves an accepted claim when identity verification fails instead of allowing a new claim', async () => {
+    const requests: string[] = [];
+    const outcome = await submitAccountOperation(
+      'claim',
+      { login_name: 'admin', password: 'password', confirmed: true },
+      'current-csrf',
+      async (input) => {
+        requests.push(String(input));
+        return String(input) === '/api/v1/me'
+          ? failedResponse(503)
+          : Response.json({
+              code: 0,
+              msg: 'ok',
+              request_id: 'request-account',
+              data: { authenticated: true, workspace_binding: 'pending_local_configuration' },
+            });
+      },
+    );
+    expect(outcome.kind).toBe('accepted-unverified');
+    if (outcome.kind === 'accepted-unverified') expect(outcome.workspacePending).toBe(true);
+    expect(requests).toEqual(['/api/v1/auth/claim', '/api/v1/me']);
+  });
+
+  it('requires a fresh state read after an initialization race', async () => {
+    const outcome = await submitAccountOperation(
+      'initialize',
+      { display_name: '原用户', login_name: 'admin', password: 'password' },
+      null,
+      async () =>
+        Response.json(
+          {
+            code: 409,
+            msg: 'conflict',
+            request_id: 'request-account',
+            error: {
+              code: 'STATE_CONFLICT',
+              message: 'initialization closed',
+              request_id: 'request-account',
+            },
+          },
+          { status: 409 },
+        ),
+    );
+    expect(outcome.kind).toBe('rejected');
+    if (outcome.kind === 'rejected') expect(outcome.rereadRequired).toBe(true);
   });
 });

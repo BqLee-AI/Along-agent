@@ -1,8 +1,10 @@
 # @along/web
 
-Next.js App Router client for the v0 loop: 今日简报 → 确认 → 任务/活动账 → 对话.
+Next.js App Router Web：蓝墨任务书桌，统一采用 shadcn/ui new-york / Radix primitives 和 Tailwind CSS v4。桌面侧栏与窄屏 Sheet 提供今日、对话、提醒确认、提醒任务、活动及账户入口；登录、建号、原身份转正与退出沿用正式账户合同。
 
 ## Run
+
+正式安装请先按 [本机使用指南](../../docs/local-lifecycle.md) 使用原安装的初始化/启动/停止/升级入口。以下分进程命令仅用于开发，不等于受支持安装或真实模型/文件闭环验收。原安装缺私有配置时应定位原配置并由部署者处理，不生成替代秘密、owner、资料根目录或临时安装绕过。
 
 ```bash
 # API (repo root; DATABASE_URL + TZDB_VERSION required)
@@ -33,22 +35,18 @@ under `apps/web`.
 
 ## Conversation Runs
 
-- The execution selector defaults to business and sends the selected execution
-  explicitly. Harness uses the real native service; a `HARNESS_UNAVAILABLE`
-  response is shown without falling back to business or a fixture.
+- 新任务先明确选择 **创建提醒 / 处理资料**，分别固定映射 `business` / `harness`，不要求用户选内部执行器，不自动 fallback。资料任务必须显式选择服务端读取成功的真实登记；展示完整可读/可写相对范围和受管副本边界，不默认选首项、不接受任意宿主 root。无写范围可只读；空登记与读取失败分别提示，`HARNESS_UNAVAILABLE` 不自动断言为缺模型。
+- 今日的 `intent=reminder|document` 链接只预选新任务表单，选择/填写不执行；已有会话/Run 身份 query 优先，不改变冻结范围或继续旧 Run。
 - `thread.started` supplies the conversation and Run IDs. The address becomes
   `/conversations?conversation_id=…&run_id=…`; reopening it reads buffered
   conversation events and the owner-scoped Run view, without starting execution.
   Event sequence IDs deduplicate replay and same-Run continuation.
 - Approval links retain those original IDs and open a separate tab. Keep the
   original conversation open: an approval may arrive before its native snapshot
-  commits, and ordinary disconnection still cancels active execution. After
-  confirm/reject/revise, read the original Run on the approval page, return to it
-  and explicitly click **继续原运行**. An early decision may still show a running
-  Run: read again after suspension. Pending approval is not resumable, and
-  ordinary suspension stream EOF is not success or cancellation.
+  commits, and ordinary disconnection still cancels active execution.
+  confirm/reject/revise 后返回原标签页或原 Run 深链，先读取状态，再在“此运行的操作”中明确继续。文档批准页只授权，不写文件、不自动 resume；批准早于挂起或 `can_resume=false` 时保留授权事实，不能一概解释为尚未批准。普通挂起 EOF 不是成功或取消。
 - Resume retries retain the same checkpoint and idempotency key in this tab's
-  session storage, including across reload. **重试原继续请求（不重复确认）**
+  session storage, including across reload. 显式同键重试
   retries that request, not approval confirmation, a successor, or a fresh
   message. **读取运行状态** is read-only.
 - **停止原运行** first posts the durable cancel action with a retained
@@ -65,6 +63,16 @@ events, replay sequence deduplication, request-abort and downstream-reader
 cancellation. Browser acceptance must also
 exercise the real approval/continue/stop/reload surface against the native/API
 stack; unit coverage alone is not provider or complete R1 evidence.
+
+## Pages and read-only recovery
+
+- `/` 展示今日提醒与待确认摘要，不把摘要称作全量；`/conversations` 按建立时间发现会话，沿 `conversation_id/run_id` 读取原话、回复与逐项批准/效果，消息档案不猜与 Run 的对应。
+- `/approvals` 是提醒确认；文档批准从原 Run 的修改与结果打开 `/document-approvals/{id}`，没有虚构的文档批准集合。校样页保留完整 before/after、目标全文、版本与冻结正文；确认直接以原 `preview.body` 为 `seen_content`，不 trim、不从 DOM/diff/摘要生成。
+- `/tasks` 和详情只承载提醒；`/activity` 分别分页读取任务范围索引与选中任务事件。会话/消息/事件/批准/提醒各自沿原游标 GET，失败保留先前获取的内容与游标，不声称已加载范围为全量。
+- 打开历史、展开操作、分页、刷新、返回及重登恢复不自动发业务 POST。副作用丢响应先读原事实；继续/取消的显式同键恢复沿原合同，不自动换键或新 Run。
+- 授权、Run 与效果独立读取：approved/not_started 不称保存，applied 不称全文核对，verified 才表示有新读取核对；unknown 可能已写入，不能盲重做。取消不撤回既成效果，助手回复不是保存回执。
+- page/layout 保留 Server Component 组装；交互 View 使用基础组件，功能 controller 分别拥有对话生命周期、批准决议和账户操作；HTTP/解析/纯投影复用 `lib` 与公开 contracts，不建立第二执行事实源。分层真源见 [design/01 §6](../../docs/design/01-tech-stack-and-repo-structure.md#6-r1-web蓝墨任务书桌与职责边界)。
+- 键盘、窄屏与长正文是交付要求；源码描述、测试文件存在或受控 HTTP 浏览器观察均不能替代正式安装、真实 provider、唯一 apply 与新全文 read 的端到端证据。
 
 ## Scope
 

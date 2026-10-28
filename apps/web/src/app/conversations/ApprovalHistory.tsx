@@ -1,12 +1,14 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useEffect } from 'react';
 import {
   ApprovalDetailSchema,
   DocumentApprovalDetailSchema,
   type ApprovalDetail,
   type DocumentApprovalDetail,
 } from '@along/contracts';
+import { Badge } from '@/components/ui/badge';
+import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { readEnvelope, type HistoryApprovalReference } from '../../lib/conversation-run';
 import { TaskDetailSchema, type TaskDetail } from '../../lib/types';
 import { documentEffectLabel } from '../../lib/document-loop';
@@ -32,16 +34,19 @@ function TaskHistoryResult({ taskId }: { taskId: string }) {
   const { state, read } = useHistoryPage<TaskDetail>(`task:${taskId}`, loader);
   const task = state.items[0];
   return (
-    <div>
-      <p>
-        <a href={`/tasks/${encodeURIComponent(taskId)}`} target="_blank" rel="noopener noreferrer">
-          查看真实提醒结果（新标签页）
-        </a>
-      </p>
+    <div className="space-y-3 border-l-2 border-border pl-4">
+      <a
+        className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
+        href={`/tasks/${encodeURIComponent(taskId)}`}
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        查看真实提醒结果 ↗ 新标签页
+      </a>
       {task ? (
         <p>
-          提醒当前状态：{task.state} · {task.fire_at_local}（{task.timezone_id}
-          ）。这是提醒调度事实，不代表资料 Run 状态。
+          提醒{state.error ? '上次获取的' : '本次获取的'}状态：{task.state} · {task.fire_at_local}（
+          {task.timezone_id}）。这是提醒调度事实，不代表资料运行状态。
         </p>
       ) : null}
       <ReadControls state={state} read={read} label="提醒结果" />
@@ -53,10 +58,12 @@ export default function ApprovalHistory({
   reference,
   conversationId,
   runId,
+  onUnknownEffect,
 }: {
   reference: HistoryApprovalReference;
   conversationId: string;
   runId: string;
+  onUnknownEffect?: (approvalId: string, unknown: boolean) => void;
 }) {
   const { kind, approvalId } = reference;
   const path = `/${kind === 'document' ? 'document-approvals' : 'approvals'}/${encodeURIComponent(approvalId)}`;
@@ -69,99 +76,174 @@ export default function ApprovalHistory({
           ? { kind: 'document', detail: DocumentApprovalDetailSchema.parse(data) }
           : { kind: 'task', detail: ApprovalDetailSchema.parse(data) };
       if (item.detail.approval_id !== approvalId) throw new Error('批准引用不匹配；未确认结果。');
+      if (
+        item.kind === 'document' &&
+        (item.detail.conversation_id !== conversationId || item.detail.run_id !== runId)
+      )
+        throw new Error('文档批准与原运行不匹配，未接纳此结果。');
       return { items: [item], nextCursor: null };
     },
-    [path, kind, approvalId],
+    [path, kind, approvalId, conversationId, runId],
   );
   const { state, read } = useHistoryPage<ApprovalHistoryDetail>(`${kind}:${approvalId}`, loader);
   const item = state.items[0];
+  useEffect(() => {
+    if (item?.kind === 'document')
+      onUnknownEffect?.(approvalId, item.detail.effect.status === 'unknown');
+  }, [item, approvalId, onUnknownEffect]);
   return (
-    <li className="panel">
-      <h3>
-        {kind === 'document' ? '文档批准' : '提醒批准'} · 事件 {reference.seq}
-      </h3>
-      <p>
-        <a
-          className="history-link"
-          href={`${path}?${query}`}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          查看原批准详情与当前可用操作（新标签页）
-        </a>
+    <li className="min-w-0 space-y-4 py-6 [overflow-wrap:anywhere]">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <h3 className="font-semibold">
+          {kind === 'document' ? '文档修改' : '提醒提议'}
+          {item?.kind === 'document' ? ` · ${item.detail.relative_path}` : ''}
+        </h3>
+        <Badge variant="outline">{kind === 'document' ? '文档批准' : '提醒确认'}</Badge>
+      </div>
+      <a
+        className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
+        href={`${path}?${query}`}
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        完整预览与批准结果 ↗ 新标签页
+      </a>
+      <p className="text-sm text-muted-foreground">
+        本处只读。
+        {state.error
+          ? '最新结果读取失败；下方仅保留上次获取的事实，当前效果尚未确认。'
+          : '决议、工具效果与运行终态分别读取，不是原子快照。'}
       </p>
-      <p className="muted">{approvalId}。本处只读冻结事实；可读不表示当前可授权。</p>
       {item?.kind === 'task' ? (
-        <div>
-          <p>批准状态：{item.detail.status}</p>
-          <pre className="echo">{item.detail.echo_text}</pre>
+        <div className="space-y-4">
+          <p>提醒决议：{item.detail.status}</p>
+          <pre className="whitespace-pre-wrap font-sans text-base leading-7 [overflow-wrap:anywhere]">
+            {item.detail.echo_text}
+          </pre>
           {item.detail.result.task_id ? (
             <TaskHistoryResult
               key={item.detail.result.task_id}
               taskId={item.detail.result.task_id}
             />
           ) : (
-            <p>当前没有真实提醒结果引用；不表示已创建或已调度。</p>
+            <p className="text-muted-foreground">没有真实提醒结果引用，不表示已创建或已调度。</p>
           )}
           {item.detail.result.successor_approval_id ? (
-            <p>
-              <a
-                href={`/approvals/${encodeURIComponent(item.detail.result.successor_approval_id)}?${query}`}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                查看实际后继提议
-              </a>
-            </p>
+            <a
+              className="block min-h-11 py-2 text-primary underline"
+              href={`/approvals/${encodeURIComponent(item.detail.result.successor_approval_id)}?${query}`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              查看实际后继提议 ↗
+            </a>
           ) : null}
           {item.detail.recreated_from ? (
-            <p>
-              <a
-                href={`/approvals/${encodeURIComponent(item.detail.recreated_from)}?${query}`}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                查看前驱提议
-              </a>
-            </p>
+            <a
+              className="block min-h-11 py-2 text-primary underline"
+              href={`/approvals/${encodeURIComponent(item.detail.recreated_from)}?${query}`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              查看前驱提议 ↗
+            </a>
           ) : null}
         </div>
       ) : null}
       {item?.kind === 'document' ? (
-        <div>
-          <p>批准状态：{item.detail.state}。批准不代表文件已保存。</p>
-          <p>{documentEffectLabel[item.detail.effect.status]}</p>
-          {item.detail.effect.apply_invocation_id ? (
-            <p>已存替换证据：{item.detail.effect.apply_invocation_id}</p>
-          ) : null}
-          {item.detail.effect.read_invocation_id ? (
-            <p>已存回读证据：{item.detail.effect.read_invocation_id}</p>
-          ) : null}
-          {item.detail.replaces_approval_id ? (
-            <p>
-              <a
-                href={`/document-approvals/${encodeURIComponent(item.detail.replaces_approval_id)}?${query}`}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                查看前驱批准
-              </a>
+        <div className="space-y-4">
+          <p>
+            授权决议：
+            {item.detail.state === 'approved'
+              ? '已授权'
+              : item.detail.state === 'rejected'
+                ? '已拒绝'
+                : '等待审阅'}
+            。批准不代表文件已保存。
+          </p>
+          {item.detail.effect.status === 'unknown' ? (
+            <Alert>
+              <AlertTitle>可能已写入，原动作结果未知</AlertTitle>
+              <AlertDescription>
+                不能安全重做。只读核对原运行与效果，并联系本机维护者排查；当前内容相同也不能将原调用判为成功。
+              </AlertDescription>
+            </Alert>
+          ) : (
+            <p
+              className={item.detail.effect.status === 'verified' ? 'font-medium text-success' : ''}
+            >
+              {item.detail.state === 'approved' && item.detail.effect.status === 'not_started'
+                ? '已授权，尚无保存结果。回到原运行，读取当前资格后明确继续。'
+                : item.detail.effect.status === 'applied'
+                  ? '已记录写入，尚未完成后续全文核对。'
+                  : item.detail.effect.status === 'verified'
+                    ? '✓ 已保存并核对（本项）'
+                    : documentEffectLabel[item.detail.effect.status]}
             </p>
+          )}
+          <dl className="space-y-2 text-sm">
+            <div>
+              <dt className="text-muted-foreground">目标</dt>
+              <dd className="font-mono">{item.detail.relative_path}</dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">登记标识（原名称见运行冻结范围）</dt>
+              <dd className="font-mono">{item.detail.workspace_id}</dd>
+            </div>
+          </dl>
+          <details className="text-sm">
+            <summary className="cursor-pointer py-2 font-medium">版本与执行证据</summary>
+            <dl className="space-y-3 font-mono">
+              <div>
+                <dt>基线 SHA-256</dt>
+                <dd>{item.detail.base_version}</dd>
+              </div>
+              <div>
+                <dt>目标 SHA-256</dt>
+                <dd>{item.detail.new_version}</dd>
+              </div>
+              <div>
+                <dt>写入引用</dt>
+                <dd>{item.detail.effect.apply_invocation_id ?? '尚无已接受证据'}</dd>
+              </div>
+              <div>
+                <dt>新全文读取引用</dt>
+                <dd>{item.detail.effect.read_invocation_id ?? '尚无已接受证据'}</dd>
+              </div>
+            </dl>
+          </details>
+          {item.detail.replaces_approval_id ? (
+            <a
+              className="block min-h-11 py-2 text-primary underline"
+              href={`/document-approvals/${encodeURIComponent(item.detail.replaces_approval_id)}?${query}`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              查看前驱批准 ↗
+            </a>
           ) : null}
           {item.detail.effect.successor_approval_id ? (
-            <p>
-              <a
-                href={`/document-approvals/${encodeURIComponent(item.detail.effect.successor_approval_id)}?${query}`}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                查看冲突后继提议（需单独批准）
-              </a>
-            </p>
+            <a
+              className="block min-h-11 py-2 text-primary underline"
+              href={`/document-approvals/${encodeURIComponent(item.detail.effect.successor_approval_id)}?${query}`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              查看冲突后继提议（需单独批准）↗
+            </a>
           ) : null}
         </div>
       ) : null}
-      <ReadControls state={state} read={read} label="批准详情" />
+      <ReadControls state={state} read={read} label="本项批准与效果" />
+      <details className="text-sm text-muted-foreground">
+        <summary className="cursor-pointer py-2">批准技术信息</summary>
+        <p className="font-mono">{approvalId}</p>
+        <p>
+          {reference.seq
+            ? `首次批准事件 seq ${reference.seq}`
+            : '从运行等待点取得引用；事件索引仍需读取。'}
+        </p>
+      </details>
     </li>
   );
 }
