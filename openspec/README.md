@@ -5,7 +5,7 @@
 
 ## 命名
 
-- `openspec/specs/<capability>/spec.md`：按模块拆，与 `docs/design/02` 所有权表一致（time-core、approvals、tasks-ledger、scheduler-delivery、agent-runtime、tool-gateway、workspaces、conversations-sse、briefs-cards、notifications、identity、connector-vault），归档时按需生成，不预建空壳。
+- `openspec/specs/<capability>/spec.md`：按模块拆，与 `docs/design/02` 所有权表一致（time-core、approvals、tasks-ledger、scheduler-delivery、agent-runtime、tool-gateway、workspaces、conversations、conversations-sse、briefs-cards、notifications、identity、connector-vault），归档时按需生成，不预建空壳。
 - `openspec/changes/<动词>-<模块>`：kebab-case，如 `add-time-core-normalize`；不带 `-v1`；归档后由工具移入 `changes/archive/YYYY-MM-DD-<name>`。
 
 ## 流程

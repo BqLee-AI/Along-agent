@@ -17,7 +17,7 @@
 - [x] 2.8 为受影响公共用例、HTTP、Web真实消费者和真实PG补边界覆盖；复用现有snapshot过滤、唯一继续、unknown和撤权覆盖，不重复无价值底座测试。
 - [x] 2.9 同步用户历史使用说明及本次实现证据，运行根脚本既有相关门并如实记录Red/Green、替代依据及未跑项。
 
-有效 Red 的具体范围、其余行为覆盖及真实运行限制见[2026-10-28 验证记录](../../../docs/conversation-history-verification-2026-10-28.md)。不是每个新增测试都先观察过 Red；事后覆盖不称为 TDD。
+有效 Red 的具体范围、其余行为覆盖及真实运行限制见[2026-10-28 验证记录](../../../../docs/conversation-history-verification-2026-10-28.md)。不是每个新增测试都先观察过 Red；事后覆盖不称为 TDD。
 
 索引与聚合补证：原 47 场景 smoke 对应三索引状态；新增第四个 `conversation_idempotency(run_id)` 索引后，实际 PG16 查询计划从逐 Run 全账本扫描变为索引查找，历史响应与账本摘要相同，扩展后的 53 场景 smoke 全部通过。多 Run 单次事件聚合经旧新输出等价、隐藏文本零读取及实际 Web 验证；根校验 347 pass / 0 fail。版本边界、定向独立复核与未重跑项见验证记录；新提交五门证据记录在实现 PR。
 
@@ -34,6 +34,10 @@
 
 - [x] 4.1 D1：检查Web仅用共享合同、模块公共读取及SQL owner边界；D8：真实公共/HTTP/strict消费者；D10：partial、approved/applied/verified/unknown真实口径。
 - [x] 4.2 D3–D6：新迁移与已有唯一/只追加/冻结事实不变；D7：沿既有Compose门和#67升级验证持久化；D2、D9：复用既有展示禁算时间与取消/unknown回归，不虚称本issue新增时间/调度能力。
-- [ ] 4.3 保持static、migration-scan、scheduler-fault、contracts-dual、compose-smoke五门全部成功；A1–A4复用有效安全证据，只补历史打开真实消费者的缺口，不把#69当新的全链路时间/调度验收。
+- [x] 4.3 保持static、migration-scan、scheduler-fault、contracts-dual、compose-smoke五门全部成功；A1–A4复用有效安全证据，只补历史打开真实消费者的缺口，不把#69当新的全链路时间/调度验收。
 - [x] 4.4 实现与真实验收后开展独立审查，修复有效发现并核对六项验收证据及未覆盖限制。
-- [ ] 4.5 最后独立执行OpenSpec archive与归档校验，同步主规格/索引及任务证据；仅收口PR Closes #69并Refs #66，#66总路径仍由自身验收决定。
+- [x] 4.5 最后独立执行OpenSpec archive与归档校验，同步主规格/索引及任务证据；仅收口PR Closes #69并Refs #66，#66总路径仍由自身验收决定。
+
+五门证据：质量修正提交 `8f7167b9c887e263eec0407f3beefcca35fdcaad` 的 [CI 40655581196](https://github.com/BqLee-AI/Along-agent/actions/runs/40655581196) 五门全部成功，对应 [实现 PR #78](https://github.com/BqLee-AI/Along-agent/pull/78)；运行与静态审查边界见验证记录，不把归档视为重新运行完整产品验收。
+
+归档检查：执行 `openspec archive close-r1-conversation-history --yes` 生成 conversations 主规格并移入本目录；随后补齐归档自身的 4.5，`openspec validate --all --strict` 为 8/0，活动 change 为 0。归档新增 7 条 requirement，不改已评审的要求或场景；此检查不代替实现运行证据。

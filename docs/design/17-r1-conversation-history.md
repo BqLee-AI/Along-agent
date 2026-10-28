@@ -119,7 +119,7 @@ mount、列表选择、Run选择、刷新、back、读取更多及登录返回�
 
 ## 9. 数据、索引与兼容发布
 
-不新增表或原话/assistant 关系列，不修改旧迁移、不重写旧冻结事实。尚未合并、未部署到用户原安装的 `0018_conversation_history.sql` 仅增加四个非唯一普通 B-tree 索引：
+不新增表或原话/assistant 关系列，不修改旧迁移、不重写旧冻结事实。`0018_conversation_history.sql` 仅增加四个非唯一普通 B-tree 索引：
 
 - conversations(owner_id,created_at DESC,id DESC)：列表keyset。
 - messages(owner_id,conversation_id,created_at,id) WHERE role IN ('user','assistant')：本人可见消息分页/首条原文。
@@ -167,3 +167,5 @@ last_activity为已有有界owner会话事实的派生查询，不预建搜索�
 | AC4 恢复严格只读               | §6–§8：mount/back/分页/登录返回只 GET；静止历史的 Run/attempt/决议/调用/文件证据不增加，断网不补业务 POST |
 | AC5 旧深链与撤权边界           | §4、§6–§7：旧事件、Run 和冻结批准可读；当前撤权不恢复新动作资格，不从新登记补造旧摘要                     |
 | AC6 真实浏览器与 PG16          | §9–§10：覆盖升级与真实历史路径，复用确定性 native/授权/unknown 证据，保留五门并如实记录未覆盖项           |
+
+行为真源见 [conversations 规格](../../openspec/specs/conversations/spec.md)，完整交付清单见[会话历史归档](../../openspec/changes/archive/2026-10-28-close-r1-conversation-history/tasks.md)。[2026-10-28 验证记录](../conversation-history-verification-2026-10-28.md)分列六项真实验收、四索引与单次聚合补证、静态审阅及适用版本，不将历史切片扩大为 #66 全路径验收。
