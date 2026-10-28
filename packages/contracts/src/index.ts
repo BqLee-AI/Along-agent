@@ -39,3 +39,5 @@ export type {
 export * from './workspaces.js';
 export * from './document-approvals.js';
 export * from './auth.js';
+export * from './conversations.js';
+export * from './approvals.js';

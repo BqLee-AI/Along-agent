@@ -1,27 +1,27 @@
 # 17. R1 会话历史与只读恢复
 
-> 状态：Proposed；#69方案评审稿，未实施、未验收。
+> 状态：Required；R1 会话历史发现与只读恢复合同。
 > 范围：服务端会话发现、可见消息/Run索引、批准与结果读取、Web稳定深链和只读恢复。
 > 不包含：#70视觉/全站目标导航、账户机制修改、搜索、第二份任务事实表、自动执行恢复及R2。
-> 阶段：R1日常可用性第三步。行为合同建议归conversations capability，既有执行/授权/身份合同不变。
+> 阶段：R1 日常可用性第三步；行为归 conversations capability，既有执行、授权和身份合同不变。
 
 ## 1. 结论与事实依据
 
 Required：清空临时状态且不保留旧URL，退出后同账户登录，仍能由服务端找到原会话、原话、指定Run、全部可见回复、批准及结果。历史导航不得产生执行或自动业务POST。
 
-Observed：conversation routes只匹配带尾斜线前缀，集合路径当前不会命中（routes.ts:103–109）；新用户消息原样写messages，business/harness当前均写input_message_id（service.ts:104–107、201–258）；updated_at仅确认时区时更新，不能作为持续活动钟（repository.ts:138–146）。assistant最终消息由Run全部attempt已接受delta合并，消息没有assistant→Run引用（run-state.ts:50–94；0002迁移messages定义）。外部七词事件已有持久游标及显式内部过滤（repository.ts:309–360）。Web userTexts只在内存，且每Run仅保留最后一个批准（Chat.tsx:45–47、310–335）。
+历史恢复组合已存消息、Run/attempt 外部事件及所属模块的批准/结果投影，不依赖客户端缓存。`updated_at` 不是持续活动钟；最终 assistant 消息没有可信的 Run 引用，不能猜测归属或再次拼接到 Run 回复。
 
-Proposed：新增三个有界集合，扩展旧事件查询的可选Run筛选但不改变响应；补task批准详情的实际结果引用。历史只依已有事实，Web经HTTP和共享strict DTO消费。仓颉仍是唯一Harness，TS仍拥有事实与授权。
+三个有界集合负责服务端发现、可见消息和 Run 索引；旧事件查询仅增加可选 Run 筛选，任务批准详情提供真实结果引用。Web 经 HTTP 和共享 strict DTO 消费已有事实。仓颉仍是唯一 Harness，TS 仍拥有事实与授权。
 
-关键源码依据（静态核对，不代表运行验收）：
+实现责任与源码入口（运行证据单独记录）：
 
-| 事实                                                                      | 位置                                                                                                          |
-| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| 会话集合路径需要显式接入，原 guard 不覆盖无尾斜线集合                     | `apps/api/src/modules/conversations/routes.ts:103–109`                                                        |
-| 用户原文保留，新 Run 冻结原消息 ID                                        | `apps/api/src/modules/conversations/service.ts:103–106,194–250`                                               |
-| 终结消息合并本 Run 各 attempt 的已存 delta，没有消息到 Run 的新引用       | `apps/api/src/modules/conversations/run-state.ts:54–92`                                                       |
-| 任务批准详情缺少结果 ID，已有公共决议投影可以读取真实 task 引用           | `apps/api/src/modules/approvals/service.ts:36–54,193–206`；`apps/api/src/modules/approvals/decision.ts:15–41` |
-| 新版本核验已支持 SQL，JSON 增量只核表、列和约束，不能直接声明新增普通索引 | `scripts/local/database.mjs:476–510,622–690`                                                                  |
+| 责任                                              | 位置                                                                                 |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| 无尾斜线集合与既有深路由接入                      | `apps/api/src/http/app.ts`、`apps/api/src/modules/conversations/routes.ts`           |
+| owner/parent 作用域、稳定分页与可信原话投影       | `apps/api/src/modules/conversations/history-service.ts`、`history-repository.ts`     |
+| 用户原文与新 Run 输入引用、终结消息的既有合并规则 | `apps/api/src/modules/conversations/service.ts`、`run-state.ts`                      |
+| 任务批准详情和决议共用真实结果投影                | `apps/api/src/modules/approvals/repository.ts`、`service.ts`、`decision.ts`          |
+| 四个查询索引及真实结构核验                        | `infra/migrations/0018_conversation_history.sql`、`scripts/local/baselines/0018.sql` |
 
 ## 2. 所有权与方案取舍
 
@@ -119,15 +119,16 @@ mount、列表选择、Run选择、刷新、back、读取更多及登录返回�
 
 ## 9. 数据、索引与兼容发布
 
-不新增表或原话/assistant关系列，不修改旧迁移、不重写旧冻结事实。下一新迁移（当前库存之后预计0018，以合入时实际序号为准）仅增加：
+不新增表或原话/assistant 关系列，不修改旧迁移、不重写旧冻结事实。尚未合并、未部署到用户原安装的 `0018_conversation_history.sql` 仅增加四个非唯一普通 B-tree 索引：
 
 - conversations(owner_id,created_at DESC,id DESC)：列表keyset。
 - messages(owner_id,conversation_id,created_at,id) WHERE role IN ('user','assistant')：本人可见消息分页/首条原文。
 - agent_runs(owner_id,conversation_id,created_at,id)：本人会话Run索引。
+- conversation_idempotency(run_id)：旧 Run 缺少 input_message_id 时，按 run_id 查全既有幂等引用；非唯一索引保留多引用事实，随后仍检查全部引用的 owner/会话作用域及原话歧义，不预先过滤坏引用或更改读取合同。
 
 last_activity为已有有界owner会话事实的派生查询，不预建搜索索引。列表用单SQL/明确只读投影取得每页标题/活动，避免为每行多次往返；既有event_seq、attempt/run索引先复用，不预建event JSON或FTS索引。没有实测性能预算，不虚构p95保证。
 
-索引只在新迁移中创建，旧 baseline 对象保留。同步 `scripts/check-migrations.mjs` 窄范围允许新 conversation 迁移。#67 对新增版本要求核验文件：使用已有 SQL verifier 支持，为新索引提供对应 `scripts/local/baselines/<版本>.sql`，通过 pg_catalog 验证索引定义、有效性与版本，不用只检查列/约束的 JSON 增量冒充索引核验。具体序号沿库存确定，预计 0018。补 0017→新版本、重复升级和重启仍只读的独立 PG 覆盖；原 #67/#68 历史证据不被改写成新测试通过。
+索引只在 `0018_conversation_history.sql` 中创建，旧 baseline 对象保留。`scripts/check-migrations.mjs` 仅窄范围允许该文件；`scripts/local/baselines/0018.sql` 沿用已有 SQL verifier，经 pg_catalog 核对四个真实索引的表、键、非唯一属性、方向、空值顺序、谓词及有效/就绪/存活状态，不以只核列/约束的 JSON 增量冒充索引核验。既有表驱动 PG smoke 扩展 run_id 索引缺失、错键、错误唯一性、错表、无效及未就绪场景，要求拒绝且不修复索引、不改变已有事实。原已运行的三索引升级与 47 场景验收只证明旧状态，不能作为新增第四索引的验收；四索引状态须另记真实 PG16 EXPLAIN 与生命周期运行证据，不改写 #67/#68 的历史记录。
 
 停旧写者，经既有显式local:upgrade升级并部署同批API/Web/contracts。新集合属添加，旧events/RunView/SSE不变，task批准详情增加结果字段且同步消费者；不改Harness协议。迁移失败沿既有停写和显式修复流程，不自动重试业务POST。回退应用须遵守#67版本分类，不能盲目降版或删新迁移/卷/owner来通过启动。
 
@@ -151,8 +152,8 @@ last_activity为已有有界owner会话事实的派生查询，不预建搜索�
 具体消费者：
 
 - API：`apps/api/src/modules/conversations/{routes,service,repository,schemas}.ts`；提醒结果由 `approvals/{service,routes,schemas,decision}.ts` 所属公共读取承接，不跨模块查私表。
-- 共享合同：建议新增 `packages/contracts/src/conversations.ts`、`approvals.ts` 并更新 `index.ts` 和行为测试。保留 `ThreadEventSchema`、`RunViewSchema`、`DocumentApprovalDetailSchema` 和既有动作请求/响应合同；移除重复的提醒详情 schema，不留 alias shim。
-- Web：`apps/web/src/app/conversations/{page,Chat}.tsx`、建议新增 HistoryList/HistoryDetail、`lib/conversation-run.ts`、`lib/types.ts` 和 API 错误处理；批准/文档详情复用原页面并保留返回会话位置。`account-navigation`/AccountForm 仅复用安全重登及清理本应用重试键，不更改认证机制。
+- 共享合同：`packages/contracts/src/conversations.ts`、`approvals.ts` 及 `index.ts` 和行为测试。保留 `ThreadEventSchema`、`RunViewSchema`、`DocumentApprovalDetailSchema` 和既有动作请求/响应合同；提醒详情使用共享 schema，不留 alias shim。
+- Web：`apps/web/src/app/conversations/{page,Chat,HistoryList,HistoryDetail,HistoryResource,ApprovalHistory}.tsx`、`lib/conversation-run.ts`、API 错误处理及具体命名类型；批准/文档详情复用原页面并保留返回会话位置。`account-navigation`/AccountForm 复用安全重登，仅清理本应用重试键，不更改认证机制。
 - 验证：检查 `apps/api/test/helpers/harness-consumer.ts` 的 local/HTTP 两个消费者、相关 conversations/approvals 集成和 Web 行为覆盖。新增历史消费者必须读全所有页，不把既有小夹具首批读取扩大为完整历史证明；如纳入 enforced D8，同步既有 `ci/gates.json` 和报告入口，不另建 CI 框架。
 - 交付文档：本文及 conversation/approval API、conversation schema、PRD 和文档索引。实现时才在迁移目录索引和使用指南登记真实入口；不把计划序号或命令写成已可运行。
 

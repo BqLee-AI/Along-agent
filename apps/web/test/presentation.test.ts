@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { describeApproval, describeCard } from '../src/lib/presentation';
-import type { ApprovalDetail, BriefCard } from '../src/lib/types';
+import type { ApprovalDetail } from '@along/contracts';
+import type { BriefCard } from '../src/lib/types';
 
 describe('D2 display projection', () => {
   const card: BriefCard & { fire_at_utc: string } = {
@@ -41,6 +42,7 @@ describe('D2 display projection', () => {
       presentation_version: 'v1',
       expires_at: '2026-10-18T01:20:00Z',
       recreated_from: null,
+      result: { task_id: null, successor_approval_id: null },
     };
     const before = describeApproval(detail);
     const mutated = {

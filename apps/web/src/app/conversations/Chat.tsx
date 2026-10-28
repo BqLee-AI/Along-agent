@@ -16,6 +16,7 @@ import {
   ConversationEventsSchema,
   ResumeRequestSchema,
   conversationHref,
+  collectRunTranscripts,
   mergeThreadEvents,
   readEnvelope,
   readRun,
@@ -34,9 +35,11 @@ interface AmbiguousProposal extends AmbiguousTimeDetails {
 export default function Chat({
   conversationId = null,
   runId = null,
+  controlsOnly = false,
 }: {
   conversationId?: string | null;
   runId?: string | null;
+  controlsOnly?: boolean;
 }) {
   const [input, setInput] = useState('');
   const [execution, setExecution] = useState<ExecutionKind>('business');
@@ -60,6 +63,8 @@ export default function Chat({
   const selectedRef = useRef(selected);
   const csrfRef = useRef<Me | null>(null);
   const streamRef = useRef<AbortController | null>(null);
+  const refreshRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(true);
   const cursorRef = useRef(0);
   const seenRef = useRef(new Set<number>());
   const cancelKeyRef = useRef<string | null>(null);
@@ -111,21 +116,26 @@ export default function Chat({
 
   async function refresh(): Promise<void> {
     const target = selectedRef.current;
-    if (!target) return;
+    if (!target || !mountedRef.current) return;
+    refreshRef.current?.abort();
+    const controller = new AbortController();
+    refreshRef.current = controller;
     setReading(true);
     try {
       // GET only reads projections. It never starts or resumes execution.
-      for (;;) {
-        const response = await fetch(
-          `/api/v1/conversations/${encodeURIComponent(target.conversationId)}?after_seq=${cursorRef.current}&limit=200`,
-          { cache: 'no-store' },
-        );
-        const data = ConversationEventsSchema.parse(await readEnvelope(response));
-        for (const event of data.events) applyEvent(event);
-        if (data.events.length < 200 || data.next_after_seq === null) break;
-      }
-      const view = await readRun(target.conversationId, target.runId);
-      if (selectedRef.current?.runId !== target.runId) return;
+      if (!controlsOnly)
+        for (;;) {
+          const response = await fetch(
+            `/api/v1/conversations/${encodeURIComponent(target.conversationId)}?after_seq=${cursorRef.current}&limit=200&run_id=${encodeURIComponent(target.runId)}`,
+            { cache: 'no-store', signal: controller.signal },
+          );
+          const data = ConversationEventsSchema.parse(await readEnvelope(response));
+          if (controller.signal.aborted || selectedRef.current?.runId !== target.runId) return;
+          for (const event of data.events) applyEvent(event);
+          if (data.events.length < 200 || data.next_after_seq === null) break;
+        }
+      const view = await readRun(target.conversationId, target.runId, controller.signal);
+      if (controller.signal.aborted || selectedRef.current?.runId !== target.runId) return;
       setRun(view);
       setExecution(view.execution);
       const stored = sessionStorage.getItem(`run-resume:${target.conversationId}:${target.runId}`);
@@ -133,29 +143,36 @@ export default function Chat({
         setRetryResume(ResumeRequestSchema.parse(JSON.parse(stored)));
       }
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : '无法读取运行状态。');
+      if (!controller.signal.aborted)
+        setError(failure instanceof Error ? failure.message : '无法读取运行状态。');
     } finally {
-      setReading(false);
+      if (!controller.signal.aborted) setReading(false);
     }
   }
 
   useEffect(() => {
-    void loadMe()
-      .then(() => fetch('/api/v1/workspaces', { cache: 'no-store' }))
-      .then(readEnvelope)
-      .then((data) =>
-        setWorkspaces(
-          z
-            .object({ items: z.array(workspaceSummarySchema) })
-            .strict()
-            .parse(data).items,
-        ),
-      )
-      .catch((failure: unknown) =>
-        setWorkspaceError(failure instanceof Error ? failure.message : '无法读取工作区。'),
-      );
+    mountedRef.current = true;
+    if (!controlsOnly)
+      void loadMe()
+        .then(() => fetch('/api/v1/workspaces', { cache: 'no-store' }))
+        .then(readEnvelope)
+        .then((data) =>
+          setWorkspaces(
+            z
+              .object({ items: z.array(workspaceSummarySchema) })
+              .strict()
+              .parse(data).items,
+          ),
+        )
+        .catch((failure: unknown) =>
+          setWorkspaceError(failure instanceof Error ? failure.message : '无法读取工作区。'),
+        );
     void refresh();
-    return () => streamRef.current?.abort();
+    return () => {
+      mountedRef.current = false;
+      refreshRef.current?.abort();
+      streamRef.current?.abort();
+    };
     // Initial URL identities are immutable for this mounted conversation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -306,32 +323,25 @@ export default function Chat({
     }
   }
 
-  const transcript = useMemo(() => {
-    const turns = new Map<string, { text: string; approvalId: string | null; cardId?: string }>();
-    for (const event of events) {
-      const rid = event.payload.run_id;
-      if (typeof rid !== 'string') continue;
-      let turn = turns.get(rid);
-      if (!turn) {
-        turn = { text: '', approvalId: null };
-        turns.set(rid, turn);
-      }
-      if (event.type === 'message.delta' && typeof event.payload.delta === 'string')
-        turn.text += event.payload.delta;
-      if (event.type === 'approval_required' && typeof event.payload.approval_id === 'string') {
-        turn.approvalId = event.payload.approval_id;
-        turn.cardId = event.payload.card_id;
-      }
+  const transcript = useMemo(
+    () => [...collectRunTranscripts(events, { includeText: !controlsOnly })],
+    [events, controlsOnly],
+  );
+  const approvals = transcript.flatMap(([rid, turn]) =>
+    turn.approvals.map((reference) => ({ ...reference, runId: rid })),
+  );
+  if (run?.waiting && selected) {
+    const waiting = run.waiting;
+    const kind =
+      'approval_kind' in waiting && waiting.approval_kind === 'document' ? 'document' : 'task';
+    if (
+      !approvals.some(
+        (reference) => reference.kind === kind && reference.approvalId === waiting.approval_id,
+      )
+    ) {
+      approvals.push({ kind, approvalId: waiting.approval_id, seq: 0, runId: selected.runId });
     }
-    return [...turns.entries()];
-  }, [events]);
-  const approvalId =
-    run?.waiting?.approval_id ??
-    transcript.find(([rid]) => rid === selected?.runId)?.[1].approvalId;
-  const approvalCardId =
-    run?.waiting && 'approval_kind' in run.waiting && run.waiting.approval_kind === 'document'
-      ? `document-approval:${approvalId}`
-      : transcript.find(([rid]) => rid === selected?.runId)?.[1].cardId;
+  }
   const active =
     busy ||
     Boolean(selected && !run) ||
@@ -340,20 +350,24 @@ export default function Chat({
 
   return (
     <section>
-      <h1>对话</h1>
-      <p className="subtitle">
-        {execution === 'harness'
-          ? '说清楚目标、资料和修改要求。文档先预览批准，再由原运行保存和回读。'
-          : '说清楚日期、时间和时区。确认前不会创建提醒，也不会排期。'}
-      </p>
-      <div className="chat-log" aria-label="对话记录">
-        {transcript.map(([rid, turn]) => (
-          <Fragment key={rid}>
-            {userTexts[rid] ? <div className="bubble user">{userTexts[rid]}</div> : null}
-            {turn.text ? <div className="bubble assistant">{turn.text}</div> : null}
-          </Fragment>
-        ))}
-      </div>
+      {controlsOnly ? <h3>当前运行状态与显式操作</h3> : <h2>主动对话</h2>}
+      {!controlsOnly ? (
+        <p className="subtitle">
+          {execution === 'harness'
+            ? '说清楚目标、资料和修改要求。文档先预览批准，再由原运行保存和回读。'
+            : '说清楚日期、时间和时区。确认前不会创建提醒，也不会排期。'}
+        </p>
+      ) : null}
+      {!controlsOnly ? (
+        <div className="chat-log" aria-label="对话记录">
+          {transcript.map(([rid, turn]) => (
+            <Fragment key={rid}>
+              {userTexts[rid] ? <div className="bubble user">{userTexts[rid]}</div> : null}
+              {turn.text ? <div className="bubble assistant">{turn.text}</div> : null}
+            </Fragment>
+          ))}
+        </div>
+      ) : null}
       {selected ? (
         <div className="panel" aria-label="原运行状态" aria-busy={reading}>
           <p role="status">
@@ -363,6 +377,13 @@ export default function Chat({
             Run {selected.runId}
             {run ? ` · ${run.execution} · attempt ${run.attempt_no}` : ''}
           </p>
+          {!controlsOnly ? (
+            <p>
+              <a href={conversationHref(selected.conversationId, selected.runId)}>
+                打开此 Run 的只读历史（离开当前主动连接）
+              </a>
+            </p>
+          ) : null}
           {run?.workspace ? (
             <div>
               <p>
@@ -411,22 +432,21 @@ export default function Chat({
           </p>
         </div>
       ) : null}
-      {approvalId && selected ? (
-        <p>
-          原提议：
-          <a
-            href={`${approvalHref(approvalId, approvalCardId)}?${new URLSearchParams({ conversation_id: selected.conversationId, run_id: selected.runId })}`}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            查看提议与结果（新标签页）
-          </a>
-          <span className="muted">
-            {' '}
-            查看提议或读取状态不会自动继续；是否需要继续，以原运行状态为准。
-          </span>
-        </p>
-      ) : null}
+      {!controlsOnly && selected
+        ? approvals.map((reference) => (
+            <p key={`${reference.runId}:${reference.kind}:${reference.approvalId}`}>
+              原提议：
+              <a
+                href={`${approvalHref(reference.approvalId, reference.kind === 'document' ? `document-approval:${reference.approvalId}` : undefined)}?${new URLSearchParams({ conversation_id: selected.conversationId, run_id: reference.runId })}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                查看{reference.kind === 'document' ? '文档' : '提醒'}提议与结果（新标签页）
+              </a>
+              <span className="muted"> 查看或读取不会自动继续。</span>
+            </p>
+          ))
+        : null}
       {error ? (
         <p className="error" role="alert">
           {error}
@@ -454,83 +474,85 @@ export default function Chat({
           </div>
         </div>
       ) : null}
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          void send();
-        }}
-      >
-        <label htmlFor="execution">执行方式</label>
-        <select
-          id="execution"
-          value={execution}
-          disabled={busy || Boolean(run && active)}
-          onChange={(event) => setExecution(ExecutionKindSchema.parse(event.target.value))}
-        >
-          <option value="business">业务（默认）</option>
-          <option value="harness">仓颉 Harness</option>
-        </select>
-        <p className="muted">仓颉依赖未就绪会明确报错，不会自动切换到业务。</p>
-        {execution === 'harness' ? (
-          <div>
-            <label htmlFor="workspace">新 Run 工作区（服务端授权范围）</label>
-            <select
-              id="workspace"
-              value={workspaceId}
-              disabled={Boolean(active)}
-              onChange={(event) => setWorkspaceId(event.target.value)}
-            >
-              <option value="">不选择工作区（原有业务工具）</option>
-              {workspaces.map((workspace) => (
-                <option key={workspace.workspace_id} value={workspace.workspace_id}>
-                  {workspace.label}
-                </option>
-              ))}
-            </select>
-            {workspaces
-              .filter((workspace) => workspace.workspace_id === workspaceId)
-              .map((workspace) => (
-                <div key={workspace.workspace_id} className="muted">
-                  <p>可读：{workspace.readable_paths.join('、') || '无'}</p>
-                  <p>可写：{workspace.writable_paths.join('、') || '无'}</p>
-                  <p>仅操作登记的受管文件；若为副本，不代表修改未登记原件。</p>
-                </div>
-              ))}
-            {workspaceError ? (
-              <p className="error" role="alert">
-                {workspaceError}
-              </p>
-            ) : null}
-          </div>
-        ) : null}
-        <label htmlFor="message-input">
-          {execution === 'harness'
-            ? '任务原文（目标、资料和修改要求）'
-            : '提醒原文（日期、时间和时区）'}
-        </label>
-        <textarea
-          rows={3}
-          id="message-input"
-          disabled={Boolean(active)}
-          value={input}
-          placeholder={
-            execution === 'harness'
-              ? workspaceId
-                ? '例如：核对资料中的冲突日期，更新简报并保留其他内容；先给预览，批准后保存和回读。'
-                : '例如：读取我的偏好，并根据真实工具结果回答。'
-              : '例如：明天 9:20 提醒我喝水（Asia/Shanghai）'
-          }
-          onChange={(event) => {
-            setInput(event.target.value);
-            setAmbiguousProposal(null);
+      {!controlsOnly ? (
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void send();
           }}
-        />
-        <div className="actions">
-          <button type="submit" disabled={Boolean(active) || input.trim() === ''}>
-            {busy ? '处理中…' : '发送'}
-          </button>
-        </div>
-      </form>
+        >
+          <label htmlFor="execution">执行方式</label>
+          <select
+            id="execution"
+            value={execution}
+            disabled={busy || Boolean(run && active)}
+            onChange={(event) => setExecution(ExecutionKindSchema.parse(event.target.value))}
+          >
+            <option value="business">业务（默认）</option>
+            <option value="harness">仓颉 Harness</option>
+          </select>
+          <p className="muted">仓颉依赖未就绪会明确报错，不会自动切换到业务。</p>
+          {execution === 'harness' ? (
+            <div>
+              <label htmlFor="workspace">新 Run 工作区（服务端授权范围）</label>
+              <select
+                id="workspace"
+                value={workspaceId}
+                disabled={Boolean(active)}
+                onChange={(event) => setWorkspaceId(event.target.value)}
+              >
+                <option value="">不选择工作区（原有业务工具）</option>
+                {workspaces.map((workspace) => (
+                  <option key={workspace.workspace_id} value={workspace.workspace_id}>
+                    {workspace.label}
+                  </option>
+                ))}
+              </select>
+              {workspaces
+                .filter((workspace) => workspace.workspace_id === workspaceId)
+                .map((workspace) => (
+                  <div key={workspace.workspace_id} className="muted">
+                    <p>可读：{workspace.readable_paths.join('、') || '无'}</p>
+                    <p>可写：{workspace.writable_paths.join('、') || '无'}</p>
+                    <p>仅操作登记的受管文件；若为副本，不代表修改未登记原件。</p>
+                  </div>
+                ))}
+              {workspaceError ? (
+                <p className="error" role="alert">
+                  {workspaceError}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+          <label htmlFor="message-input">
+            {execution === 'harness'
+              ? '任务原文（目标、资料和修改要求）'
+              : '提醒原文（日期、时间和时区）'}
+          </label>
+          <textarea
+            rows={3}
+            id="message-input"
+            disabled={Boolean(active)}
+            value={input}
+            placeholder={
+              execution === 'harness'
+                ? workspaceId
+                  ? '例如：核对资料中的冲突日期，更新简报并保留其他内容；先给预览，批准后保存和回读。'
+                  : '例如：读取我的偏好，并根据真实工具结果回答。'
+                : '例如：明天 9:20 提醒我喝水（Asia/Shanghai）'
+            }
+            onChange={(event) => {
+              setInput(event.target.value);
+              setAmbiguousProposal(null);
+            }}
+          />
+          <div className="actions">
+            <button type="submit" disabled={Boolean(active) || input.trim() === ''}>
+              {busy ? '处理中…' : '发送'}
+            </button>
+          </div>
+        </form>
+      ) : null}
     </section>
   );
 }

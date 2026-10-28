@@ -7,7 +7,9 @@ import { protectedLoginHref } from './account-navigation';
 
 const API_BASE = process.env.API_BASE ?? 'http://127.0.0.1:3000';
 
-export type ApiResult<T> = { ok: true; data: T } | { ok: false; status: number; message: string };
+export type ApiResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; status: number; message: string; code: string | null; requestId: string | null };
 
 export async function apiGet<T>(path: string, returnTo?: string): Promise<ApiResult<T>> {
   const cookie = (await cookies()).toString();
@@ -18,7 +20,13 @@ export async function apiGet<T>(path: string, returnTo?: string): Promise<ApiRes
       cache: 'no-store',
     });
   } catch {
-    return { ok: false, status: 0, message: '无法连接 API，请确认服务已启动。' };
+    return {
+      ok: false,
+      status: 0,
+      code: null,
+      requestId: null,
+      message: '无法连接 API，请确认服务已启动。',
+    };
   }
   if (returnTo !== undefined) {
     const login = protectedLoginHref(response.status, returnTo);
@@ -36,5 +44,13 @@ export async function apiGet<T>(path: string, returnTo?: string): Promise<ApiRes
   const message =
     envelope?.error?.message ??
     (response.status === 401 ? '请先登录。' : `API 返回 ${response.status}`);
-  return { ok: false, status: response.status, message };
+  const code = envelope?.error?.code ?? null;
+  const requestId = envelope?.request_id ?? response.headers.get('x-request-id');
+  return {
+    ok: false,
+    status: response.status,
+    code,
+    requestId,
+    message: `HTTP ${response.status}${code ? ` · ${code}` : ''}: ${message}${requestId ? `（request_id: ${requestId}）` : ''}`,
+  };
 }

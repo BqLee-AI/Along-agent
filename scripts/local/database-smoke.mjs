@@ -83,9 +83,17 @@ async function signature(client) {
     'outbox',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM outbox t),
     'invocations',(SELECT jsonb_agg(to_jsonb(t) ORDER BY invocation_id) FROM tool_invocations t),
     'documents',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM document_approvals t),
+    'conversations',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM conversations t),
+    'messages',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM messages t),
+    'runs',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM agent_runs t),
+    'attempts',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM run_attempts t),
+    'idempotency',(SELECT jsonb_agg(to_jsonb(t) ORDER BY owner_id,idempotency_key) FROM conversation_idempotency t),
     'ledger',(SELECT jsonb_agg(to_jsonb(t) ORDER BY version) FROM schema_migrations t),
     'schema',(SELECT jsonb_agg(jsonb_build_array(c.relname,c.relkind,a.attname,a.atttypid,a.attnotnull) ORDER BY c.relname,a.attnum)
       FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace LEFT JOIN pg_attribute a ON a.attrelid=c.oid AND a.attnum>0
+      WHERE n.nspname='public'),
+    'indexes',(SELECT jsonb_agg(jsonb_build_array(c.relname,to_jsonb(i),pg_get_indexdef(i.indexrelid)) ORDER BY c.relname)
+      FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid JOIN pg_namespace n ON n.oid=c.relnamespace
       WHERE n.nspname='public')) AS value`)
   ).rows[0].value;
 }
@@ -100,10 +108,30 @@ VALUES ('00000000-0000-4000-8000-000000000004','00000000-0000-4000-8000-00000000
 INSERT INTO document_approvals(id,owner_id,conversation_id,run_id,workspace_id,workspace_grant,relative_path,base_read_invocation_id,base_version,exact_new_content,new_version,presentation_version,presentation_hash,preview)
 VALUES ('00000000-0000-4000-8000-000000000008','00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000005','00000000-0000-4000-8000-000000000006','fixture','{}','fixture.txt','00000000-0000-4000-8000-000000000004',repeat('a',64),'preserve fixture',repeat('b',64),'document_replace.v1',repeat('c',64),'{}');
 `;
+const HISTORY_CANARIES = `
+INSERT INTO conversations(id,owner_id,created_at)
+VALUES ('00000000-0000-4000-8000-000000000105','00000000-0000-4000-8000-000000000001','2020-01-01T00:00:00.123456Z');
+INSERT INTO messages(id,owner_id,conversation_id,role,content,created_at)
+SELECT ('00000000-0000-4000-8000-' || lpad(n::text,12,'0'))::uuid,
+  '00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000105',role,
+  E'  historical content\\n original whitespace  ','2020-01-01T00:00:00.123456Z'
+FROM (VALUES (106,'user'),(107,'assistant'),(108,'system')) AS fixture(n,role);
+INSERT INTO agent_runs(id,owner_id,conversation_id,agent_revision,mode,budget_max_iterations,budget_max_tokens,input_message_id)
+VALUES ('00000000-0000-4000-8000-000000000109','00000000-0000-4000-8000-000000000001',
+  '00000000-0000-4000-8000-000000000105','historical','chat',1,1,'00000000-0000-4000-8000-000000000106');
+INSERT INTO run_attempts(id,owner_id,run_id,attempt_no)
+VALUES ('00000000-0000-4000-8000-000000000110','00000000-0000-4000-8000-000000000001',
+  '00000000-0000-4000-8000-000000000109',1);
+INSERT INTO conversation_idempotency(owner_id,idempotency_key,request_hash,conversation_id,run_id,user_message_id,expires_at)
+VALUES ('00000000-0000-4000-8000-000000000001','historical-reference','preserve',
+  '00000000-0000-4000-8000-000000000105','00000000-0000-4000-8000-000000000109',
+  '00000000-0000-4000-8000-000000000106','2020-01-02T00:00:00Z');
+`;
 
 /** Run only against an explicitly supplied, disposable PostgreSQL 16 server.
- * The administrative account needs CREATEDB, event-trigger creation, and backend
- * termination privileges. Existing databases are never cleared or migrated.
+ * The administrative account needs CREATEDB, event-trigger creation, catalog
+ * updates for the isolated invalid-index fixture, and backend termination privileges.
+ * Existing databases are never cleared or migrated.
  * Each scenario exclusively owns a newly CREATE DATABASE'd random name; cleanup
  * drops only names successfully created by this invocation.
  */
@@ -117,15 +145,17 @@ export async function runDatabaseSmoke({
   const created = new Set();
   const reports = [];
   const temp = await mkdtemp(path.join(tmpdir(), 'along-lifecycle67-'));
-  // Keep the original #67 0016 scenarios fixed even when this checkout ships 0017.
+  // Keep the original #67 0016 and #68 0017 scenarios fixed as the inventory grows.
   const migrationsDirectory = path.join(temp, 'legacy0016');
+  const accountMigrationsDirectory = path.join(temp, 'legacy0017');
   await mkdir(migrationsDirectory);
+  await mkdir(accountMigrationsDirectory);
   for (const name of await readdir(sourceMigrationsDirectory)) {
-    if (/^\d{4}_[a-z0-9_]+\.sql$/.test(name) && name.slice(0, 4) <= '0016')
-      await writeFile(
-        path.join(migrationsDirectory, name),
-        await readFile(path.join(sourceMigrationsDirectory, name)),
-      );
+    if (!/^\d{4}_[a-z0-9_]+\.sql$/.test(name)) continue;
+    const sql = await readFile(path.join(sourceMigrationsDirectory, name));
+    if (name.slice(0, 4) <= '0016') await writeFile(path.join(migrationsDirectory, name), sql);
+    if (name.slice(0, 4) <= '0017')
+      await writeFile(path.join(accountMigrationsDirectory, name), sql);
   }
   let stage = 'admin_connect';
   const record = (name) => {
@@ -348,7 +378,7 @@ export async function runDatabaseSmoke({
       );
       await withDeployment(
         url,
-        { migrationsDirectory: sourceMigrationsDirectory },
+        { migrationsDirectory: accountMigrationsDirectory },
         async (database) => {
           assert.equal(database.targetVersion, '0017');
           assert.deepEqual(await database.classify(), {
@@ -378,7 +408,7 @@ export async function runDatabaseSmoke({
         for (let restart = 0; restart < 2; restart++) {
           await withDeployment(
             url,
-            { migrationsDirectory: sourceMigrationsDirectory },
+            { migrationsDirectory: accountMigrationsDirectory },
             async (database) => {
               assert.equal((await database.classify()).version, '0017');
               assert.equal((await database.initialize()).version, '0017');
@@ -405,13 +435,13 @@ export async function runDatabaseSmoke({
       ['future_account_ledger', "INSERT INTO schema_migrations(version) VALUES('0018')"],
     ]) {
       await fresh(`account0017_${name}`, async (url) => {
-        await withDeployment(url, { migrationsDirectory: sourceMigrationsDirectory }, (database) =>
+        await withDeployment(url, { migrationsDirectory: accountMigrationsDirectory }, (database) =>
           database.initialize(),
         );
         await withClient(url, (client) => client.query(mutation));
         await withDeployment(
           url,
-          { migrationsDirectory: sourceMigrationsDirectory },
+          { migrationsDirectory: accountMigrationsDirectory },
           async (database) => {
             assert.equal((await database.classify()).kind, 'unknown');
             await rejectsCode(() => database.upgrade(), 'unsupported_upgrade_source');
@@ -421,6 +451,156 @@ export async function runDatabaseSmoke({
         record(`account0017_${name}_refused`);
       });
     }
+    await fresh('history0018_explicit_upgrade_preserves_original_facts', async (url) => {
+      await withDeployment(url, { migrationsDirectory: accountMigrationsDirectory }, (database) =>
+        database.initialize(),
+      );
+      const beforeFacts = await withClient(url, async (client) => {
+        await client.query(CANARIES + HISTORY_CANARIES);
+        const facts = await signature(client);
+        delete facts.schema;
+        delete facts.ledger;
+        delete facts.indexes;
+        return facts;
+      });
+      await withDeployment(
+        url,
+        { migrationsDirectory: sourceMigrationsDirectory },
+        async (database) => {
+          assert.equal(database.targetVersion, '0018');
+          assert.deepEqual(await database.classify(), {
+            kind: 'supported',
+            version: '0017',
+            reason: 'explicit_upgrade_required',
+          });
+          await rejectsCode(() => database.initialize(), 'explicit_upgrade_required');
+          assert.equal((await database.upgrade()).version, '0018');
+        },
+      );
+      await withClient(url, async (client) => {
+        const afterFacts = await signature(client);
+        delete afterFacts.schema;
+        delete afterFacts.ledger;
+        delete afterFacts.indexes;
+        assert.deepEqual(afterFacts, beforeFacts);
+        await client.query(`CREATE FUNCTION history0018_reject_ddl() RETURNS event_trigger LANGUAGE plpgsql AS $$
+          BEGIN RAISE EXCEPTION 'smoke: history restart attempted DDL'; END; $$;
+          CREATE EVENT TRIGGER history0018_no_ddl ON ddl_command_start EXECUTE FUNCTION history0018_reject_ddl()`);
+        const before = await signature(client);
+        for (let restart = 0; restart < 2; restart++)
+          await withDeployment(
+            url,
+            { migrationsDirectory: sourceMigrationsDirectory },
+            async (database) => {
+              assert.deepEqual(await database.classify(), {
+                kind: 'supported',
+                version: '0018',
+                reason: 'target_schema_verified',
+              });
+              assert.equal((await database.initialize()).version, '0018');
+              assert.equal((await database.upgrade()).version, '0018');
+            },
+          );
+        assert.deepEqual(await signature(client), before);
+      });
+      record('history0017_to0018_preserves_facts_repeated_upgrade_two_readonly_restarts');
+    });
+    for (const [name, mutation] of [
+      ['missing_conversation_index', 'DROP INDEX conversations_owner_history_idx'],
+      ['missing_message_index', 'DROP INDEX messages_owner_conversation_history_idx'],
+      ['missing_run_index', 'DROP INDEX agent_runs_owner_conversation_history_idx'],
+      ['missing_idempotency_run_index', 'DROP INDEX conversation_idempotency_run_id_idx'],
+      [
+        'wrong_idempotency_run_key',
+        'DROP INDEX conversation_idempotency_run_id_idx; CREATE INDEX conversation_idempotency_run_id_idx ON conversation_idempotency(owner_id)',
+      ],
+      [
+        'unique_idempotency_run_index',
+        'DROP INDEX conversation_idempotency_run_id_idx; CREATE UNIQUE INDEX conversation_idempotency_run_id_idx ON conversation_idempotency(run_id)',
+      ],
+      [
+        'wrong_idempotency_run_table',
+        'DROP INDEX conversation_idempotency_run_id_idx; CREATE INDEX conversation_idempotency_run_id_idx ON run_attempts(run_id)',
+      ],
+      [
+        'invalid_idempotency_run_index',
+        "UPDATE pg_catalog.pg_index SET indisvalid=false WHERE indexrelid='public.conversation_idempotency_run_id_idx'::regclass",
+      ],
+      [
+        'not_ready_idempotency_run_index',
+        "UPDATE pg_catalog.pg_index SET indisready=false WHERE indexrelid='public.conversation_idempotency_run_id_idx'::regclass",
+      ],
+      [
+        'wrong_conversation_order',
+        'DROP INDEX conversations_owner_history_idx; CREATE INDEX conversations_owner_history_idx ON conversations(owner_id,created_at ASC,id DESC)',
+      ],
+      [
+        'wrong_message_order',
+        "DROP INDEX messages_owner_conversation_history_idx; CREATE INDEX messages_owner_conversation_history_idx ON messages(owner_id,conversation_id,id,created_at) WHERE role IN ('user','assistant')",
+      ],
+      [
+        'wrong_run_owner',
+        'DROP INDEX agent_runs_owner_conversation_history_idx; CREATE INDEX agent_runs_owner_conversation_history_idx ON agent_runs(conversation_id,created_at,id)',
+      ],
+      [
+        'wrong_null_order',
+        'DROP INDEX conversations_owner_history_idx; CREATE INDEX conversations_owner_history_idx ON conversations(owner_id,created_at DESC NULLS LAST,id DESC)',
+      ],
+      [
+        'missing_message_predicate',
+        'DROP INDEX messages_owner_conversation_history_idx; CREATE INDEX messages_owner_conversation_history_idx ON messages(owner_id,conversation_id,created_at,id)',
+      ],
+      [
+        'broadened_message_predicate',
+        "DROP INDEX messages_owner_conversation_history_idx; CREATE INDEX messages_owner_conversation_history_idx ON messages(owner_id,conversation_id,created_at,id) WHERE role IN ('user','assistant','system')",
+      ],
+      [
+        'invalid_index',
+        "UPDATE pg_catalog.pg_index SET indisvalid=false WHERE indexrelid='public.messages_owner_conversation_history_idx'::regclass",
+      ],
+      [
+        'not_ready_index',
+        "UPDATE pg_catalog.pg_index SET indisready=false WHERE indexrelid='public.agent_runs_owner_conversation_history_idx'::regclass",
+      ],
+      ['future_history_version', "INSERT INTO schema_migrations(version) VALUES('0019')"],
+    ])
+      await fresh(`history0018_${name}`, async (url) => {
+        await withDeployment(url, { migrationsDirectory: sourceMigrationsDirectory }, (database) =>
+          database.initialize(),
+        );
+        await withClient(url, (client) => client.query(CANARIES + HISTORY_CANARIES));
+        await withClient(url, (client) => client.query(mutation));
+        const before = await withClient(url, signature);
+        await withDeployment(
+          url,
+          { migrationsDirectory: sourceMigrationsDirectory },
+          async (database) => {
+            assert.equal((await database.classify()).kind, 'unknown');
+            await rejectsCode(() => database.initialize(), 'unknown_database_refused');
+            await rejectsCode(() => database.upgrade(), 'unsupported_upgrade_source');
+          },
+        );
+        assert.deepEqual(await withClient(url, signature), before);
+        record(`history0018_${name}_refused_without_repair`);
+      });
+    await fresh('history0018_forged_version_without_indexes', async (url) => {
+      await withDeployment(url, { migrationsDirectory: accountMigrationsDirectory }, (database) =>
+        database.initialize(),
+      );
+      await withClient(url, (client) =>
+        client.query("INSERT INTO schema_migrations(version) VALUES('0018')"),
+      );
+      await withDeployment(
+        url,
+        { migrationsDirectory: sourceMigrationsDirectory },
+        async (database) => {
+          assert.equal((await database.classify()).kind, 'unknown');
+          await rejectsCode(() => database.initialize(), 'unknown_database_refused');
+          await rejectsCode(() => database.upgrade(), 'unsupported_upgrade_source');
+        },
+      );
+      record('history0018_forged_version_without_indexes_refused');
+    });
     // Create an extension migration set outside the repository. The first step
     // commits a canary once. The second step fails or is terminated mid-transaction.
     const extended = path.join(temp, 'migrations'),
@@ -621,6 +801,8 @@ export async function runDatabaseSmoke({
       migrationsDirectory,
     });
     await rejectsCode(() => database.connect(), 'connection_failed');
+    await rejectsCode(() => database.classify(), 'deployment_lease_lost');
+    await database.close();
     record('connection_failure_never_classified_as_empty');
   } catch (error) {
     // Do not include assertion values, PG messages, SQL, URLs, object IDs or causes.

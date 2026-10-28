@@ -49,6 +49,7 @@ import {
   lockRun,
   type ConversationRow,
 } from './repository.js';
+import { requireHistoryRun } from './history-repository.js';
 
 const AGENT_REVISION = 'assistant/r1';
 const BUSINESS_MAX_ITERATIONS = 10;
@@ -708,19 +709,23 @@ export async function getConversationDetail(
   query: Record<string, string | string[] | undefined>,
 ): Promise<ConversationDetail> {
   const pool = requirePool(deps);
-  const parsed = ConversationEventsQuerySchema.safeParse({
-    after_seq: typeof query.after_seq === 'string' ? query.after_seq : undefined,
-    limit: typeof query.limit === 'string' ? query.limit : undefined,
-  });
+  const parsed = ConversationEventsQuerySchema.safeParse(query);
   if (!parsed.success) throw validationError('invalid events query');
   const conversation = await getConversation(pool, conversationId);
   if (!conversation) throw notFound('conversation not found');
   if (conversation.owner_id !== ownerId) throw forbidden('conversation not found');
+  if (
+    parsed.data.run_id &&
+    !(await requireHistoryRun(pool, ownerId, conversationId, parsed.data.run_id))
+  ) {
+    throw notFound('Run not found');
+  }
   const events = await listConversationEvents(pool, {
     ownerId,
     conversationId,
     afterSeq: parsed.data.after_seq ?? null,
     limit: parsed.data.limit,
+    runId: parsed.data.run_id,
   });
   const last = events.at(-1);
   return {

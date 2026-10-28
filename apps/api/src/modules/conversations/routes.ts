@@ -28,6 +28,11 @@ import {
 import type { StartResult } from './contracts.js';
 import type { HarnessServices } from './harness-process.js';
 import type { TimeContext } from '../time/context.js';
+import {
+  getConversationList,
+  getConversationMessages,
+  getConversationRuns,
+} from './history-service.js';
 
 export interface RouteDeps {
   pool: Pool | null;
@@ -38,9 +43,15 @@ export interface RouteDeps {
 }
 
 function queryOf(url: URL): Record<string, string | string[] | undefined> {
-  const out: Record<string, string | string[] | undefined> = {};
+  const out: Record<string, string | string[] | undefined> = Object.create(null);
   url.searchParams.forEach((value, key) => {
-    out[key] = value;
+    const previous = out[key];
+    out[key] =
+      previous === undefined
+        ? value
+        : Array.isArray(previous)
+          ? [...previous, value]
+          : [previous, value];
   });
   return out;
 }
@@ -101,10 +112,7 @@ export async function handleConversationRoute(
   deps: RouteDeps,
 ): Promise<boolean> {
   const { pathname } = url;
-  if (
-    pathname !== '/api/v1/conversations/messages' &&
-    !pathname.startsWith('/api/v1/conversations/')
-  ) {
+  if (pathname !== '/api/v1/conversations' && !pathname.startsWith('/api/v1/conversations/')) {
     return false;
   }
 
@@ -129,6 +137,23 @@ export async function handleConversationRoute(
         idempotencyKeyOf(req),
       );
       await streamRun(req, res, deps, started, requestId);
+      return true;
+    }
+
+    if (req.method === 'GET' && pathname === '/api/v1/conversations') {
+      const page = await getConversationList(deps, actor.ownerId, queryOf(url));
+      sendJson(res, 200, okEnvelope(page, requestId), requestId);
+      return true;
+    }
+    const collectionMatch = /^\/api\/v1\/conversations\/([^/]+)\/(messages|runs)$/.exec(pathname);
+    if (req.method === 'GET' && collectionMatch) {
+      const conversationId = collectionMatch[1] ?? '';
+      if (!isUuid(conversationId)) throw notFound('conversation not found');
+      const page =
+        collectionMatch[2] === 'messages'
+          ? await getConversationMessages(deps, actor.ownerId, conversationId, queryOf(url))
+          : await getConversationRuns(deps, actor.ownerId, conversationId, queryOf(url));
+      sendJson(res, 200, okEnvelope(page, requestId), requestId);
       return true;
     }
 

@@ -23,10 +23,45 @@ export const SendMessageBodySchema = z
 
 export type SendMessageBody = z.infer<typeof SendMessageBodySchema>;
 
-export const ConversationEventsQuerySchema = z.object({
-  after_seq: z.coerce.number().int().nonnegative().optional(),
-  limit: z.coerce.number().int().min(1).max(500).default(200),
-});
+export const ConversationEventsQuerySchema = z
+  .object({
+    after_seq: z
+      .string()
+      .regex(/^[0-9]+$/)
+      .transform(Number)
+      .pipe(z.number().int().nonnegative().safe())
+      .optional(),
+    limit: z
+      .string()
+      .regex(/^[0-9]+$/)
+      .default('200')
+      .transform(Number)
+      .pipe(z.number().int().min(1).max(500)),
+    run_id: z.string().uuid().optional(),
+  })
+  .strict();
+
+export const HistoryCursorSchema = z
+  .object({
+    v: z.literal('1'),
+    kind: z.enum(['conversations', 'messages', 'runs']),
+    owner: z.string().uuid(),
+    parent: z.union([z.string().uuid(), z.literal('')]),
+    upper_at: z.string().datetime({ precision: 6 }),
+    upper_id: z.string().uuid(),
+    last_at: z.string().datetime({ precision: 6 }),
+    last_id: z.string().uuid(),
+  })
+  .strict()
+  .refine(
+    (cursor) =>
+      (cursor.kind === 'conversations') === (cursor.parent === '') &&
+      (cursor.last_at < cursor.upper_at ||
+        (cursor.last_at === cursor.upper_at &&
+          cursor.last_id.toLowerCase() <= cursor.upper_id.toLowerCase())),
+    { message: 'invalid cursor boundary' },
+  );
+export type HistoryCursor = z.infer<typeof HistoryCursorSchema>;
 
 export const CancelRunBodySchema = z
   .object({

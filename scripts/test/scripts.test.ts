@@ -78,4 +78,23 @@ describe('governance scripts', () => {
       }
     }
   });
+
+  it('permits exactly conversation history migration 0018 without broadening ownership', () => {
+    for (const [name, accepted] of [
+      ['0018_conversation_history.sql', true],
+      ['0015_conversation_history.sql', false],
+      ['0017_conversation_history.sql', false],
+      ['0019_conversation_history.sql', false],
+      ['0018_conversation_unapproved_change.sql', false],
+    ] as const) {
+      const target = mkdtempSync(join(tmpdir(), 'migration-history-'));
+      try {
+        mkdirSync(join(target, 'infra', 'migrations'), { recursive: true });
+        writeFileSync(join(target, 'infra', 'migrations', name), 'BEGIN; COMMIT;');
+        expect(run('check-migrations.mjs', target).code === 0).toBe(accepted);
+      } finally {
+        rmSync(target, { recursive: true, force: true });
+      }
+    }
+  });
 });

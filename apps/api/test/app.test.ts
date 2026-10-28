@@ -38,6 +38,30 @@ function errorCode(payload: Record<string, unknown>): string {
 }
 
 describe('app', () => {
+  it('history collections report dependency failure rather than missing routes or empty history', async () => {
+    const conversationId = '11111111-1111-4111-8111-111111111111';
+    for (const path of [
+      '/api/v1/conversations',
+      `/api/v1/conversations/${conversationId}/messages`,
+      `/api/v1/conversations/${conversationId}/runs`,
+    ]) {
+      const { req, res, body } = fakePair('GET', path);
+      await handleRequest(req, res, {
+        pool: null,
+        tzdbVersion: '2024a',
+        resolveActor: async () => ({
+          ownerId: '22222222-2222-4222-8222-222222222222',
+          sessionId: null,
+          displayName: 'History owner',
+          timezoneId: null,
+        }),
+      });
+      expect(res.status).toBe(503);
+      expect(errorCode(body())).toBe('NOT_READY');
+      expect(res.resHeaders['cache-control']).toBe('no-store');
+    }
+  });
+
   it('GET /auth/status without a database returns503 and no-store, never missing route or empty setup', async () => {
     const { req, res, body } = fakePair('GET', '/api/v1/auth/status');
     await handleRequest(req, res, { pool: null, tzdbVersion: '2024a' });

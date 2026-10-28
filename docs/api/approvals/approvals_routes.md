@@ -190,9 +190,9 @@ AMBIGUOUS唯一共享结构引用A4 `docs/design/05-time-core.md` §9.1：`detai
 
 版本冲突后的新批准可引用明确零写的同目标前驱，旧授权及结果保持原事实。不得拿文档 UUID 调用旧 task confirm，或将其写入 task 批准外键；旧 approvals 的有效期、consumed、revise、时间展示与事务语义不变。
 
-## 8. R1 历史中的真实提醒结果（Proposed，#69）
+## 8. R1 历史中的真实提醒结果（#69）
 
-本节为 [design/17 §5](../../design/17-r1-conversation-history.md#5-批准与结果) 的待评审只读增量；不新增批准或执行入口，不改确认三件套、取消回执、修订或幂等合同。
+本节为 [design/17 §5](../../design/17-r1-conversation-history.md#5-批准与结果) 的 Required 只读增量；不新增批准或执行入口，不改确认三件套、取消回执、修订或幂等合同。
 
 - `GET /approvals/{id}` 在保留既有详情字段的同时，增加 `result={task_id:UUID|null,successor_approval_id:UUID|null}`；公共详情 strict schema 归 `packages/contracts`，API/Web/合同消费者同批迁移，不保留重复 schema 或兼容别名。
 - consumed create_task 指向真实 `consumed_task_id`；consumed cancel_task 指向真实 `target_task_id`；superseded 指向原后继批准，其余相应值为 null。consumed 却缺真实结果为完整性错误，不能当“没有结果”成功返回。

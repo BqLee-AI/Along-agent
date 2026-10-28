@@ -9,10 +9,10 @@
 ## 1. Base Path 与路由总数 [Required]
 
 - Base Path：`/api/v1`。下文路由表省略该前缀，如 `GET /me` 即 `GET /api/v1/me`。
-- 合同共 25 个业务端点 + 2 个探针：既有 v0 的13个业务端点、正式 Harness 的3个 Run 入口、R1 的4个工作区/文档批准入口，以及 #68 新增5个窄账户入口：
+- 合同共 28 个业务端点 + 2 个探针：既有 v0 的 13 个业务端点、正式 Harness 的 3 个 Run 入口、R1 的 4 个工作区/文档批准入口、5 个窄账户入口及 3 个历史集合读取入口：
   - auth：`GET /me`，`GET /auth/status`、`POST /auth/initialize`、`POST /auth/claim`、`POST /auth/sign-in`、`POST /auth/sign-out`（6；后5个是 #68 新增合同，详见 auth §4）。
   - brief：`GET /brief`（1）。
-  - conversations：`POST /conversations/messages`（SSE）、`GET /conversations/{id}`，加 Run 查询、取消和有限批准恢复（5；见 conversations §3）。
+  - conversations：`POST /conversations/messages`（SSE）、`GET /conversations/{id}`，Run 查询、取消和有限批准恢复，以及 `GET /conversations`、`GET /conversations/{cid}/messages`、`GET /conversations/{cid}/runs`（8；见 conversations §3、§6）。
   - approvals：`GET /approvals`、`GET /approvals/{id}`、`POST /approvals/{id}/actions/confirm`、`POST /approvals/{id}/actions/reject`、`POST /approvals/{id}/actions/revise`（5；revise 见 approvals §6）。
   - tasks：`GET /tasks`、`GET /tasks/{id}`、`POST /tasks/{id}/actions/cancel`、`GET /tasks/{id}/events`（4）。
   - R1：`GET /workspaces`、文档批准详情、确认和拒绝（4；见 §8）。不提供工作区登记写接口或任意文件读写 HTTP 入口。
@@ -148,6 +148,9 @@
 | 23  | POST | `/auth/claim`                                    | 旧签名会话 + Origin   | 是     | —      | 仅转正当前 actor                             | auth/auth_routes.md §4                   |
 | 24  | POST | `/auth/sign-in`                                  | Origin                | Origin | —      | 固定七天 credential 登录                     | auth/auth_routes.md §4                   |
 | 25  | POST | `/auth/sign-out`                                 | 签名会话 + Origin     | 是     | —      | 已确认撤销后清 Cookie                        | auth/auth_routes.md §4                   |
+| 26  | GET  | `/conversations`                                 | 是                    | 否     | —      | 本人会话发现，稳定有界分页                   | conversations/conversations_routes.md §6 |
+| 27  | GET  | `/conversations/{cid}/messages`                  | 是                    | 否     | —      | 本人会话可见消息档案                         | conversations/conversations_routes.md §6 |
+| 28  | GET  | `/conversations/{cid}/runs`                      | 是                    | 否     | —      | Run 索引、可信原话及指定 Run 点查            | conversations/conversations_routes.md §6 |
 
 ## 8. R1 工作区与文档批准 [Required]
 
@@ -169,8 +172,8 @@
 - 不复制外部产物原文/token/DSN；不猜目标市场/推送通道/实际 LLM 供应商/计费。仓颉唯一 Harness 与 TS 长期能力/业务/存储已定；正式 pipe/用户 Run API 见 design/09/11，完整 R1 与通用恢复不据此自动通过。
 - 引用蓝图统一用 B00–B06 / AF 代号。
 
-## 10. R1 会话历史读取增量（Proposed，#69）
+## 10. R1 会话历史读取（#69）
 
-[design/17](../design/17-r1-conversation-history.md) 与 [conversation API §6](conversations/conversations_routes.md#6-r1-可发现历史与只读恢复proposed69) 建议增加三个带会话的 GET：会话集合、会话可见消息集合、会话 Run 集合；不新增业务写入端点。该 Proposed 增量不改变 §1、§7 的 25 端点 Required 基线，不代表三个新入口已实施。
+[design/17](../design/17-r1-conversation-history.md) 与 [conversation API §6](conversations/conversations_routes.md#6-r1-可发现历史与只读恢复69) 定义三个带会话的 GET：会话集合、会话可见消息集合、会话 Run 集合；不新增业务写入端点，计入 §1、§7 的 28 端点 Required 合同。
 
-新集合共享严格分页 DTO、owner 作用域、no-store 和准确失败边界；旧事件查询新增可选 Run 筛选但保持响应。原任务批准详情的只读结果字段见 [approval API §8](approvals/approvals_routes.md#8-r1-历史中的真实提醒结果proposed69)。历史页仅 GET 恢复，403/依赖错误不跳登录；读完整历史不恢复工作区新动作权限。
+新集合共享严格分页 DTO、owner 作用域、no-store 和准确失败边界；旧事件查询提供可选 Run 筛选但保持响应。原任务批准详情的只读结果字段见 [approval API §8](approvals/approvals_routes.md#8-r1-历史中的真实提醒结果69)。历史页仅 GET 恢复，403/依赖错误不跳登录；读完整历史不恢复工作区新动作权限。
