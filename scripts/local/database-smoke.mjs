@@ -87,9 +87,13 @@ async function signature(client) {
     'messages',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM messages t),
     'runs',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM agent_runs t),
     'attempts',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM run_attempts t),
+    'idempotency',(SELECT jsonb_agg(to_jsonb(t) ORDER BY owner_id,idempotency_key) FROM conversation_idempotency t),
     'ledger',(SELECT jsonb_agg(to_jsonb(t) ORDER BY version) FROM schema_migrations t),
     'schema',(SELECT jsonb_agg(jsonb_build_array(c.relname,c.relkind,a.attname,a.atttypid,a.attnotnull) ORDER BY c.relname,a.attnum)
       FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace LEFT JOIN pg_attribute a ON a.attrelid=c.oid AND a.attnum>0
+      WHERE n.nspname='public'),
+    'indexes',(SELECT jsonb_agg(jsonb_build_array(c.relname,to_jsonb(i),pg_get_indexdef(i.indexrelid)) ORDER BY c.relname)
+      FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid JOIN pg_namespace n ON n.oid=c.relnamespace
       WHERE n.nspname='public')) AS value`)
   ).rows[0].value;
 }
@@ -118,6 +122,10 @@ VALUES ('00000000-0000-4000-8000-000000000109','00000000-0000-4000-8000-00000000
 INSERT INTO run_attempts(id,owner_id,run_id,attempt_no)
 VALUES ('00000000-0000-4000-8000-000000000110','00000000-0000-4000-8000-000000000001',
   '00000000-0000-4000-8000-000000000109',1);
+INSERT INTO conversation_idempotency(owner_id,idempotency_key,request_hash,conversation_id,run_id,user_message_id,expires_at)
+VALUES ('00000000-0000-4000-8000-000000000001','historical-reference','preserve',
+  '00000000-0000-4000-8000-000000000105','00000000-0000-4000-8000-000000000109',
+  '00000000-0000-4000-8000-000000000106','2020-01-02T00:00:00Z');
 `;
 
 /** Run only against an explicitly supplied, disposable PostgreSQL 16 server.
@@ -452,6 +460,7 @@ export async function runDatabaseSmoke({
         const facts = await signature(client);
         delete facts.schema;
         delete facts.ledger;
+        delete facts.indexes;
         return facts;
       });
       await withDeployment(
@@ -472,6 +481,7 @@ export async function runDatabaseSmoke({
         const afterFacts = await signature(client);
         delete afterFacts.schema;
         delete afterFacts.ledger;
+        delete afterFacts.indexes;
         assert.deepEqual(afterFacts, beforeFacts);
         await client.query(`CREATE FUNCTION history0018_reject_ddl() RETURNS event_trigger LANGUAGE plpgsql AS $$
           BEGIN RAISE EXCEPTION 'smoke: history restart attempted DDL'; END; $$;
@@ -499,6 +509,27 @@ export async function runDatabaseSmoke({
       ['missing_conversation_index', 'DROP INDEX conversations_owner_history_idx'],
       ['missing_message_index', 'DROP INDEX messages_owner_conversation_history_idx'],
       ['missing_run_index', 'DROP INDEX agent_runs_owner_conversation_history_idx'],
+      ['missing_idempotency_run_index', 'DROP INDEX conversation_idempotency_run_id_idx'],
+      [
+        'wrong_idempotency_run_key',
+        'DROP INDEX conversation_idempotency_run_id_idx; CREATE INDEX conversation_idempotency_run_id_idx ON conversation_idempotency(owner_id)',
+      ],
+      [
+        'unique_idempotency_run_index',
+        'DROP INDEX conversation_idempotency_run_id_idx; CREATE UNIQUE INDEX conversation_idempotency_run_id_idx ON conversation_idempotency(run_id)',
+      ],
+      [
+        'wrong_idempotency_run_table',
+        'DROP INDEX conversation_idempotency_run_id_idx; CREATE INDEX conversation_idempotency_run_id_idx ON run_attempts(run_id)',
+      ],
+      [
+        'invalid_idempotency_run_index',
+        "UPDATE pg_catalog.pg_index SET indisvalid=false WHERE indexrelid='public.conversation_idempotency_run_id_idx'::regclass",
+      ],
+      [
+        'not_ready_idempotency_run_index',
+        "UPDATE pg_catalog.pg_index SET indisready=false WHERE indexrelid='public.conversation_idempotency_run_id_idx'::regclass",
+      ],
       [
         'wrong_conversation_order',
         'DROP INDEX conversations_owner_history_idx; CREATE INDEX conversations_owner_history_idx ON conversations(owner_id,created_at ASC,id DESC)',
@@ -537,6 +568,7 @@ export async function runDatabaseSmoke({
         await withDeployment(url, { migrationsDirectory: sourceMigrationsDirectory }, (database) =>
           database.initialize(),
         );
+        await withClient(url, (client) => client.query(CANARIES + HISTORY_CANARIES));
         await withClient(url, (client) => client.query(mutation));
         const before = await withClient(url, signature);
         await withDeployment(

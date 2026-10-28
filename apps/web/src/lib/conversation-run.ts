@@ -235,27 +235,35 @@ export interface HistoryApprovalReference {
   seq: number;
 }
 
-export function collectRunTranscript(
-  events: ThreadEvent[],
-  runId: string,
-): {
+export interface RunTranscript {
   text: string;
   approvals: HistoryApprovalReference[];
-} {
-  let text = '';
-  const approvals: HistoryApprovalReference[] = [];
+}
+
+// Callers normalize persisted seq once with mergeThreadEvents before collecting.
+// Map insertion order retains the first event's Run order for the chat log.
+export function collectRunTranscripts(
+  events: readonly ThreadEvent[],
+  { includeText = true }: { includeText?: boolean } = {},
+): Map<string, RunTranscript> {
+  const transcripts = new Map<string, RunTranscript>();
   const seen = new Set<string>();
-  for (const event of mergeThreadEvents([], events)) {
-    if (event.payload.run_id !== runId) continue;
-    if (event.type === 'message.delta') text += event.payload.delta;
+  for (const event of events) {
+    const runId = event.payload.run_id;
+    let transcript = transcripts.get(runId);
+    if (!transcript) {
+      transcript = { text: '', approvals: [] };
+      transcripts.set(runId, transcript);
+    }
+    if (includeText && event.type === 'message.delta') transcript.text += event.payload.delta;
     if (event.type !== 'approval_required') continue;
     const approvalId = event.payload.approval_id;
     const kind = event.payload.card_id === `document-approval:${approvalId}` ? 'document' : 'task';
-    const key = `${kind}:${approvalId}`;
+    const key = `${runId}:${kind}:${approvalId}`;
     if (!seen.has(key)) {
       seen.add(key);
-      approvals.push({ kind, approvalId, seq: event.seq });
+      transcript.approvals.push({ kind, approvalId, seq: event.seq });
     }
   }
-  return { text, approvals };
+  return transcripts;
 }

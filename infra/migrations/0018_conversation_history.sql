@@ -1,4 +1,4 @@
--- Add only owner-scoped keyset indexes; preserve all existing tables and facts.
+-- Add only history keyset and legacy-reference lookup indexes; preserve existing facts.
 BEGIN;
 LOCK TABLE schema_migrations IN EXCLUSIVE MODE;
 DO $migration$
@@ -15,6 +15,8 @@ BEGIN
     WHERE role IN ('user', 'assistant');
   CREATE INDEX agent_runs_owner_conversation_history_idx
     ON agent_runs (owner_id, conversation_id, created_at, id);
+  CREATE INDEX conversation_idempotency_run_id_idx
+    ON conversation_idempotency (run_id);
 
   INSERT INTO schema_migrations(version) VALUES ('0018');
 END;

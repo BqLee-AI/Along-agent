@@ -3,7 +3,8 @@ import { createServer, type Server } from 'node:http';
 import { once } from 'node:events';
 import { ConversationMessagePageSchema } from '@along/contracts';
 import {
-  collectRunTranscript,
+  collectRunTranscripts,
+  mergeThreadEvents,
   readHistoryCollectionPage,
   readHistoryEventPage,
 } from '../src/lib/conversation-run';
@@ -128,7 +129,8 @@ describe('actual HTTP readonly history consumers', () => {
     );
     expect(last.items).toEqual([]);
     expect(last.nextCursor).toBeNull();
-    const transcript = collectRunTranscript([...first.items, ...last.items, first.items[0]!], rid);
+    const events = mergeThreadEvents([], [...first.items, ...last.items, first.items[0]!]);
+    const transcript = collectRunTranscripts(events).get(rid)!;
     expect(transcript.text).toBe(`第一轮。${'续'.repeat(199)}`);
     expect(transcript.text).not.toContain('最终档案');
     expect(requests.filter((request) => request.url.startsWith('/events'))).toEqual([

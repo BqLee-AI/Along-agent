@@ -1,4 +1,4 @@
--- Read-only incremental verifier for the three ordinary indexes added by 0018.
+-- Read-only incremental verifier for the four ordinary indexes added by 0018.
 -- The existing 0016/0017 verifiers continue to validate their original objects.
 DO $verification$
 DECLARE
@@ -19,7 +19,10 @@ BEGIN
         '(role = ANY (ARRAY[''user''::text, ''assistant''::text]))'::text),
       ('agent_runs_owner_conversation_history_idx', 'agent_runs',
         ARRAY['owner_id','conversation_id','created_at','id']::text[], ARRAY[0,0,0,0]::smallint[],
-        ARRAY['uuid_ops','uuid_ops','timestamptz_ops','uuid_ops']::text[], NULL::text)
+        ARRAY['uuid_ops','uuid_ops','timestamptz_ops','uuid_ops']::text[], NULL::text),
+      ('conversation_idempotency_run_id_idx', 'conversation_idempotency',
+        ARRAY['run_id']::text[], ARRAY[0]::smallint[],
+        ARRAY['uuid_ops']::text[], NULL::text)
     ) AS indexes(index_name, table_name, columns, options, operator_classes, predicate)
   LOOP
     IF NOT EXISTS (

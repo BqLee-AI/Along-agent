@@ -16,7 +16,7 @@ import {
   ConversationEventsSchema,
   ResumeRequestSchema,
   conversationHref,
-  collectRunTranscript,
+  collectRunTranscripts,
   mergeThreadEvents,
   readEnvelope,
   readRun,
@@ -323,10 +323,10 @@ export default function Chat({
     }
   }
 
-  const transcript = useMemo(() => {
-    const runIds = new Set(events.map((event) => event.payload.run_id));
-    return [...runIds].map((rid) => [rid, collectRunTranscript(events, rid)] as const);
-  }, [events]);
+  const transcript = useMemo(
+    () => [...collectRunTranscripts(events, { includeText: !controlsOnly })],
+    [events, controlsOnly],
+  );
   const approvals = transcript.flatMap(([rid, turn]) =>
     turn.approvals.map((reference) => ({ ...reference, runId: rid })),
   );

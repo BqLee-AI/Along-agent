@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   ConversationMessagePageSchema,
   ConversationRunPageSchema,
@@ -10,7 +10,7 @@ import {
 } from '@along/contracts';
 import type { ThreadEvent } from '@along/stream-protocol';
 import {
-  collectRunTranscript,
+  collectRunTranscripts,
   conversationHref,
   mergeThreadEvents,
   readHistoryCollectionPage,
@@ -101,9 +101,12 @@ function RunHistory({ conversationId, runId }: { conversationId: string; runId: 
     [conversationId, runId],
   );
   const replies = useHistoryPage<ThreadEvent>(`events:${conversationId}:${runId}`, eventLoader);
-  const transcript = collectRunTranscript(replies.state.items, runId);
+  const events = useMemo(() => mergeThreadEvents([], replies.state.items), [replies.state.items]);
+  const transcript = useMemo(
+    () => collectRunTranscripts(events).get(runId) ?? { text: '', approvals: [] },
+    [events, runId],
+  );
   const run = original.state.items[0];
-  const events = mergeThreadEvents([], replies.state.items);
   return (
     <section aria-label="指定 Run 历史">
       <h2>指定 Run {runId}</h2>

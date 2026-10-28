@@ -347,6 +347,6 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 
 - 当前新 Run 的 `input_message_id` 指向原样用户消息；读取须同时核 owner、conversation、role。旧空引用仅在既有幂等引用完整无歧义时使用，否则明确不可关联；非空损坏引用标记不完整，不回填猜测关系。
 - 终态 assistant message 合并本 Run 已存 delta，但消息本身没有可信 Run 引用。消息档案保留所有允许公开的 user/assistant 内容；各 Run 回复按外部事件读取全部 attempt，不把最终消息重复拼接，不把 system/internal snapshot 公开。
-- `0018_conversation_history.sql` 仅增加三个查询索引：`conversations(owner_id,created_at DESC,id DESC)`、`messages(owner_id,conversation_id,created_at,id) WHERE role IN ('user','assistant')`、`agent_runs(owner_id,conversation_id,created_at,id)`。不修改旧迁移或原行。
-- 新增索引核验沿 #67 已有 SQL verifier，验证真实定义、有效性及版本；同步迁移扫描窄允许项和显式升级覆盖。只核列/约束的 JSON 增量不能冒充新普通索引结构校验，不扩建第二套迁移框架。
+- `0018_conversation_history.sql` 仅增加四个非唯一普通 B-tree 查询索引：`conversations(owner_id,created_at DESC,id DESC)`、`messages(owner_id,conversation_id,created_at,id) WHERE role IN ('user','assistant')`、`agent_runs(owner_id,conversation_id,created_at,id)`、`conversation_idempotency(run_id)`。最后一个服务于旧 Run 缺少 `input_message_id` 的回退查找：按 `run_id` 取全引用后，仍核全部引用的 owner/会话及原话歧义，不因索引加唯一约束或预先排除坏引用。不修改旧迁移或原行。
+- 新增索引核验沿 #67 已有 SQL verifier，验证四个索引的真实表、键、非唯一性、定义、有效/就绪/存活状态及版本；同步迁移扫描窄允许项和显式升级覆盖。只核列/约束的 JSON 增量不能冒充新普通索引结构校验，不扩建第二套迁移框架。旧三索引运行记录不视为四索引已验收，新增状态须有独立实际运行证据。
 - 列表标题/活动只做所属模块查询投影，分页按不变建立键保留微秒与 ID 顺序；Run 更新不搬页，跨请求不是数据库快照。批准与工具效果仍经所属模块公共只读投影组合，不跨模块直读私表。

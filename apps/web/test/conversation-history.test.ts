@@ -2,10 +2,11 @@ import { describe, expect, it } from 'bun:test';
 import { ThreadEventSchema, type ThreadEvent } from '@along/stream-protocol';
 import {
   ApiReadError,
-  collectRunTranscript,
+  collectRunTranscripts,
   eventPageComplete,
   historyPageReducer,
   initialHistoryPage,
+  mergeThreadEvents,
   readEnvelope,
 } from '../src/lib/conversation-run';
 import { clearAppRetryState } from '../src/lib/account-navigation';
@@ -16,12 +17,13 @@ function event(
   seq: number,
   type: 'message.delta' | 'approval_required',
   fields: Record<string, unknown>,
+  requestId = 'history-read',
 ): ThreadEvent {
   return ThreadEventSchema.parse({
     protocol_version: 'v1',
     seq,
     type,
-    request_id: 'history-read',
+    request_id: requestId,
     payload: {
       conversation_id: cid,
       run_id: rid,
@@ -164,21 +166,98 @@ describe('history resource state consumed by the Web', () => {
     expect(eventPageComplete(199, 200)).toBe(true);
   });
 
-  it('merges all attempt deltas by seq and keeps every kind+ID approval once in first-event order', () => {
+  it('normalizes all attempt deltas by seq and keeps every kind+ID approval once in first-event order', () => {
     const events = [
-      event(2, 'message.delta', { delta: '第一轮。' }),
-      event(5, 'approval_required', { approval_id: cid, card_id: 'task-card' }),
+      event(9, 'message.delta', { delta: '第二轮。' }, 'resumed-attempt'),
+      event(2, 'message.delta', { delta: '第一轮。' }, 'initial-attempt'),
       event(8, 'approval_required', { approval_id: cid, card_id: `document-approval:${cid}` }),
-      event(9, 'message.delta', { delta: '第二轮。' }),
+      event(5, 'approval_required', { approval_id: cid, card_id: 'task-card' }),
       event(10, 'approval_required', { approval_id: cid, card_id: 'task-card' }),
+      event(2, 'message.delta', { delta: '重复 seq 不应替换第一条。' }),
     ];
-    const transcript = collectRunTranscript([...events, events[0]!], rid);
-    expect(transcript.text).toBe('第一轮。第二轮。');
-    expect(transcript.approvals).toEqual([
-      { kind: 'task', approvalId: cid, seq: 5 },
-      { kind: 'document', approvalId: cid, seq: 8 },
+    const transcripts = collectRunTranscripts(mergeThreadEvents([], events));
+    expect(transcripts.get(rid)).toEqual({
+      text: '第一轮。第二轮。',
+      approvals: [
+        { kind: 'task', approvalId: cid, seq: 5 },
+        { kind: 'document', approvalId: cid, seq: 8 },
+      ],
+    });
+    expect(transcripts.get('another-run')).toBeUndefined();
+  });
+
+  it('keeps interleaved Runs separate and orders Runs and their approvals by first persisted event', () => {
+    const otherRunId = '33333333-3333-4333-8333-333333333333';
+    const events = mergeThreadEvents(
+      [],
+      [
+        event(8, 'message.delta', { run_id: otherRunId, delta: '乙二。' }),
+        event(3, 'message.delta', { run_id: otherRunId, delta: '乙一。' }),
+        event(2, 'message.delta', { delta: '甲一。' }),
+        event(7, 'message.delta', { delta: '甲二。' }, 'resumed-attempt'),
+        event(5, 'approval_required', { approval_id: cid, card_id: 'task-card' }),
+        event(4, 'approval_required', {
+          run_id: otherRunId,
+          approval_id: cid,
+          card_id: `document-approval:${cid}`,
+        }),
+        event(6, 'approval_required', {
+          run_id: otherRunId,
+          approval_id: cid,
+          card_id: 'task-card',
+        }),
+        event(9, 'approval_required', {
+          run_id: otherRunId,
+          approval_id: cid,
+          card_id: 'task-card',
+        }),
+      ],
+    );
+    expect([...collectRunTranscripts(events)]).toEqual([
+      [
+        rid,
+        {
+          text: '甲一。甲二。',
+          approvals: [{ kind: 'task', approvalId: cid, seq: 5 }],
+        },
+      ],
+      [
+        otherRunId,
+        {
+          text: '乙一。乙二。',
+          approvals: [
+            { kind: 'document', approvalId: cid, seq: 4 },
+            { kind: 'task', approvalId: cid, seq: 6 },
+          ],
+        },
+      ],
     ]);
-    expect(collectRunTranscript(events, 'another-run').text).toBe('');
+  });
+
+  it('retains approval references with text disabled and handles an empty event collection', () => {
+    const events = mergeThreadEvents(
+      [],
+      [
+        event(2, 'message.delta', { delta: '不展示的回复。' }),
+        event(3, 'approval_required', { approval_id: cid, card_id: 'task-card' }),
+        event(4, 'approval_required', { approval_id: cid, card_id: `document-approval:${cid}` }),
+        event(5, 'approval_required', { approval_id: cid, card_id: 'task-card' }),
+      ],
+    );
+    expect([...collectRunTranscripts(events, { includeText: false })]).toEqual([
+      [
+        rid,
+        {
+          text: '',
+          approvals: [
+            { kind: 'task', approvalId: cid, seq: 3 },
+            { kind: 'document', approvalId: cid, seq: 4 },
+          ],
+        },
+      ],
+    ]);
+    expect([...collectRunTranscripts([])]).toEqual([]);
+    expect([...collectRunTranscripts([], { includeText: false })]).toEqual([]);
   });
 
   it.each([403, 404, 503])(

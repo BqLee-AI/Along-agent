@@ -21,7 +21,7 @@ Required：清空临时状态且不保留旧URL，退出后同账户登录，仍
 | owner/parent 作用域、稳定分页与可信原话投影       | `apps/api/src/modules/conversations/history-service.ts`、`history-repository.ts`     |
 | 用户原文与新 Run 输入引用、终结消息的既有合并规则 | `apps/api/src/modules/conversations/service.ts`、`run-state.ts`                      |
 | 任务批准详情和决议共用真实结果投影                | `apps/api/src/modules/approvals/repository.ts`、`service.ts`、`decision.ts`          |
-| 三个查询索引及真实结构核验                        | `infra/migrations/0018_conversation_history.sql`、`scripts/local/baselines/0018.sql` |
+| 四个查询索引及真实结构核验                        | `infra/migrations/0018_conversation_history.sql`、`scripts/local/baselines/0018.sql` |
 
 ## 2. 所有权与方案取舍
 
@@ -119,15 +119,16 @@ mount、列表选择、Run选择、刷新、back、读取更多及登录返回�
 
 ## 9. 数据、索引与兼容发布
 
-不新增表或原话/assistant 关系列，不修改旧迁移、不重写旧冻结事实。`0018_conversation_history.sql` 仅增加：
+不新增表或原话/assistant 关系列，不修改旧迁移、不重写旧冻结事实。尚未合并、未部署到用户原安装的 `0018_conversation_history.sql` 仅增加四个非唯一普通 B-tree 索引：
 
 - conversations(owner_id,created_at DESC,id DESC)：列表keyset。
 - messages(owner_id,conversation_id,created_at,id) WHERE role IN ('user','assistant')：本人可见消息分页/首条原文。
 - agent_runs(owner_id,conversation_id,created_at,id)：本人会话Run索引。
+- conversation_idempotency(run_id)：旧 Run 缺少 input_message_id 时，按 run_id 查全既有幂等引用；非唯一索引保留多引用事实，随后仍检查全部引用的 owner/会话作用域及原话歧义，不预先过滤坏引用或更改读取合同。
 
 last_activity为已有有界owner会话事实的派生查询，不预建搜索索引。列表用单SQL/明确只读投影取得每页标题/活动，避免为每行多次往返；既有event_seq、attempt/run索引先复用，不预建event JSON或FTS索引。没有实测性能预算，不虚构p95保证。
 
-索引只在 `0018_conversation_history.sql` 中创建，旧 baseline 对象保留。`scripts/check-migrations.mjs` 仅窄范围允许该文件；`scripts/local/baselines/0018.sql` 沿用已有 SQL verifier，经 pg_catalog 核对真实索引定义、方向、空值顺序、谓词及有效性，不以只核列/约束的 JSON 增量冒充索引核验。升级覆盖包括 0017→0018、重复升级、两次禁止 DDL 的只读重启和畸形索引拒绝；新运行证据不改写 #67/#68 的历史记录。
+索引只在 `0018_conversation_history.sql` 中创建，旧 baseline 对象保留。`scripts/check-migrations.mjs` 仅窄范围允许该文件；`scripts/local/baselines/0018.sql` 沿用已有 SQL verifier，经 pg_catalog 核对四个真实索引的表、键、非唯一属性、方向、空值顺序、谓词及有效/就绪/存活状态，不以只核列/约束的 JSON 增量冒充索引核验。既有表驱动 PG smoke 扩展 run_id 索引缺失、错键、错误唯一性、错表、无效及未就绪场景，要求拒绝且不修复索引、不改变已有事实。原已运行的三索引升级与 47 场景验收只证明旧状态，不能作为新增第四索引的验收；四索引状态须另记真实 PG16 EXPLAIN 与生命周期运行证据，不改写 #67/#68 的历史记录。
 
 停旧写者，经既有显式local:upgrade升级并部署同批API/Web/contracts。新集合属添加，旧events/RunView/SSE不变，task批准详情增加结果字段且同步消费者；不改Harness协议。迁移失败沿既有停写和显式修复流程，不自动重试业务POST。回退应用须遵守#67版本分类，不能盲目降版或删新迁移/卷/owner来通过启动。
 

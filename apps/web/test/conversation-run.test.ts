@@ -63,15 +63,17 @@ describe('Run event consumers', () => {
     expect(observed.at(-1)?.type).toBe('approval_required');
   });
 
-  it('merges buffered rereads and same Run continuation without duplicating deltas or requiring contiguous seq', () => {
+  it('normalizes out-of-order rereads and continuation, keeping the first accepted event per seq across gaps', () => {
     const started = event(10, 'thread.started');
     const delta = event(12, 'message.delta', { delta: '已提议。' });
     let observed = mergeThreadEvents([], [started, delta]);
     observed = mergeThreadEvents(observed, [
       started,
       delta,
-      event(19, 'message.delta', { delta: '已确认。' }),
       event(20, 'thread.completed'),
+      event(12, 'message.delta', { delta: '不得覆盖已接受增量。' }),
+      event(19, 'message.delta', { delta: '已确认。' }),
+      event(19, 'message.delta', { delta: '不得重复追加。' }),
     ]);
     expect(observed.map((value) => value.seq)).toEqual([10, 12, 19, 20]);
     expect(observed.filter((value) => value.type === 'thread.started')).toHaveLength(1);
