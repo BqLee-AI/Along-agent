@@ -307,10 +307,7 @@ async function dispatchRequest(
     return;
   }
 
-  if (
-    pathname === '/api/v1/conversations/messages' ||
-    pathname.startsWith('/api/v1/conversations/')
-  ) {
+  if (pathname === '/api/v1/conversations' || pathname.startsWith('/api/v1/conversations/')) {
     if (req.method === 'GET' || req.method === 'POST') {
       const handled = await handleConversationRoute(req, res, url, {
         pool: deps.pool,

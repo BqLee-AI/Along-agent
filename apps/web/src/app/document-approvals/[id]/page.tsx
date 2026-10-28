@@ -32,22 +32,20 @@ export default async function DocumentApprovalPage({
         <p className="error" role="alert">
           {detailResult.message}
         </p>
-      </section>
-    );
-  if (!meResult.ok)
-    return (
-      <section>
-        <h1>文档批准</h1>
-        <p className="error" role="alert">
-          {meResult.message}
-        </p>
+        <a href={returnTo}>重试读取原批准（GET）</a>
       </section>
     );
   const detail = DocumentApprovalDetailSchema.parse(detailResult.data);
   const me = meResult.ok ? MeSchema.safeParse(meResult.data) : null;
   return (
-    <section>
+    <section className="conversation-history">
       <h1>批准文档精确替换</h1>
+      {!meResult.ok ? (
+        <p className="error" role="alert">
+          冻结批准详情已获取，但当前动作身份未核验：{meResult.message}。
+          <a href={returnTo}>重试读取身份（GET）</a>
+        </p>
+      ) : null}
       <p className="subtitle">
         批准状态：{detail.state}。确认只授权，不写入文件；实际文件结果以下方执行证据为准。
       </p>
@@ -113,6 +111,9 @@ export default async function DocumentApprovalPage({
           </p>
         ) : null}
       </div>
+      <p>
+        <a href={returnTo}>刷新批准与已接受效果（GET）</a>
+      </p>
       <DocumentActions key={detail.approval_id} detail={detail} me={me?.success ? me.data : null} />
       <p>
         <a href={conversationHref(detail.conversation_id, detail.run_id)}>查看原会话与原 Run</a>

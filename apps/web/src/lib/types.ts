@@ -31,27 +31,6 @@ export interface ApprovalListItem {
   created_at: string;
 }
 
-export const ApprovalDetailSchema = z.object({
-  approval_id: z.string().uuid(),
-  kind: z.enum(['create_task', 'cancel_task']),
-  status: z.string(),
-  echo_text: z.string(),
-  original_text: z.string().nullable(),
-  fire_at_local: z.string(),
-  expires_in_seconds: z.number(),
-  snapshot: z.object({
-    fire_at_utc: z.string(),
-    timezone_id: z.string(),
-    fold: z.number(),
-    offset_seconds: z.number(),
-  }),
-  presentation_hash: z.string(),
-  presentation_version: z.string(),
-  expires_at: z.string(),
-  recreated_from: z.string().nullable(),
-});
-export type ApprovalDetail = z.infer<typeof ApprovalDetailSchema>;
-
 export interface TaskListItem {
   task_id: string;
   state: string;
@@ -62,21 +41,33 @@ export interface TaskListItem {
   schedule_receipt: string | null;
 }
 
-export interface TaskNotification {
-  id: string;
-  title: string;
-  body: string;
-  status: 'pending' | 'sent' | 'failed';
-  sent_at: string | null;
-}
-
-export interface TaskDetail extends TaskListItem {
-  kind: string;
-  state_version: number;
-  recreated_from: string | null;
-  created_at: string;
-  notifications: TaskNotification[];
-}
+export const TaskDetailSchema = z
+  .object({
+    task_id: z.string().uuid(),
+    state: z.string(),
+    fire_at_utc: z.string(),
+    fire_at_local: z.string(),
+    timezone_id: z.string(),
+    source_approval_id: z.string().nullable(),
+    schedule_receipt: z.string().nullable(),
+    kind: z.string(),
+    state_version: z.number(),
+    recreated_from: z.string().nullable(),
+    created_at: z.string(),
+    notifications: z.array(
+      z
+        .object({
+          id: z.string().uuid(),
+          title: z.string(),
+          body: z.string(),
+          status: z.enum(['pending', 'sent', 'failed']),
+          sent_at: z.string().nullable(),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+export type TaskDetail = z.infer<typeof TaskDetailSchema>;
 
 export interface TaskEventItem {
   event_id: string;

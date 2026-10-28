@@ -351,6 +351,7 @@ export async function listConversationEvents(
     conversationId: string;
     afterSeq: number | null;
     limit: number;
+    runId?: string;
   },
 ): Promise<ThreadEvent[]> {
   const { rows } = await client.query<CheckpointRow>(
@@ -359,12 +360,15 @@ export async function listConversationEvents(
      JOIN run_attempts a ON a.id = c.attempt_id
      JOIN agent_runs r ON r.id = a.run_id
      WHERE r.owner_id = $1 AND r.conversation_id = $2
+       AND c.owner_id=$1 AND a.owner_id=$1
+       AND EXISTS (SELECT 1 FROM conversations parent WHERE parent.id=r.conversation_id AND parent.owner_id=$1)
+       AND ($5::uuid IS NULL OR r.id=$5::uuid)
        AND c.kind IN ('thread.started','message.delta','card.proposed','approval_required',
          'thread.completed','thread.failed','thread.cancelled')
        AND ($3::bigint IS NULL OR c.event_seq > $3::bigint)
      ORDER BY c.event_seq ASC
      LIMIT $4`,
-    [args.ownerId, args.conversationId, args.afterSeq, args.limit],
+    [args.ownerId, args.conversationId, args.afterSeq, args.limit, args.runId ?? null],
   );
   return rows.map(envelopeOf);
 }

@@ -10,7 +10,12 @@ import {
   authAuthenticatedSchema,
   authSignedOutSchema,
 } from '@along/contracts';
-import { safeReturnTo, loginHref, requireClientSession } from '../../lib/account-navigation';
+import {
+  safeReturnTo,
+  loginHref,
+  requireClientSession,
+  clearAppRetryState,
+} from '../../lib/account-navigation';
 import { MeSchema } from '../../lib/types';
 
 type Operation = 'initialize' | 'claim' | 'sign-in' | 'sign-out';
@@ -115,6 +120,7 @@ export default function AccountForm({
       }
       if (signingOut) {
         authSignedOutSchema.parse(payload.data);
+        clearAppRetryState();
         window.location.replace('/login');
         return;
       }

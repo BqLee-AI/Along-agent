@@ -1,4 +1,4 @@
-import { EnvelopeSchema, RunViewSchema, type RunView } from '@along/contracts';
+import { EnvelopeSchema, RunViewSchema, type Envelope, type RunView } from '@along/contracts';
 import { ThreadEventSchema, type ThreadEvent } from '@along/stream-protocol';
 import { z } from 'zod';
 import { requireClientSession } from './account-navigation';
@@ -30,21 +30,85 @@ export function conversationHref(conversationId: string, runId: string): string 
   return `/conversations?${new URLSearchParams({ conversation_id: conversationId, run_id: runId })}`;
 }
 
+export class ApiReadError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string | null,
+    readonly requestId: string | null,
+    message: string,
+  ) {
+    super(
+      `HTTP ${status}${code ? ` · ${code}` : ''}: ${message}${requestId ? `（request_id: ${requestId}）` : ''}`,
+    );
+    this.name = 'ApiReadError';
+  }
+}
+
 export async function readEnvelope(response: Response): Promise<unknown> {
   requireClientSession(response);
-  const payload = EnvelopeSchema.parse(await response.json());
+  let payload: Envelope;
+  try {
+    payload = EnvelopeSchema.parse(await response.json());
+  } catch {
+    throw new ApiReadError(
+      response.status,
+      null,
+      response.headers.get('x-request-id'),
+      '响应不符合公开读取合同。',
+    );
+  }
   if (!response.ok || payload.code !== 0) {
     const detail = payload.error;
-    throw new Error(
-      `${detail?.code ? `${detail.code}: ` : ''}${detail?.message ?? `请求失败（${response.status}）`}`,
+    throw new ApiReadError(
+      response.status,
+      detail?.code ?? null,
+      payload.request_id,
+      detail?.message ?? `请求失败（${response.status}）`,
     );
   }
   return payload.data;
 }
 
-export async function readRun(conversationId: string, runId: string): Promise<RunView> {
-  const response = await fetch(runPath(conversationId, runId), { cache: 'no-store' });
+export async function readRun(
+  conversationId: string,
+  runId: string,
+  signal?: AbortSignal,
+): Promise<RunView> {
+  const response = await fetch(runPath(conversationId, runId), { cache: 'no-store', signal });
   return RunViewSchema.parse(await readEnvelope(response));
+}
+
+export async function readHistoryCollectionPage<T>(
+  url: string,
+  schema: z.ZodType<{ items: T[]; next_cursor: string | null }>,
+  signal?: AbortSignal,
+): Promise<{ items: T[]; next_cursor: string | null }> {
+  const response = await fetch(url, { method: 'GET', cache: 'no-store', signal });
+  return schema.parse(await readEnvelope(response));
+}
+
+export async function readHistoryEventPage(
+  url: string,
+  conversationId: string,
+  runId: string,
+  afterSeq: number,
+  signal?: AbortSignal,
+): Promise<{ items: ThreadEvent[]; nextCursor: string | null }> {
+  const response = await fetch(url, { method: 'GET', cache: 'no-store', signal });
+  const page = ConversationEventsSchema.parse(await readEnvelope(response));
+  if (
+    page.conversation_id !== conversationId ||
+    page.events.some(
+      (event) => event.payload.run_id !== runId || event.payload.conversation_id !== conversationId,
+    )
+  ) {
+    throw new Error('事件与指定会话 / Run 不匹配，未接纳此页。');
+  }
+  const complete = eventPageComplete(page.events.length, 200);
+  if (!complete && (page.next_after_seq === null || page.next_after_seq <= afterSeq)) {
+    throw new Error('事件页没有可继续的游标，尚未完整读取。');
+  }
+  return { items: page.events, nextCursor: complete ? null : String(page.next_after_seq) };
 }
 
 // One persisted seq identifies one event, including across resume attempts.
@@ -103,3 +167,95 @@ export const runStatusLabel: Record<RunView['status'], string> = {
   failed: '运行失败',
   cancelled: '已停止；已发生的效果不会撤销',
 };
+
+export interface HistoryPageState<T> {
+  target: string;
+  request: number;
+  items: T[];
+  nextCursor: string | null;
+  loaded: boolean;
+  reading: boolean;
+  resetting: boolean;
+  error: string | null;
+}
+
+export type HistoryPageAction<T> =
+  | { type: 'start'; target: string; request: number; reset: boolean }
+  | { type: 'success'; target: string; request: number; items: T[]; nextCursor: string | null }
+  | { type: 'failure'; target: string; request: number; error: string };
+
+export function initialHistoryPage<T>(target: string): HistoryPageState<T> {
+  return {
+    target,
+    request: 0,
+    items: [],
+    nextCursor: null,
+    loaded: false,
+    reading: false,
+    resetting: false,
+    error: null,
+  };
+}
+
+// Each resource has its own reducer and request identity. Failed pages never
+// advance a cursor; stale reads cannot replace a newly selected URL's facts.
+export function historyPageReducer<T>(
+  state: HistoryPageState<T>,
+  action: HistoryPageAction<T>,
+): HistoryPageState<T> {
+  if (action.type === 'start') {
+    const current = state.target === action.target ? state : initialHistoryPage<T>(action.target);
+    return {
+      ...current,
+      request: action.request,
+      reading: true,
+      resetting: action.reset,
+      error: null,
+    };
+  }
+  if (state.target !== action.target || state.request !== action.request) return state;
+  if (action.type === 'failure') return { ...state, reading: false, error: action.error };
+  return {
+    ...state,
+    items: state.resetting ? action.items : [...state.items, ...action.items],
+    nextCursor: action.nextCursor,
+    loaded: true,
+    reading: false,
+    error: null,
+  };
+}
+
+export function eventPageComplete(count: number, limit: number): boolean {
+  return count < limit;
+}
+
+export interface HistoryApprovalReference {
+  kind: 'task' | 'document';
+  approvalId: string;
+  seq: number;
+}
+
+export function collectRunTranscript(
+  events: ThreadEvent[],
+  runId: string,
+): {
+  text: string;
+  approvals: HistoryApprovalReference[];
+} {
+  let text = '';
+  const approvals: HistoryApprovalReference[] = [];
+  const seen = new Set<string>();
+  for (const event of mergeThreadEvents([], events)) {
+    if (event.payload.run_id !== runId) continue;
+    if (event.type === 'message.delta') text += event.payload.delta;
+    if (event.type !== 'approval_required') continue;
+    const approvalId = event.payload.approval_id;
+    const kind = event.payload.card_id === `document-approval:${approvalId}` ? 'document' : 'task';
+    const key = `${kind}:${approvalId}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      approvals.push({ kind, approvalId, seq: event.seq });
+    }
+  }
+  return { text, approvals };
+}

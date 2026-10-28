@@ -315,3 +315,44 @@ code {
     gap: 12px;
   }
 }
+
+.conversation-history {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.conversation-history pre {
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.conversation-history summary,
+.conversation-history button,
+.conversation-history .history-link {
+  min-height: 44px;
+}
+
+.conversation-history summary {
+  cursor: pointer;
+  padding: 8px 0;
+}
+
+.conversation-history .history-link {
+  display: inline-flex;
+  align-items: center;
+}
+
+.conversation-history .panel {
+  min-width: 0;
+}
+
+.conversation-history dd {
+  margin-inline-start: 0;
+}
+
+@media (max-width: 600px) {
+  .conversation-history .panel {
+    padding: 14px 12px;
+  }
+}

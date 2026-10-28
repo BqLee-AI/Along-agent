@@ -1,16 +1,16 @@
 import type { Pool, PoolClient } from 'pg';
+import type { ApprovalDetail } from '@along/contracts';
 import { withClient } from '../../db/transaction.js';
 import {
   decodeCursor,
   encodeCursor,
-  forbidden,
   isUuid,
-  notFound,
   notReady,
   validationError,
-  type HttpError,
 } from '../../http/errors.js';
-import { effectiveStatus, findSuccessorId, getApproval, listApprovals } from './repository.js';
+import { effectiveStatus, listApprovals } from './repository.js';
+import { readApprovalProjection } from './decision.js';
+import type { ApprovalReadProjection } from './decision.js';
 import {
   PRESENTATION_VERSION_V1,
   renderEchoCancelV1,
@@ -31,26 +31,6 @@ export interface ApprovalListItem {
   status: string;
   expires_at: string;
   created_at: string;
-}
-
-export interface ApprovalDetail {
-  approval_id: string;
-  kind: 'create_task' | 'cancel_task';
-  status: string;
-  echo_text: string;
-  original_text: string | null;
-  fire_at_local: string;
-  expires_in_seconds: number;
-  snapshot: {
-    fire_at_utc: string;
-    timezone_id: string;
-    fold: number;
-    offset_seconds: number;
-  };
-  presentation_hash: string;
-  presentation_version: string;
-  expires_at: string;
-  recreated_from: string | null;
 }
 
 function titleOf(originalText: string | null, effective: string): string {
@@ -79,21 +59,9 @@ function echoOf(row: {
   return renderEchoV1(snapshot, shortNoOf(row.id));
 }
 
-export function detailOf(
-  row: Parameters<typeof echoOf>[0] & {
-    fire_at_utc: Date;
-    fold: number;
-    resolved_utc_offset_seconds: number;
-    presentation_hash: string;
-    presentation_version: string;
-    expires_at: Date;
-    supersedes_approval_id: string | null;
-    state: string;
-    kind?: 'create_task' | 'cancel_task';
-  },
-  now: Date,
-): ApprovalDetail {
-  const effective = effectiveStatus(row, now);
+function detailOf(projection: ApprovalReadProjection): ApprovalDetail {
+  const { row, status, taskId, successorId } = projection;
+  const now = row.effective_now;
   const snapshot = {
     originalText: row.original_text ?? '',
     localDatetime: row.wall_time,
@@ -110,7 +78,7 @@ export function detailOf(
   return {
     approval_id: row.id,
     kind: row.kind ?? 'create_task',
-    status: effective,
+    status,
     echo_text: echo,
     original_text: row.original_text,
     fire_at_local: row.wall_time,
@@ -125,6 +93,7 @@ export function detailOf(
     presentation_version: row.presentation_version,
     expires_at: row.expires_at.toISOString(),
     recreated_from: row.supersedes_approval_id,
+    result: { task_id: taskId, successor_approval_id: successorId },
   };
 }
 
@@ -195,15 +164,10 @@ export async function getApprovalDetail(
   ownerId: string,
   approvalId: string,
 ): Promise<{ detail: ApprovalDetail; successorId: string | null }> {
-  const now = deps.now?.() ?? new Date();
+  const now = deps.now?.();
   return withClient(requirePool(deps), async (client: PoolClient) => {
-    const lookup = await getApproval(client, ownerId, approvalId);
-    if (!lookup.found) throw notFound('approval not found') as HttpError;
-    if (lookup.forbidden) throw forbidden('approval not found') as HttpError;
-    const detail = detailOf(lookup.row, now);
-    const successorId =
-      detail.status === 'superseded' ? await findSuccessorId(client, approvalId) : null;
-    return { detail, successorId };
+    const projection = await readApprovalProjection(client, ownerId, approvalId, now);
+    return { detail: detailOf(projection), successorId: projection.successorId };
   });
 }
 

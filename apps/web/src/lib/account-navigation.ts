@@ -70,6 +70,26 @@ export function protectedLoginHref(status: number, returnTo: unknown): string | 
   return status === 401 ? loginHref(returnTo) : null;
 }
 
+export function clearAppRetryState(
+  storage?: Pick<Storage, 'removeItem'> & Partial<Pick<Storage, 'length' | 'key'>>,
+): void {
+  try {
+    const target = storage ?? (typeof window === 'undefined' ? null : window.sessionStorage);
+    if (!target) return;
+    const keys =
+      target.key && typeof target.length === 'number'
+        ? Array.from({ length: target.length }, (_, index) => target.key!(index))
+        : Object.keys(target);
+    for (const key of keys) {
+      if (key && /^(?:run-resume:|run-cancel:|document-decision:)/.test(key)) {
+        target.removeItem(key);
+      }
+    }
+  } catch {
+    // Storage may be disabled; authentication never persists an action itself.
+  }
+}
+
 export function requireClientSession(response: Response): void {
   if (typeof window === 'undefined') return;
   const target = protectedLoginHref(
@@ -77,16 +97,7 @@ export function requireClientSession(response: Response): void {
     `${window.location.pathname}${window.location.search}`,
   );
   if (!target) return;
-  // Existing explicit same-tab retries must not survive a re-login boundary.
-  try {
-    for (const key of Object.keys(window.sessionStorage)) {
-      if (/^(?:run-resume:|run-cancel:|document-decision:)/.test(key)) {
-        window.sessionStorage.removeItem(key);
-      }
-    }
-  } catch {
-    // Storage may be disabled; no action is persisted by the auth flow itself.
-  }
+  clearAppRetryState();
   window.location.replace(target);
   throw new Error('会话已过期，请登录。原操作不会自动重放。');
 }

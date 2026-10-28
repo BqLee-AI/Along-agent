@@ -16,6 +16,8 @@ const failures = [];
 const groupRanges = { identity: [1, 1], conversation: [2, 14], commitments: [3, 9998] };
 // R1 identity owns exactly this next migration, not the intervening groups' range.
 const identityAccountMigration = '0017_identity_account_access.sql';
+// History owns exactly this addition; intervening conversation ranges stay frozen.
+const conversationHistoryMigration = '0018_conversation_history.sql';
 const files = readdirSync(dir)
   .filter((f) => f.endsWith('.sql'))
   .sort();
@@ -28,7 +30,12 @@ for (const f of files) {
   }
   const [, seq, group] = m;
   const range = groupRanges[group];
-  if (range && (+seq < range[0] || +seq > range[1]) && f !== identityAccountMigration) {
+  if (
+    range &&
+    (+seq < range[0] || +seq > range[1]) &&
+    f !== identityAccountMigration &&
+    f !== conversationHistoryMigration
+  ) {
     failures.push(`${f}: ${group} sequence ${seq} outside ${String(range[0]).padStart(4, '0')}+`);
   }
 }

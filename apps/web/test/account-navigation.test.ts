@@ -139,6 +139,18 @@ describe('actual protected response consumers at the re-login boundary', () => {
     expect(Object.keys(browser.storage)).toEqual(['unrelated']);
   });
 
+  it('still redirects real HTTP401 when browser storage access is disabled', async () => {
+    const browser = browserLocation();
+    Object.defineProperty(window, 'sessionStorage', {
+      configurable: true,
+      get() {
+        throw new Error('Storage disabled');
+      },
+    });
+    await expect(readEnvelope(failedResponse(401))).rejects.toThrow('会话已过期');
+    expect(browser.navigations).toHaveLength(1);
+  });
+
   it.each([403, 503])(
     'keeps HTTP%i as an accurate error without navigation or retry removal',
     async (status) => {

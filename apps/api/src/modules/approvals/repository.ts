@@ -107,6 +107,30 @@ export async function getApproval(
   return { found: true, forbidden: false, row };
 }
 
+export interface ApprovalReadRow extends ApprovalRow {
+  effective_now: Date;
+  successor_approval_id: string | null;
+}
+
+// One statement snapshot binds the stored status, result and successor together.
+// The clock is captured once for the public projection; no expiry is persisted.
+export async function readApprovalFacts(
+  client: PoolClient,
+  approvalId: string,
+  now?: Date,
+): Promise<ApprovalReadRow | null> {
+  const { rows } = await client.query<ApprovalReadRow>(
+    `SELECT approval.*,
+       COALESCE($2::timestamptz, clock_timestamp()) AS effective_now,
+       (SELECT successor.id FROM approvals successor
+        WHERE successor.supersedes_approval_id = approval.id
+          AND successor.owner_id = approval.owner_id) AS successor_approval_id
+     FROM approvals approval WHERE approval.id = $1`,
+    [approvalId, now?.toISOString() ?? null],
+  );
+  return rows[0] ?? null;
+}
+
 export async function findSuccessorId(
   client: PoolClient,
   approvalId: string,

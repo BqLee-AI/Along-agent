@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import type { IncomingMessage, Server } from 'node:http';
 import { z } from 'zod';
 import {
+  ApprovalDetailSchema,
   EnvelopeSchema,
   HarnessApprovalDecisionSchema,
   HarnessModelMessageSchema,
@@ -108,11 +109,6 @@ export interface ModelGate {
 }
 
 const ModelBody = z.object({ messages: z.array(HarnessModelMessageSchema) });
-const ApprovalDetail = z.object({
-  approval_id: z.string().uuid(),
-  presentation_hash: z.string(),
-  echo_text: z.string(),
-});
 const Confirmed = z.object({
   approval_id: z.string().uuid(),
   status: z.literal('consumed'),
@@ -485,12 +481,11 @@ export class HarnessActor {
   }
 
   async confirm(approvalId: string): Promise<ConfirmResult> {
-    const detail =
+    const detail = ApprovalDetailSchema.parse(
       this.mode === 'local'
         ? (await getApprovalDetail(this.fixture.deps, this.ownerId, approvalId)).detail
-        : ApprovalDetail.parse(
-            await successful(await this.fixture.request(this, `/api/v1/approvals/${approvalId}`)),
-          );
+        : await successful(await this.fixture.request(this, `/api/v1/approvals/${approvalId}`)),
+    );
     const body = {
       presentation_hash: detail.presentation_hash,
       seen_content: detail.echo_text,

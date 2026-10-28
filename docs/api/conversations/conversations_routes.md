@@ -114,9 +114,9 @@ Web 批准链接保留原 conversation/Run，并明确打开新标签页；在�
 - `unknown` 正常以 `TOOL_EFFECT_UNKNOWN` 失败终结，保留既有事实，不重写、不凭相同文件 hash 补报成功、不制造可恢复 unknown checkpoint。GET/入站重放和已完成文档决议重放均不是执行恢复。
 - HTTP 原始 JSON 累计上限仍为131072字节，工具接受结果应用限额为240000字节（不是240KiB）。提议还须保证完整确认 body（含再次 JSON 转义的 `seen_content=preview.body`、hash、UUID键）不超过131072字节；不能只按改后文本或 receipt 大小判断。详见 design/14 与 API 索引。
 
-## 6. R1 可发现历史与只读恢复（Proposed，#69）
+## 6. R1 可发现历史与只读恢复（#69）
 
-本节为待评审合同；字段、排序、一致性和取舍以 [design/17](../../design/17-r1-conversation-history.md) §3–§8 为真源，不代表 API 已实施。既有 §1–§5 保持其有效合同。
+本节为 Required 合同；字段、排序、一致性和取舍以 [design/17](../../design/17-r1-conversation-history.md) §3–§8 为真源。既有 §1–§5 保持其有效合同。
 
 | 方法 | 路径                            | 用途                             |
 | ---- | ------------------------------- | -------------------------------- |
@@ -130,4 +130,4 @@ Web 批准链接保留原 conversation/Run，并明确打开新标签页；在�
 - 标题来自真实首条用户消息的有限显示文本，原文不改；活动时间来自已存消息及 Run 事实，不使用未维护的 `conversations.updated_at`。Run 原话分为 `available`、`legacy_unavailable`、`invalid_reference`，不得按近邻时间或模型回答猜测关联。
 - 既有事件 GET 仅新增可选 `run_id` 筛选，并验证 Run/owner/父会话。缺省与响应保持旧合同：默认 200、最大 500，`events/next_after_seq` 和 SSE 七词不变。事件全量需按游标读完，页满后可能再读一空页，不能把 `next_after_seq` 当 has_more。
 - 原 conversation 403/404 与 Run 404 隐藏边界保持；未登录 401，typed 依赖失败按原 503，实际查询异常脱敏 500，不变为空历史。独立 GET 的部分成功由 UI 逐项报告，不新增伪成功的 PARTIAL envelope。
-- 历史入口、分页和 #68 重登后只 GET；不调用模型/MCP、不分配 Run/attempt，不新建决议/工具调用或写文件。全部批准按事件索引保留，任务结果见 [approval API §8](../approvals/approvals_routes.md#8-r1-历史中的真实提醒结果proposed69)，文档冻结 effect 和当前动作授权继续分离。
+- 历史入口、分页和 #68 重登后只 GET；不调用模型/MCP、不分配 Run/attempt，不新建决议/工具调用或写文件。全部批准按事件索引保留，任务结果见 [approval API §8](../approvals/approvals_routes.md#8-r1-历史中的真实提醒结果69)，文档冻结 effect 和当前动作授权继续分离。

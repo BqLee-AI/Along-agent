@@ -1,7 +1,8 @@
 // D2: the display layer never computes time. It renders frozen server fields
 // (fire_at_local, local wall text, echo_text) exactly as received. This module
 // intentionally does not read snapshot.fire_at_utc.
-import type { ApprovalDetail, BriefCard } from './types';
+import type { ApprovalDetail } from '@along/contracts';
+import type { BriefCard } from './types';
 
 const TASK_STATUS_LABELS: Record<string, string> = {
   saved: '已保存',

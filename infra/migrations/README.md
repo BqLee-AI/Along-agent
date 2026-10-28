@@ -28,3 +28,11 @@
 - 历史业务与事件可读；仅最后有效批准等待点支持显式 resume。任意 checkpoint、无人值守崩溃恢复及通用外部 exactly-once 不在该迁移保证内。
 
 字段与路由见[运行 schema](../../docs/schema/conversation-and-runs-schema.md)、[Harness 设计](../../docs/design/09-agent-runtime-and-checkpoint.md)、[运行说明](../../apps/harness/README.md)。新鲜库、0014 升级、重复执行及 DDL 故障回滚由真实 PG 合同覆盖。
+
+## 0018：本人会话历史 keyset 索引
+
+- 仅新增三个普通 B-tree 索引：`conversations_owner_history_idx` 对应 `(owner_id, created_at DESC, id DESC)`；`messages_owner_conversation_history_idx` 对应 `(owner_id, conversation_id, created_at, id) WHERE role IN ('user', 'assistant')`；`agent_runs_owner_conversation_history_idx` 对应 `(owner_id, conversation_id, created_at, id)`。
+- 不新增表、原话关联或历史副本，不修改 owner、消息、Run 或旧 baseline 对象。三个索引与 `0018` 版本账同事务提交；要求已存在 `0017`，已记账的迁移不重复应用。
+- 使用原显式 `bun --no-env-file run local:upgrade` 停旧写者、备份并升级至 `0018`，同批部署 API/Web/contracts。普通启动只核验，不从 `0017` 自动迁移；失败保持停写，按原版本分类与显式修复流程处理，不删卷/账本或降版。
+- `scripts/check-migrations.mjs` 仅放行 `0018_conversation_history.sql`，不扩大 conversation 领域编号范围。`scripts/local/baselines/0018.sql` 使用现有 SQL verifier 扩展，在只读事务内验证版本账和 `pg_catalog` 中实际索引的表/列顺序、方向与 NULL 排序、普通 B-tree 属性、谓词、有效/就绪/存活状态、默认 operator class 与 collation；保留原 `0016`、`0017` 核验。
+- 确定性扫描回归位于 `scripts/test/scripts.test.ts`；真实 PG16 升级烟测沿用 `scripts/local/database-smoke.mjs`，通过 stdin JSON 的 `connectionString` 显式注入一次性管理连接，不放入 argv、环境或仓库。该入口保留原 `0016`/`0017` 场景，新增 `0017→0018`、事实保留、重复升级、两次零 DDL 重启、缺失/错序/错误谓词/无效索引及伪版本拒绝，并保留连接失败不当空库。无效索引夹具仅在本次新建随机数据库内修改 `pg_index`，管理账号需具备相应 catalog 更新权限。运行入口不等于已经通过验收，结果由实际隔离 PG 执行记录提供。
