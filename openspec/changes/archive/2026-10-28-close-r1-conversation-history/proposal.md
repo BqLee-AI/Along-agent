@@ -14,9 +14,9 @@ Issue: #69
 
 ## Spec
 
-设计真源：[design/17](../../../docs/design/17-r1-conversation-history.md) §1–§10。API 及存储同步见 [conversation API §6](../../../docs/api/conversations/conversations_routes.md#6-r1-可发现历史与只读恢复proposed69)、[approval API §8](../../../docs/api/approvals/approvals_routes.md#8-r1-历史中的真实提醒结果proposed69) 及 [conversation schema 历史读取节](../../../docs/schema/conversation-and-runs-schema.md#r1-历史读取投影与查询索引proposed69)。
+设计真源：[design/17](../../../../docs/design/17-r1-conversation-history.md) §1–§10。API 及存储同步见 [conversation API §6](../../../../docs/api/conversations/conversations_routes.md#6-r1-可发现历史与只读恢复69)、[approval API §8](../../../../docs/api/approvals/approvals_routes.md#8-r1-历史中的真实提醒结果69) 及 [conversation schema 历史读取节](../../../../docs/schema/conversation-and-runs-schema.md#r1-历史读取投影与查询索引69)。
 
-新增conversations capability，与design/02模块所有权一致；引用既有agent-runtime/workspaces/identity合同，不修改它们的执行、授权或账户语义。所有正文均为待评审合同，不表示功能已实现。
+新增 conversations capability，与 design/02 模块所有权一致；引用既有 agent-runtime/workspaces/identity 合同，不修改它们的执行、授权或账户语义。行为真源见 [conversations 主规格](../../../specs/conversations/spec.md)，合同本身不代替实现和运行证据。
 
 ## Impact
 
@@ -24,4 +24,4 @@ Issue: #69
 
 ## 非目标 / Deferred
 
-不做#70全站导航/视觉/目标入口、登录机制修改、R2、搜索/FTS/向量、跨owner合并、导入导出、后台自动恢复、第二份资料任务事实表、缓存/队列/持久扫描会话、provider/模型/路由/秘密配置或用户数据库操作。本change的规划和合同PR不归档、不关闭#69/#66。
+不做#70全站导航/视觉/目标入口、登录机制修改、R2、搜索/FTS/向量、跨owner合并、导入导出、后台自动恢复、第二份资料任务事实表、缓存/队列/持久扫描会话、provider/模型/路由/秘密配置或用户数据库操作。合同、实现与归档分别交付；本 change 只收口 #69，不关闭 #66。

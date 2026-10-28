@@ -1,6 +1,6 @@
 ## Context
 
-设计真源为 [design/17](../../../docs/design/17-r1-conversation-history.md)。当前用户原文已保存在 messages，当前 business/harness 新 Run 均写 input_message_id；旧 business 可能为空。Run 终结将本 Run 所有 attempt 已接受 delta 合并为 assistant message，但 messages 没有 assistant→Run 引用。外部回复与批准事件已按 event_seq 持久化，内部 snapshot 被显式过滤。Web 缺集合发现，userTexts 只有内存，同一 Run 仅保留最后一个批准链接。
+设计真源为 [design/17](../../../../docs/design/17-r1-conversation-history.md)。变更前用户原文已保存在 messages，business/harness 新 Run 均写 input_message_id；旧 business 可能为空。Run 终结将本 Run 所有 attempt 已接受 delta 合并为 assistant message，但 messages 没有 assistant→Run 引用。外部回复与批准事件按 event_seq 持久化，内部 snapshot 被显式过滤。原 Web 缺集合发现，userTexts 只有内存，同一 Run 仅保留最后一个批准链接。
 
 ## Goals / Non-Goals
 
@@ -21,10 +21,10 @@
 
 ## Compatibility / Migration
 
-只在尚未合并、未部署到用户原安装的 `0018` 新迁移增加四个非唯一查询索引，不改 `0001`–`0017`、不回填虚构引用、不改 owner。三个 keyset 索引之外，`conversation_idempotency(run_id)` 支撑旧 Run 缺少 `input_message_id` 的回退查找；仍按 run_id 取全引用并保留 scope/歧义检测，不用唯一约束或预过滤改变事实解释。#67 升级沿原 SQL verifier 对真实表、键、非唯一性、有效/就绪/存活状态核验，表驱动 smoke 拒绝缺失/错误索引且不修复、不改事实。停旧写者后升级并部署同批 API/Web/contracts；不改变 Harness 协议、SSE 词表及现有动作。保留原卷、密钥与 root；失败沿既有显式升级处理，不自动重试业务写入。
+`0018` 迁移增加四个非唯一查询索引，不改 `0001`–`0017`、不回填虚构引用、不改 owner。三个 keyset 索引之外，`conversation_idempotency(run_id)` 支撑旧 Run 缺少 `input_message_id` 的回退查找；仍按 run_id 取全引用并保留 scope/歧义检测，不用唯一约束或预过滤改变事实解释。#67 升级沿原 SQL verifier 对真实表、键、非唯一性、有效/就绪/存活状态核验，表驱动 smoke 拒绝缺失/错误索引且不修复、不改事实。停旧写者后升级并部署同批 API/Web/contracts；不改变 Harness 协议、SSE 词表及现有动作。保留原卷、密钥与 root；失败沿既有显式升级处理，不自动重试业务写入。
 
 ## Risks / Verification
 
-时间keyset不是跨请求MVCC快照；旧数据可缺原文/关联，必须诚实展示。独立GET不能冒充原子总快照，部分失败不能变空历史。真实浏览器/PG验证服务器重新发现、分页、隐私、结果、撤权及零读取副作用；沿现有门取证，合同PR不勾实现项、不归档。
+时间keyset不是跨请求MVCC快照；旧数据可缺原文/关联，必须诚实展示。独立GET不能冒充原子总快照，部分失败不能变空历史。真实浏览器/PG验证服务器重新发现、分页、隐私、结果、撤权及零读取副作用；沿现有门取证，合同、实现、运行验收及归档分别记录。
 
-原已运行的三索引升级与 47 场景生命周期证据只属于旧状态，不能冒充新增第四索引的验收；四索引版本需另记真实 PG16 EXPLAIN 前后对照与生命周期 smoke 的运行结果。
+原三索引升级与 47 场景生命周期证据只属于旧状态；四索引版本的真实 PG16 EXPLAIN、53 场景 smoke、单次事件聚合及实际 Web 证据见[验证记录](../../../../docs/conversation-history-verification-2026-10-28.md)，不扩大为本轮重跑完整模型验收。
