@@ -233,7 +233,9 @@ try {
       const result = await actions[request.action](file, initialInput);
       console.log(
         result.phase === 'prepared'
-          ? '本安装已准备；API/worker/Web 未由初始化启动。'
+          ? result.schema.upgradeRequired
+            ? `本安装已准备；原数据库 ${result.schema.version} 尚未升级至 ${result.schema.targetVersion}。API/worker/Web 未启动；必须先显式运行 local:upgrade，不能直接 local:start。`
+            : `本安装已准备；数据库 ${result.schema.version} 已核验为目标版本。API/worker/Web 未由初始化启动，可运行 local:start。`
           : result.phase === 'stopped'
             ? '本安装已停止；配置、数据卷和资料保留。'
             : `Web 已启动：${result.webUrl}`,
