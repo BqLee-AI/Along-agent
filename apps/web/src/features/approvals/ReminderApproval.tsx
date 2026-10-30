@@ -4,12 +4,13 @@ import Link from 'next/link';
 import { useEffect, useRef } from 'react';
 import type { ApprovalDetail } from '@along/contracts';
 import { PageHeading, ErrorNotice } from '@/components/page';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { Label } from '@/components/ui/label';
+import { Button } from '@lorelum/lumen-ui/components/button';
+import { Badge } from '@lorelum/lumen-ui/components/badge';
+import { Alert } from '@lorelum/lumen-ui/components/alert';
+import { Input } from '@lorelum/lumen-ui/components/input';
+import { Textarea } from '@lorelum/lumen-ui/components/textarea';
+import { Label } from '@lorelum/lumen-ui/components/label';
+import { Radio } from '@lorelum/lumen-ui/components/radio';
 import type { Me } from '@/lib/types';
 import { describeApproval } from '@/lib/presentation';
 import { approvalStatusLabels } from './model';
@@ -44,8 +45,14 @@ export default function ReminderApproval({
   const disabled = !state.canAct || state.busy !== null || state.reading;
   return (
     <section className="min-w-0 space-y-8 [overflow-wrap:anywhere]">
-      <Button asChild variant="ghost">
-        <Link href="/approvals">返回提醒确认</Link>
+      <Button
+        variant="clear"
+        color="default"
+        role="link"
+        nativeButton={false}
+        render={<Link href="/approvals" />}
+      >
+        返回提醒确认
       </Button>
       <PageHeading
         eyebrow={detail.kind === 'cancel_task' ? '取消提醒提议' : '创建提醒提议'}
@@ -53,7 +60,7 @@ export default function ReminderApproval({
         description="核对下面的服务端冻结内容。这里不会自动继续任何运行；修改会生成需要重新确认的新提议。"
       />
       <div className="flex flex-wrap items-center gap-3" role="status">
-        <Badge variant="outline">{approvalStatusLabels[detail.status]}</Badge>
+        <Badge variant="glass">{approvalStatusLabels[detail.status]}</Badge>
         <span className="text-sm text-muted-foreground">
           有效期至 {detail.expires_at}
           {detail.status === 'pending'
@@ -63,12 +70,18 @@ export default function ReminderApproval({
       </div>
       {identityError ? (
         <ErrorNotice message={`冻结内容已获取，但动作身份未核验：${identityError}`}>
-          <Button asChild variant="outline">
-            <a href={`/approvals/${encodeURIComponent(detail.approval_id)}`}>重新读取身份与详情</a>
+          <Button
+            variant="glass"
+            color="default"
+            role="link"
+            nativeButton={false}
+            render={<a href={`/approvals/${encodeURIComponent(detail.approval_id)}`} />}
+          >
+            重新读取身份与详情
           </Button>
         </ErrorNotice>
       ) : null}
-      <article className="min-w-0 space-y-8 rounded-xl border border-border bg-card p-4 sm:p-8">
+      <article className="min-w-0 space-y-8 p-4 sm:p-8">
         <section className="space-y-3">
           <h2 className="text-lg font-semibold">你的原话</h2>
           <p className="whitespace-pre-wrap leading-7">
@@ -116,14 +129,16 @@ export default function ReminderApproval({
         </details>
       </article>
       <Alert>
-        <AlertTitle>提醒的通知边界</AlertTitle>
-        <AlertDescription>
-          提醒保存在云端，到点在调度器成功运行时尝试通知。设备关机、休眠或进程未运行时可能错过，不保证准时响。取消决议也不代表已送通知可以撤回。
-        </AlertDescription>
+        <Alert.Content>
+          <Alert.Title>提醒的通知边界</Alert.Title>
+          <Alert.Description>
+            提醒保存在云端，到点在调度器成功运行时尝试通知。设备关机、休眠或进程未运行时可能错过，不保证准时响。取消决议也不代表已送通知可以撤回。
+          </Alert.Description>
+        </Alert.Content>
       </Alert>
       {state.editing ? (
         <form
-          className="space-y-6 rounded-xl border border-border bg-card p-4 sm:p-8"
+          className="space-y-6 p-4 sm:p-8"
           aria-labelledby="revision-title"
           onSubmit={(event) => {
             event.preventDefault();
@@ -170,32 +185,38 @@ export default function ReminderApproval({
           </div>
           {state.ambiguity ? (
             <fieldset
-              className="space-y-3 rounded-lg border border-border p-4"
+              className="space-y-3 p-4"
               disabled={state.busy !== null || state.uncertain || state.blocked}
             >
-              <legend className="font-medium">此本地时间出现两次，请明确选择</legend>
+              <legend id="revision-fold-label" className="font-medium">
+                此本地时间出现两次，请明确选择
+              </legend>
               <p className="text-sm text-muted-foreground">
                 {state.ambiguity.wall_time} · {state.ambiguity.timezone_id} ·{' '}
                 {state.ambiguity.ruleset_id}。选择后仍需明确提交修改。
               </p>
-              {state.ambiguity.candidates.map((candidate) => (
-                <label
-                  key={candidate.fold_choice}
-                  className="flex min-h-11 cursor-pointer items-start gap-3 rounded-lg border border-border p-3"
-                >
-                  <input
-                    className="mt-1 size-5 shrink-0 accent-primary"
-                    type="radio"
-                    name="fold"
-                    checked={state.fold === candidate.fold_choice}
-                    onChange={() => state.changeInput('fold', candidate.fold_choice)}
-                  />
-                  <span>
-                    {candidate.fold_choice === 'first' ? '第一次' : '第二次'} · offset_seconds=
-                    {candidate.offset_seconds} · UTC={candidate.fire_at_utc}
-                  </span>
-                </label>
-              ))}
+              <Radio.Group
+                name="fold"
+                value={state.fold}
+                disabled={state.busy !== null || state.uncertain || state.blocked}
+                aria-labelledby="revision-fold-label"
+                onValueChange={(value) => {
+                  if (value === 'first' || value === 'second') state.changeInput('fold', value);
+                }}
+              >
+                {state.ambiguity.candidates.map((candidate) => (
+                  <Label
+                    key={candidate.fold_choice}
+                    className="flex min-h-11 cursor-pointer items-start gap-3 p-3"
+                  >
+                    <Radio className="mt-1 shrink-0" value={candidate.fold_choice} />
+                    <span>
+                      {candidate.fold_choice === 'first' ? '第一次' : '第二次'} · offset_seconds=
+                      {candidate.offset_seconds} · UTC={candidate.fire_at_utc}
+                    </span>
+                  </Label>
+                ))}
+              </Radio.Group>
             </fieldset>
           ) : null}
           <div className="flex flex-wrap gap-4">
@@ -212,7 +233,8 @@ export default function ReminderApproval({
             </Button>
             <Button
               type="button"
-              variant="outline"
+              variant="glass"
+              color="default"
               disabled={state.busy !== null || state.uncertain}
               onClick={() => state.toggleEditing(false)}
             >
@@ -234,7 +256,8 @@ export default function ReminderApproval({
                   : '确认创建这条提醒'}
             </Button>
             <Button
-              variant="outline"
+              variant="glass"
+              color="default"
               disabled={disabled}
               onClick={() => void state.decide('reject')}
             >
@@ -243,7 +266,8 @@ export default function ReminderApproval({
             {detail.kind === 'create_task' ? (
               <Button
                 ref={editTrigger}
-                variant="ghost"
+                variant="clear"
+                color="default"
                 disabled={disabled}
                 onClick={() => state.toggleEditing(true)}
               >
@@ -268,7 +292,8 @@ export default function ReminderApproval({
                 </p>
                 {state.readAfterFailure && state.retryAction && detail.status === 'pending' ? (
                   <Button
-                    variant="outline"
+                    variant="glass"
+                    color="default"
                     disabled={state.busy !== null || state.reading}
                     onClick={() => void state.decide(state.retryAction!, true)}
                   >
@@ -284,17 +309,16 @@ export default function ReminderApproval({
       ) : null}
       {state.notice ? (
         <Alert>
-          <AlertTitle>已接收决议</AlertTitle>
-          <AlertDescription>
-            <p role="status">{state.notice}</p>
-          </AlertDescription>
+          <Alert.Content>
+            <Alert.Title>已接收决议</Alert.Title>
+            <Alert.Description>
+              <p role="status">{state.notice}</p>
+            </Alert.Description>
+          </Alert.Content>
         </Alert>
       ) : null}
       {state.successorReading || state.successorDetail || state.successorError ? (
-        <section
-          className="space-y-4 rounded-xl border border-border bg-card p-4 sm:p-8"
-          aria-busy={state.successorReading}
-        >
+        <section className="space-y-4 p-4 sm:p-8" aria-busy={state.successorReading}>
           <h2 className="text-lg font-semibold">修改后的真实后继提议</h2>
           <p className="text-sm text-muted-foreground">
             原提议已被替代，新提议仍需单独审阅确认。这里读取后继不会自动批准。
@@ -302,17 +326,23 @@ export default function ReminderApproval({
           {state.successorReading ? <p role="status">正在读取实际后继冻结内容…</p> : null}
           {state.successorDetail ? (
             <>
-              <Badge variant="outline">{approvalStatusLabels[state.successorDetail.status]}</Badge>
+              <Badge variant="glass">{approvalStatusLabels[state.successorDetail.status]}</Badge>
               <p>
                 {state.successorDetail.fire_at_local} · {state.successorDetail.snapshot.timezone_id}
               </p>
               <pre className="whitespace-pre-wrap font-mono text-base leading-7">
                 {state.successorDetail.echo_text}
               </pre>
-              <Button asChild>
-                <Link href={`/approvals/${encodeURIComponent(state.successorDetail.approval_id)}`}>
-                  打开后继详情并审阅
-                </Link>
+              <Button
+                role="link"
+                nativeButton={false}
+                render={
+                  <Link
+                    href={`/approvals/${encodeURIComponent(state.successorDetail.approval_id)}`}
+                  />
+                }
+              >
+                打开后继详情并审阅
               </Button>
             </>
           ) : null}
@@ -321,7 +351,8 @@ export default function ReminderApproval({
               <p>修改结果已接受；这里只重读后继，不再次提交修改。</p>
               {successor ? (
                 <Button
-                  variant="outline"
+                  variant="glass"
+                  color="default"
                   disabled={state.successorReading}
                   onClick={() => void state.readSuccessor(successor)}
                 >
@@ -371,7 +402,8 @@ export default function ReminderApproval({
         </p>
         {state.readError ? <ErrorNotice message={state.readError} /> : null}
         <Button
-          variant="outline"
+          variant="glass"
+          color="default"
           disabled={state.reading || state.busy !== null}
           onClick={() => void state.refresh()}
         >

@@ -2,7 +2,13 @@
 // agent_runs, run_attempts, run_checkpoints and the idempotency ledger.
 // No tasks/outbox/approval writes here.
 import type { Pool, PoolClient } from 'pg';
-import type { ExecutionKind, RunView, WorkspaceGrant, WorkspaceSummary } from '@along/contracts';
+import type {
+  ExecutionKind,
+  HarnessStart,
+  RunView,
+  WorkspaceGrant,
+  WorkspaceSummary,
+} from '@along/contracts';
 import { forbidden, notFound, stateConflict } from '../../http/errors.js';
 import { isActiveOwner } from '../identity/preferences.js';
 import type { RunContext } from './contracts.js';
@@ -35,6 +41,7 @@ export interface FrozenContext {
   rulesetId: string;
   tzdbVersion: string;
   aliasVersion: string | null;
+  messageRefs?: string[];
   workspaceGrant?: WorkspaceGrant | null;
   workspaceSummary?: WorkspaceSummary | null;
 }
@@ -166,6 +173,62 @@ export async function insertMessage(
   const id = rows[0]?.id;
   if (!id) throw new Error('message insert returned no row');
   return id;
+}
+
+// harness/v2 admits 64 visible messages. Freeze the newest 63 predecessors plus
+// the complete accepted user input; timestamps retain PostgreSQL precision.
+export async function listHarnessMessageRefs(
+  client: Pick<Pool | PoolClient, 'query'>,
+  binding: Pick<RunContext, 'ownerId' | 'conversationId' | 'userMessageId'>,
+): Promise<string[]> {
+  const { ownerId, conversationId, userMessageId } = binding;
+  const { rows } = await client.query<{ id: string }>(
+    `WITH accepted AS (
+       SELECT m.id,m.created_at FROM messages m
+       WHERE m.id=$3 AND m.owner_id=$1 AND m.conversation_id=$2 AND m.role='user'
+         AND EXISTS (SELECT 1 FROM conversations c WHERE c.id=$2 AND c.owner_id=$1)
+     ), history AS (
+       SELECT m.id,m.created_at FROM messages m CROSS JOIN accepted a
+       WHERE m.owner_id=$1 AND m.conversation_id=$2 AND m.role IN ('user','assistant')
+         AND m.id<>a.id
+       ORDER BY m.created_at DESC,m.id DESC LIMIT 63
+     )
+     SELECT id FROM (
+       SELECT *,false AS current_input FROM history
+       UNION ALL SELECT *,true AS current_input FROM accepted
+     ) visible ORDER BY current_input,created_at,id`,
+    [ownerId, conversationId, userMessageId],
+  );
+  if (rows.at(-1)?.id !== userMessageId) throw stateConflict('Run accepted message missing');
+  return rows.map((row) => row.id);
+}
+
+// Both initial execution and resume resolve only frozen, ordered references.
+export async function readHarnessMessages(
+  client: Pick<Pool | PoolClient, 'query'>,
+  binding: Pick<RunContext, 'ownerId' | 'conversationId' | 'userMessageId'>,
+  messageRefs: readonly string[],
+): Promise<HarnessStart['messages']> {
+  const { ownerId, conversationId, userMessageId } = binding;
+  if (
+    messageRefs.length === 0 ||
+    messageRefs.length > 64 ||
+    messageRefs.at(-1) !== userMessageId ||
+    new Set(messageRefs).size !== messageRefs.length
+  )
+    throw stateConflict('snapshot message reference conflict');
+  const { rows } = await client.query<HarnessStart['messages'][number]>(
+    `SELECT m.id AS message_id,m.role,m.content
+     FROM unnest($3::uuid[]) WITH ORDINALITY AS refs(id,position)
+     JOIN messages m ON m.id=refs.id AND m.owner_id=$1 AND m.conversation_id=$2
+       AND m.role IN ('user','assistant')
+     WHERE EXISTS (SELECT 1 FROM conversations c WHERE c.id=$2 AND c.owner_id=$1)
+     ORDER BY refs.position`,
+    [ownerId, conversationId, messageRefs],
+  );
+  if (rows.length !== messageRefs.length || rows.at(-1)?.role !== 'user')
+    throw stateConflict('snapshot message reference conflict');
+  return rows;
 }
 
 export async function insertRun(

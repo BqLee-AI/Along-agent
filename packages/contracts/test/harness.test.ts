@@ -3,6 +3,7 @@ import {
   HarnessApprovalDecisionSchema,
   HarnessCancelSchema,
   HarnessReplySchema,
+  HarnessModelStepSchema,
   HarnessRequestSchema,
   HarnessSnapshotSchema,
   HarnessStartSchema,
@@ -21,7 +22,7 @@ const snapshot = {
   waiting: { invocation_id: invocationId, approval_id: approvalId },
 };
 const start = {
-  protocol: 'harness/v2',
+  protocol: 'harness/v3',
   type: 'start',
   messages: [{ message_id: messageId, role: 'user', content: 'Read the registered workspace.' }],
   tools: [],
@@ -49,7 +50,7 @@ function rejectsDecision(decision: unknown) {
   expect(HarnessStartSchema.safeParse({ ...start, approval: decision }).success).toBe(false);
 }
 
-describe('harness/v2 executable contract', () => {
+describe('harness/v3 executable contract with snapshot2', () => {
   it('retains all five typed task decision states and their real references', () => {
     for (const status of ['pending', 'consumed', 'rejected', 'expired', 'superseded'] as const) {
       acceptsDecision({
@@ -145,7 +146,7 @@ describe('harness/v2 executable contract', () => {
     expect<unknown>(HarnessStartSchema.parse({ ...start, snapshot }).snapshot).toEqual(snapshot);
     expect(
       HarnessRequestSchema.parse({
-        protocol: 'harness/v2',
+        protocol: 'harness/v3',
         type: 'snapshot',
         request_ref: 'snapshot-1',
         context: snapshot,
@@ -159,7 +160,7 @@ describe('harness/v2 executable contract', () => {
     ).toBe(false);
     expect(
       HarnessRequestSchema.safeParse({
-        protocol: 'harness/v2',
+        protocol: 'harness/v3',
         type: 'suspend',
         request_ref: 'suspend-1',
         checkpoint_ref: messageId,
@@ -170,6 +171,51 @@ describe('harness/v2 executable contract', () => {
     ).toBe(false);
   });
 
+  it('accepts correlated model pulls and bounded delta-or-complete replies only', () => {
+    expect(
+      HarnessRequestSchema.parse({
+        protocol: 'harness/v3',
+        type: 'model_next',
+        request_ref: 'next-1',
+        model_ref: 'model-1',
+      }),
+    ).toMatchObject({ model_ref: 'model-1' });
+    expect(
+      HarnessRequestSchema.safeParse({
+        protocol: 'harness/v3',
+        type: 'model_next',
+        request_ref: 'next-1',
+      }).success,
+    ).toBe(false);
+    expect(HarnessModelStepSchema.parse({ type: 'delta', delta: '中文😀' })).toEqual({
+      type: 'delta',
+      delta: '中文😀',
+    });
+    for (const delta of ['', 'x'.repeat(4001)]) {
+      expect(HarnessModelStepSchema.safeParse({ type: 'delta', delta }).success).toBe(false);
+      expect(
+        HarnessRequestSchema.safeParse({
+          protocol: 'harness/v3',
+          type: 'answer',
+          request_ref: 'answer-1',
+          delta,
+        }).success,
+      ).toBe(false);
+    }
+    expect(
+      HarnessModelStepSchema.parse({
+        type: 'complete',
+        reply: { message: { content: '中文😀', tool_calls: [] }, usage: null },
+      }),
+    ).toMatchObject({ type: 'complete' });
+    expect(
+      HarnessModelStepSchema.safeParse({
+        message: { content: 'old complete reply', tool_calls: [] },
+        usage: null,
+      }).success,
+    ).toBe(false);
+    expect(HarnessStartSchema.safeParse({ ...start, protocol: 'harness/v2' }).success).toBe(false);
+  });
   it('rejects v1 executable frames and v1 snapshots rather than running a fallback protocol', () => {
     expect(HarnessStartSchema.safeParse({ ...start, protocol: 'harness/v1' }).success).toBe(false);
     const legacy = { ...snapshot, version: 1 };
@@ -177,7 +223,7 @@ describe('harness/v2 executable contract', () => {
     expect(HarnessStartSchema.safeParse({ ...start, snapshot: legacy }).success).toBe(false);
     expect(
       HarnessRequestSchema.safeParse({
-        protocol: 'harness/v2',
+        protocol: 'harness/v3',
         type: 'snapshot',
         request_ref: 'snapshot-1',
         context: legacy,

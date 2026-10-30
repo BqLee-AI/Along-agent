@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Button } from '@/components/ui/button';
+import { Button } from '@lorelum/lumen-ui/components/button';
 import { EmptyState } from '@/components/page';
 import type { ApiResult } from '@/lib/api';
 import type { Me, TaskDetail } from '@/lib/types';
@@ -27,10 +27,14 @@ export function TaskSummary({ task }: { task: TaskDetail }) {
       </p>
       <div className="flex flex-wrap gap-3">
         {task.source_approval_id ? (
-          <Button asChild variant="outline">
-            <Link href={`/approvals/${encodeURIComponent(task.source_approval_id)}`}>
-              查看来源提醒确认
-            </Link>
+          <Button
+            variant="glass"
+            color="default"
+            role="link"
+            nativeButton={false}
+            render={<Link href={`/approvals/${encodeURIComponent(task.source_approval_id)}`} />}
+          >
+            查看来源提醒确认
           </Button>
         ) : (
           <p className="text-sm text-muted-foreground">无来源批准引用，不推测关联会话。</p>
@@ -88,7 +92,7 @@ export function TaskContent({ task, meResult }: { task: TaskDetail; meResult: Ap
         state={task.state}
         meResult={meResult}
       />
-      <details className="rounded-xl border border-border bg-card p-4 text-sm [overflow-wrap:anywhere]">
+      <details className="p-4 text-sm [overflow-wrap:anywhere]">
         <summary className="cursor-pointer py-2 font-medium">任务技术信息</summary>
         <dl className="mt-4 grid gap-2 font-mono sm:grid-cols-[160px_minmax(0,1fr)]">
           <dt>task_id</dt>

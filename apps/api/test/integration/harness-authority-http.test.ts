@@ -131,7 +131,7 @@ maybe('harness authority signed HTTP boundary', () => {
           binaryPath: process.env.HARNESS_BINARY ?? '/app/harness/bin/along-harness',
           maxIterations: 8,
           maxTokens: 8000,
-          model: async () => {
+          model: () => {
             models += 1;
             throw new Error('GET/cancel must never call model');
           },
@@ -194,7 +194,7 @@ maybe('harness authority signed HTTP boundary', () => {
           binaryPath: process.env.HARNESS_BINARY ?? '/app/harness/bin/along-harness',
           maxIterations: 8,
           maxTokens: 8000,
-          model: async () => {
+          model: () => {
             throw new Error('cancel must never execute model');
           },
         },

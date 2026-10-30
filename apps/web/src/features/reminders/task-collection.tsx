@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Button } from '@/components/ui/button';
+import { Button } from '@lorelum/lumen-ui/components/button';
 import { EmptyState } from '@/components/page';
 import type { TaskListItem } from '@/lib/types';
 import { TaskListPageSchema, taskListPath, type PageSnapshot, type TaskFilter } from './data';
@@ -41,8 +41,14 @@ export function TaskCollection({
       )}
       {page?.items.length === 0 ? (
         <EmptyState title="此范围没有提醒任务" description="确认提醒提议后才会创建任务。">
-          <Button asChild variant="outline">
-            <Link href="/approvals">查看提醒确认</Link>
+          <Button
+            variant="glass"
+            color="default"
+            role="link"
+            nativeButton={false}
+            render={<Link href="/approvals" />}
+          >
+            查看提醒确认
           </Button>
         </EmptyState>
       ) : null}
@@ -51,7 +57,7 @@ export function TaskCollection({
           {page.items.map((task) => (
             <li
               key={task.task_id}
-              className={`min-w-0 py-4 ${index && selectedId === task.task_id ? 'border-l-2 border-primary bg-accent pl-3' : ''}`}
+              className={`min-w-0 py-4 ${index && selectedId === task.task_id ? 'pl-3' : ''}`}
             >
               <div
                 className={index ? 'space-y-3' : 'flex flex-wrap items-start justify-between gap-4'}
@@ -66,21 +72,28 @@ export function TaskCollection({
                     </span>
                   </div>
                 </div>
-                <Button asChild variant="ghost" className={index ? 'w-full justify-start' : ''}>
-                  <Link
-                    aria-current={index && selectedId === task.task_id ? 'true' : undefined}
-                    href={
-                      index
-                        ? `/activity?${new URLSearchParams({ task_id: task.task_id })}#task-events`
-                        : `/tasks/${encodeURIComponent(task.task_id)}`
-                    }
-                  >
-                    {index ? '查看此任务事件' : '查看任务详情'}
-                    <span className="sr-only">
-                      {' '}
-                      · {task.fire_at_local} · {task.task_id}
-                    </span>
-                  </Link>
+                <Button
+                  variant="clear"
+                  color="default"
+                  className={index ? 'w-full justify-start' : ''}
+                  role="link"
+                  nativeButton={false}
+                  render={
+                    <Link
+                      aria-current={index && selectedId === task.task_id ? 'true' : undefined}
+                      href={
+                        index
+                          ? `/activity?${new URLSearchParams({ task_id: task.task_id })}#task-events`
+                          : `/tasks/${encodeURIComponent(task.task_id)}`
+                      }
+                    />
+                  }
+                >
+                  {index ? '查看此任务事件' : '查看任务详情'}
+                  <span className="sr-only">
+                    {' '}
+                    · {task.fire_at_local} · {task.task_id}
+                  </span>
                 </Button>
               </div>
               <details className="mt-2 text-sm text-muted-foreground">
@@ -97,7 +110,7 @@ export function TaskCollection({
       ) : null}
       {error ? (
         <ResourceError error={error} returnTo={returnTo}>
-          <Button variant="outline" disabled={busy} onClick={() => void load()}>
+          <Button variant="glass" color="default" disabled={busy} onClick={() => void load()}>
             {busy ? '正在读取…' : page ? '重新读取未成功页' : '重新读取任务范围'}
           </Button>
         </ResourceError>

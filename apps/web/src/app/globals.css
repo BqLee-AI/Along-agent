@@ -1,67 +1,13 @@
 @import 'tailwindcss';
-@import 'tw-animate-css';
+@import '@lorelum/lumen-ui/theme.css';
 
-@custom-variant dark (&:is(.dark *));
+@source '../../node_modules/@lorelum/lumen-ui/dist';
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--foreground);
-  --color-popover: var(--card);
-  --color-popover-foreground: var(--foreground);
-  --color-primary: var(--primary);
-  --color-primary-foreground: #ffffff;
-  --color-secondary: var(--muted);
-  --color-secondary-foreground: var(--foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--primary);
-  --color-destructive: var(--destructive);
-  --color-destructive-foreground: #ffffff;
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--primary);
-  --color-success: #206348;
-  --color-success-soft: #edf7f0;
-  --color-warning: #80500b;
-  --color-warning-soft: #fff5df;
-  --color-sidebar: var(--card);
-  --color-sidebar-foreground: var(--foreground);
-  --color-sidebar-primary: var(--primary);
-  --color-sidebar-primary-foreground: #ffffff;
-  --color-sidebar-accent: var(--accent);
-  --color-sidebar-accent-foreground: var(--primary);
-  --color-sidebar-border: var(--border);
-  --color-sidebar-ring: var(--primary);
-  --font-sans: system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   --font-mono: ui-monospace, 'Cascadia Code', Consolas, monospace;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 8px;
-  --radius-xl: 12px;
-}
-
-:root {
-  color-scheme: light;
-  --background: #f6f7f9;
-  --card: #ffffff;
-  --foreground: #18212f;
-  --muted: #edf0f4;
-  --muted-foreground: #566273;
-  --primary: #2447a8;
-  --accent: #eaf0ff;
-  --border: #d8dfe8;
-  --input: #7b8798;
-  --destructive: #af3038;
-  --radius: 8px;
 }
 
 @layer base {
-  * {
-    @apply border-border;
-  }
   body {
     @apply m-0 bg-background font-sans text-base leading-7 text-foreground antialiased;
   }
@@ -76,21 +22,6 @@
   h3 {
     @apply text-base font-medium leading-6;
   }
-  a,
-  button,
-  input,
-  textarea,
-  select,
-  summary {
-    -webkit-tap-highlight-color: transparent;
-  }
-  :focus-visible {
-    outline: 2px solid var(--primary);
-    outline-offset: 3px;
-  }
-  a {
-    @apply underline-offset-4;
-  }
   p,
   li,
   dd,
@@ -100,34 +31,5 @@
   }
   pre {
     @apply whitespace-pre-wrap font-mono text-base leading-7;
-  }
-  button,
-  a,
-  input,
-  select,
-  textarea {
-    touch-action: manipulation;
-  }
-  button:disabled,
-  input:disabled,
-  select:disabled,
-  textarea:disabled {
-    cursor: not-allowed;
-  }
-  summary {
-    @apply cursor-pointer;
-  }
-  ::selection {
-    background: #dce6ff;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
   }
 }

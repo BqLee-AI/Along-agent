@@ -3,7 +3,7 @@ import HistoryList from './HistoryList';
 import HistoryDetail from './HistoryDetail';
 import type { PageQuery } from '../../lib/account-navigation';
 import { ErrorNotice, PageHeading } from '@/components/page';
-import { Button } from '@/components/ui/button';
+import { Button } from '@lorelum/lumen-ui/components/button';
 import { taskIntentFromQuery } from '@/features/conversations/task-model';
 
 export const dynamic = 'force-dynamic';
@@ -29,8 +29,14 @@ export default async function ConversationsPage({
       <div className="space-y-8">
         <PageHeading title="会话历史" />
         <ErrorNotice message="会话 / 运行地址无效，未读取或执行任何操作。" />
-        <Button variant="outline" asChild>
-          <a href="/conversations">返回会话列表</a>
+        <Button
+          variant="glass"
+          color="default"
+          role="link"
+          nativeButton={false}
+          render={<a href="/conversations" />}
+        >
+          返回会话列表
         </Button>
       </div>
     );

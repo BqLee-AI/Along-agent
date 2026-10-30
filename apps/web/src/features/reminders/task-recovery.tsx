@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
-import { Button } from '@/components/ui/button';
+import { Button } from '@lorelum/lumen-ui/components/button';
 import type { ApiResult } from '@/lib/api';
 import type { Me, TaskDetail } from '@/lib/types';
 import { readTask, type ResourceFailure } from './data';
@@ -52,8 +52,14 @@ export function TaskRecovery({
     return activity ? (
       <div className="space-y-8">
         <TaskSummary task={task} />
-        <Button asChild variant="outline">
-          <Link href={`/tasks/${encodeURIComponent(taskId)}`}>查看任务详情</Link>
+        <Button
+          variant="glass"
+          color="default"
+          role="link"
+          nativeButton={false}
+          render={<Link href={`/tasks/${encodeURIComponent(taskId)}`} />}
+        >
+          查看任务详情
         </Button>
         <TaskEvents taskId={taskId} initial={{ page: null, error: null }} returnTo={returnTo} />
       </div>
@@ -64,7 +70,7 @@ export function TaskRecovery({
     <div aria-busy={busy}>
       {error ? (
         <ResourceError error={error} returnTo={returnTo}>
-          <Button variant="outline" disabled={busy} onClick={() => void recover()}>
+          <Button variant="glass" color="default" disabled={busy} onClick={() => void recover()}>
             {busy ? '正在读取…' : '重新读取此任务详情'}
           </Button>
         </ResourceError>

@@ -2,7 +2,7 @@ import { DocumentApprovalDetailSchema } from '@along/contracts';
 import { apiGet } from '@/lib/api';
 import { MeSchema } from '@/lib/types';
 import { PageHeading, ErrorNotice } from '@/components/page';
-import { Button } from '@/components/ui/button';
+import { Button } from '@lorelum/lumen-ui/components/button';
 import DocumentApproval from '@/features/approvals/DocumentApproval';
 
 export const dynamic = 'force-dynamic';
@@ -24,11 +24,23 @@ export default async function DocumentApprovalPage({
       <section className="space-y-8">
         <PageHeading title="文档批准" />
         <ErrorNotice message={!result.ok ? result.message : '冻结文档正文无法核验，因此不能批准。'}>
-          <Button asChild variant="outline">
-            <a href={returnTo}>重新读取原批准全文</a>
+          <Button
+            variant="glass"
+            color="default"
+            role="link"
+            nativeButton={false}
+            render={<a href={returnTo} />}
+          >
+            重新读取原批准全文
           </Button>
-          <Button asChild variant="ghost">
-            <a href="/conversations">返回会话历史</a>
+          <Button
+            variant="clear"
+            color="default"
+            role="link"
+            nativeButton={false}
+            render={<a href="/conversations" />}
+          >
+            返回会话历史
           </Button>
         </ErrorNotice>
       </section>

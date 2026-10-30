@@ -49,12 +49,18 @@ export function validateAccountFields(operation: AccountOperation, fields: FormD
       const name = String(issue.path[0] ?? 'form');
       fieldErrors[name] ??=
         name === 'password'
-          ? '密码须为 8–128 个字符，保留首尾空格。'
+          ? password.length === 0
+            ? '请输入密码。'
+            : password.length < 8
+              ? '密码至少需要 8 位。'
+              : '密码过长，请检查输入。'
           : name === 'confirmed'
             ? '请确认只为当前原账户设置正式登录。'
             : name === 'display_name'
               ? '请填写 1–128 个字符的展示名。'
-              : '请填写 1–128 个字符的登录名。';
+              : login_name.trim().length === 0
+                ? '请输入用户名。'
+                : '用户名过长，请检查输入。';
     }
   }
   if (

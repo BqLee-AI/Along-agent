@@ -6,7 +6,7 @@ import {
   initialHistoryPage,
   type HistoryPageState,
 } from '../../lib/conversation-run';
-import { Button } from '@/components/ui/button';
+import { Button } from '@lorelum/lumen-ui/components/button';
 import { ErrorNotice } from '@/components/page';
 
 export interface HistoryReadPage<T> {
@@ -86,7 +86,8 @@ export function ReadControls({
           message={`${state.loaded ? '此部分未完整读取，已获取内容仍保留。' : '读取失败，不表示没有历史。'} ${state.error}`}
         >
           <Button
-            variant="outline"
+            variant="glass"
+            color="default"
             type="button"
             disabled={state.reading}
             onClick={() => void read(state.resetting)}
@@ -97,7 +98,8 @@ export function ReadControls({
       ) : null}
       <div className="flex flex-wrap gap-3">
         <Button
-          variant="outline"
+          variant="glass"
+          color="default"
           type="button"
           disabled={state.reading}
           onClick={() => void read(true)}
@@ -106,7 +108,8 @@ export function ReadControls({
         </Button>
         {state.loaded && state.nextCursor !== null ? (
           <Button
-            variant="outline"
+            variant="glass"
+            color="default"
             type="button"
             disabled={state.reading}
             onClick={() => void read(false)}

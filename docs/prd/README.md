@@ -21,7 +21,7 @@
 - [Required] 对外只说已记录步骤，不承诺必达；取消后触发数 = 0 为一级指标；超 15 分钟标 missed 不补发。
 - [Required] 实时对话 v0 用 SSE；WS + ws-ticket 自 P2 起；Web Push 仅兜底。
 - [Required] Redis 延后；Postgres 唯一事实源；单镜像 api|worker|all。
-- [Required] Web：Next.js App Router，保留 RSC/Turbopack 默认边界；R1 蓝墨任务书桌采用 shadcn/ui new-york、Radix primitives、Tailwind CSS v4，功能 View/controller/data 分责，全站入口与原批准/恢复合同见 [design/01 §6](../design/01-tech-stack-and-repo-structure.md#6-r1-web蓝墨任务书桌与职责边界)。Electron 套壳在后。
+- [Required] Web：Next.js App Router，保留 RSC/Turbopack 默认边界；R1 个人助理采用 LumenUI（shadcn/Base UI）、官方 Linen 主题和 Tailwind CSS v4，功能 View/controller/data 分责，分组顶部导航、对话首页与原批准/恢复合同见 [design/01 §6](../design/01-tech-stack-and-repo-structure.md#6-r1-web个人助理与职责边界)。Electron 套壳在后。
 - [Required] 鉴权：Better Auth 自建 credential（D7 空环境冒烟不依赖外部 IdP；v0 单租户）；v0 端点只暴露 `GET /me`。
 - [Required] 仓颉唯一宿主 Harness（模型/工具循环、当前上下文、计划、预算、等待/恢复/停止）；TS 长期保留工具/业务/worker/API/Web 与 Run 存储。R1 未实现，不迁移整个 TS 后端，也不在 TS 工具内藏第二 Agent（design/09/11、ADR 0009）。
 

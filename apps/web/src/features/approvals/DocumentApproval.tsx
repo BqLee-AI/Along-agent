@@ -4,9 +4,9 @@ import Link from 'next/link';
 import { useEffect, useRef } from 'react';
 import type { DocumentApprovalDetail } from '@along/contracts';
 import { PageHeading, ErrorNotice } from '@/components/page';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@lorelum/lumen-ui/components/button';
+import { Badge } from '@lorelum/lumen-ui/components/badge';
+import { Alert } from '@lorelum/lumen-ui/components/alert';
 import { conversationHref, runStatusLabel as baseRunStatusLabel } from '@/lib/conversation-run';
 import { documentEffectLabel } from '@/lib/document-loop';
 import type { Me } from '@/lib/types';
@@ -44,8 +44,14 @@ export default function DocumentApproval({
   const originalHref = conversationHref(detail.conversation_id, detail.run_id);
   return (
     <section className="min-w-0 space-y-8 [overflow-wrap:anywhere]">
-      <Button asChild variant="ghost">
-        <Link href={originalHref}>查看原会话与原运行（只读）</Link>
+      <Button
+        variant="clear"
+        color="default"
+        role="link"
+        nativeButton={false}
+        render={<Link href={originalHref} />}
+      >
+        查看原会话与原运行（只读）
       </Button>
       <PageHeading
         eyebrow="文档批准 · 全页校样"
@@ -53,17 +59,21 @@ export default function DocumentApproval({
         description="批准只授权本次冻结版本，本页零文件写入、不自动继续运行。请保留原会话标签页，以免中断原执行连接。"
       />
       <div className="flex flex-wrap items-center gap-3">
-        <Badge variant="outline">{decisionLabel[state.decision]}</Badge>
+        <Badge variant="glass">{decisionLabel[state.decision]}</Badge>
         <span className="text-sm text-muted-foreground">
           决议、文件效果与运行状态分别读取，不视为同一快照。
         </span>
       </div>
       {identityError ? (
         <ErrorNotice message={`全文已获取，但动作身份未核验：${identityError}`}>
-          <Button asChild variant="outline">
-            <a href={`/document-approvals/${encodeURIComponent(detail.approval_id)}`}>
-              重新读取身份与全文
-            </a>
+          <Button
+            variant="glass"
+            color="default"
+            role="link"
+            nativeButton={false}
+            render={<a href={`/document-approvals/${encodeURIComponent(detail.approval_id)}`} />}
+          >
+            重新读取身份与全文
           </Button>
         </ErrorNotice>
       ) : null}
@@ -86,7 +96,7 @@ export default function DocumentApproval({
           </a>
         ))}
       </nav>
-      <article className="min-w-0 space-y-8 rounded-xl border border-border bg-card p-4 sm:p-8">
+      <article className="min-w-0 space-y-8 p-4 sm:p-8">
         <section className="space-y-4">
           <h2 className="text-lg font-semibold">目标与冻结版本</h2>
           <dl className="grid min-w-0 gap-4">
@@ -123,15 +133,11 @@ export default function DocumentApproval({
           </div>
           <div className="space-y-3">
             <h3 className="font-medium">替换前 · 移除的完整基线</h3>
-            <pre className={`${textClass} rounded-lg border border-border bg-muted/40 p-4`}>
-              {detail.preview.before}
-            </pre>
+            <pre className={`${textClass} p-4`}>{detail.preview.before}</pre>
           </div>
           <div className="space-y-3">
             <h3 className="font-medium">替换后 · 新增的完整预览</h3>
-            <pre className={`${textClass} rounded-lg border border-border bg-accent/30 p-4`}>
-              {detail.preview.after}
-            </pre>
+            <pre className={`${textClass} p-4`}>{detail.preview.after}</pre>
           </div>
         </section>
         <section id="target" className="scroll-mt-24 space-y-4 border-t border-border pt-8">
@@ -166,7 +172,8 @@ export default function DocumentApproval({
               </ErrorNotice>
             ) : null}
             <Button
-              variant="outline"
+              variant="glass"
+              color="default"
               disabled={state.decisionReading || state.busy !== null}
               onClick={() => void state.refresh('decision')}
             >
@@ -176,11 +183,13 @@ export default function DocumentApproval({
           <div className="space-y-3 border-t border-border pt-6" aria-busy={state.effect.reading}>
             <h3 className="font-medium">文件效果</h3>
             {!state.effect.current ? (
-              <Alert className="border-warning bg-warning/10">
-                <AlertTitle>最新效果尚未读取</AlertTitle>
-                <AlertDescription>
-                  授权事实仍保留；不把旧的尚未执行状态当作最新文件结果。
-                </AlertDescription>
+              <Alert color="warning">
+                <Alert.Content>
+                  <Alert.Title>最新效果尚未读取</Alert.Title>
+                  <Alert.Description>
+                    授权事实仍保留；不把旧的尚未执行状态当作最新文件结果。
+                  </Alert.Description>
+                </Alert.Content>
               </Alert>
             ) : null}
             {effect ? (
@@ -189,7 +198,7 @@ export default function DocumentApproval({
                   role="status"
                   className={
                     state.effect.current && effect.status === 'verified'
-                      ? 'font-medium text-success'
+                      ? 'font-medium text-foreground'
                       : ''
                   }
                 >
@@ -197,26 +206,31 @@ export default function DocumentApproval({
                   {documentEffectLabel[effect.status]}
                 </p>
                 {effect.status === 'unknown' ? (
-                  <Alert className="border-warning bg-warning/10">
-                    <AlertTitle>可能已写入，原动作结果未知</AlertTitle>
-                    <AlertDescription>
-                      原动作不能安全重做。只读取原运行、原效果或联系本机维护者核对，不重发、覆盖或另开同目标写入。
-                    </AlertDescription>
+                  <Alert color="warning">
+                    <Alert.Content>
+                      <Alert.Title>可能已写入，原动作结果未知</Alert.Title>
+                      <Alert.Description>
+                        原动作不能安全重做。只读取原运行、原效果或联系本机维护者核对，不重发、覆盖或另开同目标写入。
+                      </Alert.Description>
+                    </Alert.Content>
                   </Alert>
                 ) : null}
                 {effect.status === 'conflict' ? (
-                  <Alert className="border-warning bg-warning/10">
-                    <AlertTitle>原版本写前冲突，此次未写入</AlertTitle>
-                    <AlertDescription>
-                      旧授权不覆盖新内容；只有真实后继才可重新审阅。本页不提供覆盖写入。
-                    </AlertDescription>
+                  <Alert color="warning">
+                    <Alert.Content>
+                      <Alert.Title>原版本写前冲突，此次未写入</Alert.Title>
+                      <Alert.Description>
+                        旧授权不覆盖新内容；只有真实后继才可重新审阅。本页不提供覆盖写入。
+                      </Alert.Description>
+                    </Alert.Content>
                   </Alert>
                 ) : null}
               </div>
             ) : null}
             {state.effect.error ? <ErrorNotice message={state.effect.error} /> : null}
             <Button
-              variant="outline"
+              variant="glass"
+              color="default"
               disabled={state.effect.reading || state.busy !== null}
               onClick={() => void state.refresh('effect')}
             >
@@ -237,23 +251,32 @@ export default function DocumentApproval({
             ) : null}
             {state.run?.status === 'cancelled' ? (
               <Alert>
-                <AlertTitle>原运行已停止</AlertTitle>
-                <AlertDescription>
-                  停止不会撤回已发生的文件效果；先前获取的效果仍在上方独立保留。
-                </AlertDescription>
+                <Alert.Content>
+                  <Alert.Title>原运行已停止</Alert.Title>
+                  <Alert.Description>
+                    停止不会撤回已发生的文件效果；先前获取的效果仍在上方独立保留。
+                  </Alert.Description>
+                </Alert.Content>
               </Alert>
             ) : null}
             {state.runError ? <ErrorNotice message={state.runError} /> : null}
             <div className="flex flex-wrap gap-3">
               <Button
-                variant="outline"
+                variant="glass"
+                color="default"
                 disabled={state.runReading}
                 onClick={() => void state.refresh('run')}
               >
                 {state.runReading ? '正在读取原运行…' : '读取原运行状态'}
               </Button>
-              <Button asChild variant="ghost">
-                <Link href={originalHref}>查看原运行</Link>
+              <Button
+                variant="clear"
+                color="default"
+                role="link"
+                nativeButton={false}
+                render={<Link href={originalHref} />}
+              >
+                查看原运行
               </Button>
             </div>
           </div>
@@ -315,12 +338,14 @@ export default function DocumentApproval({
       </article>
       {state.notice ? (
         <Alert>
-          <AlertTitle>
-            {state.decision === 'approved' ? '已授权，不代表已保存' : '已拒绝'}
-          </AlertTitle>
-          <AlertDescription>
-            <p role="status">{state.notice}</p>
-          </AlertDescription>
+          <Alert.Content>
+            <Alert.Title>
+              {state.decision === 'approved' ? '已授权，不代表已保存' : '已拒绝'}
+            </Alert.Title>
+            <Alert.Description>
+              <p role="status">{state.notice}</p>
+            </Alert.Description>
+          </Alert.Content>
         </Alert>
       ) : null}
       {state.error ? (
@@ -329,7 +354,8 @@ export default function DocumentApproval({
             <p>保留全文与已接受事实。响应未知时先读取授权，不自动补发决议，不换请求键。</p>
             {state.uncertain && state.decisionChecked && state.decision === 'pending' ? (
               <Button
-                variant="outline"
+                variant="glass"
+                color="default"
                 disabled={state.busy !== null || state.decisionReading}
                 onClick={() => void state.decide(state.uncertain!, true)}
               >
@@ -349,7 +375,8 @@ export default function DocumentApproval({
               {state.busy === 'confirm' ? '正在批准此版本…' : '批准此版本（仅授权）'}
             </Button>
             <Button
-              variant="outline"
+              variant="glass"
+              color="default"
               disabled={disabled}
               onClick={() => void state.decide('reject')}
             >
@@ -367,8 +394,14 @@ export default function DocumentApproval({
             当前动作无效或不具备权限，请重新读取授权和原运行；不重做旧决议。
           </p>
         ) : null}
-        <Button asChild variant={state.decision === 'pending' ? 'outline' : 'default'}>
-          <Link href={originalHref}>查看原运行（不自动继续）</Link>
+        <Button
+          variant={state.decision === 'pending' ? 'glass' : 'solid'}
+          color={state.decision === 'pending' ? 'default' : 'primary'}
+          role="link"
+          nativeButton={false}
+          render={<Link href={originalHref} />}
+        >
+          查看原运行（不自动继续）
         </Button>
         <p className="text-sm text-muted-foreground">
           返回链接来自此详情可信的会话与 Run 引用。保留原标签页接收事件；本页不会自动

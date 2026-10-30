@@ -1,5 +1,5 @@
 import { PageHeading } from '@/components/page';
-import { Skeleton } from '@/components/ui/skeleton';
+import { Skeleton } from '@lorelum/lumen-ui/components/skeleton';
 
 export default function ActivityLoading() {
   return (

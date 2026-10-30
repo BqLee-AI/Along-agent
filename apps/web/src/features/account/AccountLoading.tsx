@@ -1,4 +1,4 @@
-import { Skeleton } from '@/components/ui/skeleton';
+import { Skeleton } from '@lorelum/lumen-ui/components/skeleton';
 
 export default function AccountLoading({ summary = false }: { summary?: boolean }) {
   return (
@@ -10,11 +10,11 @@ export default function AccountLoading({ summary = false }: { summary?: boolean 
       }
       aria-busy="true"
     >
-      <h1 className="text-2xl font-semibold leading-9">正在读取账户</h1>
+      <h1 className="text-3xl font-semibold leading-9">稍等片刻</h1>
       <p className="text-base leading-7 text-muted-foreground" role="status">
-        正在核验原安装状态，尚未开放账户操作。
+        正在读取账户…
       </p>
-      <div className="space-y-6 rounded-xl border border-border bg-card p-6" aria-hidden="true">
+      <div className="space-y-6 py-4" aria-hidden="true">
         <Skeleton className="h-6 w-1/2" />
         <Skeleton className="h-11 w-full" />
         <Skeleton className="h-6 w-1/3" />

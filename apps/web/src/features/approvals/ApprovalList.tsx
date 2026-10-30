@@ -2,8 +2,8 @@
 
 import Link from 'next/link';
 import { useEffect, useReducer, useRef, useState } from 'react';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
+import { Button } from '@lorelum/lumen-ui/components/button';
+import { Badge } from '@lorelum/lumen-ui/components/badge';
 import { EmptyState, ErrorNotice } from '@/components/page';
 import {
   historyPageReducer,
@@ -97,14 +97,20 @@ export default function ApprovalList({
                   >
                     {item.title}
                   </Link>
-                  <Badge variant="outline">{approvalStatusLabels[item.status]}</Badge>
+                  <Badge variant="glass">{approvalStatusLabels[item.status]}</Badge>
                 </div>
                 <p className="text-sm text-muted-foreground [overflow-wrap:anywhere]">
                   有效期至 {item.expires_at}
                 </p>
               </div>
-              <Button asChild variant="outline">
-                <Link href={`/approvals/${item.approval_id}`}>审阅提议</Link>
+              <Button
+                variant="glass"
+                color="default"
+                role="link"
+                nativeButton={false}
+                render={<Link href={`/approvals/${item.approval_id}`} />}
+              >
+                审阅提议
               </Button>
             </li>
           ))}
@@ -119,7 +125,8 @@ export default function ApprovalList({
         <ErrorNotice message={readError}>
           <p>先前内容与后续游标仍保留；重读只发送 GET。</p>
           <Button
-            variant="outline"
+            variant="glass"
+            color="default"
             disabled={state.reading}
             onClick={() => void load(!state.loaded || state.resetting)}
           >
@@ -134,11 +141,21 @@ export default function ApprovalList({
       ) : null}
       <div className="flex flex-wrap gap-3">
         {state.nextCursor ? (
-          <Button variant="outline" disabled={state.reading} onClick={() => void load(false)}>
+          <Button
+            variant="glass"
+            color="default"
+            disabled={state.reading}
+            onClick={() => void load(false)}
+          >
             继续读取提醒确认
           </Button>
         ) : null}
-        <Button variant="ghost" disabled={state.reading} onClick={() => void load(true)}>
+        <Button
+          variant="clear"
+          color="default"
+          disabled={state.reading}
+          onClick={() => void load(true)}
+        >
           重新读取首批
         </Button>
       </div>

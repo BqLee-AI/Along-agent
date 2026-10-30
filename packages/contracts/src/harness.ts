@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { workspaceSummarySchema } from './workspaces.js';
 import { DocumentApprovalDecisionSchema } from './document-approvals.js';
 
-export const HARNESS_PROTOCOL_VERSION = 'harness/v2' as const;
+export const HARNESS_PROTOCOL_VERSION = 'harness/v3' as const;
 export const HARNESS_MAX_FRAME_BYTES = 1024 * 1024;
 
 const uuid = z.string().uuid();
@@ -77,6 +77,10 @@ export const HarnessModelReplySchema = z
     usage: z.object({ total_tokens: z.number().int().nonnegative() }).strict().nullable(),
   })
   .strict();
+export const HarnessModelStepSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('delta'), delta: z.string().min(1).max(4000) }).strict(),
+  z.object({ type: z.literal('complete'), reply: HarnessModelReplySchema }).strict(),
+]);
 const request = {
   protocol: z.literal(HARNESS_PROTOCOL_VERSION),
   request_ref: reference,
@@ -90,6 +94,7 @@ export const HarnessRequestSchema = z.discriminatedUnion('type', [
       remaining_tokens: z.number().int().nonnegative(),
     })
     .strict(),
+  z.object({ ...request, type: z.literal('model_next'), model_ref: reference }).strict(),
   z
     .object({
       ...request,
@@ -118,7 +123,7 @@ export const HarnessRequestSchema = z.discriminatedUnion('type', [
       approval_id: uuid,
     })
     .strict(),
-  z.object({ ...request, type: z.literal('answer'), delta: text }).strict(),
+  z.object({ ...request, type: z.literal('answer'), delta: z.string().min(1).max(4000) }).strict(),
   z
     .object({
       ...request,
@@ -233,6 +238,7 @@ export type HarnessUsage = z.infer<typeof HarnessUsageSchema>;
 export type HarnessSnapshot = z.infer<typeof HarnessSnapshotSchema>;
 export type HarnessTool = z.infer<typeof HarnessToolSchema>;
 export type HarnessModelReply = z.infer<typeof HarnessModelReplySchema>;
+export type HarnessModelStep = z.infer<typeof HarnessModelStepSchema>;
 export type HarnessRequest = z.infer<typeof HarnessRequestSchema>;
 export type HarnessStart = z.infer<typeof HarnessStartSchema>;
 export type HarnessReply = z.infer<typeof HarnessReplySchema>;

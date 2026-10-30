@@ -2,7 +2,7 @@ import { ApprovalDetailSchema } from '@along/contracts';
 import { apiGet } from '@/lib/api';
 import { MeSchema } from '@/lib/types';
 import { PageHeading, ErrorNotice } from '@/components/page';
-import { Button } from '@/components/ui/button';
+import { Button } from '@lorelum/lumen-ui/components/button';
 import ReminderApproval from '@/features/approvals/ReminderApproval';
 
 export const dynamic = 'force-dynamic';
@@ -22,11 +22,23 @@ export default async function ApprovalDetailPage({ params }: { params: Promise<{
         <ErrorNotice
           message={!result.ok ? result.message : '冻结确认内容无法核验，未开放任何决议操作。'}
         >
-          <Button asChild variant="outline">
-            <a href={returnTo}>重新读取原提议</a>
+          <Button
+            variant="glass"
+            color="default"
+            role="link"
+            nativeButton={false}
+            render={<a href={returnTo} />}
+          >
+            重新读取原提议
           </Button>
-          <Button asChild variant="ghost">
-            <a href="/approvals">返回提醒确认</a>
+          <Button
+            variant="clear"
+            color="default"
+            role="link"
+            nativeButton={false}
+            render={<a href="/approvals" />}
+          >
+            返回提醒确认
           </Button>
         </ErrorNotice>
       </section>

@@ -1,11 +1,12 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { LoaderCircle } from 'lucide-react';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { Eye, EyeOff, LoaderCircle } from 'lucide-react';
+import { Alert } from '@lorelum/lumen-ui/components/alert';
+import { Button } from '@lorelum/lumen-ui/components/button';
+import { Input } from '@lorelum/lumen-ui/components/input';
+import { Label } from '@lorelum/lumen-ui/components/label';
+import { Checkbox } from '@lorelum/lumen-ui/components/checkbox';
 import { loginHref } from '../../lib/account-navigation';
 import type { AccountOperation } from './account-operation';
 import { AccountDiagnostics, AccountMaintenance } from './AccountSupport';
@@ -27,6 +28,7 @@ export default function AccountForm({
   const successRef = useRef<HTMLDivElement>(null);
   const newPassword = operation === 'initialize' || operation === 'claim';
   const signingOut = operation === 'sign-out';
+  const signingIn = operation === 'sign-in';
   const label =
     operation === 'initialize'
       ? '创建管理员账户'
@@ -36,7 +38,9 @@ export default function AccountForm({
           ? '退出当前会话'
           : '登录';
   const disabledReason = state.busy
-    ? `${label}请求正在提交，请等待回执。`
+    ? signingIn
+      ? '正在登录，请稍候。'
+      : `${label}请求正在提交，请等待回执。`
     : state.blocked
       ? '未核验可用于此操作的签名会话，请重新读取账户状态。'
       : state.rereadRequired
@@ -44,6 +48,13 @@ export default function AccountForm({
         : operation === 'claim' && !confirmed
           ? '请先确认原账户身份保留说明，再提交转正。'
           : null;
+  const submitHelp =
+    disabledReason ??
+    (signingOut
+      ? '打开本页不会退出；退出失败或丢失响应不表示已撤销。'
+      : signingIn
+        ? null
+        : '会话固定七天到期，读取不会续期。成功登录后只读取返回页面，不自动重放业务操作。');
 
   useEffect(() => {
     if (state.failure) errorRef.current?.focus();
@@ -56,14 +67,16 @@ export default function AccountForm({
     return (
       <div className="space-y-6" ref={successRef} tabIndex={-1}>
         <Alert role="status">
-          <AlertTitle>账户设置已接受，当前会话已核验</AlertTitle>
-          <AlertDescription>
-            原身份和历史继续保留。接下来由部署者完成本机资料登记，而不是再次提交账户表单。
-          </AlertDescription>
+          <Alert.Content>
+            <Alert.Title>账户设置已接受，当前会话已核验</Alert.Title>
+            <Alert.Description>
+              原身份和历史继续保留。接下来由部署者完成本机资料登记，而不是再次提交账户表单。
+            </Alert.Description>
+          </Alert.Content>
         </Alert>
         <AccountMaintenance pending />
-        <Button asChild className="w-full">
-          <a href="/account">查看账户与工作区状态</a>
+        <Button className="w-full" role="link" nativeButton={false} render={<a href="/account" />}>
+          查看账户与工作区状态
         </Button>
       </div>
     );
@@ -71,50 +84,67 @@ export default function AccountForm({
 
   return (
     <form
-      className="space-y-6 rounded-xl border border-border bg-card p-4 sm:p-6"
+      className={signingIn ? 'space-y-6' : 'space-y-6 p-4 sm:p-6'}
       onSubmit={state.submit}
       aria-busy={state.busy}
       noValidate
     >
       {state.failure ? (
-        <div
+        <Alert
           ref={errorRef}
           tabIndex={-1}
+          color="danger"
           role="alert"
-          className="space-y-3 rounded-lg border border-destructive bg-destructive/5 p-4 text-base leading-7 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          className="focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         >
-          <h2 className="font-semibold text-destructive">
-            {state.rereadRequired ? '请先核对账户状态' : '本次提交未完成'}
-          </h2>
-          <p>{state.failure.message}</p>
-          {Object.keys(state.fieldErrors).length ? (
-            <ul className="space-y-1">
-              {Object.entries(state.fieldErrors).map(([name, message]) => (
-                <li key={name}>
-                  <a
-                    className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
-                    href={`#${name}`}
-                  >
-                    {message}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          <AccountDiagnostics failure={state.failure} />
-          {state.rereadRequired ? (
-            <div className="flex flex-col gap-3">
-              <Button asChild variant="outline">
-                <a href="/account">只读核对账户状态</a>
-              </Button>
-              {state.failure.status === 401 ? (
-                <Button asChild variant="ghost">
-                  <a href={loginHref('/account')}>前往正式登录</a>
-                </Button>
+          <Alert.Content className="space-y-3">
+            <Alert.Title>
+              <h2>{state.rereadRequired ? '请先核对账户状态' : '本次提交未完成'}</h2>
+            </Alert.Title>
+            <Alert.Description className="space-y-3">
+              <p>{state.failure.message}</p>
+              {Object.keys(state.fieldErrors).length ? (
+                <ul className="space-y-1">
+                  {Object.entries(state.fieldErrors).map(([name, message]) => (
+                    <li key={name}>
+                      <a
+                        className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
+                        href={`#${name}`}
+                      >
+                        {message}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
               ) : null}
-            </div>
-          ) : null}
-        </div>
+              <AccountDiagnostics failure={state.failure} />
+              {state.rereadRequired ? (
+                <div className="flex flex-col gap-3">
+                  <Button
+                    variant="glass"
+                    color="default"
+                    role="link"
+                    nativeButton={false}
+                    render={<a href="/account" />}
+                  >
+                    只读核对账户状态
+                  </Button>
+                  {state.failure.status === 401 ? (
+                    <Button
+                      variant="clear"
+                      color="default"
+                      role="link"
+                      nativeButton={false}
+                      render={<a href={loginHref('/account')} />}
+                    >
+                      前往正式登录
+                    </Button>
+                  ) : null}
+                </div>
+              ) : null}
+            </Alert.Description>
+          </Alert.Content>
+        </Alert>
       ) : null}
       {!signingOut ? (
         <>
@@ -140,7 +170,7 @@ export default function AccountForm({
             </div>
           ) : null}
           <div className="space-y-2">
-            <Label htmlFor="login_name">登录名（必填）</Label>
+            <Label htmlFor="login_name">{signingIn ? '用户名' : '登录名（必填）'}</Label>
             <Input
               id="login_name"
               name="login_name"
@@ -152,44 +182,79 @@ export default function AccountForm({
               maxLength={128}
               readOnly={state.busy || state.rereadRequired}
               aria-invalid={Boolean(state.fieldErrors.login_name)}
-              aria-describedby="login_name-help login_name-error"
+              aria-describedby={
+                signingIn
+                  ? state.fieldErrors.login_name
+                    ? 'login_name-error'
+                    : undefined
+                  : state.fieldErrors.login_name
+                    ? 'login_name-help login_name-error'
+                    : 'login_name-help'
+              }
             />
-            <p id="login_name-help" className="text-sm leading-6 text-muted-foreground">
-              此安装的管理员登录名，不是邮箱；不区分大小写。
-            </p>
-            <p id="login_name-error" className="text-sm leading-6 text-destructive">
-              {state.fieldErrors.login_name}
-            </p>
+            {!signingIn ? (
+              <p id="login_name-help" className="text-sm leading-6 text-muted-foreground">
+                此安装的管理员登录名，不是邮箱；不区分大小写。
+              </p>
+            ) : null}
+            {state.fieldErrors.login_name ? (
+              <p id="login_name-error" className="text-sm leading-6 text-destructive">
+                {state.fieldErrors.login_name}
+              </p>
+            ) : null}
           </div>
           <div className="space-y-2">
-            <Label htmlFor="password">{newPassword ? '设置密码（必填）' : '密码（必填）'}</Label>
-            <Input
-              id="password"
-              name="password"
-              type={showPassword ? 'text' : 'password'}
-              autoComplete={newPassword ? 'new-password' : 'current-password'}
-              required
-              minLength={8}
-              maxLength={128}
-              readOnly={state.busy || state.rereadRequired}
-              aria-invalid={Boolean(state.fieldErrors.password)}
-              aria-describedby="password-help password-error"
-            />
-            <p id="password-help" className="text-sm leading-6 text-muted-foreground">
-              8–128 个字符，保留首尾空格。支持密码管理器与粘贴。
-            </p>
-            <p id="password-error" className="text-sm leading-6 text-destructive">
-              {state.fieldErrors.password}
-            </p>
-            <Button
-              type="button"
-              variant="ghost"
-              aria-controls={newPassword ? 'password password_confirmation' : 'password'}
-              aria-pressed={showPassword}
-              onClick={() => setShowPassword((visible) => !visible)}
-            >
-              {showPassword ? '隐藏密码' : '显示密码'}
-            </Button>
+            <Label htmlFor="password">{newPassword ? '设置密码（必填）' : '密码'}</Label>
+            <div className="relative">
+              <Input
+                id="password"
+                name="password"
+                className="pr-14"
+                type={showPassword ? 'text' : 'password'}
+                autoComplete={newPassword ? 'new-password' : 'current-password'}
+                required
+                minLength={8}
+                maxLength={128}
+                readOnly={state.busy || state.rereadRequired}
+                aria-invalid={Boolean(state.fieldErrors.password)}
+                aria-describedby={
+                  newPassword
+                    ? state.fieldErrors.password
+                      ? 'password-help password-error'
+                      : 'password-help'
+                    : state.fieldErrors.password
+                      ? 'password-error'
+                      : undefined
+                }
+              />
+              <Button
+                type="button"
+                variant="clear"
+                color="default"
+                size="icon"
+                className="absolute right-0 top-0"
+                aria-label={showPassword ? '隐藏密码' : '显示密码'}
+                aria-controls={newPassword ? 'password password_confirmation' : 'password'}
+                aria-pressed={showPassword}
+                onClick={() => setShowPassword((visible) => !visible)}
+              >
+                {showPassword ? (
+                  <EyeOff className="size-5" aria-hidden="true" />
+                ) : (
+                  <Eye className="size-5" aria-hidden="true" />
+                )}
+              </Button>
+            </div>
+            {newPassword ? (
+              <p id="password-help" className="text-sm leading-6 text-muted-foreground">
+                至少 8 位。
+              </p>
+            ) : null}
+            {state.fieldErrors.password ? (
+              <p id="password-error" className="text-sm leading-6 text-destructive">
+                {state.fieldErrors.password}
+              </p>
+            ) : null}
           </div>
           {newPassword ? (
             <div className="space-y-2">
@@ -213,26 +278,26 @@ export default function AccountForm({
           ) : null}
           {operation === 'claim' ? (
             <div className="space-y-2">
-              <label
+              <Label
                 htmlFor="confirmed"
-                className="flex min-h-11 cursor-pointer items-start gap-3 rounded-lg border border-border p-3 text-base leading-7"
+                className="flex min-h-11 cursor-pointer items-start gap-3 p-3 text-base leading-7"
               >
-                <input
+                <Checkbox
                   id="confirmed"
                   name="confirmed"
-                  type="checkbox"
+                  value="on"
                   checked={confirmed}
-                  onChange={(event) => setConfirmed(event.target.checked)}
+                  onCheckedChange={setConfirmed}
                   required
                   disabled={state.busy || state.rereadRequired}
                   aria-invalid={Boolean(state.fieldErrors.confirmed)}
                   aria-describedby="confirmed-error"
-                  className="mt-1.5 size-5 shrink-0 accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                  className="mt-1.5 shrink-0"
                 />
                 <span>
                   我确认只为当前已登录的原账户设置正式登录，保留原身份和历史，不认领或合并其他用户。
                 </span>
-              </label>
+              </Label>
               <p id="confirmed-error" className="text-sm leading-6 text-destructive">
                 {state.fieldErrors.confirmed}
               </p>
@@ -248,9 +313,9 @@ export default function AccountForm({
         <Button
           type="submit"
           className="w-full"
-          variant={signingOut ? 'destructive' : 'default'}
+          color={signingOut ? 'danger' : 'primary'}
           disabled={Boolean(disabledReason)}
-          aria-describedby="account-submit-help"
+          aria-describedby={submitHelp ? 'account-submit-help' : undefined}
         >
           {state.busy ? (
             <LoaderCircle
@@ -260,19 +325,27 @@ export default function AccountForm({
           ) : null}
           {state.busy ? `正在${label}…` : label}
         </Button>
-        <p
-          id="account-submit-help"
-          className="text-sm leading-6 text-muted-foreground"
-          role="status"
-        >
-          {disabledReason ??
-            (signingOut
-              ? '打开本页不会退出；退出失败或丢失响应不表示已撤销。'
-              : '会话固定七天到期，读取不会续期。成功登录后只读取返回页面，不自动重放业务操作。')}
-        </p>
-        <Button asChild variant="ghost" className="w-full">
-          <a href="/account">返回账户</a>
-        </Button>
+        {submitHelp ? (
+          <p
+            id="account-submit-help"
+            className="text-sm leading-6 text-muted-foreground"
+            role="status"
+          >
+            {submitHelp}
+          </p>
+        ) : null}
+        {!signingIn ? (
+          <Button
+            variant="clear"
+            color="default"
+            className="w-full"
+            role="link"
+            nativeButton={false}
+            render={<a href="/account" />}
+          >
+            返回账户
+          </Button>
+        ) : null}
       </div>
     </form>
   );

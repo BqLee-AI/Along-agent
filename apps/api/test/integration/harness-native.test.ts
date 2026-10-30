@@ -5,6 +5,8 @@ import { createServer } from 'node:http';
 import type { Server } from 'node:http';
 import { z } from 'zod';
 import {
+  HARNESS_PROTOCOL_VERSION,
+  HarnessStartSchema,
   HarnessApprovalDecisionSchema,
   HarnessModelMessageSchema,
   RunViewSchema,
@@ -13,6 +15,7 @@ import { ThreadEventSchema } from '@along/stream-protocol';
 import type { ThreadEvent } from '@along/stream-protocol';
 import { handleRequest } from '../../src/http/app.js';
 import { createHarnessModelTransport } from '../../src/modules/conversations/harness-model.js';
+import { runNativeHarness } from '../../src/modules/conversations/harness-process.js';
 import { seedSession } from '../../src/modules/identity/seed.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 import {
@@ -22,11 +25,14 @@ import {
   pending,
   jsonBody,
   listen,
+  writeModelSse,
 } from '../helpers/harness-consumer.js';
 
 const binaryPath = process.env.HARNESS_BINARY ?? '';
 const maybe = binaryPath && databaseUrl ? describe : describe.skip;
 const ModelBody = z.object({
+  stream: z.literal(true),
+  stream_options: z.object({ include_usage: z.literal(true) }),
   messages: z.array(HarnessModelMessageSchema),
 });
 const Detail = z.object({
@@ -54,9 +60,18 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
   let base: string;
   let maxIterations = 8;
   const modelCalls = new Map<string, number>();
+  const modelRequests = new Map<string, z.infer<typeof ModelBody>[]>();
   const hold = new Map<
     string,
     { started: PromiseWithResolvers<void>; closed: PromiseWithResolvers<boolean> }
+  >();
+  const streams = new Map<
+    string,
+    {
+      release: PromiseWithResolvers<void>;
+      ended: boolean;
+      closed: PromiseWithResolvers<boolean>;
+    }
   >();
 
   beforeAll(async () => {
@@ -65,18 +80,52 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
       void (async () => {
         const body = ModelBody.parse(await jsonBody(req));
         const original =
-          body.messages.find((message) => message.content.includes('nativeCase:'))?.content ?? '';
+          body.messages.findLast(
+            (message) => message.role === 'user' && message.content.includes('nativeCase:'),
+          )?.content ?? '';
         const marker = /nativeCase:([\w-]+):(\w+)/.exec(original);
         if (!marker) throw new Error('missing fixture marker');
         const id = marker[1]!;
         const kind = marker[2]!;
         modelCalls.set(id, (modelCalls.get(id) ?? 0) + 1);
+        const requests = modelRequests.get(id) ?? [];
+        requests.push(body);
+        modelRequests.set(id, requests);
         if (kind === 'hold') {
           const gate = hold.get(id);
           if (!gate) throw new Error('missing held provider');
           res.once('close', () => gate.closed.resolve(!res.writableEnded && res.destroyed));
-          res.writeHead(200, { 'content-type': 'application/json' });
-          res.write('{"choices":[', () => gate.started.resolve());
+          res.writeHead(200, { 'content-type': 'text/event-stream' });
+          res.write(': provider waiting\n\n', () => gate.started.resolve());
+          return;
+        }
+        if (kind === 'stream' || kind === 'streamerror') {
+          const gate = streams.get(id);
+          if (!gate) throw new Error('missing incremental provider gate');
+          res.once('close', () => gate.closed.resolve(!res.writableEnded && res.destroyed));
+          res.writeHead(200, { 'content-type': 'text/event-stream' });
+          res.write(
+            `data: ${JSON.stringify({
+              choices: [{ index: 0, delta: { content: '先回答😀' }, finish_reason: null }],
+            })}\n\n`,
+          );
+          await gate.release.promise;
+          if (res.destroyed) return;
+          gate.ended = true;
+          if (kind === 'streamerror') {
+            res.end('data: {"error":{"message":"private fixture failure"}}\n\n');
+          } else {
+            res.write(
+              `data: ${JSON.stringify({
+                choices: [{ index: 0, delta: { content: '，再完成。' }, finish_reason: null }],
+              })}\n\n`,
+            );
+            res.write(
+              `data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })}\n\n`,
+            );
+            res.write(`data: ${JSON.stringify({ choices: [], usage: { total_tokens: 5 } })}\n\n`);
+            res.end('data: [DONE]\n\n');
+          }
           return;
         }
         const observed = findModelObservation(body.messages, Observation);
@@ -88,12 +137,29 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
           function: { name: string; arguments: string };
         }[] = [];
         const longAnswer = longAnswers.find((answer) => answer.kind === kind);
-        if (longAnswer) {
-          content = longAnswer.content;
+        if (kind === 'language') {
+          content = original.includes('Please reply in English.')
+            ? 'Hello from Along.'
+            : '你好，我是 Along。';
+        } else if (longAnswer) {
+          // One real, large provider event exercises the transport's UTF-16
+          // bound and native's UTF-8/UTF-16 distinction (not fixture chunking).
+          res.writeHead(200, { 'content-type': 'text/event-stream' });
+          res.write(
+            `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: longAnswer.content }, finish_reason: null }] })}\n\n`,
+          );
+          res.write(
+            `data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })}\n\n`,
+          );
+          res.write(`data: ${JSON.stringify({ choices: [], usage: { total_tokens: 5 } })}\n\n`);
+          res.end('data: [DONE]\n\n');
+          return;
         } else if (actualDecision) {
           if (actualDecision.kind !== 'task' || actualDecision.status !== 'consumed')
             throw new Error('expected consumed task decision');
-          content = `记录结果 task:${actualDecision.task_id}`;
+          content = original.includes('Please reply in English.')
+            ? `Recorded task:${actualDecision.task_id}`
+            : `记录结果 task:${actualDecision.task_id}`;
         } else if (observed && kind !== 'loop') {
           if (
             kind === 'plan' &&
@@ -138,12 +204,10 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
             },
           ];
         }
-        res.end(
-          JSON.stringify({
-            choices: [{ message: { content, tool_calls: calls } }],
-            usage: { total_tokens: 5 },
-          }),
-        );
+        writeModelSse(res, {
+          choices: [{ message: { content, tool_calls: calls } }],
+          usage: { total_tokens: 5 },
+        });
       })().catch(() => {
         res.writeHead(500);
         res.end('fixture provider failed');
@@ -226,6 +290,129 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
     return Confirmed.parse(await confirmed.json()).data.task_id;
   }
 
+  for (const kind of ['stream', 'streamerror', 'streamcancel'] as const) {
+    it(`native accepts and persists content before provider completion: ${kind}`, async () => {
+      const { headers } = await actor();
+      const id = randomUUID();
+      const gate = {
+        release: Promise.withResolvers<void>(),
+        ended: false,
+        closed: Promise.withResolvers<boolean>(),
+      };
+      streams.set(id, gate);
+      const body = input(id, kind === 'streamcancel' ? 'stream' : kind);
+      const response = await post('/api/v1/conversations/messages', body, headers);
+      expect(response.status).toBe(200);
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      let text = '';
+      let events: ThreadEvent[] = [];
+      try {
+        // Gate ordering, not a delay: provider cannot send finish/usage/DONE
+        // until an accepted public delta has crossed native and the authority.
+        while (!events.some((event) => event.type === 'message.delta')) {
+          const next = await reader.read();
+          if (next.done) throw new Error('native ended before first incremental delta');
+          text += decoder.decode(next.value, { stream: true });
+          events = frames(text.slice(0, text.lastIndexOf('\n') + 1));
+        }
+        const run = started(events);
+        expect(
+          events.flatMap((event) => (event.type === 'message.delta' ? [event.payload.delta] : [])),
+        ).toEqual(['先回答😀']);
+        expect(gate.ended).toBe(false);
+        expect((await view(run.conversation_id, run.run_id, headers)).status).toBe('running');
+        expect(
+          (
+            await database.pool.query(
+              `SELECT c.payload->'payload'->>'delta' AS delta FROM run_checkpoints c
+           JOIN run_attempts a ON a.id=c.attempt_id WHERE a.run_id=$1 AND c.kind='message.delta' ORDER BY c.event_seq`,
+              [run.run_id],
+            )
+          ).rows,
+        ).toEqual([{ delta: '先回答😀' }]);
+        expect(
+          (
+            await database.pool.query(
+              `SELECT content FROM messages WHERE conversation_id=$1 AND role='assistant'`,
+              [run.conversation_id],
+            )
+          ).rows,
+        ).toEqual([]);
+        if (kind === 'streamcancel') {
+          const cancelled = await post(
+            `/api/v1/conversations/${run.conversation_id}/runs/${run.run_id}/actions/cancel`,
+            { idempotency_key: randomUUID() },
+            headers,
+          );
+          expect(cancelled.status).toBe(200);
+          expect(await gate.closed.promise).toBe(true);
+          expect(gate.ended).toBe(false);
+        } else gate.release.resolve();
+        for (;;) {
+          const next = await reader.read();
+          if (next.done) break;
+          text += decoder.decode(next.value, { stream: true });
+        }
+        text += decoder.decode();
+        const finalEvents = frames(text);
+        const expected = kind === 'stream' ? '先回答😀，再完成。' : '先回答😀';
+        expect(
+          finalEvents
+            .flatMap((event) => (event.type === 'message.delta' ? [event.payload.delta] : []))
+            .join(''),
+        ).toBe(expected);
+        expect(finalEvents.at(-1)?.type).toBe(
+          kind === 'stream'
+            ? 'thread.completed'
+            : kind === 'streamerror'
+              ? 'thread.failed'
+              : 'thread.cancelled',
+        );
+        expect(
+          (
+            await database.pool.query(
+              `SELECT content FROM messages WHERE conversation_id=$1 AND role='assistant'`,
+              [run.conversation_id],
+            )
+          ).rows,
+        ).toEqual([{ content: expected }]);
+        expect(modelCalls.get(id)).toBe(1);
+        expect(text).not.toContain('private fixture failure');
+      } finally {
+        gate.release.resolve();
+        await reader.cancel();
+        streams.delete(id);
+      }
+    });
+  }
+
+  for (const english of [false, true]) {
+    it(`native supplies the default Chinese policy and preserves explicit language requests: ${english}`, async () => {
+      const { headers } = await actor();
+      const id = randomUUID();
+      const body = input(id, 'language');
+      if (english) body.raw_text += ' Please reply in English.';
+      const response = await post('/api/v1/conversations/messages', body, headers);
+      const events = frames(await response.text());
+      expect(events.at(-1)?.type).toBe('thread.completed');
+      expect(
+        events
+          .flatMap((event) => (event.type === 'message.delta' ? [event.payload.delta] : []))
+          .join(''),
+      ).toBe(english ? 'Hello from Along.' : '你好，我是 Along。');
+      const messages = modelRequests.get(id)![0]!.messages;
+      const policy = messages.filter(
+        (message) => message.role === 'system' && message.content.includes('Simplified Chinese'),
+      );
+      expect(policy).toHaveLength(1);
+      expect(policy[0]!.content).toContain('unless the user explicitly requests another language');
+      expect(policy[0]!.content).toContain('Do not translate code, identifiers or proper nouns');
+      expect(
+        messages.some((message) => message.role === 'user' && message.content === body.raw_text),
+      ).toBe(true);
+    });
+  }
   for (const answer of longAnswers) {
     it(`native ${answer.kind} final answer survives public chunking and durable replay exactly`, async () => {
       const { headers } = await actor();
@@ -298,6 +485,150 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
     ]);
   });
 
+  it('new native Runs see prior visible turns, not another conversation, owner, system message or old tool calls', async () => {
+    const { session, headers } = await actor();
+    const other = await actor();
+    const firstId = randomUUID();
+    const firstBody = input(firstId, 'read');
+    const first = frames(
+      await (await post('/api/v1/conversations/messages', firstBody, headers)).text(),
+    );
+    const run = started(first);
+    await database.pool.query(
+      `INSERT INTO messages(id,owner_id,conversation_id,role,content)
+       VALUES (gen_random_uuid(),$1,$3,'system','private system context'),
+         (gen_random_uuid(),$2,$3,'assistant','foreign owner context')`,
+      [session.userId, other.session.userId, run.conversation_id],
+    );
+    const secondId = randomUUID();
+    const secondBody = { ...input(secondId, 'read'), conversation_id: run.conversation_id };
+    const second = frames(
+      await (await post('/api/v1/conversations/messages', secondBody, headers)).text(),
+    );
+    expect(second.at(-1)?.type).toBe('thread.completed');
+    const secondRequest = modelRequests.get(secondId)?.[0];
+    if (!secondRequest) throw new Error('missing second-turn native model request');
+    expect(secondRequest.messages.filter((message) => message.role !== 'system')).toEqual([
+      { role: 'user', content: firstBody.raw_text },
+      { role: 'assistant', content: 'prefs:Europe/London' },
+      { role: 'user', content: secondBody.raw_text },
+    ]);
+    expect(JSON.stringify(secondRequest)).not.toContain('private system context');
+    expect(JSON.stringify(secondRequest)).not.toContain('foreign owner context');
+    const isolatedId = randomUUID();
+    const isolatedBody = input(isolatedId, 'read');
+    const isolated = frames(
+      await (await post('/api/v1/conversations/messages', isolatedBody, headers)).text(),
+    );
+    expect(isolated.at(-1)?.type).toBe('thread.completed');
+    expect(
+      modelRequests.get(isolatedId)?.[0]?.messages.filter((message) => message.role !== 'system'),
+    ).toEqual([{ role: 'user', content: isolatedBody.raw_text }]);
+    const otherId = randomUUID();
+    const otherBody = input(otherId, 'read');
+    const otherEvents = frames(
+      await (await post('/api/v1/conversations/messages', otherBody, other.headers)).text(),
+    );
+    expect(otherEvents.at(-1)?.type).toBe('thread.completed');
+    expect(
+      modelRequests.get(otherId)?.[0]?.messages.filter((message) => message.role !== 'system'),
+    ).toEqual([{ role: 'user', content: otherBody.raw_text }]);
+    expect(
+      (
+        await post(
+          '/api/v1/conversations/messages',
+          { ...input(randomUUID(), 'read'), conversation_id: run.conversation_id },
+          other.headers,
+        )
+      ).status,
+    ).toBe(403);
+  });
+
+  it('native receives the deterministic newest 63 visible predecessors and the complete 20000-unit current input once', async () => {
+    const { session, headers } = await actor();
+    const conversationId = randomUUID();
+    await database.pool.query(
+      `INSERT INTO conversations(id,owner_id,title,anchor_received_at_utc)
+       VALUES ($1,$2,'bounded context',now())`,
+      [conversationId, session.userId],
+    );
+    await database.pool.query(
+      `INSERT INTO messages(id,owner_id,conversation_id,role,content,created_at)
+       SELECT ($3 || lpad(n::text,12,'0'))::uuid,$1,$2,
+         CASE WHEN n%2=0 THEN 'assistant' ELSE 'user' END,
+         'history-' || n,now()-interval '1 day'
+       FROM generate_series(1,65) AS n`,
+      [session.userId, conversationId, randomUUID().slice(0, 24)],
+    );
+    const id = randomUUID();
+    const body = { ...input(id, 'read'), conversation_id: conversationId };
+    body.raw_text += '界😀'.repeat(6000);
+    body.raw_text += '尾'.repeat(20000 - body.raw_text.length);
+    const response = await post('/api/v1/conversations/messages', body, headers);
+    expect(response.status).toBe(200);
+    const events = frames(await response.text());
+    expect(events.at(-1)?.type).toBe('thread.completed');
+    const request = modelRequests.get(id)?.[0];
+    if (!request) throw new Error('missing bounded native model request');
+    const visible = request.messages.filter((message) => message.role !== 'system');
+    expect(visible).toEqual([
+      ...Array.from({ length: 63 }, (_, index) => {
+        const n = index + 3;
+        const role = n % 2 === 0 ? ('assistant' as const) : ('user' as const);
+        return { role, content: `history-${n}` };
+      }),
+      { role: 'user', content: body.raw_text },
+    ]);
+    const run = started(events);
+    const checkpoint = await database.pool.query<{ payload: { message_refs: string[] } }>(
+      `SELECT c.payload FROM run_checkpoints c JOIN run_attempts a ON a.id=c.attempt_id
+       WHERE a.run_id=$1 AND c.kind='harness_snapshot' ORDER BY c.event_seq DESC LIMIT 1`,
+      [run.run_id],
+    );
+    expect(checkpoint.rows[0]?.payload.message_refs).toHaveLength(64);
+  });
+
+  it('an oversized complete bootstrap fails explicitly without truncating the current message or contacting the model', async () => {
+    const { session, headers } = await actor();
+    const conversationId = randomUUID();
+    await database.pool.query(
+      `INSERT INTO conversations(id,owner_id,title,anchor_received_at_utc)
+       VALUES ($1,$2,'large context',now())`,
+      [conversationId, session.userId],
+    );
+    await database.pool.query(
+      `INSERT INTO messages(id,owner_id,conversation_id,role,content,created_at)
+       VALUES (gen_random_uuid(),$1,$2,'assistant',$3,now()-interval '1 day')`,
+      [session.userId, conversationId, '界'.repeat(350000)],
+    );
+    const id = randomUUID();
+    const body = { ...input(id, 'read'), conversation_id: conversationId };
+    const response = await post('/api/v1/conversations/messages', body, headers);
+    expect(response.status).toBe(200);
+    const events = frames(await response.text());
+    expect(events.at(-1)).toMatchObject({
+      type: 'thread.failed',
+      payload: { error: { code: 'HARNESS_CONTEXT_LIMIT', http_status: 422 } },
+    });
+    expect(modelCalls.get(id) ?? 0).toBe(0);
+    expect(
+      (
+        await database.pool.query(
+          `SELECT content FROM messages WHERE owner_id=$1 AND conversation_id=$2 AND role='user'`,
+          [session.userId, conversationId],
+        )
+      ).rows,
+    ).toEqual([{ content: body.raw_text }]);
+    expect(
+      (
+        await database.pool.query(
+          'SELECT count(*)::int n FROM tool_invocations WHERE owner_id=$1',
+          [session.userId],
+        )
+      ).rows[0]?.n,
+    ).toBe(0);
+  });
+
   it('native publishes tool-call content as visible progress and retains it alongside the real next-round observation', async () => {
     const { headers } = await actor();
     const id = randomUUID();
@@ -311,10 +642,16 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
     expect(modelCalls.get(id)).toBe(2);
   });
 
-  it('approval waits without completed, then one concurrent resume consumes the original real task result', async () => {
+  it('approval resume preserves the accepted visible context despite later turns and consumes the original task only once', async () => {
     const { session, headers } = await actor();
+    const priorBody = input(randomUUID(), 'read');
+    const prior = frames(
+      await (await post('/api/v1/conversations/messages', priorBody, headers)).text(),
+    );
+    const priorRun = started(prior);
     const id = randomUUID();
-    const body = input(id, 'create');
+    const body = { ...input(id, 'create'), conversation_id: priorRun.conversation_id };
+    body.raw_text += ' Please reply in English.';
     const initial = frames(
       await (await post('/api/v1/conversations/messages', body, headers)).text(),
     );
@@ -333,6 +670,12 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
       await (await post('/api/v1/conversations/messages', body, headers)).text(),
     );
     expect(replay).toEqual(initial);
+    const laterId = randomUUID();
+    const laterBody = { ...input(laterId, 'read'), conversation_id: run.conversation_id };
+    const later = frames(
+      await (await post('/api/v1/conversations/messages', laterBody, headers)).text(),
+    );
+    expect(later.at(-1)?.type).toBe('thread.completed');
     const taskId = await confirm(approvalId, headers);
     const replies = await Promise.all([post(path, resume, headers), post(path, resume, headers)]);
     for (const reply of replies) {
@@ -345,7 +688,7 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
             .filter((event) => event.type === 'message.delta')
             .map((event) => event.payload.delta)
             .join(''),
-        ).toContain(taskId);
+        ).toBe(`Recorded task:${taskId}`);
       } else await reply.arrayBuffer();
     }
     const final = await view(run.conversation_id, run.run_id, headers);
@@ -355,6 +698,42 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
     );
     expect((await post(path, resume, headers)).status).toBe(200);
     expect(modelCalls.get(id)).toBe(2);
+    const acceptedVisible: z.infer<typeof ModelBody>['messages'] = [
+      { role: 'user', content: priorBody.raw_text },
+      { role: 'assistant', content: 'prefs:Europe/London' },
+      { role: 'user', content: body.raw_text },
+    ];
+    const requests = modelRequests.get(id);
+    expect(requests).toHaveLength(2);
+    expect(requests?.[0]?.messages.filter((message) => message.role !== 'system')).toEqual(
+      acceptedVisible,
+    );
+    const resumedMessages = requests?.[1]?.messages;
+    for (const request of requests ?? []) {
+      const policies = request.messages.filter(
+        (message) => message.role === 'system' && message.content.includes('Simplified Chinese'),
+      );
+      expect(policies).toHaveLength(1);
+      expect(policies[0]!.content).toContain(
+        'unless the user explicitly requests another language',
+      );
+      expect(
+        request.messages.some(
+          (message) => message.role === 'user' && message.content === body.raw_text,
+        ),
+      ).toBe(true);
+    }
+    expect(resumedMessages?.filter((message) => message.role !== 'system').slice(0, 3)).toEqual(
+      acceptedVisible,
+    );
+    expect(resumedMessages?.filter((message) => message.content === body.raw_text)).toHaveLength(1);
+    expect(resumedMessages?.some((message) => message.content === laterBody.raw_text)).toBe(false);
+    expect(
+      resumedMessages?.some(
+        (message) =>
+          message.role === 'tool' || ('tool_calls' in message && message.tool_calls.length),
+      ),
+    ).toBe(false);
     expect(
       (await database.pool.query('SELECT id FROM tasks WHERE owner_id=$1', [session.userId])).rows,
     ).toEqual([{ id: taskId }]);
@@ -458,6 +837,68 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
     ).toBe(0);
     expect(modelCalls.get(id)).toBe(1);
     hold.delete(id);
+  });
+
+  it('native termination aborts a provider read even when only the exit hook owns its signal', async () => {
+    const id = randomUUID();
+    const gate = {
+      started: Promise.withResolvers<void>(),
+      closed: Promise.withResolvers<boolean>(),
+    };
+    hold.set(id, gate);
+    const address = modelServer.address();
+    if (!address || typeof address === 'string') throw new Error('missing provider address');
+    const model = createHarnessModelTransport({
+      baseUrl: `http://127.0.0.1:${address.port}/v1`,
+      model: 'exit-lifecycle-fixture',
+    });
+    const native = new AbortController();
+    const provider = new AbortController();
+    const running = runNativeHarness({
+      services: {
+        binaryPath,
+        libraryPath: process.env.HARNESS_LIBRARY_PATH ?? '/app/harness/lib',
+        maxIterations: 8,
+        maxTokens: 8000,
+        model,
+      },
+      start: HarnessStartSchema.parse({
+        protocol: HARNESS_PROTOCOL_VERSION,
+        type: 'start',
+        messages: [{ message_id: randomUUID(), role: 'user', content: input(id, 'hold').raw_text }],
+        tools: [],
+        budget: { max_iterations: 8, max_tokens: 8000 },
+        snapshot: null,
+        observations: [],
+        approval: null,
+      }),
+      signal: native.signal,
+      onExit: () => provider.abort(),
+      handleRequest: async (request) => {
+        if (request.type !== 'model')
+          throw new Error('unexpected native action while provider is held');
+        const stream = model(request, [], provider.signal);
+        try {
+          const first = await stream.next();
+          if (first.done) throw new Error('held provider completed');
+          return first.value;
+        } finally {
+          await stream.return();
+        }
+      },
+    });
+    try {
+      await gate.started.promise;
+      native.abort();
+      await running;
+      expect(await gate.closed.promise).toBe(true);
+      expect(modelCalls.get(id)).toBe(1);
+    } finally {
+      native.abort();
+      provider.abort();
+      await running;
+      hold.delete(id);
+    }
   });
 
   it('the native iteration ceiling stops repeated real read effects instead of a TS character estimate', async () => {

@@ -102,7 +102,13 @@ maybe('harness durable authority against PostgreSQL', () => {
         binaryPath: process.env.HARNESS_BINARY ?? '/app/harness/bin/along-harness',
         maxIterations: 8,
         maxTokens: 8000,
-        model: async () => ({ message: { content: 'answer', tool_calls: [] }, usage: null }),
+        model: async function* () {
+          yield { type: 'delta', delta: 'answer' };
+          yield {
+            type: 'complete',
+            reply: { message: { content: 'answer', tool_calls: [] }, usage: null },
+          };
+        },
       },
     };
   });
@@ -110,7 +116,7 @@ maybe('harness durable authority against PostgreSQL', () => {
     await database?.close();
   });
 
-  async function fresh(): Promise<Fixture> {
+  async function fresh(legacyWithoutMessageRefs = false): Promise<Fixture> {
     const actor = await seedSession(database.pool, {});
     const started = await startConversationRun(
       deps,
@@ -125,7 +131,25 @@ maybe('harness durable authority against PostgreSQL', () => {
       null,
     );
     if (!started.context) throw new Error('fresh context missing');
-    const context = started.context;
+    let context = started.context;
+    if (legacyWithoutMessageRefs) {
+      // Insert the old accepted shape rather than rewriting immutable authority.
+      const runId = randomUUID();
+      const attemptId = randomUUID();
+      await database.pool.query(
+        `WITH legacy AS (
+           INSERT INTO agent_runs(id,owner_id,conversation_id,agent_revision,mode,status,
+             budget_max_iterations,budget_max_tokens,execution,tools_allowlist,frozen_context,input_message_id)
+           SELECT $2,owner_id,conversation_id,agent_revision,mode,'running',
+             budget_max_iterations,budget_max_tokens,execution,tools_allowlist,
+             frozen_context-'messageRefs',input_message_id FROM agent_runs WHERE id=$1
+           RETURNING id,owner_id
+         ) INSERT INTO run_attempts(id,owner_id,run_id,attempt_no,status)
+           SELECT $3,owner_id,id,1,'running' FROM legacy`,
+        [context.runId, runId, attemptId],
+      );
+      context = { ...context, runId, attemptId };
+    }
     const events: ThreadEvent[] = [];
     const session = await createHarnessSession(
       deps,
@@ -165,8 +189,8 @@ maybe('harness durable authority against PostgreSQL', () => {
     );
     return { invocationId: reserved.invocation_id, outcome };
   }
-  async function waiting(): Promise<WaitingFixture> {
-    const fixture = await fresh();
+  async function waiting(legacyWithoutMessageRefs = false): Promise<WaitingFixture> {
+    const fixture = await fresh(legacyWithoutMessageRefs);
     const invoked = await invoke(fixture, 'propose_task', {
       raw_time_text: fixture.context.inputText,
       timezone_hint: 'Asia/Shanghai',
@@ -424,6 +448,104 @@ maybe('harness durable authority against PostgreSQL', () => {
     expect(await listRunEvents(database.pool, first.actor.userId, first.context.runId)).toEqual([]);
   });
 
+  it('freezes visible message references when a new Run is accepted, before execution or later backdated messages', async () => {
+    const first = await fresh();
+    await first.frame(request('answer', { delta: 'accepted first answer' }));
+    await first.frame(
+      request('finish', { outcome: 'done', usage: { iterations: 1, tokens: null } }),
+    );
+    const second = await startConversationRun(
+      deps,
+      first.actor.userId,
+      randomUUID(),
+      {
+        execution: 'harness',
+        conversation_id: first.context.conversationId,
+        raw_text: 'What did you just say?',
+        idempotency_key: randomUUID(),
+      },
+      null,
+    );
+    if (!second.context) throw new Error('second accepted context missing');
+    const lateId = randomUUID();
+    await database.pool.query(
+      `INSERT INTO messages(id,owner_id,conversation_id,role,content,created_at)
+       VALUES ($1,$2,$3,'assistant','late visible content',now()-interval '1 day')`,
+      [lateId, first.actor.userId, first.context.conversationId],
+    );
+    const session = await createHarnessSession(
+      deps,
+      second.context,
+      async () => true,
+      new AbortController().signal,
+    );
+    expect(session.start.messages.map(({ role, content }) => ({ role, content }))).toEqual([
+      { role: 'user', content: first.context.inputText },
+      { role: 'assistant', content: 'accepted first answer' },
+      { role: 'user', content: second.context.inputText },
+    ]);
+    const snapshot: HarnessSnapshot = {
+      version: 2,
+      message_refs: session.start.messages.map((message) => message.message_id),
+      tool_refs: [],
+      next_call_no: 1,
+      usage: { iterations: 0, tokens: 0 },
+      waiting: null,
+    };
+    await session.handleRequest(request('snapshot', { context: snapshot }));
+    for (const refs of [
+      [second.context.userMessageId],
+      [lateId, ...snapshot.message_refs],
+      [...snapshot.message_refs.slice(0, -1).reverse(), second.context.userMessageId],
+      [...snapshot.message_refs, second.context.userMessageId],
+    ])
+      await expect(
+        session.handleRequest(
+          request('snapshot', { context: { ...snapshot, message_refs: refs } }),
+        ),
+      ).rejects.toMatchObject({ errorCode: 'STATE_CONFLICT' });
+  });
+
+  it('resumes a pre-history Run with only its original input even after later visible turns', async () => {
+    const fixture = await waiting(true);
+    const later = await startConversationRun(
+      deps,
+      fixture.actor.userId,
+      randomUUID(),
+      {
+        execution: 'harness',
+        conversation_id: fixture.context.conversationId,
+        raw_text: 'A later turn must not join the old approval context.',
+        idempotency_key: randomUUID(),
+      },
+      null,
+    );
+    if (!later.context) throw new Error('later context missing');
+    await rejectApproval({ pool: database.pool }, fixture.actor.userId, fixture.approvalId, {
+      idempotency_key: randomUUID(),
+    });
+    const resumed = await resume(fixture);
+    if (!resumed.context) throw new Error('resumed legacy context missing');
+    const session = await createHarnessSession(
+      deps,
+      resumed.context,
+      async () => true,
+      new AbortController().signal,
+    );
+    expect(session.start.messages).toEqual([
+      {
+        message_id: fixture.context.userMessageId,
+        role: 'user',
+        content: fixture.context.inputText,
+      },
+    ]);
+    expect(session.start.snapshot?.message_refs).toEqual([fixture.context.userMessageId]);
+    expect(session.start.approval).toMatchObject({ kind: 'task', status: 'rejected' });
+    expect(session.start.observations.map((observation) => observation.invocation_id)).toEqual([
+      fixture.invocationId,
+    ]);
+  });
+
   it('rejects unresolved effects as done and atomically rolls back terminal message/checkpoint/attempt/Run on a real trigger failure', async () => {
     const fixture = await fresh();
     await fixture.frame(
@@ -605,7 +727,7 @@ maybe('harness durable authority against PostgreSQL', () => {
       async () => true,
       new AbortController().signal,
     );
-    expect(session.start.protocol).toBe('harness/v2');
+    expect(session.start.protocol).toBe('harness/v3');
     expect(session.start.snapshot).toEqual({ ...legacy, version: 2 });
     expect(session.start.approval).toEqual({
       kind: 'task',
@@ -1073,7 +1195,7 @@ maybe('harness durable authority against PostgreSQL', () => {
     }
   });
 
-  it('cancel between accepted answer chunks persists only accepted output and prevents all later effects', async () => {
+  it('cancel between native answer deltas persists only accepted output and prevents all later effects', async () => {
     const fixture = await fresh();
     const session = await createHarnessSession(
       deps,
@@ -1092,9 +1214,12 @@ maybe('harness durable authority against PostgreSQL', () => {
       },
       new AbortController().signal,
     );
-    await expect(
-      session.handleRequest(request('answer', { delta: 'a'.repeat(8001) })),
-    ).rejects.toMatchObject({ errorCode: 'STATE_CONFLICT' });
+    expect(await session.handleRequest(request('answer', { delta: 'a'.repeat(4000) }))).toEqual({
+      accepted: true,
+    });
+    await expect(session.handleRequest(request('answer', { delta: 'a' }))).rejects.toMatchObject({
+      errorCode: 'STATE_CONFLICT',
+    });
     await expect(
       session.handleRequest(
         request('finish', { outcome: 'done', usage: { iterations: 1, tokens: null } }),
@@ -1275,6 +1400,60 @@ maybe('harness durable authority against PostgreSQL', () => {
     }
   });
 
+  it('model pulls stay correlated and output is accepted once only after native answer', async () => {
+    const fixture = await fresh();
+    const model = request('model', {
+      messages: [{ role: 'user', content: fixture.context.inputText }],
+      remaining_tokens: 8000,
+    });
+    try {
+      expect(await fixture.frame(model)).toEqual({ type: 'delta', delta: 'answer' });
+      expect(
+        await listRunEvents(database.pool, fixture.actor.userId, fixture.context.runId),
+      ).toEqual([]);
+      await expect(
+        fixture.frame(request('model_next', { model_ref: 'wrong-model' })),
+      ).rejects.toMatchObject({ errorCode: 'STATE_CONFLICT' });
+      await expect(
+        fixture.frame(request('model_next', { model_ref: model.request_ref })),
+      ).rejects.toMatchObject({ errorCode: 'STATE_CONFLICT' });
+      await expect(
+        fixture.frame(request('answer', { delta: 'invented text' })),
+      ).rejects.toMatchObject({ errorCode: 'STATE_CONFLICT' });
+      await expect(
+        fixture.frame(
+          request('model', {
+            messages: [{ role: 'user', content: 'second model' }],
+            remaining_tokens: 8000,
+          }),
+        ),
+      ).rejects.toMatchObject({ errorCode: 'STATE_CONFLICT' });
+      expect(await fixture.frame(request('answer', { delta: 'answer' }))).toEqual({
+        accepted: true,
+      });
+      expect(
+        await fixture.frame(request('model_next', { model_ref: model.request_ref })),
+      ).toMatchObject({
+        type: 'complete',
+        reply: { message: { content: 'answer' } },
+      });
+      await expect(
+        fixture.frame(request('model_next', { model_ref: model.request_ref })),
+      ).rejects.toMatchObject({ errorCode: 'STATE_CONFLICT' });
+      await expect(fixture.frame(request('answer', { delta: 'answer' }))).rejects.toMatchObject({
+        errorCode: 'STATE_CONFLICT',
+      });
+      const events = await listRunEvents(
+        database.pool,
+        fixture.actor.userId,
+        fixture.context.runId,
+      );
+      expect(events.filter((event) => event.type === 'message.delta')).toHaveLength(1);
+    } finally {
+      await fixture.session.close();
+    }
+  });
+
   it('model waiting holds no database locks and its late response cannot authorize output after durable cancel', async () => {
     const fixture = await fresh();
     const entered = Promise.withResolvers<void>();
@@ -1283,10 +1462,13 @@ maybe('harness durable authority against PostgreSQL', () => {
       ...deps,
       harness: {
         ...deps.harness!,
-        model: async () => {
+        model: async function* () {
           entered.resolve();
           await release.promise;
-          return { message: { content: 'late model answer', tool_calls: [] }, usage: null };
+          yield {
+            type: 'complete',
+            reply: { message: { content: 'late model answer', tool_calls: [] }, usage: null },
+          };
         },
       },
     };
@@ -1763,9 +1945,12 @@ maybe('harness durable authority against PostgreSQL', () => {
         ...deps,
         harness: {
           ...deps.harness!,
-          model: async () => {
+          model: async function* () {
             modelCalls++;
-            return { message: { content: 'unexpected', tool_calls: [] }, usage: null };
+            yield {
+              type: 'complete',
+              reply: { message: { content: 'unexpected', tool_calls: [] }, usage: null },
+            };
           },
         },
       },

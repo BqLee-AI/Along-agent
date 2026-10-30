@@ -1,14 +1,13 @@
 import type { ReactNode } from 'react';
 import { authStatusSchema } from '@along/contracts';
 import { PageHeading } from '@/components/page';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { Badge } from '@lorelum/lumen-ui/components/badge';
+import { Button } from '@lorelum/lumen-ui/components/button';
 import { apiGet } from '../../lib/api';
 import { loginHref, safeReturnTo } from '../../lib/account-navigation';
 import { MeSchema } from '../../lib/types';
 import AccountForm from './AccountForm';
-import { AccountMaintenance, AccountReadError } from './AccountSupport';
+import { AccountMaintenance, AccountReadError, AccountStatusNotice } from './AccountSupport';
 
 type AccountView = 'account' | 'login' | 'setup' | 'claim' | 'logout';
 
@@ -28,18 +27,28 @@ function AccountFrame({
       className={
         view === 'account'
           ? 'mx-auto w-full min-w-0 max-w-[640px] space-y-8 [overflow-wrap:anywhere]'
-          : 'mx-auto w-full min-w-0 max-w-[400px] space-y-6 [overflow-wrap:anywhere]'
+          : 'mx-auto w-full min-w-0 max-w-[400px] space-y-8 py-6 [overflow-wrap:anywhere] sm:py-12'
       }
     >
       {view !== 'account' ? (
         <a
           href="/"
-          className="inline-flex min-h-11 items-center text-xl font-semibold text-primary underline-offset-4 hover:underline focus-visible:rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          aria-label="Along 首页"
+          className="inline-flex min-h-11 items-center text-2xl font-semibold tracking-tight text-foreground underline-offset-4 hover:text-primary focus-visible:rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         >
           Along
         </a>
       ) : null}
-      <PageHeading title={title} description={description} />
+      {view === 'account' ? (
+        <PageHeading title={title} description={description} />
+      ) : (
+        <header className="space-y-3">
+          <h1 className="text-3xl font-semibold leading-tight tracking-tight sm:text-4xl">
+            {title}
+          </h1>
+          <p className="text-base leading-7 text-muted-foreground">{description}</p>
+        </header>
+      )}
       {children}
     </section>
   );
@@ -79,12 +88,24 @@ export default async function AccountScreen({
           failure={statusResult.ok ? { status: 200, code: null, requestId: null } : statusResult}
         />
         <div className="flex flex-col gap-3">
-          <Button asChild variant="outline">
-            <a href={retryHref}>重新读取账户状态</a>
+          <Button
+            variant="glass"
+            color="default"
+            role="link"
+            nativeButton={false}
+            render={<a href={retryHref} />}
+          >
+            重新读取账户状态
           </Button>
           {view !== 'account' ? (
-            <Button asChild variant="ghost">
-              <a href="/account">返回账户</a>
+            <Button
+              variant="clear"
+              color="default"
+              role="link"
+              nativeButton={false}
+              render={<a href="/account" />}
+            >
+              返回账户
             </Button>
           ) : null}
         </div>
@@ -100,12 +121,7 @@ export default async function AccountScreen({
         title={view === 'setup' ? titles.setup : titles[view]}
         description="服务端已确认这是空安装，尚未建立管理员账户。"
       >
-        <Alert>
-          <AlertTitle>仅此空安装可首次建号</AlertTitle>
-          <AlertDescription>
-            此安装只有一个管理员，不提供公众注册。已有历史或会话失效都不能用首次建号替代身份恢复。
-          </AlertDescription>
-        </Alert>
+        <AccountStatusNotice kind="setup" />
         {view === 'setup' ? (
           <AccountForm operation="initialize" />
         ) : (
@@ -115,12 +131,18 @@ export default async function AccountScreen({
                 此安装尚无可撤销的管理员会话；打开此页没有执行退出。
               </p>
             ) : null}
-            <Button asChild>
-              <a href="/setup">开始首次设置</a>
+            <Button role="link" nativeButton={false} render={<a href="/setup" />}>
+              开始首次设置
             </Button>
             {view !== 'account' ? (
-              <Button asChild variant="ghost">
-                <a href="/account">返回账户</a>
+              <Button
+                variant="clear"
+                color="default"
+                role="link"
+                nativeButton={false}
+                render={<a href="/account" />}
+              >
+                返回账户
               </Button>
             ) : null}
           </div>
@@ -146,17 +168,31 @@ export default async function AccountScreen({
     return (
       <AccountFrame
         view={view}
-        title={titles.login}
-        description="使用此安装已绑定管理员的登录名和密码。"
+        title="欢迎回来"
+        description="让 Along 陪你理清思绪，照顾每天的大小事。"
       >
-        <p className="text-base leading-7 text-muted-foreground">
-          登录成功后只读返回{category}
-          。不会保存口令、恢复旧正文或自动补发发送、批准、继续和取消操作。
-        </p>
         <AccountForm operation="sign-in" returnTo={destination} />
-        <p className="text-sm leading-6 text-muted-foreground">
-          此安装不开放公众注册或在线找回密码。无法登录时，请部署者通过原安装的本机维护入口处理。
-        </p>
+        <details className="group pt-4 text-sm">
+          <summary className="min-h-11 cursor-pointer content-center text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+            登录遇到问题？
+          </summary>
+          <div className="space-y-3 pb-1 pt-3 leading-6 text-muted-foreground">
+            <p>请使用此安装已设置的管理员用户名和密码，用户名不是邮箱，不区分大小写。</p>
+            <p>
+              支持密码管理器自动填充和粘贴。此安装不开放公众注册或在线找回密码；如需帮助，请联系部署者通过原安装的本机维护入口处理。
+            </p>
+            <p>
+              登录成功后返回{category}
+              ，不会自动发送消息或提交批准等操作。登录请求的口令不会保存在本应用中。
+            </p>
+            <a
+              href="/account"
+              className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4 focus-visible:rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            >
+              查看账户状态
+            </a>
+          </div>
+        </details>
       </AccountFrame>
     );
   }
@@ -170,7 +206,7 @@ export default async function AccountScreen({
         title={titles[view]}
         description="安装状态读取成功，当前会话仍需单独核验。"
       >
-        <Badge variant="secondary">
+        <Badge variant="flat">
           {status.state === 'ready' ? '管理员已配置' : '需保留原身份完成转正'}
         </Badge>
         <AccountReadError
@@ -181,12 +217,24 @@ export default async function AccountScreen({
           已配置的身份与历史不会因本次读取失败而重新建立。当前没有开放转正或退出操作。
         </p>
         <div className="flex flex-col gap-3">
-          <Button asChild variant="outline">
-            <a href={retryHref}>重新核验当前会话</a>
+          <Button
+            variant="glass"
+            color="default"
+            role="link"
+            nativeButton={false}
+            render={<a href={retryHref} />}
+          >
+            重新核验当前会话
           </Button>
           {view !== 'account' ? (
-            <Button asChild variant="ghost">
-              <a href="/account">返回账户</a>
+            <Button
+              variant="clear"
+              color="default"
+              role="link"
+              nativeButton={false}
+              render={<a href="/account" />}
+            >
+              返回账户
             </Button>
           ) : null}
         </div>
@@ -211,32 +259,34 @@ export default async function AccountScreen({
               <AccountForm operation="sign-out" csrfToken={actor.csrf_token} />
             ) : (
               <>
-                <Alert>
-                  <AlertTitle>当前不是可撤销的签名会话</AlertTitle>
-                  <AlertDescription>
-                    这是开发桥身份，不能作为正式退出凭据。请部署者关闭开发桥后使用正式登录；未发送退出请求。
-                  </AlertDescription>
-                </Alert>
-                <Button asChild variant="outline">
-                  <a href="/account">返回账户</a>
+                <AccountStatusNotice kind="unsigned" />
+                <Button
+                  variant="glass"
+                  color="default"
+                  role="link"
+                  nativeButton={false}
+                  render={<a href="/account" />}
+                >
+                  返回账户
                 </Button>
               </>
             )}
           </div>
         ) : (
           <div className="space-y-6">
-            <Alert>
-              <AlertTitle>当前没有有效会话</AlertTitle>
-              <AlertDescription>
-                身份自检返回未认证。这是当前读取到的事实，不代表本页执行过撤销，也不证明之前丢失响应的退出结果。
-              </AlertDescription>
-            </Alert>
+            <AccountStatusNotice kind="unauthenticated" />
             <div className="flex flex-col gap-3">
-              <Button asChild>
-                <a href={loginHref('/account')}>正式登录</a>
+              <Button role="link" nativeButton={false} render={<a href={loginHref('/account')} />}>
+                正式登录
               </Button>
-              <Button asChild variant="ghost">
-                <a href="/account">返回账户</a>
+              <Button
+                variant="clear"
+                color="default"
+                role="link"
+                nativeButton={false}
+                render={<a href="/account" />}
+              >
+                返回账户
               </Button>
             </div>
           </div>
@@ -254,10 +304,10 @@ export default async function AccountScreen({
         description="此安装已有原账户或历史，不能重新建号或自动认领。"
       >
         {actor ? (
-          <section className="space-y-3 rounded-xl border border-border bg-card p-4 sm:p-6">
+          <section className="space-y-3 p-4 sm:p-6">
             <h2 className="text-sm font-medium text-muted-foreground">当前原账户的展示名</h2>
             <p className="text-xl font-semibold leading-8">{actor.user.display_name}</p>
-            <Badge variant="secondary">
+            <Badge variant="flat">
               {actor.csrf_token !== null ? '原签名会话已核验' : '开发桥身份，不可转正'}
             </Badge>
             <p className="text-base leading-7">
@@ -270,44 +320,69 @@ export default async function AccountScreen({
             <AccountForm operation="claim" csrfToken={actor.csrf_token} />
           ) : (
             <div className="space-y-3">
-              <Button asChild>
-                <a href="/claim">明确转正当前原账户</a>
+              <Button role="link" nativeButton={false} render={<a href="/claim" />}>
+                明确转正当前原账户
               </Button>
               {view !== 'account' ? (
-                <Button asChild variant="ghost">
-                  <a href="/account">返回账户</a>
+                <Button
+                  variant="clear"
+                  color="default"
+                  role="link"
+                  nativeButton={false}
+                  render={<a href="/account" />}
+                >
+                  返回账户
                 </Button>
               ) : null}
             </div>
           )
         ) : (
           <>
-            <Alert>
-              <AlertTitle>需要部署者在本机维护</AlertTitle>
-              <AlertDescription>
-                当前没有符合转正条件的原签名会话。会话失效不是空安装；开发桥身份也不能认领账户。请部署者在原安装明确选择并确认原账户，已有口令须验证，不能在此覆盖。
-              </AlertDescription>
-            </Alert>
+            <AccountStatusNotice kind="legacy" />
             <AccountMaintenance />
           </>
         )}
         <div className="flex flex-wrap gap-3">
-          <Button asChild variant="outline">
-            <a href={retryHref}>重新读取状态</a>
+          <Button
+            variant="glass"
+            color="default"
+            role="link"
+            nativeButton={false}
+            render={<a href={retryHref} />}
+          >
+            重新读取状态
           </Button>
           {view !== 'account' && !canClaim ? (
-            <Button asChild variant="ghost">
-              <a href="/account">返回账户</a>
+            <Button
+              variant="clear"
+              color="default"
+              role="link"
+              nativeButton={false}
+              render={<a href="/account" />}
+            >
+              返回账户
             </Button>
           ) : null}
           {view === 'account' ? (
-            <Button asChild variant="ghost">
-              <a href="/">返回今日</a>
+            <Button
+              variant="clear"
+              color="default"
+              role="link"
+              nativeButton={false}
+              render={<a href="/" />}
+            >
+              返回今日
             </Button>
           ) : null}
           {view === 'account' && actor?.csrf_token != null ? (
-            <Button asChild variant="ghost">
-              <a href="/logout">退出当前会话</a>
+            <Button
+              variant="clear"
+              color="default"
+              role="link"
+              nativeButton={false}
+              render={<a href="/logout" />}
+            >
+              退出当前会话
             </Button>
           ) : null}
         </div>
@@ -322,20 +397,23 @@ export default async function AccountScreen({
         title={titles[view]}
         description="此安装的管理员已配置，不再开放首次建号或原身份转正。"
       >
-        <Alert>
-          <AlertTitle>请继续使用原账户</AlertTitle>
-          <AlertDescription>
-            原身份和历史保持不变。不要重新建号或用此页覆盖已有口令；需要维护时请联系部署者。
-          </AlertDescription>
-        </Alert>
+        <AccountStatusNotice kind="configured" />
         <div className="flex flex-col gap-3">
-          <Button asChild>
-            <a href={actor ? '/account' : loginHref('/account')}>
-              {actor ? '查看当前账户' : '正式登录'}
-            </a>
+          <Button
+            role="link"
+            nativeButton={false}
+            render={<a href={actor ? '/account' : loginHref('/account')} />}
+          >
+            {actor ? '查看当前账户' : '正式登录'}
           </Button>
-          <Button asChild variant="ghost">
-            <a href="/account">返回账户</a>
+          <Button
+            variant="clear"
+            color="default"
+            role="link"
+            nativeButton={false}
+            render={<a href="/account" />}
+          >
+            返回账户
           </Button>
         </div>
       </AccountFrame>
@@ -349,14 +427,9 @@ export default async function AccountScreen({
         title={titles.account}
         description="管理员已配置，当前没有有效会话。"
       >
-        <Alert>
-          <AlertTitle>登录后查看当前身份</AlertTitle>
-          <AlertDescription>
-            管理员绑定保持不变，不会因退出或会话失效重新开放建号。正式登录后只读返回原页面。
-          </AlertDescription>
-        </Alert>
-        <Button asChild>
-          <a href={loginHref(destination)}>正式登录</a>
+        <AccountStatusNotice kind="login" />
+        <Button role="link" nativeButton={false} render={<a href={loginHref(destination)} />}>
+          正式登录
         </Button>
         <AccountMaintenance />
       </AccountFrame>
@@ -389,17 +462,12 @@ export default async function AccountScreen({
       title={titles.account}
       description="确认当前身份、会话边界与原安装的资料登记状态。"
     >
-      <section
-        className="space-y-4 rounded-xl border border-border bg-card p-4 sm:p-6"
-        aria-labelledby="account-identity-title"
-      >
+      <section className="space-y-4 p-4 sm:p-6" aria-labelledby="account-identity-title">
         <h2 id="account-identity-title" className="text-sm font-medium text-muted-foreground">
           当前账户的展示名
         </h2>
         <p className="text-2xl font-semibold leading-9">{actor.user.display_name}</p>
-        <Badge variant="secondary">
-          {actor.csrf_token !== null ? '签名会话已核验' : '开发桥身份'}
-        </Badge>
+        <Badge variant="flat">{actor.csrf_token !== null ? '签名会话已核验' : '开发桥身份'}</Badge>
         <p className="text-base leading-7 text-muted-foreground">
           {actor.csrf_token !== null
             ? '正式会话固定七天到期，读取页面不会续期。退出只撤销当前会话，不删除原身份或历史。'
@@ -422,25 +490,49 @@ export default async function AccountScreen({
           <h2 id="account-workspace-title" className="text-lg font-semibold">
             资料工作区
           </h2>
-          <Badge variant="outline">{workspaceLabel}</Badge>
+          <Badge variant="glass">{workspaceLabel}</Badge>
         </div>
         <p className="text-base leading-7 text-muted-foreground">{workspaceMessage}</p>
       </section>
       <AccountMaintenance />
       <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-        <Button asChild variant="outline">
-          <a href="/account">重新读取状态</a>
+        <Button
+          variant="glass"
+          color="default"
+          role="link"
+          nativeButton={false}
+          render={<a href="/account" />}
+        >
+          重新读取状态
         </Button>
-        <Button asChild variant="ghost">
-          <a href="/">返回今日</a>
+        <Button
+          variant="clear"
+          color="default"
+          role="link"
+          nativeButton={false}
+          render={<a href="/" />}
+        >
+          返回今日
         </Button>
         {actor.csrf_token !== null ? (
-          <Button asChild variant="ghost">
-            <a href="/logout">退出当前会话</a>
+          <Button
+            variant="clear"
+            color="default"
+            role="link"
+            nativeButton={false}
+            render={<a href="/logout" />}
+          >
+            退出当前会话
           </Button>
         ) : (
-          <Button asChild variant="ghost">
-            <a href={loginHref('/account')}>使用正式登录</a>
+          <Button
+            variant="clear"
+            color="default"
+            role="link"
+            nativeButton={false}
+            render={<a href={loginHref('/account')} />}
+          >
+            使用正式登录
           </Button>
         )}
       </div>

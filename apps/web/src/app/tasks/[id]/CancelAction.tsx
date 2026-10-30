@@ -1,8 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { Button } from '@/components/ui/button';
-import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@lorelum/lumen-ui/components/button';
+import { Alert } from '@lorelum/lumen-ui/components/alert';
 import type { ApiResult } from '@/lib/api';
 import type { Me } from '@/lib/types';
 import { cancellationAllowed, taskStateLabel } from '@/features/reminders/data';
@@ -23,7 +23,7 @@ export default function CancelAction({
   const returnTo = `/tasks/${encodeURIComponent(taskId)}`;
   return (
     <section
-      className="space-y-4 rounded-xl border border-border bg-card p-4 sm:p-6"
+      className="space-y-4 p-4 sm:p-6"
       aria-labelledby="cancel-heading"
       aria-busy={Boolean(controller.busy)}
     >
@@ -39,7 +39,8 @@ export default function CancelAction({
       {!controller.identity.ok ? (
         <ResourceError error={controller.identity} returnTo={returnTo}>
           <Button
-            variant="outline"
+            variant="glass"
+            color="default"
             disabled={Boolean(controller.busy)}
             onClick={() => void controller.recover('identity')}
           >
@@ -52,7 +53,8 @@ export default function CancelAction({
             当前身份没有可用的 CSRF 凭据，取消不可用。
           </p>
           <Button
-            variant="outline"
+            variant="glass"
+            color="default"
             disabled={Boolean(controller.busy)}
             onClick={() => void controller.recover('identity')}
           >
@@ -62,22 +64,26 @@ export default function CancelAction({
       ) : null}
       {controller.uncertain ? (
         <Alert>
-          <AlertTitle>取消结果待确认</AlertTitle>
-          <AlertDescription>
-            请求可能已经被接受。请先读取此任务状态；不会自动补发取消。若读取后仍可取消，明确再次提交将沿用原幂等键。
-          </AlertDescription>
+          <Alert.Content>
+            <Alert.Title>取消结果待确认</Alert.Title>
+            <Alert.Description>
+              请求可能已经被接受。请先读取此任务状态；不会自动补发取消。若读取后仍可取消，明确再次提交将沿用原幂等键。
+            </Alert.Description>
+          </Alert.Content>
         </Alert>
       ) : null}
       {controller.accepted && ['cancelled', 'cancel_pending'].includes(controller.state) ? (
         <Alert>
-          <AlertTitle>
-            {controller.state === 'cancelled' ? '已取得取消完成回执' : '取消请求已接受'}
-          </AlertTitle>
-          <AlertDescription>
-            {controller.state === 'cancelled'
-              ? '服务端已记录取消完成；既有通知记录仍然保留。'
-              : '当前为 cancel_pending，仍在等待调度器取消回执；不能视作已取消。'}
-          </AlertDescription>
+          <Alert.Content>
+            <Alert.Title>
+              {controller.state === 'cancelled' ? '已取得取消完成回执' : '取消请求已接受'}
+            </Alert.Title>
+            <Alert.Description>
+              {controller.state === 'cancelled'
+                ? '服务端已记录取消完成；既有通知记录仍然保留。'
+                : '当前为 cancel_pending，仍在等待调度器取消回执；不能视作已取消。'}
+            </Alert.Description>
+          </Alert.Content>
         </Alert>
       ) : null}
       {!cancellationAllowed(controller.state) ? (
@@ -92,11 +98,11 @@ export default function CancelAction({
         <div className="space-y-4 border-l-2 border-destructive pl-4">
           <p>确定取消这条冻结时间为当前详情所示的提醒？</p>
           <div className="flex flex-wrap gap-4">
-            <Button variant="outline" onClick={() => setConfirming(false)}>
+            <Button variant="glass" color="default" onClick={() => setConfirming(false)}>
               保留提醒
             </Button>
             <Button
-              variant="destructive"
+              color="danger"
               disabled={!controller.canCancel}
               onClick={() => {
                 setConfirming(false);
@@ -110,14 +116,16 @@ export default function CancelAction({
       ) : (
         <div className="flex flex-wrap gap-4">
           <Button
-            variant="outline"
+            variant="glass"
+            color="default"
             disabled={!controller.canCancel}
             onClick={() => setConfirming(true)}
           >
             {controller.busy === 'cancel' ? '正在提交取消…' : '取消这条提醒'}
           </Button>
           <Button
-            variant="ghost"
+            variant="clear"
+            color="default"
             disabled={Boolean(controller.busy)}
             onClick={() => void controller.recover()}
           >

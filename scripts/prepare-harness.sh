@@ -14,10 +14,10 @@ fetch() {
   fi
   printf '%s  %s\n' "$hash" "$file" | sha256sum --check --status
 }
-fetch "$SDK_URL" "$SDK_SHA256" "$dest/downloads/sdk.tar.gz"
-fetch "$STDX_URL" "$STDX_SHA256" "$dest/downloads/stdx.zip"
+fetch "$SDK_URL" "$SDK_SHA256" "$dest/downloads/$SDK_SHA256.tar.gz"
+fetch "$STDX_URL" "$STDX_SHA256" "$dest/downloads/$STDX_SHA256.zip"
 # Always extract verified archives; never trust a pre-existing global compiler.
 rm -rf "$dest/cangjie" "$dest/stdx"
-tar -xzf "$dest/downloads/sdk.tar.gz" -C "$dest"
+tar -xzf "$dest/downloads/$SDK_SHA256.tar.gz" -C "$dest"
 mkdir -p "$dest/stdx"
-unzip -q "$dest/downloads/stdx.zip" -d "$dest/stdx"
+unzip -q "$dest/downloads/$STDX_SHA256.zip" -d "$dest/stdx"

@@ -3,7 +3,7 @@ import { apiGet } from '@/lib/api';
 import { MeSchema, TaskDetailSchema } from '@/lib/types';
 import { pageReturnTo, type PageQuery } from '@/lib/account-navigation';
 import { PageHeading } from '@/components/page';
-import { Button } from '@/components/ui/button';
+import { Button } from '@lorelum/lumen-ui/components/button';
 import { TaskContent } from '@/features/reminders/task-content';
 import { TaskEvents } from '@/features/reminders/task-events';
 import { TaskRecovery } from '@/features/reminders/task-recovery';
@@ -44,11 +44,23 @@ export default async function TaskDetailPage({
         description="冻结时间、通知与事件各自保留真实记录。"
         actions={
           <div className="flex flex-wrap gap-3">
-            <Button asChild variant="outline">
-              <Link href="/tasks">返回提醒任务</Link>
+            <Button
+              variant="glass"
+              color="default"
+              role="link"
+              nativeButton={false}
+              render={<Link href="/tasks" />}
+            >
+              返回提醒任务
             </Button>
-            <Button asChild variant="ghost">
-              <Link href={`/activity?${new URLSearchParams({ task_id: id })}`}>在活动中定位</Link>
+            <Button
+              variant="clear"
+              color="default"
+              role="link"
+              nativeButton={false}
+              render={<Link href={`/activity?${new URLSearchParams({ task_id: id })}`} />}
+            >
+              在活动中定位
             </Button>
           </div>
         }

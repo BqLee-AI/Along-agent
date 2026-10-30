@@ -1,7 +1,9 @@
+'use client';
+
 import Link from 'next/link';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { Alert } from '@lorelum/lumen-ui/components/alert';
+import { Badge } from '@lorelum/lumen-ui/components/badge';
+import { Button } from '@lorelum/lumen-ui/components/button';
 import { loginHref } from '@/lib/account-navigation';
 import { failureExplanation, taskStateLabel, type ResourceFailure } from './data';
 import type { ReactNode } from 'react';
@@ -16,43 +18,51 @@ export function ResourceError({
   children?: ReactNode;
 }) {
   return (
-    <Alert variant="destructive" className="[overflow-wrap:anywhere]">
-      <AlertTitle>此区域未能读取</AlertTitle>
-      <AlertDescription className="space-y-3">
-        <p>{failureExplanation(error)}</p>
-        <details className="text-sm">
-          <summary className="cursor-pointer py-2">诊断信息</summary>
-          <dl className="space-y-1 font-mono">
-            <dt>HTTP</dt>
-            <dd>{error.status || '连接未建立'}</dd>
-            {error.code ? (
-              <>
-                <dt>领域代码</dt>
-                <dd>{error.code}</dd>
-              </>
-            ) : null}
-            {error.requestId ? (
-              <>
-                <dt>request_id</dt>
-                <dd>{error.requestId}</dd>
-              </>
-            ) : null}
-          </dl>
-        </details>
-        {error.status === 401 ? (
-          <Button asChild variant="outline">
-            <Link href={loginHref(returnTo)}>重新登录</Link>
-          </Button>
-        ) : (
-          children
-        )}
-      </AlertDescription>
+    <Alert color="danger" role="alert" className="[overflow-wrap:anywhere]">
+      <Alert.Content>
+        <Alert.Title>此区域未能读取</Alert.Title>
+        <Alert.Description className="space-y-3">
+          <p>{failureExplanation(error)}</p>
+          <details className="text-sm">
+            <summary className="cursor-pointer py-2">诊断信息</summary>
+            <dl className="space-y-1 font-mono">
+              <dt>HTTP</dt>
+              <dd>{error.status || '连接未建立'}</dd>
+              {error.code ? (
+                <>
+                  <dt>领域代码</dt>
+                  <dd>{error.code}</dd>
+                </>
+              ) : null}
+              {error.requestId ? (
+                <>
+                  <dt>request_id</dt>
+                  <dd>{error.requestId}</dd>
+                </>
+              ) : null}
+            </dl>
+          </details>
+          {error.status === 401 ? (
+            <Button
+              variant="glass"
+              color="default"
+              role="link"
+              nativeButton={false}
+              render={<Link href={loginHref(returnTo)} />}
+            >
+              重新登录
+            </Button>
+          ) : (
+            children
+          )}
+        </Alert.Description>
+      </Alert.Content>
     </Alert>
   );
 }
 
 export function TaskState({ state }: { state: string }) {
-  return <Badge variant="outline">{taskStateLabel(state)}</Badge>;
+  return <Badge variant="glass">{taskStateLabel(state)}</Badge>;
 }
 
 export function PageControls({
@@ -75,7 +85,7 @@ export function PageControls({
         {nextCursor === null ? '本次读取范围已到末页' : '仍有后续页未读取'}
       </p>
       {nextCursor !== null ? (
-        <Button variant="outline" disabled={busy} onClick={() => void load()}>
+        <Button variant="glass" color="default" disabled={busy} onClick={() => void load()}>
           {busy ? '正在读取…' : `继续读取${noun}`}
         </Button>
       ) : null}

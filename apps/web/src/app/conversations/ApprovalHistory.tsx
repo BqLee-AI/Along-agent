@@ -7,8 +7,8 @@ import {
   type ApprovalDetail,
   type DocumentApprovalDetail,
 } from '@along/contracts';
-import { Badge } from '@/components/ui/badge';
-import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@lorelum/lumen-ui/components/badge';
+import { Alert } from '@lorelum/lumen-ui/components/alert';
 import { readEnvelope, type HistoryApprovalReference } from '../../lib/conversation-run';
 import { TaskDetailSchema, type TaskDetail } from '../../lib/types';
 import { documentEffectLabel } from '../../lib/document-loop';
@@ -98,7 +98,7 @@ export default function ApprovalHistory({
           {kind === 'document' ? '文档修改' : '提醒提议'}
           {item?.kind === 'document' ? ` · ${item.detail.relative_path}` : ''}
         </h3>
-        <Badge variant="outline">{kind === 'document' ? '文档批准' : '提醒确认'}</Badge>
+        <Badge variant="glass">{kind === 'document' ? '文档批准' : '提醒确认'}</Badge>
       </div>
       <a
         className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
@@ -162,15 +162,19 @@ export default function ApprovalHistory({
             。批准不代表文件已保存。
           </p>
           {item.detail.effect.status === 'unknown' ? (
-            <Alert>
-              <AlertTitle>可能已写入，原动作结果未知</AlertTitle>
-              <AlertDescription>
-                不能安全重做。只读核对原运行与效果，并联系本机维护者排查；当前内容相同也不能将原调用判为成功。
-              </AlertDescription>
+            <Alert color="warning">
+              <Alert.Content>
+                <Alert.Title>可能已写入，原动作结果未知</Alert.Title>
+                <Alert.Description>
+                  不能安全重做。只读核对原运行与效果，并联系本机维护者排查；当前内容相同也不能将原调用判为成功。
+                </Alert.Description>
+              </Alert.Content>
             </Alert>
           ) : (
             <p
-              className={item.detail.effect.status === 'verified' ? 'font-medium text-success' : ''}
+              className={
+                item.detail.effect.status === 'verified' ? 'font-medium text-foreground' : ''
+              }
             >
               {item.detail.state === 'approved' && item.detail.effect.status === 'not_started'
                 ? '已授权，尚无保存结果。回到原运行，读取当前资格后明确继续。'

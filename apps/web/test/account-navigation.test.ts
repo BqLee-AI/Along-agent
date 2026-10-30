@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import AccountForm from '../src/features/account/AccountForm';
 import {
   loginHref,
   pageReturnTo,
@@ -374,5 +377,23 @@ describe('account operation response boundaries', () => {
     );
     expect(outcome.kind).toBe('rejected');
     if (outcome.kind === 'rejected') expect(outcome.rereadRequired).toBe(true);
+  });
+});
+
+describe('account navigation semantics', () => {
+  it('exposes the sign-out return action as a link rather than a button', async () => {
+    const markup = renderToStaticMarkup(
+      createElement(AccountForm, { operation: 'sign-out', csrfToken: 'csrf-fixture' }),
+    );
+    const roles: string[] = [];
+    await new HTMLRewriter()
+      .on('form a[href="/account"]', {
+        element(element) {
+          roles.push(element.getAttribute('role') ?? 'link');
+        },
+      })
+      .transform(new Response(markup))
+      .text();
+    expect(roles).toEqual(['link']);
   });
 });

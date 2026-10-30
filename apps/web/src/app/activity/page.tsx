@@ -3,7 +3,7 @@ import { apiGet } from '@/lib/api';
 import { TaskDetailSchema } from '@/lib/types';
 import { pageReturnTo, type PageQuery } from '@/lib/account-navigation';
 import { EmptyState, PageHeading } from '@/components/page';
-import { Button } from '@/components/ui/button';
+import { Button } from '@lorelum/lumen-ui/components/button';
 import { TaskCollection } from '@/features/reminders/task-collection';
 import { TaskSummary } from '@/features/reminders/task-content';
 import { TaskEvents } from '@/features/reminders/task-events';
@@ -45,8 +45,14 @@ export default async function ActivityPage({ searchParams }: { searchParams: Pro
         title="提醒活动"
         description="先定位一条提醒，再核对这条提醒的事件账。此页不是全站时间线或完整审计。"
         actions={
-          <Button asChild variant="outline">
-            <Link href="/tasks">返回提醒任务</Link>
+          <Button
+            variant="glass"
+            color="default"
+            role="link"
+            nativeButton={false}
+            render={<Link href="/tasks" />}
+          >
+            返回提醒任务
           </Button>
         }
       />
@@ -73,11 +79,23 @@ export default async function ActivityPage({ searchParams }: { searchParams: Pro
         >
           {selectedId ? (
             <div className="flex flex-wrap gap-3">
-              <Button asChild variant="outline">
-                <Link href="#task-index">返回任务范围</Link>
+              <Button
+                variant="glass"
+                color="default"
+                role="link"
+                nativeButton={false}
+                render={<Link href="#task-index" />}
+              >
+                返回任务范围
               </Button>
-              <Button asChild variant="ghost">
-                <Link href="/activity">清除任务选择</Link>
+              <Button
+                variant="clear"
+                color="default"
+                role="link"
+                nativeButton={false}
+                render={<Link href="/activity" />}
+              >
+                清除任务选择
               </Button>
             </div>
           ) : null}
@@ -89,8 +107,14 @@ export default async function ActivityPage({ searchParams }: { searchParams: Pro
           ) : detail?.ok ? (
             <>
               <TaskSummary task={detail.data} />
-              <Button asChild variant="outline">
-                <Link href={`/tasks/${encodeURIComponent(selectedId)}`}>查看任务详情</Link>
+              <Button
+                variant="glass"
+                color="default"
+                role="link"
+                nativeButton={false}
+                render={<Link href={`/tasks/${encodeURIComponent(selectedId)}`} />}
+              >
+                查看任务详情
               </Button>
               <details className="text-sm text-muted-foreground">
                 <summary className="cursor-pointer py-2">当前任务技术信息</summary>

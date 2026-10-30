@@ -1,6 +1,6 @@
 'use client';
 
-import { Button } from '@/components/ui/button';
+import { Button } from '@lorelum/lumen-ui/components/button';
 import { EmptyState } from '@/components/page';
 import type { TaskEventItem } from '@/lib/types';
 import { TaskEventsPageSchema, taskEventsPath, type PageSnapshot } from './data';
@@ -37,7 +37,7 @@ export function TaskEvents({
         <EmptyState title="此提醒尚无事件记录" description="只表示本次成功读取没有记录。" />
       ) : null}
       {!page && !error ? (
-        <Button variant="outline" disabled={busy} onClick={() => void load()}>
+        <Button variant="glass" color="default" disabled={busy} onClick={() => void load()}>
           {busy ? '正在读取…' : '读取此任务事件'}
         </Button>
       ) : null}
@@ -71,7 +71,7 @@ export function TaskEvents({
       ) : null}
       {error ? (
         <ResourceError error={error} returnTo={returnTo}>
-          <Button variant="outline" disabled={busy} onClick={() => void load()}>
+          <Button variant="glass" color="default" disabled={busy} onClick={() => void load()}>
             {busy ? '正在读取…' : '重新读取未成功事件页'}
           </Button>
         </ResourceError>

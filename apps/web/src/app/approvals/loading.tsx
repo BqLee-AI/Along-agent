@@ -1,4 +1,4 @@
-import { Skeleton } from '@/components/ui/skeleton';
+import { Skeleton } from '@lorelum/lumen-ui/components/skeleton';
 
 export default function LoadingApprovals() {
   return (

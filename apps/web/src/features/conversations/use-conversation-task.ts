@@ -2,6 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ConversationMessagePageSchema,
+  ConversationRunPageSchema,
+  DocumentApprovalDetailSchema,
+  type ConversationRunHistoryItem,
+  type MessageHistoryItem,
   RunViewSchema,
   workspaceSummarySchema,
   type RunView,
@@ -17,23 +22,30 @@ import {
   conversationHref,
   mergeThreadEvents,
   readEnvelope,
+  readHistoryCollectionPage,
   readHistoryEventPage,
   readRun,
   ResumeRequestSchema,
   runPath,
   type ResumeRequest,
 } from '@/lib/conversation-run';
-import { taskExecution, taskSendEligibility, type TaskIntent } from './task-model';
+import {
+  conversationSendBlocked,
+  taskExecution,
+  taskSendEligibility,
+  type TaskIntent,
+} from './task-model';
 import type { RunTranscript } from '@/lib/conversation-run';
 import { isSameReadingPage, watchHistoryNavigation } from '@/lib/stream-navigation';
 
 type AmbiguousProposal = z.infer<typeof AmbiguousTimeDetailsSchema> & { raw_text: string };
 type Identity = { conversationId: string; runId: string };
+const PendingSendSchema = z.object({ text: z.string(), body: z.record(z.unknown()) }).strict();
 
 export interface ConversationTask {
   input: string;
   setInput: (value: string) => void;
-  intent: TaskIntent | null;
+  intent: TaskIntent;
   setIntent: (value: TaskIntent) => void;
   workspaces: WorkspaceSummary[];
   workspaceId: string;
@@ -42,7 +54,10 @@ export interface ConversationTask {
   workspaceError: string | null;
   readWorkspaces: () => Promise<void>;
   events: ThreadEvent[];
-  original: string;
+  messages: MessageHistoryItem[];
+  runs: ConversationRunHistoryItem[];
+  liveReply: boolean;
+  liveOriginal: string | null;
   run: RunView | null;
   selected: Identity | null;
   error: string | null;
@@ -73,22 +88,24 @@ export interface ConversationTask {
 export function useConversationTask({
   conversationId = null,
   runId = null,
-  initialIntent = null,
-  controlsOnly = false,
+  initialIntent = 'chat',
 }: {
   conversationId?: string | null;
   runId?: string | null;
   initialIntent?: TaskIntent | null;
-  controlsOnly?: boolean;
 }): ConversationTask {
   const [input, setInput] = useState('');
-  const [intent, setIntent] = useState<TaskIntent | null>(initialIntent);
+  const [intent, setIntent] = useState<TaskIntent>(initialIntent ?? 'chat');
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [workspaceId, setWorkspaceId] = useState('');
   const [workspaceState, setWorkspaceState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [events, setEvents] = useState<ThreadEvent[]>([]);
-  const [original, setOriginal] = useState('');
+  const [messages, setMessages] = useState<MessageHistoryItem[]>([]);
+  const [runs, setRuns] = useState<ConversationRunHistoryItem[]>([]);
+  const [historyReady, setHistoryReady] = useState(!conversationId);
+  const [liveReply, setLiveReply] = useState(false);
+  const [liveOriginal, setLiveOriginal] = useState<string | null>(null);
   const [run, setRun] = useState<RunView | null>(null);
   const [selected, setSelected] = useState<Identity | null>(
     conversationId && runId ? { conversationId, runId } : null,
@@ -96,7 +113,7 @@ export function useConversationTask({
   const [error, setError] = useState<string | null>(null);
   const [readError, setReadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [reading, setReading] = useState(false);
+  const [reading, setReading] = useState(Boolean(conversationId));
   const [stopping, setStopping] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [retryResume, setRetryResume] = useState<ResumeRequest | null>(null);
@@ -116,8 +133,10 @@ export function useConversationTask({
   const workspaceRef = useRef<AbortController | null>(null);
   const cancelRef = useRef<AbortController | null>(null);
   const sendRef = useRef<AbortController | null>(null);
-  const pendingSend = useRef<{ body: object; text: string } | null>(null);
-  const cursor = useRef(0);
+  const pendingSend = useRef<z.infer<typeof PendingSendSchema> | null>(null);
+  const pendingStorage = useRef<string | null>(null);
+  const cursors = useRef(new Map<string, number>());
+  const eventsRef = useRef<ThreadEvent[]>([]);
   const selectionVersion = useRef(0);
   const leaveAllowed = useRef(false);
   const [effectsUnknown, setEffectsUnknown] = useState(false);
@@ -165,26 +184,30 @@ export function useConversationTask({
   function acceptEvent(event: ThreadEvent, text?: string) {
     if (!mounted.current) return;
     const { conversation_id: cid, run_id: rid } = event.payload;
+    if (conversationRef.current && conversationRef.current !== cid)
+      throw new Error('发送回执与原会话不匹配，未接纳新运行。');
     if (text !== undefined && event.type === 'thread.started' && !selectedRef.current) {
       selectedRef.current = { conversationId: cid, runId: rid };
       conversationRef.current = cid;
       setSelected(selectedRef.current);
-      setOriginal(text);
       pendingSend.current = null;
+      if (pendingStorage.current) sessionStorage.removeItem(pendingStorage.current);
+      pendingStorage.current = null;
       setSendUncertain(false);
-      window.history.replaceState(null, '', conversationHref(cid, rid));
+      window.history.replaceState(window.history.state, '', conversationHref(cid, rid));
     }
-    const target = selectedRef.current;
-    if (!target || target.conversationId !== cid || target.runId !== rid) return;
-    cursor.current = Math.max(cursor.current, event.seq);
-    setEvents((current) => mergeThreadEvents(current, [event]));
+    if (conversationRef.current !== cid) return;
+    cursors.current.set(rid, Math.max(cursors.current.get(rid) ?? 0, event.seq));
+    eventsRef.current = mergeThreadEvents(eventsRef.current, [event]);
+    setEvents(eventsRef.current);
     if (event.type === 'thread.failed') {
       const detail = event.payload.error;
-      setError(`${detail.code}: ${detail.message}`);
       if (detail.code === 'TOOL_EFFECT_UNKNOWN') {
         unknownRef.current = true;
         setEffectsUnknown(true);
       }
+      if (selectedRef.current?.runId !== rid) return;
+      setError(`${detail.code}: ${detail.message}`);
       if (text !== undefined && detail.code === 'AMBIGUOUS_LOCAL_TIME' && detail.details) {
         const parsed = AmbiguousTimeDetailsSchema.safeParse(detail.details);
         if (parsed.success) {
@@ -196,53 +219,132 @@ export function useConversationTask({
   }
 
   async function refresh(clearError = false) {
-    const target = selectedRef.current;
-    if (!target || !mounted.current) return;
+    const cid = conversationRef.current;
+    if (!cid || !mounted.current) return;
     readRef.current?.abort();
     const request = new AbortController();
     readRef.current = request;
     const version = selectionVersion.current;
+    const valid = () =>
+      mounted.current && !request.signal.aborted && version === selectionVersion.current;
     setReading(true);
     if (clearError) setError(null);
     try {
-      if (!controlsOnly) {
+      const history: ConversationRunHistoryItem[] = [];
+      let next: string | null = null;
+      do {
+        const query = new URLSearchParams({ limit: '50' });
+        if (next !== null) query.set('cursor', next);
+        const page = await readHistoryCollectionPage(
+          `/api/v1/conversations/${encodeURIComponent(cid)}/runs?${query}`,
+          ConversationRunPageSchema,
+          request.signal,
+        );
+        if (!valid()) return;
+        if (page.items.some((item) => item.conversation_id !== cid))
+          throw new Error('运行列表会话归属不匹配，未接纳此页。');
+        history.push(...page.items);
+        next = page.next_cursor;
+      } while (next !== null);
+      let target = selectedRef.current;
+      if (!target && history.length && !pendingSend.current) {
+        target = { conversationId: cid, runId: history[history.length - 1]!.run_id };
+        selectedRef.current = target;
+        setSelected(target);
+      }
+      // Read every indexed Run: a selected completed Run cannot bypass another
+      // suspended Run or an unknown document effect in this conversation.
+      for (const item of history) {
+        let after = cursors.current.get(item.run_id) ?? 0;
         for (;;) {
           const query = new URLSearchParams({
-            run_id: target.runId,
-            after_seq: String(cursor.current),
+            run_id: item.run_id,
+            after_seq: String(after),
             limit: '200',
           });
           const page = await readHistoryEventPage(
-            `/api/v1/conversations/${encodeURIComponent(target.conversationId)}?${query}`,
-            target.conversationId,
-            target.runId,
-            cursor.current,
+            `/api/v1/conversations/${encodeURIComponent(cid)}?${query}`,
+            cid,
+            item.run_id,
+            after,
             request.signal,
           );
-          if (!mounted.current || request.signal.aborted || version !== selectionVersion.current)
-            return;
+          if (!valid()) return;
           for (const event of page.items) acceptEvent(event);
           if (page.nextCursor === null) break;
+          after = Number(page.nextCursor);
         }
       }
-      const current = await readRun(target.conversationId, target.runId, request.signal);
-      if (!mounted.current || request.signal.aborted || version !== selectionVersion.current)
-        return;
-      if (current.conversation_id !== target.conversationId || current.run_id !== target.runId)
-        throw new Error('运行身份不匹配，未接纳状态。');
-      setRun(current);
-      setReadError(null);
-      const stored = sessionStorage.getItem(`run-resume:${target.conversationId}:${target.runId}`);
-      if (stored) {
-        const parsed = ResumeRequestSchema.safeParse(JSON.parse(stored));
-        if (parsed.success) setRetryResume(parsed.data);
+      const transcripts = collectRunTranscripts(eventsRef.current);
+      for (const [rid, transcript] of transcripts) {
+        for (const approval of transcript.approvals) {
+          if (approval.kind !== 'document') continue;
+          const detail = DocumentApprovalDetailSchema.parse(
+            await readEnvelope(
+              await fetch(`/api/v1/document-approvals/${encodeURIComponent(approval.approvalId)}`, {
+                cache: 'no-store',
+                signal: request.signal,
+              }),
+            ),
+          );
+          if (!valid()) return;
+          if (
+            detail.approval_id !== approval.approvalId ||
+            detail.conversation_id !== cid ||
+            detail.run_id !== rid
+          )
+            throw new Error('文档效果与原运行不匹配，不能确认发送资格。');
+          if (detail.effect.status === 'unknown') {
+            unknownRef.current = true;
+            setEffectsUnknown(true);
+          }
+        }
       }
+      let replyPending = false;
+      if (target) {
+        const current = await readRun(cid, target.runId, request.signal);
+        if (!valid()) return;
+        if (current.conversation_id !== cid || current.run_id !== target.runId)
+          throw new Error('运行身份不匹配，未接纳状态。');
+        setRun(current);
+        replyPending = current.status === 'running' || current.status === 'suspended_approval';
+        const indexed = history.find((item) => item.run_id === current.run_id);
+        if (indexed) indexed.status = current.status;
+        const stored = sessionStorage.getItem(`run-resume:${cid}:${target.runId}`);
+        if (stored) {
+          const parsed = ResumeRequestSchema.safeParse(JSON.parse(stored));
+          if (parsed.success) setRetryResume(parsed.data);
+        }
+      }
+      // Suspended attempts have accepted deltas but no archived assistant yet.
+      // Only a terminal archive replaces that cumulative run transcript.
+      if (!streamRef.current) {
+        const archive: MessageHistoryItem[] = [];
+        next = null;
+        do {
+          const query = new URLSearchParams({ limit: '50' });
+          if (next !== null) query.set('cursor', next);
+          const page = await readHistoryCollectionPage(
+            `/api/v1/conversations/${encodeURIComponent(cid)}/messages?${query}`,
+            ConversationMessagePageSchema,
+            request.signal,
+          );
+          if (!valid()) return;
+          archive.push(...page.items);
+          next = page.next_cursor;
+        } while (next !== null);
+        setMessages(archive);
+        setLiveReply(Boolean(replyPending && target && transcripts.get(target.runId)?.text));
+        setLiveOriginal(null);
+      }
+      setRuns(history);
+      setHistoryReady(true);
+      setReadError(null);
     } catch (failure) {
-      if (mounted.current && !request.signal.aborted && version === selectionVersion.current)
-        setReadError(failure instanceof Error ? failure.message : '无法读取运行状态。');
+      if (valid())
+        setReadError(failure instanceof Error ? failure.message : '无法读取会话与运行状态。');
     } finally {
-      if (mounted.current && !request.signal.aborted && version === selectionVersion.current)
-        setReading(false);
+      if (valid()) setReading(false);
     }
   }
 
@@ -251,6 +353,8 @@ export function useConversationTask({
     streamRef.current = request;
     const version = selectionVersion.current;
     setStreaming(true);
+    setLiveReply(true);
+    setLiveOriginal(text ?? null);
     let accepted = false;
     let failedEvent = false;
     let expectedEof = false;
@@ -294,7 +398,13 @@ export function useConversationTask({
         );
         if (text !== undefined && !selectedRef.current) {
           setSendUncertain(!rejected);
-          if (rejected) pendingSend.current = null;
+          if (rejected) {
+            pendingSend.current = null;
+            if (pendingStorage.current) sessionStorage.removeItem(pendingStorage.current);
+            pendingStorage.current = null;
+            setLiveReply(false);
+            setLiveOriginal(null);
+          }
         }
       }
     } finally {
@@ -310,11 +420,21 @@ export function useConversationTask({
     return accepted;
   }
 
-  const active = busy || run?.status === 'running' || run?.status === 'suspended_approval';
+  const active = conversationSendBlocked({
+    busy: busy || stopping,
+    reading,
+    readError,
+    ready: historyReady,
+    selected: Boolean(selected),
+    run,
+    runs,
+    sendUncertain,
+    effectsUnknown,
+  });
   const eligibility = taskSendEligibility({
     intent,
     text: ambiguousProposal?.raw_text ?? input,
-    busy: active || sendUncertain || effectsUnknown,
+    busy: active,
     workspaceState,
     workspaceId,
     workspaces,
@@ -337,7 +457,6 @@ export function useConversationTask({
     try {
       let pending = retry ? pendingSend.current : null;
       if (!pending) {
-        if (!intent) return;
         const me = await loadMe(authentication.signal);
         if (!mounted.current || authentication.signal.aborted) return;
         const proposal = ambiguousProposal;
@@ -356,17 +475,17 @@ export function useConversationTask({
         };
         pendingSend.current = pending;
       }
+      const storageKey =
+        pendingStorage.current ?? `conversation-send:${conversationRef.current ?? 'new'}`;
+      sessionStorage.setItem(storageKey, JSON.stringify(pending));
+      pendingStorage.current = storageKey;
       selectionVersion.current++;
       readRef.current?.abort();
       selectedRef.current = null;
       setSelected(null);
       setRun(null);
       setReadError(null);
-      setEvents([]);
-      unknownRef.current = false;
-      setEffectsUnknown(false);
       setReading(false);
-      cursor.current = 0;
       setRetryResume(null);
       setAmbiguousProposal(null);
       setSendUncertain(false);
@@ -483,7 +602,23 @@ export function useConversationTask({
 
   useEffect(() => {
     mounted.current = true;
-    if (!controlsOnly) void readWorkspaces();
+    const storageKey = `conversation-send:${conversationId ?? 'new'}`;
+    const stored = sessionStorage.getItem(storageKey);
+    if (stored) {
+      setSendUncertain(true);
+      pendingStorage.current = storageKey;
+      try {
+        const pending = PendingSendSchema.parse(JSON.parse(stored));
+        if (pending.body.conversation_id !== (conversationId ?? undefined))
+          throw new Error('原发送的会话身份不匹配。');
+        pendingSend.current = pending;
+        setInput(pending.text);
+      } catch (failure) {
+        setError(
+          `原发送结果未知，不能创建另一条消息。${failure instanceof Error ? failure.message : '原请求记录无法读取。'}`,
+        );
+      }
+    }
     void refresh();
     return () => {
       mounted.current = false;
@@ -498,6 +633,12 @@ export function useConversationTask({
     // Each mounted instance owns one URL identity; route parents key it accordingly.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (intent === 'document' && !workspaceRef.current) void readWorkspaces();
+    // Workspace registration is only a prerequisite of the explicit document shortcut.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [intent]);
 
   useEffect(() => {
     if (!streaming) return;
@@ -559,7 +700,10 @@ export function useConversationTask({
     workspaceError,
     readWorkspaces,
     events,
-    original,
+    messages,
+    runs,
+    liveReply,
+    liveOriginal,
     run,
     selected,
     error,

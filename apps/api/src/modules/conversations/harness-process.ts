@@ -5,7 +5,7 @@ import {
   HARNESS_PROTOCOL_VERSION,
   HarnessRequestSchema,
   HarnessStartSchema,
-  type HarnessModelReply,
+  type HarnessModelStep,
   type HarnessRequest,
   type HarnessStart,
   type HarnessTool,
@@ -21,7 +21,7 @@ export interface HarnessServices {
     request: Extract<HarnessRequest, { type: 'model' }>,
     tools: readonly HarnessTool[],
     signal: AbortSignal,
-  ) => Promise<HarnessModelReply>;
+  ) => AsyncGenerator<HarnessModelStep, void, unknown>;
 }
 
 export interface NativeHarnessOptions {
@@ -29,6 +29,7 @@ export interface NativeHarnessOptions {
   start: HarnessStart;
   signal: AbortSignal;
   handleRequest: (request: HarnessRequest) => Promise<unknown>;
+  onExit?: () => void | Promise<void>;
 }
 
 function protocolError(): HttpError {
@@ -70,13 +71,21 @@ export async function runNativeHarness(options: NativeHarnessOptions): Promise<v
   let spawnFailed = false;
   let transportFailed = false;
   let closed = false;
+  let exited = false;
   let killTimer: NodeJS.Timeout | undefined;
+  // exit precedes stdio close: abort a provider read even while the request
+  // handler is waiting and stdout has not yet been drained to EOF.
+  child.once('exit', () => {
+    exited = true;
+    void options.onExit?.();
+  });
   const completion = new Promise<{ code: number | null; signal: string | null }>((resolve) => {
     child.once('error', () => {
       spawnFailed = true;
     });
     child.once('close', (code, exitSignal) => {
       closed = true;
+      void options.onExit?.();
       resolve({ code, signal: exitSignal });
     });
   });
@@ -175,7 +184,7 @@ export async function runNativeHarness(options: NativeHarnessOptions): Promise<v
   } catch (error) {
     if (signal.aborted) return;
     if (spawnFailed) throw new HttpError(503, 503, 'HARNESS_UNAVAILABLE', 'harness unavailable');
-    if (transportFailed)
+    if (transportFailed || exited)
       throw new HttpError(502, 502, 'HARNESS_EXITED', 'harness process exited unexpectedly');
     throw error;
   } finally {
