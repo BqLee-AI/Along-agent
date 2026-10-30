@@ -38,7 +38,7 @@
 - `execution`：可选 `business | harness`，省略为兼容的确定性业务。harness 明确进入正式仓颉，`mode=chat` 不作隐式分派；缺实际依赖在任何新写入/SSE 前503 `HARNESS_UNAVAILABLE`，不自动改走 TS/fixture。
 - Web 的默认 Agent 对话显式传 `execution=harness`，不带 `workspace_id` 也可交流；提醒快捷入口仍显式传 `business`。这不改变 HTTP 省略 execution 的默认值，也不新增执行种类。
 - 新 Harness Run 在接纳事务内冻结同 owner、同 conversation 最新63条可见 user/assistant 消息引用并按 `created_at/id` 排序，随后追加本轮完整用户输入一次，总计最多64条。执行和批准恢复按冻结引用读原文，不混入后来消息、其他会话或 system 消息，不把旧 tool_calls 作为待执行动作。该窗口不是永久记忆；完整窗口、工具定义与观察超1MiB时明确失败 `HARNESS_CONTEXT_LIMIT`，不截断当前输入。缺跨轮引用的旧 Run 保持仅原输入的上下文。
-- 入站幂等仍为同 owner/key：business 沿历史 hash 材料；无 workspace 的 harness 保持 `harness/v1\0` 域，带 workspace 则用 `harness/workspace/v2\0`，将 `workspace_id` 追加到原规范数组后计算 SHA-256。这里是请求 hash 域，不是执行协议版本（执行为 `harness/v3`）。同键换 execution、workspace 或其他绑定输入为409，不重复创建另一 Run；冻结输入/权限不从 body 的 owner、allowlist 等额外字段取得。
+- 入站幂等仍为同 owner/key：business 沿历史 hash 材料；无 workspace 的 harness 保持 `harness/v1\0` 域，带 workspace 则用 `harness/workspace/v2\0`，将 `workspace_id` 追加到原规范数组后计算 SHA-256。这是请求 hash 域，不是执行协议版本（执行为 `harness/v4`）。同键换 execution、workspace 或其他绑定输入为409，不重复创建另一 Run；冻结输入/权限不从 body 的 owner、allowlist 等额外字段取得。
 - `workspace_id`：可选非空字符串，仅允许显式 `execution=harness`，business/省略 execution 时携带为400。新 Run 从当前本人有效部署登记取得精确授权，并冻结安全摘要；省略不授 workspace 工具。选择与新动作授权、历史展示的区别见 §5。
 - `confirmed_timezone` / `confirmed_timezone_id`：schema 均已有、可空，取 `confirmed_timezone_id ?? confirmed_timezone`；未给本轮值可使用会话先前明确冻结值，仍缺失则澄清，不猜。原文单个明确已知别名/规范 ID 优先于本轮确认值，本轮确认值优先于会话默认值；未知显式别名即使已有 Shanghai 也失败，多个不同已知时区则澄清，完整优先级见 design/05 §9.2。
 - `fold_choice`：`first | second | none`，默认 `none`；只有结构化字段决定选择，原话“第一次/第二次”不自动覆盖。歧义未选为 `AMBIGUOUS_LOCAL_TIME`；候选字段仍是 fold_choice，成功的现有归一结果与快照 `fold` 为 `0 | 1`，不混为字符串列。
@@ -136,3 +136,13 @@ Web 批准链接保留原 conversation/Run，并明确打开新标签页；在�
 - 既有事件 GET 仅新增可选 `run_id` 筛选，并验证 Run/owner/父会话。缺省与响应保持旧合同：默认 200、最大 500，`events/next_after_seq` 和 SSE 七词不变。事件全量需按游标读完，页满后可能再读一空页，不能把 `next_after_seq` 当 has_more。
 - 原 conversation 403/404 与 Run 404 隐藏边界保持；未登录 401，typed 依赖失败按原 503，实际查询异常脱敏 500，不变为空历史。独立 GET 的部分成功由 UI 逐项报告，不新增伪成功的 PARTIAL envelope。
 - 历史入口、分页和 #68 重登后只 GET；不调用模型/MCP、不分配 Run/attempt，不新建决议/工具调用或写文件。全部批准按事件索引保留，任务结果见 [approval API §8](../approvals/approvals_routes.md#8-r1-历史中的真实提醒结果69)，文档冻结 effect 和当前动作授权继续分离。
+
+## 7. R2-A 上下文容量（#83）
+
+[Required 目标合同] 设计真源为 [design/18 §2–§8](../../design/18-r2a-harness-context.md)，行为 delta 为 [manage-harness-context](../../../openspec/changes/manage-harness-context/proposal.md)。不新增公开 HTTP 路由、请求字段、RunView 字段或 SSE 词；新 context policy、measure_context/context_source、typed observations 为内部 wire/存储合同，不让浏览器选择额度、来源身份或 provider。
+
+- HARNESS_CONTEXT_LIMIT 表示完整 wire/模型 HTTP/窗口/消息数或保护内容不能容纳，沿既有流内失败投影，不静默裁剪冻结输入。已建流保持 HTTP200，`thread.failed` 的 `payload.error.http_status=422`；恢复预检在 SSE 前失败则 HTTP422 通用 envelope，不创建新 attempt。
+- BUDGET_EXCEEDED/429 保持累计 token 额度、迭代耗尽语义；64 工具引用容量耗尽仍为 HARNESS_CONTEXT_LIMIT。输出 cap 不等于 Run 余额，估算不作 usage，缺 usage 保持 unknown。
+- TOOL_EFFECT_UNKNOWN、HARNESS_EXITED、HARNESS_PROTOCOL_ERROR 保留原义及脱敏规则；不因容量处理重发未知动作。模型/计量绑定不兼容按 HARNESS_UNAVAILABLE/503 在启动新 attempt 前拒绝，不隐式换模型。
+- 新工具 read_run_observation 经既有 ToolGateway，不新增公开“按 UUID 任意取结果”端点；当前授权及新 invocation/预算照常。context_slice 不是新 workspace_read，不足以 verified。
+- 继续仍是显式有效批准等待点、同 Run 唯一新 attempt；完整冻结输入/快照引用不丢弃。GET/刷新/重登/同入站补读不创建策略、调用模型/工具或自动继续。公开查询/错误不泄漏原正文、provider body 或计量配置秘密。

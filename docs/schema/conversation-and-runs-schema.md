@@ -119,6 +119,22 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 - [Required] harness suspended_approval 时三个 waiting 引用必须齐备；其他 harness 状态必须为空。TS 锁内进一步验证实际 owner/Run/已接受调用/批准对应关系，引用本身不作授权。
 - [Required] 已接受助手 delta 合并的消息、终态 checkpoint、attempt/Run 同事务；无助手输出的结构化失败不合成助手消息。取消不能覆盖已提交事实或伪撤销既成效果。预算失败保留已产出。
 
+## R2-A 上下文策略（#83）
+
+[Required] `run_context_policies` 归 conversations，不改变 `agent_runs.frozen_context`、原预算或冻结 allowlist；由 `0019_conversation_context_policies.sql` 建立。策略单位以 [design/18 §3](../design/18-r2a-harness-context.md#3-冻结策略及旧-run) 为真源；应用迁移与实际部署另行取证。
+
+| 字段        | 类型/约束                                     | 语义                                                                                                                             |
+| ----------- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| run_id      | uuid PK，FK agent_runs(id) ON DELETE RESTRICT | 每个 harness Run 至多一个策略                                                                                                    |
+| owner_id    | uuid NOT NULL                                 | 从可信 Run 注入，所有查询验 owner/Run，不接模型自报                                                                              |
+| policy      | jsonb object NOT NULL                         | strict、版本化的 ContextPolicy，不含凭据或工具正文                                                                               |
+| policy_hash | text NOT NULL，64 位小写 SHA-256              | 全字段按键名排序的规范 JSON UTF-8，嵌套 model_binding 同样排序；摘要域为 `harness/context-policy/v1` 后接一个 NUL，再接规范 JSON |
+| created_at  | timestamptz NOT NULL                          | 首次策略接纳时间，不用于重算 Run 预算                                                                                            |
+
+PK 已支持恢复点查，不新增无查询依据的索引。DB 禁 UPDATE/DELETE；应用及约束验证 policy 正安全整数、枚举/null 语义与 owner/Run 一致性。新 Run 与原接纳事务插入；旧 Run 仅在有效显式批准恢复同事务补录，并发唯一，失败全回滚；GET/历史补读不补录。工具权限仍只由原冻结 allowlist 与当前授权决定。
+
+snapshot2 原字段/集合不变，typed views/context_slice 不写入快照正文，accepted_result 不被投影覆写。wire v4 目标切换与旧 Run 行为见 design/18 §6、§8；原文其他 v2 记载保留 R1 适用范围，不作为 v4 实现证明。后续只新增迁移并同步生命周期基线/扫描规则，不修改已合并迁移，不预占编号。
+
 ## `run_attempts`
 
 ### 用途
@@ -178,7 +194,7 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 
 - [Required] 只追加，禁 `UPDATE`/`DELETE`。
 - [Required] `payload` 不存敏感值原文；tool 参数摘要脱敏。
-- [Required] 新执行仅 `harness/v3`、snapshot仍为 `version=2`；harness_snapshot 保存已接受消息/工具结果引用、usage/next_call_no/等待引用，不保存 raw args、provider body、密钥或完整推理链。真实模型增量沿既有message.delta持久，不新建数据表。TS 验证同 owner/Run、真实接受事实与单调进度；旧 task snapshot1 的限定读取迁移见本篇 R1 节。
+- [Required] 新写入/执行仅 `harness/v4`、snapshot `version=2`；harness_snapshot 保存已接受消息/工具结果引用、usage/next_call_no/等待引用，不保存 raw args、provider body、密钥或完整推理链。真实模型增量沿既有message.delta持久，不新建数据表。TS 验证同 owner/Run、真实接受事实与单调进度；旧 task snapshot1 的限定读取迁移见本篇 R1 节。
 - [Required] 同 conversation 先持 NO KEY UPDATE 锁再分配游标，并保持至提交，避免小游标晚提交被客户端永久漏掉，并与终态消息插入取得的外键 KEY SHARE 兼容。内部快照不交给外部 ThreadEventSchema；GET/同入站键只读不启动执行。
 
 ## `harness_resumes` / `harness_cancellations`
@@ -335,7 +351,7 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 - `agent_runs.frozen_context` 增加 `workspaceGrant={workspace_id,owner_id,registration_digest,root_identity}` 和独立 `workspaceSummary={workspace_id,label,readable_paths,writable_paths}`。不保存真实 root、不单建 workspace 表、不给历史 Run 补授工具。RunView 只投影冻结安全摘要；历史缺摘要不从当前登记补造。
 - 历史 Run/事件、取消及冻结文档批准详情可在登记撤销后继续 owner-scoped 读取；摘要不是当前授权。新批准/拒绝、新恢复、新工具动作均核对当前登记与原 grant，撤销/变更使 `can_resume=false`；工具历史结果披露仍有独立当前权限门，不因历史 GET 可读而绕过它。
 - 等待继续复用三个 UUID 列；可信已接受提议结果决定 `kind=task|document` 及批准读取入口。document 的 RunView waiting 额外含 `approval_kind:"document"`，旧 task 形状不变。恢复给 native 的 task decision 保留 consumed/task_id/successor_id；document decision 仅 approval_id/status/apply_invocation_id，不制造 task、时间字段或新事件词。
-- 新执行仅 `harness/v3`，新快照仍为snapshot2。读取 snapshot1 时拒绝携 workspace grant，并验证每个 tool_ref 都是 completed 的旧业务工具、非 document receipt；仅转换内存中的快照供正式原生协议启动，保留原 Run/预算/工具范围和历史行，不改旧 writer 或 completed 事实。
+- 新执行与新快照仅 `harness/v4` / snapshot2。读取 snapshot1 时拒绝携 workspace grant，并验证每个 tool_ref 都是 completed 的旧业务工具、非 document receipt；仅转换内存中的版本供 v4 启动，保留原 Run/预算/工具范围和历史行，不改旧 writer 或 completed 事实。
 - `workspace_list/grep/read` 为 read_only，事务外 MCP IO 后首次接受有界快照；`workspace_propose_replace` 为 local，批准/receipt/审计同事务；`workspace_apply_replace` 是 non_transactional，原批准唯一绑定在预约事务建立，在 dispatch 一次许可事务再验，先提交 unknown 才可写文件。
 - `tool_invocations` 唯一持有接受结果/真实效果；`tools/query.ts#readRunDocumentEvidence` 公开同 Run 安全证据投影，approvals/conversations 不另建效果账。只有绑定的 applied 与其后创建且接受的新全文 read（目标、版本、完整内容及字节数均匹配）才满足完成；conflict 后继须有零写证据、新读和新批准。unknown 不重写、不靠文件 hash 补报成功、不制造可恢复等待点。
 

@@ -15,7 +15,7 @@
 | 4    | [风险约束与阶段门](prd/03-risk-constraints-and-stage-gates.md) | Top3 风险、指标、准入准出、不承诺口径                             |
 | 5    | [验收与待决事项](prd/04-acceptance-open-questions.md)          | v0/R1 验收、Deferred 清单、重开门槛                               |
 
-## 二、总体设计（真源，17 篇）
+## 二、总体设计（真源，18 篇）
 
 | 序号 | 文档                                                                     | 作用                                                                                                                              |
 | ---- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
@@ -36,6 +36,7 @@
 | 15   | [R1 本地生命周期与配置复用](design/15-r1-local-lifecycle.md)             | #67 初始化/启停/升级目标合同、原配置与目录身份保留、数据库分流及 #68 接口；不代表运行验收                                         |
 | 16   | [R1 账户与正式登录](design/16-r1-account-access.md)                      | #68 唯一管理员、原身份转正、库适配、固定会话、401 只读恢复及本机登记收尾合同；独立实验与验收                                      |
 | 17   | [R1 会话历史与只读恢复](design/17-r1-conversation-history.md)            | #69 服务端会话发现、原话/多 Run、稳定分页、批准真实结果及零执行恢复合同                                                           |
+| 18   | [R2-A 单 Run 有界上下文](design/18-r2a-harness-context.md)               | #83 四种额度、可信计量与未知输入的后验超额边界、不可变策略、来源投影/分页回取及有界批准恢复；实现、受控消费者、真实模型分级取证   |
 
 ## 三、API（6 篇）
 
@@ -107,6 +108,7 @@
 - [R1 账户合同（#68）](design/16-r1-account-access.md) 的行为真源为 [identity](../openspec/specs/identity/spec.md)；[归档清单](../openspec/changes/archive/2026-10-27-close-r1-account-access/tasks.md)与[验证记录](account-access-verification-2026-10-27.md)分列库实验、行为覆盖、真实 Web/PG、本机登记和独立静态审阅。原身份保留、正式认证与本机收尾共同交付，不将账户验收扩大为 #66 全路径验收。
 - [R1 会话历史（#69）](design/17-r1-conversation-history.md) 的行为真源为 [conversations](../openspec/specs/conversations/spec.md)，覆盖服务端发现、可见原文/回复、全部批准和结果、旧深链与只读重登；[使用说明](local-lifecycle.md#找回会话run-和真实结果)、[验证记录](conversation-history-verification-2026-10-28.md)和[归档清单](../openspec/changes/archive/2026-10-28-close-r1-conversation-history/tasks.md)分别记录使用、版本化运行证据与六项验收。`0018` 四个非唯一查询索引含旧原话回退查找，新增索引和单次事件聚合有独立补证；不改变执行/工作区/身份主规格，不替代 #66 全路径验收。
 - [R1 个人助理](design/01-tech-stack-and-repo-structure.md#6-r1-web个人助理与职责边界) 与[页面 PRD](prd/02-core-loop-and-pages.md#r1-个人助理)记录分组顶部导航、对话首页、简洁登录、LumenUI/Base UI/Tailwind v4、React 职责、精确批准和原 Run 显式继续；[Web 使用说明](../apps/web/README.md)与[本机任务流程](local-lifecycle.md#开始任务与审阅文档)说明实际操作与原安装边界。[版本化验证记录](web-task-experience-verification-2026-10-28.md)区分各轮源码、生产页面、受控交互与原安装实际验收，不把旧 CI 或页面示例当作新增迁移已验证。
+- [R2-A 上下文合同（#83）](design/18-r2a-harness-context.md) 的行为增量见 [manage-harness-context](../openspec/changes/manage-harness-context/proposal.md)，实施/验收顺序见 [tasks](../openspec/changes/manage-harness-context/tasks.md)。原草案收敛到该真源；[schema](schema/conversation-and-runs-schema.md#r2-a-上下文策略83)、[API](api/conversations/conversations_routes.md#7-r2-a-上下文容量83)、[PRD](prd/04-acceptance-open-questions.md#r2-a-单-run-上下文83) 跟随。保留 accepted facts、snapshot2 全引用与精确批准，原事实回取不是新读取；纯合同校验不算正式 native/真实模型验收。
 - 冲突矩阵：行为/验收以 spec 为准，字段/路由以 design/api/schema 为准，why 以 ADR 为准。
 
 ## 维护约定
