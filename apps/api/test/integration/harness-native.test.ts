@@ -16,6 +16,8 @@ import type { ThreadEvent } from '@along/stream-protocol';
 import { handleRequest } from '../../src/http/app.js';
 import { createHarnessModelTransport } from '../../src/modules/conversations/harness-model.js';
 import { runNativeHarness } from '../../src/modules/conversations/harness-process.js';
+import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
+import { measureHarnessContext } from '../../src/modules/conversations/harness-context.js';
 import { seedSession } from '../../src/modules/identity/seed.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 import {
@@ -25,7 +27,7 @@ import {
   pending,
   jsonBody,
   listen,
-  writeModelSse,
+  sendModelSse,
 } from '../helpers/harness-consumer.js';
 
 const binaryPath = process.env.HARNESS_BINARY ?? '';
@@ -137,11 +139,7 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
           function: { name: string; arguments: string };
         }[] = [];
         const longAnswer = longAnswers.find((answer) => answer.kind === kind);
-        if (kind === 'language') {
-          content = original.includes('Please reply in English.')
-            ? 'Hello from Along.'
-            : '你好，我是 Along。';
-        } else if (longAnswer) {
+        if (longAnswer) {
           // One real, large provider event exercises the transport's UTF-16
           // bound and native's UTF-8/UTF-16 distinction (not fixture chunking).
           res.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -204,8 +202,8 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
             },
           ];
         }
-        writeModelSse(res, {
-          choices: [{ message: { content, tool_calls: calls } }],
+        sendModelSse(res, {
+          message: { content, tool_calls: calls },
           usage: { total_tokens: 5 },
         });
       })().catch(() => {
@@ -227,6 +225,10 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
           libraryPath: process.env.HARNESS_LIBRARY_PATH ?? '/app/harness/lib',
           maxIterations,
           maxTokens: 8000,
+          contextPolicy: createContextPolicy({
+            completionCap: 1024,
+            model: 'fixture-transport-only',
+          }),
           model,
         },
       }).catch(() => res.destroy());
@@ -387,32 +389,6 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
     });
   }
 
-  for (const english of [false, true]) {
-    it(`native supplies the default Chinese policy and preserves explicit language requests: ${english}`, async () => {
-      const { headers } = await actor();
-      const id = randomUUID();
-      const body = input(id, 'language');
-      if (english) body.raw_text += ' Please reply in English.';
-      const response = await post('/api/v1/conversations/messages', body, headers);
-      const events = frames(await response.text());
-      expect(events.at(-1)?.type).toBe('thread.completed');
-      expect(
-        events
-          .flatMap((event) => (event.type === 'message.delta' ? [event.payload.delta] : []))
-          .join(''),
-      ).toBe(english ? 'Hello from Along.' : '你好，我是 Along。');
-      const messages = modelRequests.get(id)![0]!.messages;
-      const policy = messages.filter(
-        (message) => message.role === 'system' && message.content.includes('Simplified Chinese'),
-      );
-      expect(policy).toHaveLength(1);
-      expect(policy[0]!.content).toContain('unless the user explicitly requests another language');
-      expect(policy[0]!.content).toContain('Do not translate code, identifiers or proper nouns');
-      expect(
-        messages.some((message) => message.role === 'user' && message.content === body.raw_text),
-      ).toBe(true);
-    });
-  }
   for (const answer of longAnswers) {
     it(`native ${answer.kind} final answer survives public chunking and durable replay exactly`, async () => {
       const { headers } = await actor();
@@ -710,13 +686,6 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
     );
     const resumedMessages = requests?.[1]?.messages;
     for (const request of requests ?? []) {
-      const policies = request.messages.filter(
-        (message) => message.role === 'system' && message.content.includes('Simplified Chinese'),
-      );
-      expect(policies).toHaveLength(1);
-      expect(policies[0]!.content).toContain(
-        'unless the user explicitly requests another language',
-      );
       expect(
         request.messages.some(
           (message) => message.role === 'user' && message.content === body.raw_text,
@@ -854,17 +823,23 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
     });
     const native = new AbortController();
     const provider = new AbortController();
+    const contextPolicy = createContextPolicy({
+      completionCap: 1024,
+      model: 'exit-lifecycle-fixture',
+    });
     const running = runNativeHarness({
       services: {
         binaryPath,
         libraryPath: process.env.HARNESS_LIBRARY_PATH ?? '/app/harness/lib',
         maxIterations: 8,
         maxTokens: 8000,
+        contextPolicy,
         model,
       },
       start: HarnessStartSchema.parse({
         protocol: HARNESS_PROTOCOL_VERSION,
         type: 'start',
+        context_policy: contextPolicy,
         messages: [{ message_id: randomUUID(), role: 'user', content: input(id, 'hold').raw_text }],
         tools: [],
         budget: { max_iterations: 8, max_tokens: 8000 },
@@ -875,6 +850,8 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
       signal: native.signal,
       onExit: () => provider.abort(),
       handleRequest: async (request) => {
+        if (request.type === 'measure_context')
+          return measureHarnessContext(request, [], contextPolicy);
         if (request.type !== 'model')
           throw new Error('unexpected native action while provider is held');
         const stream = model(request, [], provider.signal);

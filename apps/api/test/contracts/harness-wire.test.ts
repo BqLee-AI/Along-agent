@@ -19,6 +19,8 @@ import {
   executeNonTransactionalInvocation,
   reserveInvocation,
 } from '../../src/modules/tools/invocations.js';
+import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
+import { measureHarnessContext } from '../../src/modules/conversations/harness-context.js';
 import { createIntegrationDatabase, type IntegrationDatabase } from '../integration/setup.js';
 import { appendFileEffect } from '../integration/tool-invocations-file-effect.js';
 import { args, fileLines, seedContext, toolId } from '../integration/tool-invocations-probe.js';
@@ -26,6 +28,7 @@ import { args, fileLines, seedContext, toolId } from '../integration/tool-invoca
 let database: IntegrationDatabase;
 let directory: string;
 let binaryPath: string;
+const contextPolicy = createContextPolicy({ completionCap: 32, model: 'wire-native-protocol' });
 beforeAll(async () => {
   binaryPath = process.env.HARNESS_BINARY ?? '';
   if (!binaryPath || process.platform !== 'linux') {
@@ -59,6 +62,7 @@ test('D8.wire-rejection', async () => {
     const start = HarnessStartSchema.parse({
       protocol: HARNESS_PROTOCOL_VERSION,
       type: 'start',
+      context_policy: contextPolicy,
       messages: [{ message_id: randomUUID(), role: 'user', content: 'Run the fsync probe once.' }],
       tools: [
         { name: toolId, description: 'Test-only append and fsync.', parameters: {}, risk: 'low' },
@@ -70,7 +74,8 @@ test('D8.wire-rejection', async () => {
     });
     const requests: HarnessRequest[] = [];
     let modelCalls = 0;
-    let pendingModel: { ref: string; reply: HarnessModelReply } | null = null;
+    let pendingModel: HarnessModelReply | undefined;
+    let pendingModelRef: string | undefined;
     let invocationId = '';
     let actualOutcome: unknown;
     let acceptedBefore: unknown[] = [];
@@ -124,9 +129,12 @@ test('D8.wire-rejection', async () => {
         requests.push(request);
         let value: unknown;
         switch (request.type) {
-          case 'model': {
+          case 'measure_context':
+            value = measureHarnessContext(request, start.tools, contextPolicy);
+            break;
+          case 'model':
             modelCalls++;
-            const modelReply = HarnessModelReplySchema.parse({
+            pendingModel = HarnessModelReplySchema.parse({
               message:
                 modelCalls === 1
                   ? {
@@ -145,19 +153,18 @@ test('D8.wire-rejection', async () => {
                   : { content: 'The probe returned a result.', tool_calls: [] },
               usage: { total_tokens: 5 },
             });
-            if (modelReply.message.content) {
-              pendingModel = { ref: request.request_ref, reply: modelReply };
-              value = { type: 'delta', delta: modelReply.message.content };
-            } else value = { type: 'complete', reply: modelReply };
+            pendingModelRef = pendingModel.message.content ? request.request_ref : undefined;
+            value = pendingModel.message.content
+              ? { type: 'delta', delta: pendingModel.message.content }
+              : { type: 'complete', reply: pendingModel };
             break;
-          }
-          case 'model_next': {
-            if (!pendingModel || request.model_ref !== pendingModel.ref)
+          case 'model_next':
+            if (!pendingModel || request.model_ref !== pendingModelRef)
               throw new Error('unexpected model continuation');
-            value = { type: 'complete', reply: pendingModel.reply };
-            pendingModel = null;
+            value = { type: 'complete', reply: pendingModel };
+            pendingModel = undefined;
+            pendingModelRef = undefined;
             break;
-          }
           case 'reserve': {
             const reserved = await reserveInvocation(database.pool, ctx, {
               callKey: request.call_key,
@@ -241,7 +248,11 @@ test('D8.wire-rejection', async () => {
     expect(stdinError).toBeUndefined();
     expect(exit).toEqual({ code: 2, signal: null });
     expect(stderr).toBe('HARNESS_PROTOCOL_ERROR\n');
-    expect(requests.map((request) => request.type)).toEqual(
+    expect(
+      requests
+        .filter((request) => request.type !== 'measure_context')
+        .map((request) => request.type),
+    ).toEqual(
       kind === 'start-version'
         ? []
         : kind === 'outcome-shape'

@@ -5,6 +5,8 @@ import {
   HARNESS_PROTOCOL_VERSION,
   HarnessRequestSchema,
   HarnessStartSchema,
+  type ContextPolicy,
+  type HarnessContextMeasurement,
   type HarnessModelStep,
   type HarnessRequest,
   type HarnessStart,
@@ -17,6 +19,12 @@ export interface HarnessServices {
   libraryPath?: string;
   maxIterations: number;
   maxTokens: number;
+  contextPolicy: ContextPolicy;
+  measure?: (
+    request: Extract<HarnessRequest, { type: 'measure_context' }>,
+    tools: readonly HarnessTool[],
+    policy: ContextPolicy,
+  ) => HarnessContextMeasurement;
   model: (
     request: Extract<HarnessRequest, { type: 'model' }>,
     tools: readonly HarnessTool[],

@@ -64,6 +64,16 @@ export const WorkspaceApplyReplaceInputSchema = z
   .object({ approval_id: z.string().uuid() })
   .strict();
 
+export const ReadRunObservationInputSchema = z
+  .object({
+    source_invocation_id: z.string().uuid(),
+    field: z.enum(['content', 'matches', 'entries', 'failures']),
+    offset: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    limit: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  })
+  .strict();
+export type ReadRunObservationInput = z.infer<typeof ReadRunObservationInputSchema>;
+
 export const TOOL_INPUT_SCHEMAS = {
   propose_task: ProposeTaskInputSchema,
   request_cancel_task: RequestCancelTaskInputSchema,
@@ -75,4 +85,5 @@ export const TOOL_INPUT_SCHEMAS = {
   workspace_read: WorkspaceReadInputSchema,
   workspace_propose_replace: WorkspaceProposeReplaceInputSchema,
   workspace_apply_replace: WorkspaceApplyReplaceInputSchema,
+  read_run_observation: ReadRunObservationInputSchema,
 } as const;

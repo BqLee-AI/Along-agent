@@ -145,18 +145,30 @@ export async function runDatabaseSmoke({
   const created = new Set();
   const reports = [];
   const temp = await mkdtemp(path.join(tmpdir(), 'along-lifecycle67-'));
-  // Keep the original #67 0016 and #68 0017 scenarios fixed as the inventory grows.
+  // Keep the original 0016/0017/0018 scenarios fixed as the inventory grows.
   const migrationsDirectory = path.join(temp, 'legacy0016');
   const accountMigrationsDirectory = path.join(temp, 'legacy0017');
   const lfMigrationsDirectory = path.join(temp, 'legacy0016lf');
   const crlfMigrationsDirectory = path.join(temp, 'legacy0016crlf');
+  const historyMigrationsDirectory = path.join(temp, 'legacy0018');
+  const contextLfMigrationsDirectory = path.join(temp, 'context0019lf');
+  const contextCrlfMigrationsDirectory = path.join(temp, 'context0019crlf');
   await mkdir(migrationsDirectory);
   await mkdir(accountMigrationsDirectory);
   await mkdir(lfMigrationsDirectory);
   await mkdir(crlfMigrationsDirectory);
+  await mkdir(historyMigrationsDirectory);
+  await mkdir(contextLfMigrationsDirectory);
+  await mkdir(contextCrlfMigrationsDirectory);
   for (const name of await readdir(sourceMigrationsDirectory)) {
     if (!/^\d{4}_[a-z0-9_]+\.sql$/.test(name)) continue;
     const sql = await readFile(path.join(sourceMigrationsDirectory, name));
+    const lfSql = sql.toString('utf8').replaceAll('\r\n', '\n');
+    await writeFile(path.join(contextLfMigrationsDirectory, name), lfSql);
+    await writeFile(
+      path.join(contextCrlfMigrationsDirectory, name),
+      lfSql.replaceAll('\n', '\r\n'),
+    );
     if (name.slice(0, 4) <= '0016') {
       await writeFile(path.join(migrationsDirectory, name), sql);
       const lfSql = sql.toString('utf8').replaceAll('\r\n', '\n');
@@ -165,6 +177,8 @@ export async function runDatabaseSmoke({
     }
     if (name.slice(0, 4) <= '0017')
       await writeFile(path.join(accountMigrationsDirectory, name), sql);
+    if (name.slice(0, 4) <= '0018')
+      await writeFile(path.join(historyMigrationsDirectory, name), sql);
   }
   let stage = 'admin_connect';
   const record = (name) => {
@@ -548,7 +562,7 @@ export async function runDatabaseSmoke({
       });
       await withDeployment(
         url,
-        { migrationsDirectory: sourceMigrationsDirectory },
+        { migrationsDirectory: historyMigrationsDirectory },
         async (database) => {
           assert.equal(database.targetVersion, '0018');
           assert.deepEqual(await database.classify(), {
@@ -573,7 +587,7 @@ export async function runDatabaseSmoke({
         for (let restart = 0; restart < 2; restart++)
           await withDeployment(
             url,
-            { migrationsDirectory: sourceMigrationsDirectory },
+            { migrationsDirectory: historyMigrationsDirectory },
             async (database) => {
               assert.deepEqual(await database.classify(), {
                 kind: 'supported',
@@ -648,7 +662,7 @@ export async function runDatabaseSmoke({
       ['future_history_version', "INSERT INTO schema_migrations(version) VALUES('0019')"],
     ])
       await fresh(`history0018_${name}`, async (url) => {
-        await withDeployment(url, { migrationsDirectory: sourceMigrationsDirectory }, (database) =>
+        await withDeployment(url, { migrationsDirectory: historyMigrationsDirectory }, (database) =>
           database.initialize(),
         );
         await withClient(url, (client) => client.query(CANARIES + HISTORY_CANARIES));
@@ -656,7 +670,7 @@ export async function runDatabaseSmoke({
         const before = await withClient(url, signature);
         await withDeployment(
           url,
-          { migrationsDirectory: sourceMigrationsDirectory },
+          { migrationsDirectory: historyMigrationsDirectory },
           async (database) => {
             assert.equal((await database.classify()).kind, 'unknown');
             await rejectsCode(() => database.initialize(), 'unknown_database_refused');
@@ -675,7 +689,7 @@ export async function runDatabaseSmoke({
       );
       await withDeployment(
         url,
-        { migrationsDirectory: sourceMigrationsDirectory },
+        { migrationsDirectory: historyMigrationsDirectory },
         async (database) => {
           assert.equal((await database.classify()).kind, 'unknown');
           await rejectsCode(() => database.initialize(), 'unknown_database_refused');
@@ -683,6 +697,186 @@ export async function runDatabaseSmoke({
         },
       );
       record('history0018_forged_version_without_indexes_refused');
+    });
+    await fresh('context0019_explicit_upgrade_preserves_original_facts', async (url) => {
+      await withDeployment(url, { migrationsDirectory: historyMigrationsDirectory }, (database) =>
+        database.initialize(),
+      );
+      await withClient(url, (client) => client.query(CANARIES + HISTORY_CANARIES));
+      const before = await withClient(url, signature);
+      await withDeployment(
+        url,
+        { migrationsDirectory: sourceMigrationsDirectory },
+        async (database) => {
+          assert.equal(database.targetVersion, '0019');
+          assert.deepEqual(await database.classify(), {
+            kind: 'supported',
+            version: '0018',
+            reason: 'explicit_upgrade_required',
+          });
+          await rejectsCode(() => database.initialize(), 'explicit_upgrade_required');
+          assert.equal((await database.upgrade()).version, '0019');
+        },
+      );
+      await withClient(url, async (client) => {
+        const after = await signature(client);
+        for (const key of ['schema', 'ledger', 'indexes']) {
+          delete before[key];
+          delete after[key];
+        }
+        assert.deepEqual(after, before);
+        assert.equal(
+          (await client.query('SELECT count(*)::int n FROM run_context_policies')).rows[0].n,
+          0,
+        );
+        await client.query(`CREATE FUNCTION context0019_reject_ddl() RETURNS event_trigger LANGUAGE plpgsql AS $$
+          BEGIN RAISE EXCEPTION 'smoke: context restart attempted DDL'; END; $$;
+          CREATE EVENT TRIGGER context0019_no_ddl ON ddl_command_start EXECUTE FUNCTION context0019_reject_ddl()`);
+        const original = await signature(client);
+        for (let restart = 0; restart < 2; restart++)
+          await withDeployment(
+            url,
+            { migrationsDirectory: sourceMigrationsDirectory },
+            async (database) => {
+              assert.deepEqual(await database.classify(), {
+                kind: 'supported',
+                version: '0019',
+                reason: 'target_schema_verified',
+              });
+              assert.equal((await database.initialize()).version, '0019');
+              assert.equal((await database.upgrade()).version, '0019');
+            },
+          );
+        assert.deepEqual(await signature(client), original);
+      });
+      record('context0018_to0019_preserves_facts_empty_policies_two_readonly_restarts');
+    });
+    for (const [name, appliedDirectory, verificationDirectory, crlf] of [
+      [
+        'context0019_crlf_database_lf_source',
+        contextCrlfMigrationsDirectory,
+        contextLfMigrationsDirectory,
+        true,
+      ],
+      [
+        'context0019_lf_database_crlf_source',
+        contextLfMigrationsDirectory,
+        contextCrlfMigrationsDirectory,
+        false,
+      ],
+    ]) {
+      await fresh(name, async (url) => {
+        await withDeployment(url, { migrationsDirectory: appliedDirectory }, async (database) => {
+          assert.equal((await database.initialize()).version, '0019');
+        });
+        await withClient(url, async (client) => {
+          await client.query(CANARIES + HISTORY_CANARIES);
+          const policyBodies = () =>
+            client.query(`SELECT proname,prosrc FROM pg_proc
+              WHERE pronamespace='public'::regnamespace AND proname IN (
+                'run_context_policy_valid','run_context_policies_guard_owner',
+                'run_checkpoints_reject_mutation') ORDER BY proname`);
+          const beforeBodies = (await policyBodies()).rows;
+          assert.equal(beforeBodies.length, 3);
+          for (const { prosrc } of beforeBodies) {
+            assert(prosrc.includes('\n'));
+            assert.equal(prosrc.includes('\r\n'), crlf);
+          }
+          const before = await signature(client);
+          await withDeployment(
+            url,
+            { migrationsDirectory: verificationDirectory },
+            async (database) => {
+              assert.deepEqual(await database.classify(), {
+                kind: 'supported',
+                version: '0019',
+                reason: 'target_schema_verified',
+              });
+              assert.equal((await database.initialize()).version, '0019');
+              assert.equal((await database.upgrade()).version, '0019');
+            },
+          );
+          assert.deepEqual(await signature(client), before);
+          assert.deepEqual((await policyBodies()).rows, beforeBodies);
+          const newline = crlf ? '\r\n' : '\n';
+          await client.query(
+            `CREATE OR REPLACE FUNCTION run_context_policy_valid(value jsonb) RETURNS boolean LANGUAGE plpgsql IMMUTABLE STRICT AS $$${newline}BEGIN${newline}  RETURN true;${newline}END;${newline}$$`,
+          );
+          await withDeployment(
+            url,
+            { migrationsDirectory: verificationDirectory },
+            async (database) => {
+              assert.deepEqual(await database.classify(), {
+                kind: 'unknown',
+                version: '0019',
+                reason: 'baseline_additional_functions_mismatch',
+              });
+              await rejectsCode(() => database.initialize(), 'unknown_database_refused');
+              await rejectsCode(() => database.upgrade(), 'unsupported_upgrade_source');
+            },
+          );
+        });
+        record(`${name}_supported_readonly_weakened_policy_refused`);
+      });
+    }
+    for (const [name, mutation] of [
+      ['missing_policy_table', 'DROP TABLE run_context_policies'],
+      ['missing_owner_trigger', 'DROP TRIGGER run_context_policies_owner ON run_context_policies'],
+      [
+        'disabled_mutation_trigger',
+        'ALTER TABLE run_context_policies DISABLE TRIGGER run_context_policies_no_update_delete',
+      ],
+      [
+        'weakened_validator',
+        'CREATE OR REPLACE FUNCTION run_context_policy_valid(value jsonb) RETURNS boolean LANGUAGE plpgsql IMMUTABLE STRICT AS $$ BEGIN RETURN true; END; $$',
+      ],
+      [
+        'wrong_owner_guard',
+        'CREATE OR REPLACE FUNCTION run_context_policies_guard_owner() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END; $$',
+      ],
+      [
+        'wrong_policy_fk',
+        'ALTER TABLE run_context_policies DROP CONSTRAINT run_context_policies_run_id_fkey; ALTER TABLE run_context_policies ADD CONSTRAINT run_context_policies_run_id_fkey FOREIGN KEY(run_id) REFERENCES agent_runs(id) ON DELETE CASCADE',
+      ],
+      ['unstamped_policy_schema', "DELETE FROM schema_migrations WHERE version='0019'"],
+      ['future_policy_version', "INSERT INTO schema_migrations(version) VALUES('0020')"],
+    ]) {
+      await fresh(`context0019_${name}`, async (url) => {
+        await withDeployment(url, { migrationsDirectory: sourceMigrationsDirectory }, (database) =>
+          database.initialize(),
+        );
+        await withClient(url, (client) => client.query(CANARIES + HISTORY_CANARIES));
+        await withClient(url, (client) => client.query(mutation));
+        const before = await withClient(url, signature);
+        await withDeployment(
+          url,
+          { migrationsDirectory: sourceMigrationsDirectory },
+          async (database) => {
+            assert.equal((await database.classify()).kind, 'unknown');
+            await rejectsCode(() => database.initialize(), 'unknown_database_refused');
+            await rejectsCode(() => database.upgrade(), 'unsupported_upgrade_source');
+          },
+        );
+        assert.deepEqual(await withClient(url, signature), before);
+        record(`context0019_${name}_refused_without_repair`);
+      });
+    }
+    await fresh('context0019_forged_version_without_policy_boundary', async (url) => {
+      await withDeployment(url, { migrationsDirectory: historyMigrationsDirectory }, (database) =>
+        database.initialize(),
+      );
+      await withClient(url, (client) =>
+        client.query("INSERT INTO schema_migrations(version) VALUES('0019')"),
+      );
+      await withDeployment(
+        url,
+        { migrationsDirectory: sourceMigrationsDirectory },
+        async (database) => {
+          assert.equal((await database.classify()).kind, 'unknown');
+          await rejectsCode(() => database.upgrade(), 'unsupported_upgrade_source');
+        },
+      );
+      record('context0019_forged_version_without_policy_boundary_refused');
     });
     // Create an extension migration set outside the repository. The first step
     // commits a canary once. The second step fails or is terminated mid-transaction.

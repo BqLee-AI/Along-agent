@@ -124,4 +124,19 @@ export const HARNESS_TOOL_DEFINITIONS = [
     parameters: workspaceParameters({}),
   },
   ...WORKSPACE_TOOL_DEFINITIONS,
+  {
+    name: 'read_run_observation',
+    description:
+      '分页回取本 Run 已接受的原观察，不重新读取当前文件；不是新的全文读取或保存后核实。offset/end 按 Unicode 标量或数组元素计数，下一页从实际 end 继续。',
+    risk: 'low' as const,
+    parameters: workspaceParameters(
+      {
+        source_invocation_id: { type: 'string', format: 'uuid' },
+        field: { type: 'string', enum: ['content', 'matches', 'entries', 'failures'] },
+        offset: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+        limit: { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER },
+      },
+      ['source_invocation_id', 'field', 'offset', 'limit'],
+    ),
+  },
 ];

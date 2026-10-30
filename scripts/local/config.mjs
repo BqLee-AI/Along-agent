@@ -24,6 +24,9 @@ const modelSchema = z
     apiKey: z.string().refine((value) => !value.includes('\0')),
     maxIterations: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
     maxTokens: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+    completionCap: z.number().int().positive().safe(),
+    modelWindowTokens: z.number().int().positive().safe().nullable().optional(),
+    reserveTokens: z.number().int().nonnegative().safe().optional(),
   })
   .strict();
 const configSchema = z

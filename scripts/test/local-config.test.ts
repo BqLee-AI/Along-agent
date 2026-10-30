@@ -15,6 +15,7 @@ import {
 } from '../local/config.mjs';
 import type { LocalConfig } from '../local/config.mjs';
 import { withInstallationLock } from '../local/lock.mjs';
+import { installationEnvironment } from '../local/compose.mjs';
 
 const execute = promisify(execFile);
 const directories: string[] = [];
@@ -50,6 +51,58 @@ async function privateAccess(path: string, directory: boolean) {
 }
 
 describe('strict local configuration', () => {
+  it('requires an explicit independent completion cap and forwards optional context policy limits', () => {
+    const model = {
+      baseUrl: 'https://authorized.invalid',
+      name: 'explicit-model',
+      apiKey: 'fixture-key',
+      maxIterations: 2,
+      maxTokens: 64000,
+      completionCap: 512,
+    };
+    const config = createConfig({ mode: 'new', tzdbVersion: '2025b', model });
+    expect(config.model?.completionCap).toBe(512);
+    const environment = installationEnvironment(config);
+    expect(environment.HARNESS_COMPLETION_CAP).toBe('512');
+    expect(environment.HARNESS_MODEL_WINDOW_TOKENS).toBe('');
+    expect(environment.HARNESS_CONTEXT_RESERVE_TOKENS).toBe('0');
+    const configured = createConfig({
+      mode: 'new',
+      tzdbVersion: '2025b',
+      model: { ...model, modelWindowTokens: 32768, reserveTokens: 128 },
+    });
+    expect(installationEnvironment(configured).HARNESS_MODEL_WINDOW_TOKENS).toBe('32768');
+    expect(installationEnvironment(configured).HARNESS_CONTEXT_RESERVE_TOKENS).toBe('128');
+    expect(
+      installationEnvironment(
+        createConfig({
+          mode: 'new',
+          tzdbVersion: '2025b',
+          model: { ...model, modelWindowTokens: null },
+        }),
+      ).HARNESS_MODEL_WINDOW_TOKENS,
+    ).toBe('');
+    const { completionCap: omitted, ...legacyModel } = model;
+    expect(omitted).toBe(512);
+    expect(() => createConfig({ ...config, model: legacyModel })).toThrow('CONFIG_INVALID');
+    for (const invalid of [
+      { completionCap: 0 },
+      { completionCap: -1 },
+      { completionCap: 1.5 },
+      { completionCap: Number.MAX_SAFE_INTEGER + 1 },
+      { completionCap: '512' },
+      { modelWindowTokens: 0 },
+      { modelWindowTokens: 1.5 },
+      { reserveTokens: -1 },
+      { reserveTokens: 0.5 },
+      { reserveTokens: Number.MAX_SAFE_INTEGER + 1 },
+    ])
+      expect(() => createConfig({ ...config, model: { ...model, ...invalid } })).toThrow(
+        'CONFIG_INVALID',
+      );
+    expect(installationEnvironment(fixture()).HARNESS_COMPLETION_CAP).toBe('');
+  });
+
   it('new installations fix independent identities and credentials once, then round-trip unchanged', async () => {
     const { directory, file } = await location();
     const config = fixture();
@@ -79,6 +132,7 @@ describe('strict local configuration', () => {
         apiKey: '',
         maxIterations: 7,
         maxTokens: 1234,
+        completionCap: 256,
       },
     };
     await saveConfig(file, createConfig(original));
@@ -98,6 +152,7 @@ describe('strict local configuration', () => {
         apiKey: 'original-model-key',
         maxIterations: 7,
         maxTokens: 1234,
+        completionCap: 256,
       },
       registryFile: join(tmpdir(), 'original-registry.json'),
     };
@@ -131,6 +186,7 @@ describe('strict local configuration', () => {
           apiKey: 'k',
           maxIterations: 1,
           maxTokens: 1,
+          completionCap: 1,
           unknown: true,
         },
       },
@@ -176,6 +232,7 @@ describe('strict local configuration', () => {
         apiKey: 'fixture-key',
         maxIterations: 1,
         maxTokens: 32,
+        completionCap: 16,
       },
     };
     await saveConfig(file, next);
@@ -237,6 +294,7 @@ describe('strict local configuration', () => {
       apiKey: 'fixture-key',
       maxIterations: 2,
       maxTokens: 2048,
+      completionCap: 512,
     };
     const origin = `http://localhost:${original.ports.web}`;
     const next = await updateConfig(file, (current: LocalConfig) => ({

@@ -128,14 +128,24 @@ async function newInstallationInput(mode) {
         : '配置已授权模型？填 y；暂不配置回车',
       'n',
     );
-    if (model === 'y')
+    if (model === 'y') {
       values.model = {
         baseUrl: await ask('HARNESS_MODEL_BASE_URL（隐藏输入）', undefined, true),
         name: await ask('HARNESS_MODEL（不提供默认替代值）', undefined, true),
         apiKey: await ask('HARNESS_MODEL_API_KEY（隐藏输入；原服务无认证才留空）', '', true),
         maxIterations: Number(await ask('HARNESS_MAX_ITERATIONS', 24)),
         maxTokens: Number(await ask('HARNESS_MAX_TOKENS', 64000)),
+        completionCap: Number(
+          await ask('HARNESS_COMPLETION_CAP（必填：独立单次输出上限；不借用 Run 预算）'),
+        ),
+        reserveTokens: Number(await ask('HARNESS_CONTEXT_RESERVE_TOKENS', 0)),
       };
+      const window = await ask(
+        'HARNESS_MODEL_WINDOW_TOKENS（可选：有依据的模型窗口；未知留空）',
+        '',
+      );
+      values.model.modelWindowTokens = window === '' ? null : Number(window);
+    }
     return values;
   } finally {
     input.close();
@@ -146,7 +156,8 @@ const explanations = {
   CONFIG_MISSING: '缺少私有配置；先运行 local:init --new 或 --adopt。不要重建原安装密钥。',
   CONFIG_INPUT_REQUIRED:
     '首次初始化需在交互终端显式选择 --new 或 --adopt。已有部署请先恢复原配置和登记。',
-  CONFIG_INVALID: '私有 JSON 缺少必填项或字段无效；核对指南，不要用新密钥补原安装。',
+  CONFIG_INVALID:
+    '私有 JSON 缺少必填项或字段无效；已配置模型必须显式补 model.completionCap（独立单次输出上限），不能借用 maxTokens。核对指南，不要重建配置或替换原安装密钥。',
   CONFIG_PERMISSIONS: '配置目录或文件不是当前用户专有；请使用专用私有目录并修复权限。',
   CONFIG_EXISTS: '配置已存在；重用它，不覆盖原值。',
   PORT_IN_USE: '固定端口已被占用；核实原进程归属并按原部署流程停写，不会抢端口或杀未知进程。',

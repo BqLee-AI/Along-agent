@@ -1,6 +1,8 @@
 import { accessSync, constants } from 'node:fs';
 import { createHarnessModelTransport } from './harness-model.js';
 import type { HarnessServices } from './harness-process.js';
+import { createContextPolicy } from './context-policy.js';
+import { measureHarnessContext } from './harness-context.js';
 
 /** Called once by server startup. Missing configuration never enables a fixture. */
 export function loadHarnessServices(
@@ -29,11 +31,28 @@ export function loadHarnessServices(
     maxTokens < 1
   )
     return null;
+  let contextPolicy;
+  try {
+    contextPolicy = createContextPolicy({
+      model,
+      completionCap: Number(environment.HARNESS_COMPLETION_CAP),
+      ...(!environment.HARNESS_MODEL_WINDOW_TOKENS
+        ? {}
+        : { modelWindowTokens: Number(environment.HARNESS_MODEL_WINDOW_TOKENS) }),
+      ...(environment.HARNESS_CONTEXT_RESERVE_TOKENS === undefined
+        ? {}
+        : { reserveTokens: Number(environment.HARNESS_CONTEXT_RESERVE_TOKENS) }),
+    });
+  } catch {
+    return null;
+  }
   return {
     binaryPath,
     libraryPath: environment.HARNESS_LIBRARY_PATH || '/app/harness/lib',
     maxIterations,
     maxTokens,
+    contextPolicy,
+    measure: measureHarnessContext,
     model: createHarnessModelTransport({ baseUrl, model, ...(apiKey ? { apiKey } : {}) }),
   };
 }

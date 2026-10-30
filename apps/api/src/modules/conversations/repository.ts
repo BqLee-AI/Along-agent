@@ -175,8 +175,8 @@ export async function insertMessage(
   return id;
 }
 
-// harness/v2 admits 64 visible messages. Freeze the newest 63 predecessors plus
-// the complete accepted user input; timestamps retain PostgreSQL precision.
+// Freeze the newest 63 visible predecessors plus the complete accepted input.
+// PostgreSQL preserves microsecond ordering; current input is always last.
 export async function listHarnessMessageRefs(
   client: Pick<Pool | PoolClient, 'query'>,
   binding: Pick<RunContext, 'ownerId' | 'conversationId' | 'userMessageId'>,
@@ -203,7 +203,8 @@ export async function listHarnessMessageRefs(
   return rows.map((row) => row.id);
 }
 
-// Both initial execution and resume resolve only frozen, ordered references.
+// Execution and resume resolve only frozen, ordered references, never reselect
+// later history. Every message is owner/conversation/visible-role scoped.
 export async function readHarnessMessages(
   client: Pick<Pool | PoolClient, 'query'>,
   binding: Pick<RunContext, 'ownerId' | 'conversationId' | 'userMessageId'>,

@@ -10,12 +10,13 @@ import {
   HarnessRequestSchema,
   HarnessStartSchema,
   type HarnessRequest,
-  type HarnessModelReply,
   type RunView,
 } from '@along/contracts';
 import type { ToolOutcome } from '../../src/modules/tools/contracts.js';
 import { cancelConversationRun } from '../../src/modules/conversations/service.js';
 import { runNativeHarness } from '../../src/modules/conversations/harness-process.js';
+import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
+import { measureHarnessContext } from '../../src/modules/conversations/harness-context.js';
 import {
   digestInvocationArgs,
   executeNonTransactionalInvocation,
@@ -34,6 +35,7 @@ import {
 let database: IntegrationDatabase;
 let directory: string;
 let binaryPath: string;
+const contextPolicy = createContextPolicy({ completionCap: 32, model: 'core-native-protocol' });
 
 beforeAll(async () => {
   binaryPath = process.env.HARNESS_BINARY ?? '';
@@ -85,10 +87,12 @@ test('D8.unknown-core-native', async () => {
   let invocationId = '';
   let effectBefore = Buffer.alloc(0);
   let modelCalls = 0;
-  let pendingModel: { ref: string; reply: HarnessModelReply } | null = null;
+  let pendingModel: z.infer<typeof HarnessModelReplySchema> | undefined;
+  let pendingModelRef: string | undefined;
   const start = HarnessStartSchema.parse({
     protocol: HARNESS_PROTOCOL_VERSION,
     type: 'start',
+    context_policy: contextPolicy,
     messages: [{ message_id: messageId, role: 'user', content: 'Run the fsync probe once.' }],
     tools: [
       { name: toolId, description: 'Test-only append and fsync.', parameters: {}, risk: 'low' },
@@ -104,7 +108,8 @@ test('D8.unknown-core-native', async () => {
       libraryPath: process.env.HARNESS_LIBRARY_PATH,
       maxIterations: 4,
       maxTokens: 100,
-      model: () => {
+      contextPolicy,
+      model: async function* () {
         throw new Error('model transport is handled at the protocol counterpart');
       },
     },
@@ -113,9 +118,11 @@ test('D8.unknown-core-native', async () => {
     handleRequest: async (request) => {
       requests.push(request);
       switch (request.type) {
-        case 'model': {
+        case 'measure_context':
+          return measureHarnessContext(request, start.tools, contextPolicy);
+        case 'model':
           modelCalls++;
-          const reply = HarnessModelReplySchema.parse({
+          pendingModel = HarnessModelReplySchema.parse({
             message:
               modelCalls === 1
                 ? {
@@ -134,17 +141,16 @@ test('D8.unknown-core-native', async () => {
                 : { content: 'The probe returned a result.', tool_calls: [] },
             usage: { total_tokens: 5 },
           });
-          if (reply.message.content) {
-            pendingModel = { ref: request.request_ref, reply };
-            return { type: 'delta', delta: reply.message.content };
-          }
-          return { type: 'complete', reply };
-        }
+          pendingModelRef = pendingModel.message.content ? request.request_ref : undefined;
+          return pendingModel.message.content
+            ? { type: 'delta', delta: pendingModel.message.content }
+            : { type: 'complete', reply: pendingModel };
         case 'model_next': {
-          if (!pendingModel || request.model_ref !== pendingModel.ref)
+          if (!pendingModel || request.model_ref !== pendingModelRef)
             throw new Error('unexpected model continuation');
-          const reply = pendingModel.reply;
-          pendingModel = null;
+          const reply = pendingModel;
+          pendingModel = undefined;
+          pendingModelRef = undefined;
           return { type: 'complete', reply };
         }
         case 'reserve': {
@@ -283,20 +289,23 @@ test('D8.cancelled-core-native', async () => {
   const reservations: string[] = [];
   const cancelled: RunView[] = [];
   let modelCalls = 0;
-  let pendingModel: { ref: string; reply: HarnessModelReply } | null = null;
+  let pendingModel: z.infer<typeof HarnessModelReplySchema> | undefined;
+  let pendingModelRef: string | undefined;
   await runNativeHarness({
     services: {
       binaryPath,
       libraryPath: process.env.HARNESS_LIBRARY_PATH,
       maxIterations: 4,
       maxTokens: 100,
-      model: () => {
+      contextPolicy,
+      model: async function* () {
         throw new Error('model transport is handled at the protocol counterpart');
       },
     },
     start: HarnessStartSchema.parse({
       protocol: HARNESS_PROTOCOL_VERSION,
       type: 'start',
+      context_policy: contextPolicy,
       messages: [{ message_id: randomUUID(), role: 'user', content: 'Run the fsync probe once.' }],
       tools: [
         { name: toolId, description: 'Test-only append and fsync.', parameters: {}, risk: 'low' },
@@ -310,10 +319,24 @@ test('D8.cancelled-core-native', async () => {
     handleRequest: async (request) => {
       requests.push(request);
       switch (request.type) {
-        case 'model': {
+        case 'measure_context':
+          return measureHarnessContext(
+            request,
+            [
+              {
+                name: toolId,
+                description: 'Test-only append and fsync.',
+                parameters: {},
+                risk: 'low',
+              },
+            ],
+            contextPolicy,
+          );
+        case 'model':
           modelCalls++;
-          // A buggy Core still gets a legal continuation, not a fixture failure.
-          const reply = HarnessModelReplySchema.parse({
+          // A buggy Core that executes after cancel gets a LEGAL second model
+          // answer, not a fixture exception masking its forbidden file effect.
+          pendingModel = HarnessModelReplySchema.parse({
             message:
               modelCalls === 1
                 ? {
@@ -332,17 +355,16 @@ test('D8.cancelled-core-native', async () => {
                 : { content: 'The probe returned a result.', tool_calls: [] },
             usage: { total_tokens: 5 },
           });
-          if (reply.message.content) {
-            pendingModel = { ref: request.request_ref, reply };
-            return { type: 'delta', delta: reply.message.content };
-          }
-          return { type: 'complete', reply };
-        }
+          pendingModelRef = pendingModel.message.content ? request.request_ref : undefined;
+          return pendingModel.message.content
+            ? { type: 'delta', delta: pendingModel.message.content }
+            : { type: 'complete', reply: pendingModel };
         case 'model_next': {
-          if (!pendingModel || request.model_ref !== pendingModel.ref)
+          if (!pendingModel || request.model_ref !== pendingModelRef)
             throw new Error('unexpected model continuation');
-          const reply = pendingModel.reply;
-          pendingModel = null;
+          const reply = pendingModel;
+          pendingModel = undefined;
+          pendingModelRef = undefined;
           return { type: 'complete', reply };
         }
         case 'reserve': {
@@ -485,6 +507,7 @@ test('D8.cancelled-core-native', async () => {
 test('native terminates boundedly when valid bootstrap observations cannot fit serialized model history', async () => {
   const messageId = randomUUID();
   const observations = Array.from({ length: 4 }, () => ({
+    view: 'full',
     invocation_id: randomUUID(),
     tool_id: 'workspace_read',
     result: {
@@ -501,6 +524,7 @@ test('native terminates boundedly when valid bootstrap observations cannot fit s
   const start = HarnessStartSchema.parse({
     protocol: HARNESS_PROTOCOL_VERSION,
     type: 'start',
+    context_policy: contextPolicy,
     messages: [{ message_id: messageId, role: 'user', content: 'Use accepted read observations.' }],
     tools: [
       {
@@ -536,7 +560,8 @@ test('native terminates boundedly when valid bootstrap observations cannot fit s
       libraryPath: process.env.HARNESS_LIBRARY_PATH,
       maxIterations: 12,
       maxTokens: 1000,
-      model: () => {
+      contextPolicy,
+      model: async function* () {
         throw new Error('oversized context must not call model transport');
       },
     },
