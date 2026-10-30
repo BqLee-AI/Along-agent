@@ -1,6 +1,6 @@
 # 仓颉原生 Harness
 
-生产源位于本目录，目标平台 Linux x86_64，仅使用继承的 stdin/stdout 交换 `harness/v2`，不执行或写出 v1；snapshot 仅接受/输出 `version: 2`。不监听端口、不持有模型凭据、不包含 fixture 或网络 transport。准确 wire DTO 见 `packages/contracts/src/harness.ts`；身份、授权、调用预约、效果、批准与持久事实由 TypeScript 裁决。
+生产源位于本目录，目标平台 Linux x86_64，仅使用继承的 stdin/stdout 交换 `harness/v3`，不混跑旧 wire；snapshot 仍仅接受/输出 `version: 2`。不监听端口、不持有模型凭据、不包含 fixture 或网络 transport。准确 wire DTO 见 `packages/contracts/src/harness.ts`；身份、授权、调用预约、效果、批准与持久事实由 TypeScript 裁决。
 
 ## 可复现构建与安装
 
@@ -9,6 +9,10 @@ Linux/WSL 安装 Bun1.4.2、Docker 后执行根入口 `bun run build:harness`，
 也可执行 `docker build --target harness-artifact --output type=local,dest=/tmp/along-harness -f infra/docker/Dockerfile .`。导出包括 `bin/along-harness`、实际链接的 SDK/stdx 动态库闭包 `lib/`、官方及第三方许可 `notices/`、源与产物 SHA256。API 使用 `HARNESS_BINARY=/tmp/along-harness/bin/along-harness` 和 `HARNESS_LIBRARY_PATH=/tmp/along-harness/lib`；直接运行二进制使用 `LD_LIBRARY_PATH=/tmp/along-harness/lib`。正式 API 镜像将该构建阶段复制到 `/app/harness/` 并配置这些路径。
 
 `bun run harness:prepare /opt/along-toolchain` 是显式 Linux 下载入口，先校验再解包；依赖 bash/curl/sha256sum/tar/unzip，构建不运行 cjpm hooks 或下载隐式依赖。Docker builder 是正式编译环境；原生 Windows 和其他架构不在该 artifact lock 支持范围。
+
+Docker 使用 BuildKit 下载缓存保留 SDK/stdx 压缩包，构建失败后重试不必丢弃已完成的下载。文件按锁定 SHA-256 命名，不让不同版本共用一个文件名；每次仍按 `artifacts.lock` 校验，再重新解包编译，不信任全局 SDK 或旧 native。缓存由本机 builder 管理，可被清理，不纳入源码、镜像运行层或发布输入；换 builder 或缓存缺失时仍需下载官方产物。
+
+若下载慢或出现 HTTP/2、TLS 中断，先比较宿主与 Docker 的真实网络路径，不能只凭协议错误认定上游限速。TUN/fake-IP 可能让国内官方站点也走代理；仅设置 `--noproxy` 不保证绕开 TUN。可以在宿主使用 curl 绑定物理网卡，并用当次解析到的官方真实 IP 保持域名、SNI 和证书校验；不要永久写死 IP、关闭 TLS 校验或切换全局代理。完整包仍须匹配锁定 SHA-256，发布继续走原安装的成套升级入口。
 
 仓库将 shell 脚本及其 `artifacts.lock` 固定为 LF，避免 Windows checkout 的 CRLF 使正式容器构建失败；不修改开发者全局 Git 配置。
 
@@ -32,6 +36,8 @@ unknown 与取消后迟到调用另验证真实非事务调用核心到 native �
 ## 执行与失败合同
 
 - 两端验证有界 UTF-8 NDJSON、版本、精确字段、唯一请求引用和对应回答。每次仅一个请求等待且立即 flush；帧上限1MiB。不完整帧、等待输入时 EOF、畸形/错配/超限失败并返回脱敏错误，不将 raw stderr/provider body 暴露给用户。
+- 模型 transport 请求真实 `stream:true`。native 逐次接收当前模型请求的增量或完整结果；每个正文增量先通过原 `answer` 请求取得 TS 持久接受回执，再以相关的 `model_next` 拉取后续，仍只有一个请求等待。最终完整结果只用于工具解析、模型历史及用量，不重复发送正文。工具参数必须完整并校验后才能执行；中断/畸形流明确失败，取消关闭 provider reader，不把完整 JSON 或打字动画作为流式回退。
+- 公开 `answer.delta` 非空且最多4000个 UTF-16 单位，传输只在真实 provider 增量过大时按 Unicode 标量边界细分；每帧对应一次接受。已出现的部分正文不表示成功，最终用量和工具决议仍独立核对。默认系统上下文指示简体中文回复，用户明确指定其他语言时遵从；此指令同样用于批准恢复，不由前端翻译。
 - 聚合 bootstrap/快照观察与 model 请求按实际 JSON 序列化核验1MiB，native 另累计转义后消息字节并在发帧前核验；无法完整承载时以 `HARNESS_CONTEXT_LIMIT` 有界失败，不截断历史或发出超限帧。64个已接受工具引用达到上限后不再预约；等待快照先核验其等价 bootstrap，恢复在分配新 attempt 前再次核验，不建立无法承载的恢复点。
 - native 从可信消息/工具描述/实际接受观察构造上下文，解析最多一个提议，预约 `harness/N`，以原 UUID invoke，逐次等待真实结果后才选择下一步；即使独立读取也不并行。TS transport 发送 `parallel_tool_calls:false`，但该参数不保证供应商遵守；provider 回复 schema、共享回复 schema 与 native 均拒绝单响应多个调用，不只取第一项。参数仍经 TS strict schema 重验。工具调用同时附带的非空 model content 先经原 `answer` 通道展示，并保留为 assistant 模型历史；这是简短可调整的可见计划/进度，不是隐藏推理。
 - 当前 attempt 的函数历史由 native 保持标准结构：`assistant.tool_calls` 保存实际提议，`role=tool` 以原 `tool_call_id` 配对真实结果；不把工具提议拼成普通 assistant 文本来替代调用。TS 原样传输该消息结构，不组织历史或选择后续工具。批准恢复的 bootstrap 可将已接受事实作为明确数据摘要纳入上下文；snapshot 仍只保存事实引用，不持久化完整函数历史。

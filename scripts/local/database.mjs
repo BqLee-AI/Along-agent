@@ -825,7 +825,9 @@ export class DeploymentDatabase {
         actual.security_definer ||
         actual.config !== null ||
         !body ||
-        actual.body.trim() !== body.trim()
+        // Migration checkout line endings are representation, not guard changes.
+        // Preserve every other character and all function/trigger attributes above.
+        actual.body.replaceAll('\r\n', '\n').trim() !== body.replaceAll('\r\n', '\n').trim()
       )
         fail('baseline_triggers_mismatch');
     }

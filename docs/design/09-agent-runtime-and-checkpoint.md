@@ -26,12 +26,13 @@ Observed / Required / Proposed / Deferred 同 01；运行记录只写进对应�
 
 ## 2. 接口语义与正式传输
 
-HTTP 消息、Run 读/取消/恢复路由见 [conversations API](../api/conversations/conversations_routes.md)。TS adapter 与同容器固定 native 产物只通过 `harness/v2` UTF-8 NDJSON 双向交互，执行/写出快照仅 `version: 2`；不执行或写出 v1。`shell=false`，子进程仅得到必要 locale/运行库配置，不继承 DB/auth/cookie/model key。
+HTTP 消息、Run 读/取消/恢复路由见 [conversations API](../api/conversations/conversations_routes.md)。TS adapter 与同容器固定 native 产物只通过 `harness/v3` UTF-8 NDJSON 双向交互，执行/写出快照仍仅 `version: 2`；不混跑旧 wire。`shell=false`，子进程仅得到必要 locale/运行库配置，不继承 DB/auth/cookie/model key。
 
-- TS→native：`start/reply/cancel`；native→TS：`model/reserve/invoke/snapshot/suspend/answer/finish`。
+- TS→native：`start/reply/cancel`；native→TS：`model/model_next/reserve/invoke/snapshot/suspend/answer/finish`。
 - 具体 strict schema 与公开 Run DTO 的唯一类型源为 [contracts/harness.ts](../../packages/contracts/src/harness.ts)。两端拒绝未知字段、版本、畸形 UTF-8/JSON、残缺 EOF 与超过 1MiB 的累计帧；发送前也检查字节大小，不静默截断上下文。
 - `request_ref/reply_to` 仅关联当前 pipe，不能替代持久身份；一个请求等待 ack 后再继续。snapshot/suspend/finish 的 ack 必须在 TS 对应事实提交后返回。
 - TS model transport 仅使用部署服务端固定的 OpenAI-compatible chat-completions 配置做 HTTP/协议转换；普通用户不配置 provider/BYOK。仓颉构造上下文并解析提议、选择工具与决定下一轮。未配置时新 harness Run 在任何写入/SSE 之前返回 `503 HARNESS_UNAVAILABLE`，不启用测试 transport。
+- 模型 transport 请求 `stream:true`，逐次给出当前模型响应的可见增量或完整结果；native 每次将增量经 `answer` 取得 TS 持久回执后再以 `model_next` 拉取，保持单请求等待和背压。完整结果只用于工具/历史/用量，正文不重发；参数未完整时不执行工具。部分接受文本不是成功，畸形/中断流明确失败，取消关闭在途 reader，不保留非流式回退。原生系统上下文默认简体中文、明确语言要求优先。
 - 每模型响应最多一个工具提议。transport 发送 `parallel_tool_calls:false`，但不保证供应商遵守；provider/共享回复 schema 与 native 严格拒绝多个调用，不只取第一项。native 明确要求一次选择一个工具、等待实际观察后才选择下一步，独立读取亦然。运行说明、固定工具链和分发 notices 见 [harness README](../../apps/harness/README.md)。
 - native 持有标准函数消息历史：实际提议存为 `assistant.tool_calls`，实际结果存为 `role=tool` 并使用对应 `tool_call_id`；TS 仅按结构原样 transport，不用普通 assistant 文本模拟工具调用。恢复 bootstrap 中的已接受观察可以是明确数据摘要；snapshot 仍只存事实引用，不扩展为完整函数历史。
 - 部署默认预算为24迭代、64000 token，可由服务端 `HARNESS_MAX_ITERATIONS/HARNESS_MAX_TOKENS` 配置；须为正安全整数，不能由 Web/模型请求覆盖。Run 接纳时持久冻结，仓颉按跨 attempt 累计迭代/可得 usage 强制，不因批准恢复或部署后来改配置重置。缺失 usage 的累计值保持未知，不字符估算、不编造费用；超预算后不安排后续模型/工具，保留已发生事实并失败。默认值不是实际 R1 预算校准证据，无法证明的 token/费用上限不作保证。
@@ -89,7 +90,7 @@ attempt: running → done | failed | fenced_out
 
 ## 9. R1 文档批准与正常未知终结（Observed / Required）
 
-[14 §7](14-r1-document-task-loop.md) 与当前 `harness/v2`/snapshot2 实现共同说明 task/document 批准判别、有限 workspace 上下文和同 Run 文档批准恢复；不增加事件词或任意恢复入口。workspace 仅有 `workspace_list/workspace_grep/workspace_read/workspace_propose_replace/workspace_apply_replace` 五工具：TS 提供授权/工具事实，仓颉决定检索、全文查证、提案、批准后 apply 和新回读的顺序，不由 TS 固定脚本代跑。
+[14 §7](14-r1-document-task-loop.md) 与正式 `harness/v3`/snapshot2 实现共同说明 task/document 批准判别、有限 workspace 上下文和同 Run 文档批准恢复；不增加事件词或任意恢复入口。workspace 仅有 `workspace_list/workspace_grep/workspace_read/workspace_propose_replace/workspace_apply_replace` 五工具：TS 提供授权/工具事实，仓颉决定检索、全文查证、提案、批准后 apply 和新回读的顺序，不由 TS 固定脚本代跑。
 
 - document 提案绑定本 Run 接受的全文 read 和精确替换，按钮只授权原冻结内容。恢复 DTO 使用 `kind=document`、`approval_id`、`pending|approved|rejected`、可空 `apply_invocation_id`，不携带伪造 task_id；等待快照只存原 invocation/approval 身份。
 - 每个批准仅绑定一个 `non_transactional` apply invocation；批准与写入分离，接受 applied 后仍需新 `workspace_read` 证明实际内容。done 前 TS 核对真实文档效果链，不把批准或模型自述当完成。

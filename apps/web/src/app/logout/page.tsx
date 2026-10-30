@@ -1,4 +1,4 @@
-import AccountScreen from '../account/AccountScreen';
+import AccountScreen from '@/features/account/AccountScreen';
 
 export const dynamic = 'force-dynamic';
 

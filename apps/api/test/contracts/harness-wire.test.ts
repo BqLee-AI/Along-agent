@@ -13,6 +13,7 @@ import {
   HarnessStartSchema,
   type HarnessRequest,
   type HarnessReply,
+  type HarnessModelReply,
 } from '@along/contracts';
 import {
   executeNonTransactionalInvocation,
@@ -69,6 +70,7 @@ test('D8.wire-rejection', async () => {
     });
     const requests: HarnessRequest[] = [];
     let modelCalls = 0;
+    let pendingModel: { ref: string; reply: HarnessModelReply } | null = null;
     let invocationId = '';
     let actualOutcome: unknown;
     let acceptedBefore: unknown[] = [];
@@ -122,9 +124,9 @@ test('D8.wire-rejection', async () => {
         requests.push(request);
         let value: unknown;
         switch (request.type) {
-          case 'model':
+          case 'model': {
             modelCalls++;
-            value = HarnessModelReplySchema.parse({
+            const modelReply = HarnessModelReplySchema.parse({
               message:
                 modelCalls === 1
                   ? {
@@ -143,7 +145,19 @@ test('D8.wire-rejection', async () => {
                   : { content: 'The probe returned a result.', tool_calls: [] },
               usage: { total_tokens: 5 },
             });
+            if (modelReply.message.content) {
+              pendingModel = { ref: request.request_ref, reply: modelReply };
+              value = { type: 'delta', delta: modelReply.message.content };
+            } else value = { type: 'complete', reply: modelReply };
             break;
+          }
+          case 'model_next': {
+            if (!pendingModel || request.model_ref !== pendingModel.ref)
+              throw new Error('unexpected model continuation');
+            value = { type: 'complete', reply: pendingModel.reply };
+            pendingModel = null;
+            break;
+          }
           case 'reserve': {
             const reserved = await reserveInvocation(database.pool, ctx, {
               callKey: request.call_key,

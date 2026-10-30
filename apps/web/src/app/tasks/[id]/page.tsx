@@ -1,14 +1,22 @@
-import { apiGet } from '../../../lib/api';
-import type { Me, TaskDetail, TaskEventItem } from '../../../lib/types';
-import CancelAction from './CancelAction';
-import { pageReturnTo, type PageQuery } from '../../../lib/account-navigation';
+import Link from 'next/link';
+import { apiGet } from '@/lib/api';
+import { MeSchema, TaskDetailSchema } from '@/lib/types';
+import { pageReturnTo, type PageQuery } from '@/lib/account-navigation';
+import { PageHeading } from '@/components/page';
+import { Button } from '@lorelum/lumen-ui/components/button';
+import { TaskContent } from '@/features/reminders/task-content';
+import { TaskEvents } from '@/features/reminders/task-events';
+import { TaskRecovery } from '@/features/reminders/task-recovery';
+import {
+  checked,
+  invalidResponse,
+  snapshot,
+  taskPath,
+  taskEventsPath,
+  TaskEventsPageSchema,
+} from '@/features/reminders/data';
 
 export const dynamic = 'force-dynamic';
-
-interface EventsPage {
-  items: TaskEventItem[];
-  next_cursor: string | null;
-}
 
 export default async function TaskDetailPage({
   params,
@@ -19,112 +27,56 @@ export default async function TaskDetailPage({
 }) {
   const { id } = await params;
   const returnTo = pageReturnTo(`/tasks/${encodeURIComponent(id)}`, await searchParams);
-  const [detailResult, eventsResult, meResult] = await Promise.all([
-    apiGet<TaskDetail>(`/api/v1/tasks/${id}`, returnTo),
-    apiGet<EventsPage>(`/api/v1/tasks/${id}/events?limit=50`, returnTo),
-    apiGet<Me>('/api/v1/me', returnTo),
+  const [detailResponse, eventsResponse, identityResponse] = await Promise.all([
+    apiGet<unknown>(taskPath(id), returnTo),
+    apiGet<unknown>(taskEventsPath(id), returnTo),
+    apiGet<unknown>('/api/v1/me', returnTo),
   ]);
-  if (!detailResult.ok) {
-    return (
-      <section>
-        <h1>任务</h1>
-        <p className="error">{detailResult.message}</p>
-      </section>
-    );
-  }
-  if (!meResult.ok)
-    return (
-      <section>
-        <h1>任务</h1>
-        <p className="error" role="alert">
-          {meResult.message}
-        </p>
-      </section>
-    );
-  const task = detailResult.data;
-  const events = eventsResult.ok ? eventsResult.data.items : [];
+  const parsedDetail = checked(detailResponse, TaskDetailSchema);
+  const detail =
+    parsedDetail.ok && parsedDetail.data.task_id !== id ? invalidResponse : parsedDetail;
+  const events = checked(eventsResponse, TaskEventsPageSchema);
+  const me = checked(identityResponse, MeSchema);
   return (
-    <section>
-      <h1>任务 {task.task_id.slice(0, 8)}</h1>
-      <p className="subtitle">
-        {task.state} · {task.fire_at_local}（{task.timezone_id}）
-      </p>
-      <div className="panel">
-        <dl>
-          <dt className="muted">登记回执</dt>
-          <dd>{task.schedule_receipt ?? '无（未确认调度成功）'}</dd>
-          <dt className="muted">状态版本</dt>
-          <dd>{task.state_version}</dd>
-          <dt className="muted">创建时间</dt>
-          <dd>{task.created_at}</dd>
-          {task.recreated_from ? (
-            <>
-              <dt className="muted">重约自</dt>
-              <dd>{task.recreated_from}</dd>
-            </>
-          ) : null}
-        </dl>
-      </div>
-      <CancelAction
-        taskId={task.task_id}
-        state={task.state}
-        csrfToken={meResult.ok ? meResult.data.csrf_token : null}
+    <section className="min-w-0 space-y-8">
+      <PageHeading
+        title="提醒任务"
+        description="冻结时间、通知与事件各自保留真实记录。"
+        actions={
+          <div className="flex flex-wrap gap-3">
+            <Button
+              variant="glass"
+              color="default"
+              role="link"
+              nativeButton={false}
+              render={<Link href="/tasks" />}
+            >
+              返回提醒任务
+            </Button>
+            <Button
+              variant="clear"
+              color="default"
+              role="link"
+              nativeButton={false}
+              render={<Link href={`/activity?${new URLSearchParams({ task_id: id })}`} />}
+            >
+              在活动中定位
+            </Button>
+          </div>
+        }
       />
-      <section aria-labelledby="notifications-heading">
-        <h2 id="notifications-heading">站内通知</h2>
-        <p className="muted">以下仅为站内通知记录，不表示用户收到或看过。</p>
-        {task.notifications.length === 0 ? (
-          <p className="muted">暂无站内通知记录</p>
-        ) : (
-          <ul>
-            {task.notifications.map((notice) => (
-              <li key={notice.id} className="panel" style={{ overflowWrap: 'anywhere' }}>
-                <h3 style={{ whiteSpace: 'pre-wrap' }}>{notice.title}</h3>
-                <p style={{ whiteSpace: 'pre-wrap' }}>{notice.body}</p>
-                <dl>
-                  <dt className="muted">记录状态</dt>
-                  <dd>{notice.status}</dd>
-                  <dt className="muted">发送时间（UTC）</dt>
-                  <dd>
-                    {notice.sent_at ? (
-                      <time dateTime={notice.sent_at}>{notice.sent_at}</time>
-                    ) : (
-                      '未记录'
-                    )}
-                  </dd>
-                </dl>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-      <h2>事件账</h2>
-      {!eventsResult.ok ? (
-        <p className="error" role="alert">
-          {eventsResult.message}
-        </p>
-      ) : events.length === 0 ? (
-        <p className="muted">还没有记录到事件。</p>
+      {detail.ok ? (
+        <TaskContent task={detail.data} meResult={me} />
       ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>类型</th>
-              <th>记录时间（UTC）</th>
-              <th>证据</th>
-            </tr>
-          </thead>
-          <tbody>
-            {events.map((event) => (
-              <tr key={event.event_id}>
-                <td>{event.type}</td>
-                <td>{event.recorded_at_utc}</td>
-                <td>{event.evidence_ref || '服务端记录'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <TaskRecovery
+          key={id}
+          taskId={id}
+          initialError={detail}
+          meResult={me}
+          returnTo={returnTo}
+        />
       )}
+      <TaskEvents key={id} taskId={id} initial={snapshot(events)} returnTo={returnTo} />
     </section>
   );
 }

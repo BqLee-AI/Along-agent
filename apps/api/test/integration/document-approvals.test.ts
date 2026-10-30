@@ -77,7 +77,7 @@ maybe('document approval PostgreSQL authority and frozen content', () => {
           binaryPath: process.env.HARNESS_BINARY ?? '/app/harness/bin/along-harness',
           maxIterations: 24,
           maxTokens: 8000,
-          model: async () => {
+          model: () => {
             throw new Error('approval tests never invoke a model');
           },
         },

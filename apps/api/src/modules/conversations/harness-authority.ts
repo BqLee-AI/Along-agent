@@ -6,6 +6,8 @@ import {
   HarnessSnapshotSchema,
   HistoricalHarnessSnapshotSchema,
   HarnessStartSchema,
+  HarnessModelStepSchema,
+  type HarnessModelStep,
   type HarnessRequest,
   type HarnessSnapshot,
   type HarnessStart,
@@ -38,6 +40,7 @@ import {
   latestAttemptId,
   listRunEvents,
   lockRun,
+  readHarnessMessages,
   type LockedRun,
   type RunRow,
 } from './repository.js';
@@ -52,6 +55,7 @@ import {
 export interface HarnessSession {
   start: HarnessStart;
   handleRequest(request: HarnessRequest): Promise<unknown>;
+  close(): Promise<void>;
 }
 
 const active = new Map<string, AbortController>();
@@ -152,6 +156,23 @@ async function contextOf(
     ...(checkpointId ? { resumeCheckpointId: checkpointId } : {}),
   };
 }
+
+async function harnessMessagesOf(
+  client: PoolClient,
+  run: RunRow,
+  context: RunContext,
+  snapshot: HarnessSnapshot | null,
+): Promise<HarnessStart['messages']> {
+  // Old Runs did not accept conversation history. Never expand them on resume.
+  const refs = run.frozen_context?.messageRefs ?? [context.userMessageId];
+  if (
+    snapshot &&
+    (snapshot.message_refs.length !== refs.length ||
+      snapshot.message_refs.some((id, index) => id !== refs[index]))
+  )
+    throw stateConflict('snapshot message reference conflict');
+  return readHarnessMessages(client, context, refs);
+}
 function eventPayload(context: RunContext) {
   return { conversation_id: context.conversationId, run_id: context.runId };
 }
@@ -168,14 +189,15 @@ function approvalAuthorizesActions(decision: HarnessApprovalDecision | null): bo
 
 function buildHarnessStart(
   context: RunContext,
+  messages: HarnessStart['messages'],
   snapshot: HarnessSnapshot | null,
   observations: HarnessStart['observations'],
   approval: HarnessApprovalDecision | null,
 ): HarnessStart {
-  const start = HarnessStartSchema.parse({
+  const start: HarnessStart = {
     protocol: HARNESS_PROTOCOL_VERSION,
     type: 'start',
-    messages: [{ message_id: context.userMessageId, role: 'user', content: context.inputText }],
+    messages,
     tools: HARNESS_TOOL_DEFINITIONS.filter((tool) => context.allowlist.includes(tool.name)),
     budget: { max_iterations: context.maxIterations, max_tokens: context.maxTokens },
     snapshot,
@@ -184,10 +206,10 @@ function buildHarnessStart(
     workspace: context.workspaceGrant
       ? validateWorkspaceGrant(context.ownerId, context.workspaceGrant)
       : null,
-  });
+  };
   if (Buffer.byteLength(JSON.stringify(start), 'utf8') > HARNESS_MAX_FRAME_BYTES)
     throw new HttpError(422, 422, 'HARNESS_CONTEXT_LIMIT', '工具上下文超过安全范围，已停下。');
-  return start;
+  return HarnessStartSchema.parse(start);
 }
 
 export async function getRunView(
@@ -338,7 +360,8 @@ export async function resumeConversationRun(
       toolContext(context),
       snapshot.tool_refs,
     );
-    buildHarnessStart(context, snapshot, observations, decision);
+    const messages = await harnessMessagesOf(client, run, context, snapshot);
+    buildHarnessStart(context, messages, snapshot, observations, decision);
     await insertAttempt(client, {
       attemptId,
       ownerId,
@@ -385,6 +408,7 @@ export async function createHarnessSession(
       resume?.checkpoint_id,
     );
     const snapshot = resume ? await readSnapshot(client, locked.run, resume.checkpoint_id) : null;
+    const messages = await harnessMessagesOf(client, locked.run, context, snapshot);
     const observations = snapshot
       ? await readInvocationSnapshots(client, toolContext(context), snapshot.tool_refs)
       : [];
@@ -396,11 +420,12 @@ export async function createHarnessSession(
           snapshot.waiting.approval_id,
         )
       : null;
-    return { context, snapshot, observations, approval };
+    return { context, messages, snapshot, observations, approval };
   });
   const { context } = initial;
   const start = buildHarnessStart(
     context,
+    initial.messages,
     initial.snapshot,
     initial.observations,
     initial.approval,
@@ -409,6 +434,45 @@ export async function createHarnessSession(
   let stopped = false;
   let lastSnapshot = initial.snapshot;
   const delivered = new Set(initial.snapshot?.tool_refs ?? []);
+  const modelController = new AbortController();
+  const modelSignal = AbortSignal.any([signal, modelController.signal]);
+  let modelStarted = false;
+  let modelStream: {
+    ref: string;
+    iterator: AsyncGenerator<HarnessModelStep, void, unknown>;
+    pendingDelta: string | null;
+    pulling: boolean;
+  } | null = null;
+  async function closeModel(): Promise<void> {
+    modelController.abort();
+    const current = modelStream;
+    modelStream = null;
+    // The pending next() owns any transport error; cleanup must not replace it.
+    await current?.iterator.return().catch(() => undefined);
+  }
+  async function nextModelStep(): Promise<HarnessModelStep> {
+    const current = modelStream;
+    if (!current || current.pendingDelta !== null || current.pulling)
+      throw stateConflict('model continuation requires one accepted previous step');
+    current.pulling = true;
+    try {
+      const step = await current.iterator.next();
+      if (step.done) throw stateConflict('model ended without complete reply');
+      const value = HarnessModelStepSchema.parse(step.value);
+      await guarded(async () => undefined);
+      if (value.type === 'complete') {
+        modelStream = null;
+        await current.iterator.return();
+      } else current.pendingDelta = value.delta;
+      return value;
+    } catch (error) {
+      modelStream = null;
+      await current.iterator.return();
+      throw error;
+    } finally {
+      current.pulling = false;
+    }
+  }
   async function guarded<T>(
     action: (client: PoolClient, locked: LockedRun) => Promise<T>,
   ): Promise<T> {
@@ -456,7 +520,10 @@ export async function createHarnessSession(
     for (const event of events) await send(event);
   }
   async function validateSnapshot(client: PoolClient, snapshot: HarnessSnapshot): Promise<void> {
-    if (snapshot.message_refs.length !== 1 || snapshot.message_refs[0] !== context.userMessageId)
+    if (
+      snapshot.message_refs.length !== start.messages.length ||
+      snapshot.message_refs.some((id, index) => id !== start.messages[index]?.message_id)
+    )
       throw stateConflict('snapshot message reference conflict');
     if (new Set(snapshot.tool_refs).size !== snapshot.tool_refs.length)
       throw stateConflict('duplicate snapshot tool reference');
@@ -527,6 +594,7 @@ export async function createHarnessSession(
     } else if (unresolved.length) throw stateConflict('snapshot omits unresolved approval');
     buildHarnessStart(
       context,
+      start.messages,
       snapshot,
       observations,
       snapshot.waiting
@@ -541,8 +609,18 @@ export async function createHarnessSession(
   }
   return {
     start,
+    close: closeModel,
     handleRequest: async (request) => {
       await guarded(async () => undefined);
+      if (modelStream && request.type === 'finish' && request.outcome !== 'done')
+        await closeModel();
+      if (modelStream && request.type !== 'model_next' && request.type !== 'answer')
+        throw stateConflict('model stream must complete before another native action');
+      if (request.type === 'model_next') {
+        if (!modelStream || request.model_ref !== modelStream.ref)
+          throw stateConflict('model continuation reference conflict');
+        return nextModelStep();
+      }
       if (request.type === 'model') {
         if (!approvalAuthorizesActions(initial.approval))
           throw forbidden('rejected approval cannot authorize another action');
@@ -569,9 +647,14 @@ export async function createHarnessSession(
           )
             throw stateConflict('approval requires suspension before further actions');
         });
-        const reply = await deps.harness.model(request, tools, signal);
-        await guarded(async () => undefined);
-        return reply;
+        modelStream = {
+          pulling: false,
+          ref: request.request_ref,
+          iterator: deps.harness.model(request, tools, modelSignal),
+          pendingDelta: null,
+        };
+        modelStarted = true;
+        return nextModelStep();
       }
       if (request.type === 'reserve') {
         if (!approvalAuthorizesActions(initial.approval))
@@ -714,27 +797,16 @@ export async function createHarnessSession(
         return { suspended: true };
       }
       if (request.type === 'answer') {
-        for (let offset = 0; offset < request.delta.length;) {
-          let end = Math.min(offset + 4000, request.delta.length);
-          // Public deltas are bounded in UTF-16 units; never cut a Unicode scalar.
-          if (
-            end < request.delta.length &&
-            request.delta.charCodeAt(end - 1) >= 0xd800 &&
-            request.delta.charCodeAt(end - 1) <= 0xdbff &&
-            request.delta.charCodeAt(end) >= 0xdc00 &&
-            request.delta.charCodeAt(end) <= 0xdfff
-          )
-            end -= 1;
-          // Requalify each accepted output so cancellation can stop later chunks.
-          const event = await guarded((client) =>
-            appendEvent(client, context, 'message.delta', {
-              ...eventPayload(context),
-              delta: request.delta.slice(offset, end),
-            }),
-          );
-          await send(event);
-          offset = end;
-        }
+        if (modelStarted && (!modelStream || request.delta !== modelStream.pendingDelta))
+          throw stateConflict('native answer must match the current model delta');
+        const event = await guarded((client) =>
+          appendEvent(client, context, 'message.delta', {
+            ...eventPayload(context),
+            delta: request.delta,
+          }),
+        );
+        await send(event);
+        if (modelStream) modelStream.pendingDelta = null;
         return { accepted: true };
       }
       const event = await guarded(async (client) => {
@@ -824,6 +896,7 @@ export async function executeHarness(
   let cancellation: Promise<unknown> | undefined;
   let cancellationFailure: { error: unknown } | undefined;
   let cancellationProjected = false;
+  let session: HarnessSession | undefined;
   const disconnected = () => {
     cancellation ??= cancelConversationRun(
       deps,
@@ -843,7 +916,7 @@ export async function executeHarness(
       await cancellation;
       return;
     }
-    const session = await createHarnessSession(
+    session = await createHarnessSession(
       deps,
       context,
       async (event) => {
@@ -873,15 +946,17 @@ export async function executeHarness(
         return;
       }
     }
+    const modelSession = session;
     await runNativeHarness({
       services: deps.harness,
       start: session.start,
       signal: controller.signal,
+      onExit: () => modelSession.close(),
       handleRequest: async (request) => {
         // No next native action may overtake a disconnect's durable decision.
         await cancellation;
         if (cancellationFailure) throw cancellationFailure.error;
-        return session.handleRequest(request);
+        return modelSession.handleRequest(request);
       },
     });
   } catch (error) {
@@ -905,6 +980,7 @@ export async function executeHarness(
       // Cancelled, suspended, stale or terminal authority wins; never overwrite.
     }
   } finally {
+    await session?.close();
     signal?.removeEventListener('abort', disconnected);
     if (active.get(context.runId) === controller) active.delete(context.runId);
     // An explicit stop commits on another HTTP request. Project that existing

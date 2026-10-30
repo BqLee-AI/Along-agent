@@ -5,7 +5,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /src
 COPY apps/harness/artifacts.lock apps/harness/artifacts.lock
 COPY scripts/prepare-harness.sh scripts/prepare-harness.sh
-RUN bash scripts/prepare-harness.sh
+RUN --mount=type=cache,id=along-harness-downloads,target=/opt/along-toolchain/downloads,sharing=locked \
+    bash scripts/prepare-harness.sh
 
 FROM harness-toolchain AS harness-native
 COPY apps/harness/cjpm.toml apps/harness/cjpm.lock apps/harness/
@@ -22,13 +23,15 @@ WORKDIR /app
 COPY package.json bun.lock ./
 COPY apps/api/package.json apps/api/
 COPY apps/web/package.json apps/web/
+COPY apps/web/vendor apps/web/vendor
 COPY packages/contracts/package.json packages/contracts/
 COPY packages/stream-protocol/package.json packages/stream-protocol/
 COPY packages/time-core/package.json packages/time-core/
 COPY packages/scheduler-core/package.json packages/scheduler-core/
 COPY packages/notifier-core/package.json packages/notifier-core/
 COPY scripts/package.json scripts/
-RUN bun install --frozen-lockfile
+RUN --mount=type=cache,id=along-bun-downloads,target=/root/.bun/install/cache,sharing=locked \
+    bun install --frozen-lockfile
 COPY . .
 RUN bun run build:api
 COPY --from=harness-native /out/ /app/harness/

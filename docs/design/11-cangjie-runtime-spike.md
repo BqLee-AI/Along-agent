@@ -36,7 +36,7 @@ Web 明确选择 execution=harness
 TS 事实与只追加事件 → SSE / GET 补读 → Web
 ```
 
-- 传输是每 attempt 一条 `harness/v2` UTF-8 NDJSON pipe，native 只执行/输出 snapshot2，不增加 RPC 服务、远程 bearer 或 FFI。具体帧见 [共享 schema](../../packages/contracts/src/harness.ts) 和 design/09 §2。旧 snapshot1 仅限 TS 读取已完成的旧业务/task 引用：不得带 workspace grant 或 document 批准；校验后构造 snapshot2 bootstrap，不改历史行、不回退 v1 执行器。
+- 传输是每 attempt 一条 `harness/v3` UTF-8 NDJSON pipe，native 仍只执行/输出 snapshot2，不增加 RPC 服务、远程 bearer 或 FFI。模型正文以真实增量经 native answer/TS接受后投影，native 以相关 model_next 串行拉取后续，最终内容不重复发送。具体帧见 [共享 schema](../../packages/contracts/src/harness.ts) 和 design/09 §2。旧 snapshot1 仅限 TS 读取已完成的旧业务/task 引用：不得带 workspace grant 或 document 批准；校验后构造 snapshot2 bootstrap，不改历史行、不回退旧 wire 执行器。
 - native 不接收数据库/会话/模型密钥，不自报 owner 或 allowlist。每次工具动作从进程闭包和持久事实恢复可信 `ToolContext`；TS 不把内部对象原样暴露为远程合同。
 - business 是既有确定性提醒/取消/查询路径，不是另一个 Agent，也不作为 harness 失败回退。默认兼容 business，消息 `mode` 不承担执行器分派。
 - 批准等待保存有限引用和进度；显式恢复仍是同 Run、新 attempt、原 invocation/批准和真实当前决议。GET 与同入站键只补读，不能从事件行推导恢复授权。

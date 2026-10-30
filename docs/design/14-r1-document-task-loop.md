@@ -15,16 +15,16 @@
 
 ## 2. 职责边界与实现真源
 
-| 边界           | 实现真源                                                              | 约束                                                                                          |
-| -------------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| 可信工作区     | workspaces/service.ts；conversations/schemas.ts、service.ts           | 部署登记、有限相对路径和 owner；新请求选择绑定 hash 与冻结 grant，模型不能自报 root/allowlist |
-| 工具目录与执行 | tools/catalog.ts、contracts.ts、gateway.ts、invocations.ts            | 五旧加五新静态定义；分类由服务端固定，纯读事务外 MCP、写入一次许可，不能让模型选择执行种类    |
-| 唯一循环       | apps/harness/src/main.cj；packages/contracts/src/harness.ts           | harness/v2，逐次真实函数调用/结果历史，typed task/document 决议；TS transport 不规划下一步    |
-| 文档授权       | approvals/document-service.ts、document-actions.ts、decision.ts；0016 | 独立批准/决议表、完整冻结内容、唯一 apply；跨模块 ID 经公共用例验证，不新增跨模块强 FK        |
-| 文件效果       | workspaces/replace.ts；tools/invocations.ts、query.ts                 | 非事务替换、真实 applied/conflict/unknown；unknown 不补报、不重写、不产生可恢复 checkpoint    |
-| 历史与当前资格 | conversations/repository.ts、run-state.ts、harness-authority.ts       | 冻结摘要保留可读；新动作和继续重新核验登记，限定旧 task snapshot1 读取不扩权                  |
-| 外部配置与预算 | conversations/harness-config.ts、harness-model.ts                     | 部署固定 provider 与预算，Run 冻结且跨 attempt 累计；普通用户不配置 provider/BYOK             |
-| 展示和证据     | packages/stream-protocol；Web Chat/document-approvals；ci/gates.json  | 保留七事件，不伪造 task 卡片；D8 按实际消费者及本次报告声明，不能替代真实模型或用户材料验收   |
+| 边界           | 实现真源                                                              | 约束                                                                                                 |
+| -------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| 可信工作区     | workspaces/service.ts；conversations/schemas.ts、service.ts           | 部署登记、有限相对路径和 owner；新请求选择绑定 hash 与冻结 grant，模型不能自报 root/allowlist        |
+| 工具目录与执行 | tools/catalog.ts、contracts.ts、gateway.ts、invocations.ts            | 五旧加五新静态定义；分类由服务端固定，纯读事务外 MCP、写入一次许可，不能让模型选择执行种类           |
+| 唯一循环       | apps/harness/src/main.cj；packages/contracts/src/harness.ts           | harness/v3，逐次真实函数调用/结果历史及模型增量，typed task/document 决议；TS transport 不规划下一步 |
+| 文档授权       | approvals/document-service.ts、document-actions.ts、decision.ts；0016 | 独立批准/决议表、完整冻结内容、唯一 apply；跨模块 ID 经公共用例验证，不新增跨模块强 FK               |
+| 文件效果       | workspaces/replace.ts；tools/invocations.ts、query.ts                 | 非事务替换、真实 applied/conflict/unknown；unknown 不补报、不重写、不产生可恢复 checkpoint           |
+| 历史与当前资格 | conversations/repository.ts、run-state.ts、harness-authority.ts       | 冻结摘要保留可读；新动作和继续重新核验登记，限定旧 task snapshot1 读取不扩权                         |
+| 外部配置与预算 | conversations/harness-config.ts、harness-model.ts                     | 部署固定 provider 与预算，Run 冻结且跨 attempt 累计；普通用户不配置 provider/BYOK                    |
+| 展示和证据     | packages/stream-protocol；Web Chat/document-approvals；ci/gates.json  | 保留七事件，不伪造 task 卡片；D8 按实际消费者及本次报告声明，不能替代真实模型或用户材料验收          |
 
 路径均相对 apps/api/src/modules，除表中明确列出的跨包位置。#45–#47 的底座合同和历史证据保留其适用范围，不重做为 R1 新成果。
 
@@ -156,7 +156,7 @@ rename 前且可信执行器能证明零写：接受明确未生效观察/失败
 
 ### 7.1 必须演进的合同
 
-推荐整体切换 harness/v2：TS contracts、native parser、start/reply 构造、正式 wire 消费者和运行说明同批迁移；不保留生产 v1/v2 并跑或旧二进制回退。版本变化是因为批准决议不再只有 task_id，不能把新含义偷偷塞进 strict v1。
+运行端整体使用 harness/v3：TS contracts、native parser、start/reply 构造、正式 wire 消费者和运行说明同批迁移，不保留生产旧 wire 并跑或旧二进制回退。typed task/document 批准决议保持其独立语义，snapshot仍为version2；v3增加模型增量和对应的串行后续拉取，不能把新含义塞进不识别该交互的旧 strict wire。
 
 start.approval 变为有明确 kind 的 union：
 
@@ -217,7 +217,7 @@ workspace_list/grep/read 走真实 initialize→listTools→callTool，返回实
 | tools            | 静态五旧＋五新定义、strict 输入/结果、MCP adapter、既有 reservation/local/non_transactional coordinator、typed 批准引用/接受结果/审计；修改 contracts/schemas/result-schema/gateway/invocations |
 | approvals        | document_approvals、按钮决议/冻结预览、一次 apply 绑定及公共授权/决议读取；新增窄文档用例文件，保留旧 task create/confirm/revise                                                                |
 | conversations    | 选择/hash/Run 冻结/资格/等待/终态及公开只读结果；service/schemas/contracts/run-state/tool-binding/harness-authority/config                                                                      |
-| contracts/native | harness/v2、typed 决议、workspace 安全上下文、计划输出/观察消费/unknown 正常失败；packages/contracts/src/harness.ts、apps/harness/src/main.cj                                                   |
+| contracts/native | harness/v3、typed 决议、workspace 安全上下文、真实增量输出/观察消费/unknown 正常失败；packages/contracts/src/harness.ts、apps/harness/src/main.cj                                               |
 | Web              | 现有 Chat 的 workspace 选择、文档批准链接/原 Run 继续、实际结果展示；新增文档批准页及 HTTP DTO，不能引用 API 源码                                                                               |
 | integration/CI   | 原根入口和五门；添加正式文件/MCP 产品消费者及负例，按实际证据扩 D8，不另建 job 平台                                                                                                             |
 
@@ -225,7 +225,7 @@ workspace_list/grep/read 走真实 initialize→listTools→callTool，返回实
 
 部署先停旧写者，保留旧数据只读，应用新增迁移，发布同批 TS/native/Web。历史 task v1 checkpoint/receipt 的只读解析保留；历史已等待 task 通过明确的版本化快照读取迁移为等价新 bootstrap，仍只恢复原 Run/预算/工具范围，不能给历史 Run 加 workspace。那是历史事实读取，不是保留旧执行器。新事实接纳后不降回不认识 document 结果的旧写者；故障停写并前滚。workspace 无效不阻断无 workspace 的原业务/healthz/D7，readiness 不扩成必须持有模型凭据的全站门。
 
-实现分为独立可评审切片：①可信登记/公开选择与有限安全只读＋SDK真实探针；②文档冻结批准/决议/单 apply 绑定及数据迁移；③工具端到端接入、harness/v2、同 Run 文档恢复与 unknown 正常终结；④受控 FS 写入/真实 read-back/done 守卫；⑤Web 全链与生产镜像/MCP 打包；⑥原根合同扩展、真实 provider 变体任务验收与证据收口。每片先保护对应可观察合同；SDK 未知先实际探针，不能拿编译失败冒充业务 Red。整个 #62 直到真实产物验收和 archive 才收口，前面的接口/基础能力不能单独宣称 R1 完成。
+实现分为独立可评审切片：①可信登记/公开选择与有限安全只读＋SDK真实探针；②文档冻结批准/决议/单 apply 绑定及数据迁移；③工具端到端接入、正式原生协议、同 Run 文档恢复与 unknown 正常终结；④受控 FS 写入/真实 read-back/done 守卫；⑤Web 全链与生产镜像/MCP 打包；⑥原根合同扩展、真实 provider 变体任务验收与证据收口。每片先保护对应可观察合同；SDK 未知先实际探针，不能拿编译失败冒充业务 Red。完整 R1 以真实产物和变体验收取证，接口/基础能力不能单独宣称用户任务完成。
 
 ## 11. 用户能力验收与证明边界
 

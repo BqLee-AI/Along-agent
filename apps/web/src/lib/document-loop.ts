@@ -30,3 +30,33 @@ export const documentEffectLabel: Record<DocumentApprovalEffect['status'], strin
   applied: '已接受文件替换结果，尚无后续全文读取验证。',
   verified: '文件替换已接受，并已通过后续全文读取验证。',
 };
+
+export interface DocumentEffectRead {
+  value: DocumentApprovalEffect | null;
+  reading: boolean;
+  error: string | null;
+  current: boolean;
+}
+export type DocumentEffectReadAction =
+  | { type: 'start' }
+  | { type: 'invalidate' }
+  | { type: 'success'; value: DocumentApprovalEffect }
+  | { type: 'failure'; message: string };
+
+// A decision receipt does not contain a new effect. Keep historical evidence
+// separately, but never present it as the latest result after a failed read.
+export function documentEffectReadReducer(
+  state: DocumentEffectRead,
+  action: DocumentEffectReadAction,
+): DocumentEffectRead {
+  switch (action.type) {
+    case 'start':
+      return { ...state, reading: true };
+    case 'invalidate':
+      return { ...state, current: false };
+    case 'success':
+      return { value: action.value, reading: false, error: null, current: true };
+    case 'failure':
+      return { ...state, reading: false, current: false, error: action.message };
+  }
+}

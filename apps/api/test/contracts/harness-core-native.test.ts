@@ -10,6 +10,7 @@ import {
   HarnessRequestSchema,
   HarnessStartSchema,
   type HarnessRequest,
+  type HarnessModelReply,
   type RunView,
 } from '@along/contracts';
 import type { ToolOutcome } from '../../src/modules/tools/contracts.js';
@@ -84,6 +85,7 @@ test('D8.unknown-core-native', async () => {
   let invocationId = '';
   let effectBefore = Buffer.alloc(0);
   let modelCalls = 0;
+  let pendingModel: { ref: string; reply: HarnessModelReply } | null = null;
   const start = HarnessStartSchema.parse({
     protocol: HARNESS_PROTOCOL_VERSION,
     type: 'start',
@@ -102,7 +104,7 @@ test('D8.unknown-core-native', async () => {
       libraryPath: process.env.HARNESS_LIBRARY_PATH,
       maxIterations: 4,
       maxTokens: 100,
-      model: async () => {
+      model: () => {
         throw new Error('model transport is handled at the protocol counterpart');
       },
     },
@@ -111,9 +113,9 @@ test('D8.unknown-core-native', async () => {
     handleRequest: async (request) => {
       requests.push(request);
       switch (request.type) {
-        case 'model':
+        case 'model': {
           modelCalls++;
-          return HarnessModelReplySchema.parse({
+          const reply = HarnessModelReplySchema.parse({
             message:
               modelCalls === 1
                 ? {
@@ -132,6 +134,19 @@ test('D8.unknown-core-native', async () => {
                 : { content: 'The probe returned a result.', tool_calls: [] },
             usage: { total_tokens: 5 },
           });
+          if (reply.message.content) {
+            pendingModel = { ref: request.request_ref, reply };
+            return { type: 'delta', delta: reply.message.content };
+          }
+          return { type: 'complete', reply };
+        }
+        case 'model_next': {
+          if (!pendingModel || request.model_ref !== pendingModel.ref)
+            throw new Error('unexpected model continuation');
+          const reply = pendingModel.reply;
+          pendingModel = null;
+          return { type: 'complete', reply };
+        }
         case 'reserve': {
           const reserved = await reserveInvocation(database.pool, ctx, {
             callKey: request.call_key,
@@ -268,13 +283,14 @@ test('D8.cancelled-core-native', async () => {
   const reservations: string[] = [];
   const cancelled: RunView[] = [];
   let modelCalls = 0;
+  let pendingModel: { ref: string; reply: HarnessModelReply } | null = null;
   await runNativeHarness({
     services: {
       binaryPath,
       libraryPath: process.env.HARNESS_LIBRARY_PATH,
       maxIterations: 4,
       maxTokens: 100,
-      model: async () => {
+      model: () => {
         throw new Error('model transport is handled at the protocol counterpart');
       },
     },
@@ -294,11 +310,10 @@ test('D8.cancelled-core-native', async () => {
     handleRequest: async (request) => {
       requests.push(request);
       switch (request.type) {
-        case 'model':
+        case 'model': {
           modelCalls++;
-          // A buggy Core that executes after cancel gets a LEGAL second model
-          // answer, not a fixture exception masking its forbidden file effect.
-          return HarnessModelReplySchema.parse({
+          // A buggy Core still gets a legal continuation, not a fixture failure.
+          const reply = HarnessModelReplySchema.parse({
             message:
               modelCalls === 1
                 ? {
@@ -317,6 +332,19 @@ test('D8.cancelled-core-native', async () => {
                 : { content: 'The probe returned a result.', tool_calls: [] },
             usage: { total_tokens: 5 },
           });
+          if (reply.message.content) {
+            pendingModel = { ref: request.request_ref, reply };
+            return { type: 'delta', delta: reply.message.content };
+          }
+          return { type: 'complete', reply };
+        }
+        case 'model_next': {
+          if (!pendingModel || request.model_ref !== pendingModel.ref)
+            throw new Error('unexpected model continuation');
+          const reply = pendingModel.reply;
+          pendingModel = null;
+          return { type: 'complete', reply };
+        }
         case 'reserve': {
           const reserved = await reserveInvocation(database.pool, ctx, {
             callKey: request.call_key,
@@ -508,7 +536,7 @@ test('native terminates boundedly when valid bootstrap observations cannot fit s
       libraryPath: process.env.HARNESS_LIBRARY_PATH,
       maxIterations: 12,
       maxTokens: 1000,
-      model: async () => {
+      model: () => {
         throw new Error('oversized context must not call model transport');
       },
     },

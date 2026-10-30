@@ -148,12 +148,21 @@ export async function runDatabaseSmoke({
   // Keep the original #67 0016 and #68 0017 scenarios fixed as the inventory grows.
   const migrationsDirectory = path.join(temp, 'legacy0016');
   const accountMigrationsDirectory = path.join(temp, 'legacy0017');
+  const lfMigrationsDirectory = path.join(temp, 'legacy0016lf');
+  const crlfMigrationsDirectory = path.join(temp, 'legacy0016crlf');
   await mkdir(migrationsDirectory);
   await mkdir(accountMigrationsDirectory);
+  await mkdir(lfMigrationsDirectory);
+  await mkdir(crlfMigrationsDirectory);
   for (const name of await readdir(sourceMigrationsDirectory)) {
     if (!/^\d{4}_[a-z0-9_]+\.sql$/.test(name)) continue;
     const sql = await readFile(path.join(sourceMigrationsDirectory, name));
-    if (name.slice(0, 4) <= '0016') await writeFile(path.join(migrationsDirectory, name), sql);
+    if (name.slice(0, 4) <= '0016') {
+      await writeFile(path.join(migrationsDirectory, name), sql);
+      const lfSql = sql.toString('utf8').replaceAll('\r\n', '\n');
+      await writeFile(path.join(lfMigrationsDirectory, name), lfSql);
+      await writeFile(path.join(crlfMigrationsDirectory, name), lfSql.replaceAll('\n', '\r\n'));
+    }
     if (name.slice(0, 4) <= '0017')
       await writeFile(path.join(accountMigrationsDirectory, name), sql);
   }
@@ -174,15 +183,19 @@ export async function runDatabaseSmoke({
     created.add(databaseName);
     return callback(databaseUrl(databaseName), databaseName);
   }
-  async function baseline(url) {
-    await withDeployment(url, { migrationsDirectory }, async (database) => {
-      assert.equal(
-        database.targetVersion,
-        '0016',
-        'Smoke requires the fixed 0016 baseline migration directory',
-      );
-      assert.equal((await database.initialize()).version, '0016');
-    });
+  async function baseline(url, baselineMigrationsDirectory = migrationsDirectory) {
+    await withDeployment(
+      url,
+      { migrationsDirectory: baselineMigrationsDirectory },
+      async (database) => {
+        assert.equal(
+          database.targetVersion,
+          '0016',
+          'Smoke requires the fixed 0016 baseline migration directory',
+        );
+        assert.equal((await database.initialize()).version, '0016');
+      },
+    );
   }
   let cleanupFailed = false;
   try {
@@ -218,6 +231,76 @@ export async function runDatabaseSmoke({
       });
       record('empty_initialize_old0016_two_restarts_zero_ddl_preserve_facts');
     });
+    // Apply the real, unchanged 0001–0016 SQL with one checkout convention, then
+    // verify against the other. Neither database functions nor old migrations are
+    // rewritten to obtain a supported classification.
+    for (const [name, appliedDirectory, verificationDirectory, crlf] of [
+      ['crlf_database_lf_source', crlfMigrationsDirectory, lfMigrationsDirectory, true],
+      ['lf_database_crlf_source', lfMigrationsDirectory, crlfMigrationsDirectory, false],
+    ]) {
+      await fresh(name, async (url) => {
+        await baseline(url, appliedDirectory);
+        await withClient(url, async (client) => {
+          await client.query(`INSERT INTO users(id,auth_email,display_name,metadata)
+            VALUES ('00000000-0000-4000-8000-000000000001',
+              'line-endings@example.invalid','line ending guard fixture','{"preserve":true}')`);
+          const guardBodies = () =>
+            client.query(`SELECT proname,prosrc FROM pg_proc
+              WHERE pronamespace='public'::regnamespace AND proname IN (
+                'users_reject_delete','agent_revisions_reject_mutation',
+                'prompt_versions_reject_mutation','run_checkpoints_reject_mutation',
+                'task_events_reject_mutation') ORDER BY proname`);
+          const beforeBodies = (await guardBodies()).rows;
+          assert.equal(beforeBodies.length, 5);
+          for (const { prosrc } of beforeBodies) {
+            assert(prosrc.includes('\n'));
+            assert.equal(prosrc.includes('\r\n'), crlf);
+          }
+          const before = await signature(client);
+          await withDeployment(
+            url,
+            { migrationsDirectory: verificationDirectory },
+            async (database) => {
+              assert.deepEqual(await database.classify(), {
+                kind: 'supported',
+                version: '0016',
+                reason: 'target_schema_verified',
+              });
+            },
+          );
+          assert.deepEqual(await signature(client), before);
+          assert.deepEqual((await guardBodies()).rows, beforeBodies);
+          // A real weakening still fails closed, even across checkout conventions.
+          // The successful DELETE proves this is behavioral damage, not formatting.
+          const newline = crlf ? '\r\n' : '\n';
+          await client.query(
+            `CREATE OR REPLACE FUNCTION users_reject_delete() RETURNS trigger LANGUAGE plpgsql AS $$${newline}BEGIN${newline}  RETURN OLD;${newline}END;${newline}$$`,
+          );
+          assert.equal(
+            (
+              await client.query(
+                "DELETE FROM users WHERE auth_email='line-endings@example.invalid'",
+              )
+            ).rowCount,
+            1,
+          );
+          await withDeployment(
+            url,
+            { migrationsDirectory: verificationDirectory },
+            async (database) => {
+              assert.deepEqual(await database.classify(), {
+                kind: 'unknown',
+                version: '0016',
+                reason: 'baseline_triggers_mismatch',
+              });
+              await rejectsCode(() => database.initialize(), 'unknown_database_refused');
+              await rejectsCode(() => database.upgrade(), 'unsupported_upgrade_source');
+            },
+          );
+        });
+        record(`${name}_supported_readonly_behavioral_guard_change_refused`);
+      });
+    }
     await fresh('forged_last_ledger', async (url) => {
       await withClient(url, (client) =>
         client.query(

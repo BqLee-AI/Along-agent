@@ -34,10 +34,10 @@ export function createAccountTerminalIO() {
   return {
     write: (message) => console.log(message),
     async ask(label, { secret = false } = {}) {
-      process.stdout.write(`${label}: `);
+      const answer = terminal.question(`${label}: `);
       hidden = secret;
       try {
-        const value = await terminal.question('');
+        const value = await answer;
         return secret ? value : value.trim();
       } finally {
         hidden = false;

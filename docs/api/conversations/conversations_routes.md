@@ -36,13 +36,17 @@
 - `card_ref`：可选，围绕某卡片追问时带；服务端只做关联，不做授权旁路。
 - `raw_text`：用户原话，按不可信输入解析，原样进回显引用。
 - `execution`：可选 `business | harness`，省略为兼容的确定性业务。harness 明确进入正式仓颉，`mode=chat` 不作隐式分派；缺实际依赖在任何新写入/SSE 前503 `HARNESS_UNAVAILABLE`，不自动改走 TS/fixture。
-- 入站幂等仍为同 owner/key：business 沿历史 hash 材料；无 workspace 的 harness 保持 `harness/v1\0` 域，带 workspace 则用 `harness/workspace/v2\0`，将 `workspace_id` 追加到原规范数组后计算 SHA-256。这里是请求 hash 域，不是执行协议版本（执行为 `harness/v2`）。同键换 execution、workspace 或其他绑定输入为409，不重复创建另一 Run；冻结输入/权限不从 body 的 owner、allowlist 等额外字段取得。
+- Web 的默认 Agent 对话显式传 `execution=harness`，不带 `workspace_id` 也可交流；提醒快捷入口仍显式传 `business`。这不改变 HTTP 省略 execution 的默认值，也不新增执行种类。
+- 新 Harness Run 在接纳事务内冻结同 owner、同 conversation 最新63条可见 user/assistant 消息引用并按 `created_at/id` 排序，随后追加本轮完整用户输入一次，总计最多64条。执行和批准恢复按冻结引用读原文，不混入后来消息、其他会话或 system 消息，不把旧 tool_calls 作为待执行动作。该窗口不是永久记忆；完整窗口、工具定义与观察超1MiB时明确失败 `HARNESS_CONTEXT_LIMIT`，不截断当前输入。缺跨轮引用的旧 Run 保持仅原输入的上下文。
+- 入站幂等仍为同 owner/key：business 沿历史 hash 材料；无 workspace 的 harness 保持 `harness/v1\0` 域，带 workspace 则用 `harness/workspace/v2\0`，将 `workspace_id` 追加到原规范数组后计算 SHA-256。这里是请求 hash 域，不是执行协议版本（执行为 `harness/v3`）。同键换 execution、workspace 或其他绑定输入为409，不重复创建另一 Run；冻结输入/权限不从 body 的 owner、allowlist 等额外字段取得。
 - `workspace_id`：可选非空字符串，仅允许显式 `execution=harness`，business/省略 execution 时携带为400。新 Run 从当前本人有效部署登记取得精确授权，并冻结安全摘要；省略不授 workspace 工具。选择与新动作授权、历史展示的区别见 §5。
 - `confirmed_timezone` / `confirmed_timezone_id`：schema 均已有、可空，取 `confirmed_timezone_id ?? confirmed_timezone`；未给本轮值可使用会话先前明确冻结值，仍缺失则澄清，不猜。原文单个明确已知别名/规范 ID 优先于本轮确认值，本轮确认值优先于会话默认值；未知显式别名即使已有 Shanghai 也失败，多个不同已知时区则澄清，完整优先级见 design/05 §9.2。
 - `fold_choice`：`first | second | none`，默认 `none`；只有结构化字段决定选择，原话“第一次/第二次”不自动覆盖。歧义未选为 `AMBIGUOUS_LOCAL_TIME`；候选字段仍是 fold_choice，成功的现有归一结果与快照 `fold` 为 `0 | 1`，不混为字符串列。
 - “明天”锚定：服务端首次接收时刻 + 已确认时区解析一次并冻结，后续不再重算（跨午夜追问具体日期；延迟线 1min/15min 语义见 design time-core）。
 
 响应：`Content-Type: text/event-stream`，`200` 建连；新消息首事件 `thread.started` 含 conversation/Run。终结事件为 completed/failed/cancelled；harness 在批准等待时只结束该段流，不发 completed。显式 resume 不重放旧 started/delta。每行 `data: {protocol_version,seq,type,payload,request_id}`，`seq` 是不透明全局游标；内部 snapshot 产生间隙合法，不能要求连续。具体七词 schema 以 `packages/stream-protocol` 为准：
+
+Harness 正文来自真实 provider SSE：原生逐次提交增量，TS 持久接受后才投影 `message.delta`，不等完整响应再拆分模拟。最终模型响应保留工具调用和用量，不重复提交正文；工具参数必须组装完整且校验后才执行。部分正文不等于运行成功，生成中错误/取消沿既有终态合同。Web 对实时与历史回复共用安全 Markdown，默认中文由原生系统上下文约束、明确语言要求优先，不由前端伪造。
 
 GET/同入站键是只读补读，既不分配 attempt 也不启动 native/工具。running 同键409；suspended 可回已存前缀而不恢复。执行恢复只经 §3 的明确等待接口；checkpoint/fencing 不保证任意外部写恰好一次，unknown 不盲重放。
 

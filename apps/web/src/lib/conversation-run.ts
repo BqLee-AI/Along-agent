@@ -162,7 +162,7 @@ export async function consumeThreadStream(
 
 export const runStatusLabel: Record<RunView['status'], string> = {
   running: '运行中（读取不会自动继续）',
-  suspended_approval: '等待批准决议；流结束不代表完成',
+  suspended_approval: '运行已挂起；请核对决议与继续资格',
   done: '已完成',
   failed: '运行失败',
   cancelled: '已停止；已发生的效果不会撤销',

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
-import type { IncomingMessage, Server } from 'node:http';
+import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { z } from 'zod';
 import {
   ApprovalDetailSchema,
@@ -95,6 +95,70 @@ export async function listen(server: Server): Promise<string> {
   if (!address || typeof address === 'string') throw new Error('missing port');
   return `http://127.0.0.1:${address.port}`;
 }
+export interface ProviderFixtureReply {
+  choices: {
+    message: {
+      content: string | null;
+      tool_calls: { id: string; type: string; function: { name: string; arguments: string } }[];
+    };
+  }[];
+  usage: { total_tokens: number };
+}
+
+/** Controlled provider wire fixture; production never accepts choices.message. */
+export function writeModelSse(res: ServerResponse, reply: ProviderFixtureReply): void {
+  res.writeHead(200, { 'content-type': 'text/event-stream' });
+  const message = reply.choices[0]!.message;
+  for (const content of message.content?.match(/.{1,256}/gsu) ?? []) {
+    res.write(
+      `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content }, finish_reason: null }] })}\n\n`,
+    );
+  }
+  if (message.tool_calls.length) {
+    res.write(
+      `data: ${JSON.stringify({
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: message.tool_calls.map((call, index) => ({
+                index,
+                id: call.id,
+                type: call.type,
+                function: { name: call.function.name, arguments: '' },
+              })),
+            },
+            finish_reason: null,
+          },
+        ],
+      })}\n\n`,
+    );
+    for (const [index, call] of message.tool_calls.entries()) {
+      for (const fragment of call.function.arguments.match(/.{1,16}/gsu) ?? []) {
+        res.write(
+          `data: ${JSON.stringify({
+            choices: [
+              {
+                index: 0,
+                delta: { tool_calls: [{ index, function: { arguments: fragment } }] },
+                finish_reason: null,
+              },
+            ],
+          })}\n\n`,
+        );
+      }
+    }
+  }
+  res.write(
+    `data: ${JSON.stringify({
+      choices: [
+        { index: 0, delta: {}, finish_reason: message.tool_calls.length ? 'tool_calls' : 'stop' },
+      ],
+    })}\n\n`,
+  );
+  res.write(`data: ${JSON.stringify({ choices: [], usage: reply.usage })}\n\n`);
+  res.end('data: [DONE]\n\n');
+}
 
 export type ConsumerMode = 'local' | 'http';
 export type ModelCase = 'create' | 'hold' | 'denied';
@@ -108,7 +172,11 @@ export interface ModelGate {
   release: PromiseWithResolvers<void>;
 }
 
-const ModelBody = z.object({ messages: z.array(HarnessModelMessageSchema) });
+const ModelBody = z.object({
+  stream: z.literal(true),
+  stream_options: z.object({ include_usage: z.literal(true) }),
+  messages: z.array(HarnessModelMessageSchema),
+});
 const Confirmed = z.object({
   approval_id: z.string().uuid(),
   status: z.literal('consumed'),
@@ -185,8 +253,8 @@ export class HarnessConsumer {
         if (kind === 'hold') {
           if (!gate) throw new Error('missing held provider');
           res.once('close', () => gate.closed.resolve(!res.writableEnded && res.destroyed));
-          res.writeHead(200, { 'content-type': 'application/json' });
-          res.write('{"choices":[', () => gate.started.resolve());
+          res.writeHead(200, { 'content-type': 'text/event-stream' });
+          res.write(': provider waiting\n\n', () => gate.started.resolve());
           return;
         }
         // Synchronize on the real request, even if a mutant omitted its decision data.
@@ -196,25 +264,21 @@ export class HarnessConsumer {
         }
         const decision = findModelObservation(body.messages, HarnessApprovalDecisionSchema);
         if (decision?.kind === 'task') {
-          res.end(
-            JSON.stringify({
-              choices: [
-                { message: { content: `记录结果 task:${decision.task_id}`, tool_calls: [] } },
-              ],
-              usage: { total_tokens: 5 },
-            }),
-          );
+          writeModelSse(res, {
+            choices: [
+              { message: { content: `记录结果 task:${decision.task_id}`, tool_calls: [] } },
+            ],
+            usage: { total_tokens: 5 },
+          });
           return;
         }
         // A second request after a denied result would be a product defect. Return
         // legal final text so the assertions observe that defect, not a fixture error.
         if (calls.length > 1) {
-          res.end(
-            JSON.stringify({
-              choices: [{ message: { content: 'unexpected retry', tool_calls: [] } }],
-              usage: { total_tokens: 5 },
-            }),
-          );
+          writeModelSse(res, {
+            choices: [{ message: { content: 'unexpected retry', tool_calls: [] } }],
+            usage: { total_tokens: 5 },
+          });
           return;
         }
         const name = kind === 'create' ? 'propose_task' : 'get_user_prefs';
@@ -227,25 +291,23 @@ export class HarnessConsumer {
                 occurrence: 'once',
               }
             : { owner_id: randomUUID() };
-        res.end(
-          JSON.stringify({
-            choices: [
-              {
-                message: {
-                  content: null,
-                  tool_calls: [
-                    {
-                      id: 'provider-id-is-not-invocation',
-                      type: 'function',
-                      function: { name, arguments: JSON.stringify(args) },
-                    },
-                  ],
-                },
+        writeModelSse(res, {
+          choices: [
+            {
+              message: {
+                content: null,
+                tool_calls: [
+                  {
+                    id: 'provider-id-is-not-invocation',
+                    type: 'function',
+                    function: { name, arguments: JSON.stringify(args) },
+                  },
+                ],
               },
-            ],
-            usage: { total_tokens: 5 },
-          }),
-        );
+            },
+          ],
+          usage: { total_tokens: 5 },
+        });
       })().catch((error: unknown) => {
         this.providerErrors.push(error);
         if (!res.headersSent) res.writeHead(500);

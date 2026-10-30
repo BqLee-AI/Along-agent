@@ -1,49 +1,40 @@
-import Link from 'next/link';
-import { apiGet } from '../../lib/api';
-import type { ApprovalListItem } from '../../lib/types';
-import { pageReturnTo, type PageQuery } from '../../lib/account-navigation';
+import { apiGet } from '@/lib/api';
+import { pageReturnTo, type PageQuery } from '@/lib/account-navigation';
+import { PageHeading } from '@/components/page';
+import { ApprovalStatusFilter } from '@/features/approvals/ApprovalStatusFilter';
+import ApprovalList from '@/features/approvals/ApprovalList';
+import { ApprovalPageSchema, approvalFilter, approvalListPath } from '@/features/approvals/model';
 
 export const dynamic = 'force-dynamic';
-
-interface Page {
-  items: ApprovalListItem[];
-  next_cursor: string | null;
-}
 
 export default async function ApprovalsPage({
   searchParams,
 }: {
   searchParams: Promise<PageQuery>;
 }) {
-  const returnTo = pageReturnTo('/approvals', await searchParams);
-  const result = await apiGet<Page>('/api/v1/approvals?limit=50', returnTo);
-  if (!result.ok) {
-    return (
-      <section>
-        <h1>确认</h1>
-        <p className="error">{result.message}</p>
-      </section>
-    );
-  }
+  const query = await searchParams;
+  const status = approvalFilter(query.status);
+  const result = await apiGet<unknown>(approvalListPath(status), pageReturnTo('/approvals', query));
+  const parsed = result.ok ? ApprovalPageSchema.safeParse(result.data) : null;
   return (
-    <section>
-      <h1>待确认</h1>
-      <p className="subtitle">确认前不会创建提醒，也不会排期。</p>
-      {result.data.items.length === 0 ? (
-        <div className="panel">没有待确认的提议。</div>
-      ) : (
-        <ul className="card-list">
-          {result.data.items.map((item) => (
-            <li className="card" key={item.approval_id}>
-              <div>
-                <Link href={`/approvals/${item.approval_id}`}>{item.title}</Link>
-                <span className="badge">{item.status}</span>
-              </div>
-              <span className="time">{item.expires_at}</span>
-            </li>
-          ))}
-        </ul>
-      )}
+    <section className="space-y-8">
+      <PageHeading
+        title="提醒确认"
+        description="这里是提醒创建与取消提议。确认前不创建提醒、不排期；文档批准请从原会话的“修改与结果”进入。"
+      />
+      <ApprovalStatusFilter key={status} status={status} />
+      <ApprovalList
+        key={status}
+        status={status}
+        initial={parsed?.success ? parsed.data : null}
+        initialError={
+          !result.ok
+            ? result.message
+            : parsed && !parsed.success
+              ? '提醒确认响应无法核验，未将错误当作空列表。'
+              : null
+        }
+      />
     </section>
   );
 }

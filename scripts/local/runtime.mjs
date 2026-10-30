@@ -205,8 +205,19 @@ async function runtimeReport(config, directory) {
   };
 }
 
-function assertTargetSchema(state, targetVersion) {
-  if (state.kind === 'supported' && state.version === targetVersion) return;
+export function assertInstallationSchema(state, targetVersion, { adopting = false } = {}) {
+  // Only first-time adoption may prepare a verified older baseline. Every
+  // writer-starting path uses the strict default and requires the target.
+  if (
+    state.kind === 'supported' &&
+    (state.version === targetVersion || (adopting === true && state.version < targetVersion))
+  ) {
+    return {
+      version: state.version,
+      targetVersion,
+      upgradeRequired: state.version !== targetVersion,
+    };
+  }
   throw failure(
     state.kind === 'supported' ? 'UPGRADE_REQUIRED' : `DATABASE_${state.reason.toUpperCase()}`,
   );
@@ -236,14 +247,13 @@ export async function initializeInstallation(file, initialInput) {
       });
       const database = await openDatabase(config, artifact.source);
       try {
-        const state = await database.classify();
+        let state = await database.classify();
         if (state.kind === 'empty') {
           if (config.mode !== 'new') throw failure('DATABASE_EMPTY_ADOPTION_REFUSED');
           await database.assertNoOtherClients();
-          await database.initialize();
-        } else {
-          assertTargetSchema(state, database.targetVersion);
+          state = await database.initialize();
         }
+        const schema = assertInstallationSchema(state, database.targetVersion, { adopting });
         await database.assertLease();
         if (adopting) {
           // Claim the explicitly stopped legacy service without starting writers.
@@ -267,15 +277,16 @@ export async function initializeInstallation(file, initialInput) {
           await database.assertLease();
         }
         await selectArtifact(directory, artifact);
+        return {
+          phase: 'prepared',
+          schema,
+          account: 'unverified',
+          model: config.model ? 'configured_unverified' : 'unconfigured',
+          workspace: config.registryFile ? 'unverified' : 'unconfigured',
+        };
       } finally {
         await database.close();
       }
-      return {
-        phase: 'prepared',
-        account: 'unverified',
-        model: config.model ? 'configured_unverified' : 'unconfigured',
-        workspace: config.registryFile ? 'unverified' : 'unconfigured',
-      };
     },
     initialInput,
   );
@@ -295,7 +306,7 @@ export async function startInstallation(file) {
       const state = await database.classify();
       if (state.kind !== 'supported' || state.version !== database.targetVersion) {
         await stopWriters(config, directory);
-        assertTargetSchema(state, database.targetVersion);
+        assertInstallationSchema(state, database.targetVersion);
       }
       try {
         await startWriters(file, config, directory, artifact, database);
@@ -355,7 +366,7 @@ export async function upgradeInstallation(file) {
       });
       await database.upgrade();
       const state = await database.classify();
-      assertTargetSchema(state, database.targetVersion);
+      assertInstallationSchema(state, database.targetVersion);
       await writeJson(path.join(directory, 'upgrade.json'), {
         phase: 'starting',
         target: artifact.digest,
@@ -391,7 +402,7 @@ export async function reloadInstallation(file, { expectedConfig } = {}) {
     const database = await openDatabase(config, artifact.source);
     try {
       await stopWriters(config, directory);
-      assertTargetSchema(await database.classify(), database.targetVersion);
+      assertInstallationSchema(await database.classify(), database.targetVersion);
       await database.assertNoOtherClients();
       await startWriters(file, config, directory, artifact, database);
       return await runtimeReport(config, directory);

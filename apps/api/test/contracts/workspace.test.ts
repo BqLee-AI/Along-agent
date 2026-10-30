@@ -26,6 +26,7 @@ import {
   listen,
   pending,
   started,
+  writeModelSse,
 } from '../helpers/harness-consumer.js';
 import type { ConsumerMode, HarnessActor, HarnessConsumer } from '../helpers/harness-consumer.js';
 
@@ -49,6 +50,8 @@ interface Scenario {
   omitReadBack: boolean;
 }
 const ModelBody = z.object({
+  stream: z.literal(true),
+  stream_options: z.object({ include_usage: z.literal(true) }),
   messages: z.array(HarnessModelMessageSchema),
   parallel_tool_calls: z.boolean().optional(),
 });
@@ -236,9 +239,8 @@ beforeAll(async () => {
       const scenario = marker ? scenarios.get(marker[1]!) : undefined;
       if (!scenario) throw new Error('missing workspace fixture identity');
       scenario.requests.push(body.messages);
-      res.setHeader('content-type', 'application/json');
       if (body.parallel_tool_calls === false) {
-        res.end(JSON.stringify(modelReply(body.messages, scenario)));
+        writeModelSse(res, modelReply(body.messages, scenario));
       } else {
         // This provider defaults to parallel proposals, as the real file task
         // endpoint did. Native must negotiate sequential calls, not discard one.
@@ -246,7 +248,7 @@ beforeAll(async () => {
         parallel.choices[0]!.message.tool_calls.push(
           ...tool('workspace_read', { path: 'brief.md' }).choices[0]!.message.tool_calls,
         );
-        res.end(JSON.stringify(parallel));
+        writeModelSse(res, parallel);
       }
     })().catch((error: unknown) => {
       modelErrors.push(error);

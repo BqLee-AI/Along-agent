@@ -46,6 +46,7 @@ import {
   insertRun,
   listConversationEvents,
   listRunEvents,
+  listHarnessMessageRefs,
   lockRun,
   type ConversationRow,
 } from './repository.js';
@@ -219,6 +220,15 @@ export async function startConversationRun(
         rulesetId: deps.timeContext.ruleset_id,
         tzdbVersion: deps.timeContext.tzdb_version,
         aliasVersion: deps.timeContext.available ? deps.timeContext.aliases.version : null,
+        ...(execution === 'harness'
+          ? {
+              messageRefs: await listHarnessMessageRefs(client, {
+                ownerId,
+                conversationId: conversation.id,
+                userMessageId,
+              }),
+            }
+          : {}),
         ...(workspaceGrant ? { workspaceGrant, workspaceSummary } : {}),
       };
       await insertRun(client, {

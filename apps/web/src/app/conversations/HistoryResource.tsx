@@ -6,6 +6,8 @@ import {
   initialHistoryPage,
   type HistoryPageState,
 } from '../../lib/conversation-run';
+import { Button } from '@lorelum/lumen-ui/components/button';
+import { ErrorNotice } from '@/components/page';
 
 export interface HistoryReadPage<T> {
   items: T[];
@@ -73,41 +75,51 @@ export function ReadControls({
   label: string;
 }) {
   return (
-    <div>
-      {state.reading ? <p role="status">正在读取{label}…</p> : null}
+    <div className="space-y-3 py-4">
+      {state.reading ? (
+        <p role="status" className="text-sm text-muted-foreground">
+          正在读取{label}…
+        </p>
+      ) : null}
       {state.error ? (
-        <div role="alert" className="error">
-          <p>
-            {state.loaded ? '此部分未完整读取，已获取内容仍保留。' : '读取失败，不表示没有历史。'}{' '}
-            {state.error}
-          </p>
-          <button
-            className="secondary"
+        <ErrorNotice
+          message={`${state.loaded ? '此部分未完整读取，已获取内容仍保留。' : '读取失败，不表示没有历史。'} ${state.error}`}
+        >
+          <Button
+            variant="glass"
+            color="default"
             type="button"
             disabled={state.reading}
             onClick={() => void read(state.resetting)}
           >
             重试读取{label}（GET）
-          </button>
-        </div>
+          </Button>
+        </ErrorNotice>
       ) : null}
-      <div className="actions">
-        <button
-          className="secondary"
+      <div className="flex flex-wrap gap-3">
+        <Button
+          variant="glass"
+          color="default"
           type="button"
           disabled={state.reading}
           onClick={() => void read(true)}
         >
           刷新{label}
-        </button>
+        </Button>
         {state.loaded && state.nextCursor !== null ? (
-          <button type="button" disabled={state.reading} onClick={() => void read(false)}>
+          <Button
+            variant="glass"
+            color="default"
+            type="button"
+            disabled={state.reading}
+            onClick={() => void read(false)}
+          >
             继续读取{label}
-          </button>
+          </Button>
         ) : null}
       </div>
       {state.loaded ? (
-        <p className="muted">
+        <p className="text-sm text-muted-foreground">
           {state.reading || state.error
             ? `${label}保留上次获取的内容；本次读取尚未确认完整。`
             : state.nextCursor !== null
