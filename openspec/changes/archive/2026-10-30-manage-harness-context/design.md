@@ -7,7 +7,7 @@
 
 ## 1. 真源与审定决定
 
-唯一详细设计为 [design/18](../../../docs/design/18-r2a-harness-context.md) §1–§9；本文件只记录证据边界与变更导航，不复制第二套字段合同。原草案路径保留导航，不保留平行设计。
+唯一详细设计为 [design/18](../../../../docs/design/18-r2a-harness-context.md) §1–§9；本文件只记录证据边界与变更导航，不复制第二套字段合同。原草案路径保留导航，不保留平行设计。
 
 - 采用独立输出 cap 与完整包装计量，不用 remaining_tokens 直接作 max_tokens。
 - 采用不可变 per-Run policy；不动 frozen_context 的建后冻结。
@@ -19,7 +19,7 @@
 
 ## 2. 基线与 #70 对齐
 
-本 worktree 建立基线为 `7f282e3`（#70 OpenSpec-only 设计）；2026-10-30 续验快进至 `f8863f5`，包含 #70 实现 `96ca073`（PR #82）及归档（PR #84）。Issue [#83](https://github.com/BqLee-AI/Along-agent/issues/83) 的实现保留为未提交工作树；集成差异和续验结果记入 tasks，不以基线快进代替行为证明。
+本 worktree 建立基线为 `7f282e3`（#70 OpenSpec-only 设计）；2026-10-30 续验快进至 `f8863f5`，包含 #70 实现 `96ca073`（PR #82）及归档（PR #84）。Issue [#83](https://github.com/BqLee-AI/Along-agent/issues/83) 的实现当时保留为未提交工作树；集成差异和续验结果记入 tasks，不以基线快进代替行为证明。
 
 正式 #70 体验合同保持：目标选择仍明确映射 business/harness；批准仅授权，原 Run 显式继续；GET/刷新/重登零执行；完整预览、当前登记、取消、unknown 和 verified 效果守卫不变。R2-A 不要求公开 API、RunView 或七事件新增字段。接口核对覆盖 harness/v3 streaming 的 start/model 帧、usage 缺失合并、assistant/tool_calls 配对与流式文本中途失败/取消；v4 必须保留它们有效语义，不能回到仅非流式/工具零历史路径。
 
@@ -31,10 +31,10 @@
 
 原草案保存的离线合成实验：十工具目录 3782 bytes，provider mapping 3952 bytes，转义目录约 4242 bytes；5/6 次 200000-byte 读取的简化合成 HTTP 为 1011016/1211501 bytes；schema 接受的合成恢复 start 为 1206057 bytes；投影原型 6849 bytes。没有运行新 wire 或模型，不把这些值充当性能/token/成功率。正式设计沿用问题证据，不重复实验为新成果。
 
-历史只读对照中的 `listHarnessMessageRefs` 的 63＋1 与输入冻结来自 #70 并行实现；对应能力随 `96ca073` 合入。#70 的[Web验证记录](../../../docs/web-task-experience-verification-2026-10-28.md)保存其三轮 refs 为 1/3/5、工具调用0及五轮流式 refs 为 1/3/5/7/9、工具调用0的补验，并分列原安装资料闭环。该记录不证明 #83 六份大资料的投影、恢复、回取、精确修改和新回读；本 change 按实际集成状态独立取证。
+历史只读对照中的 `listHarnessMessageRefs` 的 63＋1 与输入冻结来自 #70 并行实现；对应能力随 `96ca073` 合入。#70 的[Web验证记录](../../../../docs/web-task-experience-verification-2026-10-28.md)保存其三轮 refs 为 1/3/5、工具调用0及五轮流式 refs 为 1/3/5/7/9、工具调用0的补验，并分列原安装资料闭环。该记录不证明 #83 六份大资料的投影、恢复、回取、精确修改和新回读；本 change 按实际集成状态独立取证。
 
 ## 4. 影响、迁移及验收
 
-[design/18 §3/§8](../../../docs/design/18-r2a-harness-context.md#3-冻结策略及旧-run) 定义策略补录、旧 allowlist、同批 wire 切换、停写迁移/前滚；[schema](../../../docs/schema/conversation-and-runs-schema.md#r2-a-上下文策略83) 定义存储，现有迁移不可改。[对话 API §7](../../../docs/api/conversations/conversations_routes.md#7-r2-a-上下文容量83) 记录公开不变面与错误边界。
+[design/18 §3/§8](../../../../docs/design/18-r2a-harness-context.md#3-冻结策略及旧-run) 定义策略补录、旧 allowlist、同批 wire 切换、停写迁移/前滚；[schema](../../../../docs/schema/conversation-and-runs-schema.md#r2-a-上下文策略83) 定义存储，现有迁移不可改。[对话 API §7](../../../../docs/api/conversations/conversations_routes.md#7-r2-a-上下文容量83) 记录公开不变面与错误边界。
 
 实现顺序/每项验证负责人见 design/18 §9 与 [tasks.md](tasks.md)。文档 strict 校验和引用核对不计运行验收；受控 native/HTTP/PG 与真实模型分别取证，不降低 #83 的六份资料、失败、冲突、真实回取、批准后新读取及小任务对照要求。
