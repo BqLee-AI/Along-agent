@@ -16,7 +16,7 @@ Issue: #70
 
 ## Spec
 
-基线：[design/14](../../../docs/design/14-r1-document-task-loop.md) §3–§7、[design/17](../../../docs/design/17-r1-conversation-history.md) §5–§8、[页面 PRD](../../../docs/prd/02-core-loop-and-pages.md)、[API 索引](../../../docs/api/README.md)、[CONTRIBUTING](../../../CONTRIBUTING.md) §2、§6–§6.1。
+基线：[design/14](../../../../docs/design/14-r1-document-task-loop.md) §3–§7、[design/17](../../../../docs/design/17-r1-conversation-history.md) §5–§8、[页面 PRD](../../../../docs/prd/02-core-loop-and-pages.md)、[API 索引](../../../../docs/api/README.md)、[CONTRIBUTING](../../../../CONTRIBUTING.md) §2、§6–§6.1。
 
 体验与职责方案见本 change 的 [design.md](design.md) §2–§7，核心链路线框见 §2.3，19 个页面/子视图及真实状态覆盖见 §5.3，视觉规范见 §5.2。新增行为归既有 conversations 能力，引用 agent-runtime、workspaces、tool-gateway、identity，不改执行或授权主规格。本目录为 Proposed 评审材料，文档线框不是实际渲染证据，不代表实现、主规格生效或运行验收。
 

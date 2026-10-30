@@ -99,6 +99,7 @@
 ## 八、OpenSpec 行为契约与 ADR
 
 - [OpenSpec 说明](../openspec/README.md)：`openspec/specs/` 为可验收行为契约真源（SHALL + Scenario），`docs/design/` 为设计真源；spec 只写行为并引用 design 章节，不复制字段/路由表。
+- [会话与 Web 任务体验主规格](../openspec/specs/conversations/spec.md)约束入口、真实状态、显式动作、流式对话和一致首屏；[体验设计与实施归档](../openspec/changes/archive/2026-10-30-close-r1-web-task-experience/)保留方案、任务及分版本证据。
 - [ADR 决策记录](adr/README.md)：0000 模板、0001–0005 种子 ADR、[0006 Bun + Ox 工具链](adr/0006-bun-ox-toolchain.md)（取代 0002）、[0007 CI 关键路径局部修订](adr/0007-ci-critical-path.md)（调整 0006 的编排/失败传播）及 [0008 static 内部调度](adr/0008-static-scheduling.md)（局部修订 0007 的内部并发边界）；Bun/Ox 选型和五门全成功不变，冻结决策正文保留，改口径另起新 ADR。
 - [ADR0009](adr/0009-cangjie-harness-ts-capabilities.md) 确定仓颉唯一 Harness/TS 长期能力，并局部修订0003的 outbox/确认事务绝对范围；历史 ADR/验收保留其适用边界。同步公共用例/DTO、只读投影、确认创建/取消单事务和可靠异步 outbox 分列，D1 不证明 SQL 所有权。正式实现与分级验收见 design/09/11，[native 构建/运行说明](../apps/harness/README.md) 不等于真实 provider/完整 R1 验收。
 - [R1 文档任务合同（#62）](design/14-r1-document-task-loop.md) 定义 Web 选择工作区、真实 TS MCP 检索、文档批准、写入与回读；行为真源为 [workspaces](../openspec/specs/workspaces/spec.md)、[agent-runtime](../openspec/specs/agent-runtime/spec.md) 和 [tool-gateway](../openspec/specs/tool-gateway/spec.md)。[归档记录](../openspec/changes/archive/2026-10-26-define-r1-document-task-loop/tasks.md) 分列正式消费者、真实模型与受管资料副本验收，不把 #45–#47 的底座证据或混合模型的成功矩阵扩大为单模型可靠性证明。
