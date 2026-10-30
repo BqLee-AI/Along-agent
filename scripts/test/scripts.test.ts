@@ -97,4 +97,22 @@ describe('governance scripts', () => {
       }
     }
   });
+
+  it('permits exactly context policy migration 0019 without broadening ownership', () => {
+    for (const [name, accepted] of [
+      ['0019_conversation_context_policies.sql', true],
+      ['0018_conversation_context_policies.sql', false],
+      ['0020_conversation_context_policies.sql', false],
+      ['0019_conversation_unapproved_change.sql', false],
+    ] as const) {
+      const target = mkdtempSync(join(tmpdir(), 'migration-context-'));
+      try {
+        mkdirSync(join(target, 'infra', 'migrations'), { recursive: true });
+        writeFileSync(join(target, 'infra', 'migrations', name), 'BEGIN; COMMIT;');
+        expect(run('check-migrations.mjs', target).code === 0).toBe(accepted);
+      } finally {
+        rmSync(target, { recursive: true, force: true });
+      }
+    }
+  });
 });

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { createServer, type Server, type RequestListener, type ServerResponse } from 'node:http';
+import { HARNESS_PROTOCOL_VERSION } from '@along/contracts';
 import { createHarnessModelTransport } from '../src/modules/conversations/harness-model.js';
 import { loadHarnessServices } from '../src/modules/conversations/harness-config.js';
 import { failEnvelope, HttpError } from '../src/http/errors.js';
@@ -30,11 +31,12 @@ function request(baseUrl: string, signal = new AbortController().signal) {
   const model = createHarnessModelTransport({ baseUrl, model: 'contract-model' });
   return model(
     {
-      protocol: 'harness/v3',
+      protocol: HARNESS_PROTOCOL_VERSION,
       type: 'model',
       request_ref: 'm1',
       messages: [{ role: 'user', content: 'hello' }],
-      remaining_tokens: 100,
+      remaining_tokens: 8000,
+      max_output_tokens: 512,
     },
     [],
     signal,
@@ -50,15 +52,17 @@ function complete(res: ServerResponse, reason = 'stop'): void {
   res.end('data: [DONE]\n\n');
 }
 async function rejected(baseUrl: string): Promise<HttpError> {
-  try {
-    for await (const step of request(baseUrl)) {
-      if (step.type === 'complete') throw new Error('unsafe model response accepted');
-    }
-  } catch (error) {
-    if (error instanceof HttpError) return error;
-    throw error;
-  }
-  throw new Error('unsafe model response accepted');
+  const steps = await Array.fromAsync(request(baseUrl));
+  expect(steps.some((step) => step.type === 'complete')).toBe(false);
+  const failure = steps.at(-1);
+  if (failure?.type !== 'failed') throw new Error('unsafe model response accepted');
+  expect(failure.usage).toBeNull();
+  return new HttpError(
+    failure.error.code === 'HARNESS_UNAVAILABLE' ? 503 : 502,
+    failure.error.code === 'HARNESS_UNAVAILABLE' ? 503 : 502,
+    failure.error.code,
+    failure.error.message,
+  );
 }
 
 describe('harness incremental model HTTP transport', () => {
@@ -90,7 +94,7 @@ describe('harness incremental model HTTP transport', () => {
         stream: true,
         stream_options: { include_usage: true },
         parallel_tool_calls: false,
-        max_tokens: 100,
+        max_tokens: 512,
       });
       release.resolve();
       const rest = await Array.fromAsync(stream);
@@ -215,12 +219,24 @@ describe('harness incremental model HTTP transport', () => {
     }
   });
 
-  test('upstream error bodies do not enter the public error envelope', async () => {
+  test('upstream error bodies do not enter failed steps or the public error envelope', async () => {
     const privateBody = 'private-provider-diagnostic-do-not-disclose';
     const baseUrl = await provider((_req, res) => {
       res.writeHead(500, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ error: privateBody }));
     });
+    const steps = await Array.fromAsync(request(baseUrl));
+    expect(steps).toEqual([
+      {
+        type: 'failed',
+        error: {
+          code: 'HARNESS_UNAVAILABLE',
+          message: 'harness model transport unavailable',
+        },
+        usage: null,
+      },
+    ]);
+    expect(JSON.stringify(steps)).not.toContain(privateBody);
     const error = await rejected(baseUrl);
     expect(error.errorCode).toBe('HARNESS_UNAVAILABLE');
     expect(error.httpStatus).toBe(503);
@@ -260,7 +276,7 @@ describe('harness incremental model HTTP transport', () => {
         Buffer.concat([
           Buffer.from('data: {"choices":[{"index":0,"delta":{"content":"'),
           Buffer.from([0xff]),
-          Buffer.from('"}}]}\n\n'),
+          Buffer.from('"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'),
         ]),
       );
     });
@@ -291,8 +307,9 @@ describe('harness incremental model HTTP transport', () => {
       });
       const stream = request(baseUrl);
       expect((await stream.next()).value).toEqual({ type: 'delta', delta: '部分答案' });
-      await expect(stream.next()).rejects.toMatchObject({
-        errorCode: failure === 'length' ? 'BUDGET_EXCEEDED' : 'HARNESS_PROTOCOL_ERROR',
+      expect(await stream.next()).toMatchObject({
+        done: false,
+        value: { type: 'failed', error: { code: 'HARNESS_PROTOCOL_ERROR' }, usage: null },
       });
     });
   }
@@ -338,7 +355,10 @@ describe('harness incremental model HTTP transport', () => {
     try {
       expect((await stream.next()).value).toEqual({ type: 'delta', delta: '真实片段' });
       release.resolve();
-      await expect(stream.next()).rejects.toMatchObject({ errorCode: 'HARNESS_UNAVAILABLE' });
+      expect(await stream.next()).toMatchObject({
+        done: false,
+        value: { type: 'failed', error: { code: 'HARNESS_UNAVAILABLE' }, usage: null },
+      });
     } finally {
       release.resolve();
       await stream.return();
@@ -364,11 +384,78 @@ describe('harness deployment-only cumulative budgets', () => {
     HARNESS_MODEL_BASE_URL: 'http://127.0.0.1:9000/v1',
     HARNESS_MODEL: 'deployment-model',
     HARNESS_BINARY: process.execPath,
+    HARNESS_COMPLETION_CAP: '512',
   };
   test('invalid deployment budgets fail closed instead of enabling a fallback', () => {
     for (const value of ['0', '-1', '1.5', 'NaN', 'Infinity', '9007199254740992']) {
       expect(loadHarnessServices({ ...environment, HARNESS_MAX_ITERATIONS: value })).toBeNull();
       expect(loadHarnessServices({ ...environment, HARNESS_MAX_TOKENS: value })).toBeNull();
     }
+  });
+  test('requires an explicit positive safe completion cap independently of the Run budget', () => {
+    expect(loadHarnessServices({ ...environment, HARNESS_COMPLETION_CAP: undefined })).toBeNull();
+    for (const value of ['', '0', '-1', '1.5', 'NaN', 'Infinity', '9007199254740992']) {
+      expect(loadHarnessServices({ ...environment, HARNESS_COMPLETION_CAP: value })).toBeNull();
+    }
+    const services = loadHarnessServices({ ...environment, HARNESS_MAX_TOKENS: '8000' });
+    expect(services?.maxTokens).toBe(8000);
+    expect(services?.contextPolicy.completion_cap).toBe(512);
+  });
+});
+
+describe('harness R2-A model failure accounting', () => {
+  test('length termination preserves accepted deltas and usage without completing partial arguments', async () => {
+    const baseUrl = await provider((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      res.write(chunk({ content: 'visible prefix' }));
+      res.write(
+        chunk(
+          {
+            tool_calls: [
+              {
+                index: 0,
+                id: 'c1',
+                type: 'function',
+                function: { name: 'list_tasks', arguments: '{"partial":' },
+              },
+            ],
+          },
+          'length',
+        ),
+      );
+      res.write(`data: ${JSON.stringify({ choices: [], usage: { total_tokens: 73 } })}\n\n`);
+      res.end('data: [DONE]\n\n');
+    });
+    const steps = await Array.fromAsync(request(baseUrl));
+    expect(steps[0]).toEqual({ type: 'delta', delta: 'visible prefix' });
+    expect(steps.at(-1)).toMatchObject({
+      type: 'failed',
+      error: { code: 'HARNESS_CONTEXT_LIMIT' },
+      usage: { total_tokens: 73 },
+    });
+    expect(steps.some((step) => step.type === 'complete')).toBe(false);
+  });
+
+  test('structured provider window rejection is a capacity failure without diagnostic leakage', async () => {
+    const baseUrl = await provider((_req, res) => {
+      res.writeHead(400, { 'content-type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          error: { code: 'context_length_exceeded', message: 'private prompt diagnostic' },
+        }),
+      );
+    });
+    const steps = await Array.fromAsync(request(baseUrl));
+    expect(steps).toEqual([
+      {
+        type: 'failed',
+        error: {
+          code: 'HARNESS_CONTEXT_LIMIT',
+          message: 'harness model context capacity exceeded',
+        },
+        usage: null,
+      },
+    ]);
+    expect(JSON.stringify(steps)).not.toContain('private prompt diagnostic');
   });
 });

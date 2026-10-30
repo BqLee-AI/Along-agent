@@ -96,8 +96,8 @@
     },
     "D8": {
       "status": "enforced",
-      "scope": "controlled-model current-tree production native/MCP; local/signed-HTTP Run, task/document approval, actual file replacement, independent readback and zero-write conflict recovery; original rejection/cancellation/replay/strict DTO consumers, wire rejection, Core unknown/late-cancel and product HTTP post-write acceptance-failure unknown",
-      "owner": "#47, #62",
+      "scope": "controlled-model current-tree production native/MCP; local/signed-HTTP Run, task/document approval, bounded six-large-document context, original-observation retrieval, actual replacement and independent readback; zero-write conflict recovery, rejection/cancellation/replay/strict DTO, wire rejection and unknown effects",
+      "owner": "#47, #62, #83",
       "remaining": {
         "status": "partial",
         "scope": "other external tool/connector seams; real-provider task quality, arbitrary crash recovery and generic external exactly-once"
@@ -112,7 +112,10 @@
           "apps/api/test/contracts/harness.test.ts",
           "apps/api/test/contracts/harness-core-native.test.ts",
           "apps/api/test/contracts/harness-wire.test.ts",
-          "apps/api/test/contracts/workspace.test.ts"
+          "apps/api/test/contracts/workspace.test.ts",
+          "apps/api/test/contracts/harness-context-consumer.test.ts",
+          "apps/api/test/contracts/harness-context-native.test.ts",
+          "apps/api/test/contracts/context-observation.test.ts"
         ],
         "consumer_cases": [
           "D8.approval.local",
@@ -135,7 +138,9 @@
           "D8.workspace-conflict.local",
           "D8.workspace-conflict.http",
           "D8.workspace-unknown.http",
-          "D8.workspace-no-reread.http"
+          "D8.workspace-no-reread.http",
+          "D8.context.local",
+          "D8.context.http"
         ]
       }
     },

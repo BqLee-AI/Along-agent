@@ -18,18 +18,12 @@ import type {
   ToolOutcome,
   ToolResult,
 } from './contracts.js';
-import { approvalReceiptSchema, parseResult, resultKind } from './result-schema.js';
+import { parseResult, resultKind } from './result-schema.js';
 import { bindDocumentApprovalApply } from '../approvals/document-service.js';
 import { readDocumentApprovalReceipt } from '../approvals/decision.js';
-import { WorkspaceApplyReplaceInputSchema } from './schemas.js';
-
-const documentReceiptSchema = z
-  .object({
-    kind: z.literal('document_approval_receipt'),
-    approval_id: z.string().uuid(),
-    presentation_hash: z.string().regex(/^[a-f0-9]{64}$/),
-  })
-  .strict();
+import { ReadRunObservationInputSchema, WorkspaceApplyReplaceInputSchema } from './schemas.js';
+import { assertContextSourceAuthorized } from './context-source.js';
+import { readAcceptedInvocationResult } from './accepted-result.js';
 
 const HASH_DOMAIN = 'along/tool-args/v1\0';
 const frozenSchema = z
@@ -293,31 +287,6 @@ async function audit(
     ],
   );
 }
-async function replay(client: PoolClient, ctx: ToolContext, row: Invocation): Promise<ToolResult> {
-  if (row.result_version !== 1) throw stateConflict('unsupported tool result version');
-  if (row.approval_id && row.tool_id === 'workspace_propose_replace') {
-    const receipt = documentReceiptSchema.parse(row.accepted_result);
-    if (receipt.approval_id !== row.approval_id)
-      throw stateConflict('document receipt reference conflict');
-    const approval = await readDocumentApprovalReceipt(client, ctx.ownerId, row.approval_id);
-    if (approval.presentation_hash !== receipt.presentation_hash || approval.run_id !== ctx.runId)
-      throw stateConflict('document receipt differs from frozen approval');
-    return { status: 'ok', result: { kind: 'document_approval', approval } };
-  }
-  if (row.approval_id && row.tool_id !== 'workspace_apply_replace') {
-    const receipt = approvalReceiptSchema.parse(row.accepted_result);
-    if (receipt.approvalId !== row.approval_id)
-      throw stateConflict('approval result reference conflict');
-    return {
-      status: 'ok',
-      result: await readFrozenToolApproval(client, { ownerId: ctx.ownerId, ...receipt }),
-    };
-  }
-  const result = parseResult(row.accepted_result);
-  if (result.status === 'unknown' || resultKind(result) !== row.outcome_kind)
-    throw stateConflict('invalid accepted tool result');
-  return result;
-}
 
 // Bootstrap reads accepted facts only. No invocation/attempt/Run locks are
 // acquired here: callers may already hold attempt → Run locks, and historical
@@ -347,7 +316,7 @@ export async function readInvocationSnapshots(
     if (!row) throw notFound('tool invocation not found');
     if (row.state !== 'completed') throw stateConflict('tool invocation has no accepted result');
     if (!workspaceAuthorized(ctx, row)) throw forbidden('workspace authorization revoked');
-    const accepted = parseResult(await replay(client, ctx, row));
+    const accepted = parseResult(await readAcceptedInvocationResult(client, ctx, row));
     if (resultKind(accepted) !== row.outcome_kind)
       throw stateConflict('invalid accepted tool result');
     snapshots.push({
@@ -453,9 +422,23 @@ async function accept(
       presentation_hash: approval.presentation_hash,
     };
   }
+  if (
+    result.status === 'ok' &&
+    (result.result.kind === 'context_slice' ||
+      (result.result.kind === 'operation_error' &&
+        result.result.reason === 'unsupported_source')) &&
+    row.tool_id !== 'read_run_observation'
+  )
+    throw stateConflict('context result requires observation reader');
   const serialized = JSON.stringify(stored);
   if (Buffer.byteLength(serialized, 'utf8') > 240000)
     throw stateConflict('tool result exceeds safe snapshot bound');
+  if (
+    result.status === 'ok' &&
+    result.result.kind === 'context_slice' &&
+    Buffer.byteLength(serialized, 'utf8') > 16384
+  )
+    throw stateConflict('context page exceeds safe snapshot bound');
   await client.query(
     `UPDATE tool_invocations SET state = 'completed', outcome_kind = $2, result_version = 1,
        accepted_result = $3::jsonb, approval_id = $4, accepted_attempt_id = $5,
@@ -502,8 +485,29 @@ async function gate(
     else await audit(client, ctx, row, 'denied', permissionDenied);
     return { ...permissionDenied, invocationId: row.invocation_id, replayed: false };
   }
+  if (row.tool_id === 'read_run_observation') {
+    if (!canExecute || ctx.signal?.aborted) {
+      await audit(client, ctx, row, 'denied', denied);
+      return { ...denied, invocationId: row.invocation_id, replayed: false };
+    }
+    const parsed = ReadRunObservationInputSchema.safeParse(input.args);
+    let authorized = parsed.success;
+    if (parsed.success) {
+      try {
+        await assertContextSourceAuthorized(client, ctx, parsed.data.source_invocation_id);
+      } catch (error) {
+        if (!(error instanceof HttpError) || error.httpStatus !== 403) throw error;
+        authorized = false;
+      }
+    }
+    if (!authorized) {
+      if (row.state === 'reserved') await accept(client, ctx, row, denied, 'denied');
+      else await audit(client, ctx, row, 'denied', denied);
+      return { ...denied, invocationId: row.invocation_id, replayed: false };
+    }
+  }
   if (row.state === 'completed') {
-    const result = await replay(client, ctx, row);
+    const result = await readAcceptedInvocationResult(client, ctx, row);
     await audit(client, ctx, row, 'replayed', result);
     return { ...result, invocationId: row.invocation_id, replayed: true };
   }
@@ -731,7 +735,7 @@ export async function executeNonTransactionalInvocation(
       return { ...permissionDenied, invocationId: row.invocation_id, replayed: false };
     }
     if (row.state === 'completed') {
-      const accepted = await replay(client, ctx, row);
+      const accepted = await readAcceptedInvocationResult(client, ctx, row);
       if (canonicalJson(accepted) !== canonicalJson(result))
         throw stateConflict('conflicting external effect evidence');
       await audit(client, ctx, row, 'replayed', accepted);

@@ -18,7 +18,9 @@ export const WORKSPACE_TOOL_IDS = [
   'workspace_propose_replace',
   'workspace_apply_replace',
 ] as const;
-export const TOOL_IDS = [...BUSINESS_TOOL_IDS, ...WORKSPACE_TOOL_IDS] as const;
+export const CONTEXT_TOOL_IDS = ['read_run_observation'] as const;
+export const HARNESS_BASE_TOOL_IDS = [...BUSINESS_TOOL_IDS, ...CONTEXT_TOOL_IDS] as const;
+export const TOOL_IDS = [...BUSINESS_TOOL_IDS, ...WORKSPACE_TOOL_IDS, ...CONTEXT_TOOL_IDS] as const;
 export type ToolId = (typeof TOOL_IDS)[number];
 
 export const TASK_STATES = [

@@ -691,6 +691,63 @@ export class DeploymentDatabase {
       )
         fail('baseline_additional_constraints_mismatch');
     }
+    // Incremental immutable-policy guards use the same source-body comparison
+    // as the fixed baseline triggers. Classification remains entirely read-only.
+    const source = this.#migrations.map((migration) => migration.sql).join('\n');
+    for (const expected of manifest.functions ?? []) {
+      const actual = (
+        await this.#query(
+          `SELECT p.prosrc AS body,p.provolatile AS volatility,p.proisstrict AS strict,
+         p.prosecdef AS security_definer,p.proconfig AS config,l.lanname AS language,
+         p.prorettype::regtype::text AS result
+         FROM pg_proc p JOIN pg_language l ON l.oid=p.prolang
+         WHERE p.oid=to_regprocedure($1)`,
+          [`public.${expected.name}(${expected.arguments})`],
+        )
+      ).rows[0];
+      const escaped = expected.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const body = source.match(
+        new RegExp(
+          `CREATE FUNCTION ${escaped}\\s*\\([^)]*\\)[\\s\\S]*?AS \\$([a-z_]*)\\$([\\s\\S]*?)\\$\\1\\$;`,
+          'i',
+        ),
+      )?.[2];
+      if (
+        !actual ||
+        !body ||
+        actual.body.replaceAll('\r\n', '\n').trim() !== body.replaceAll('\r\n', '\n').trim() ||
+        actual.volatility !== expected.volatility ||
+        actual.strict !== expected.strict ||
+        actual.result !== expected.result ||
+        actual.language !== 'plpgsql' ||
+        actual.security_definer ||
+        actual.config !== null
+      )
+        fail('baseline_additional_functions_mismatch');
+    }
+    for (const expected of manifest.triggers ?? []) {
+      const actual = (
+        await this.#query(
+          `SELECT t.tgtype AS type,t.tgenabled AS enabled,t.tgqual IS NULL AS unconditional,
+         t.tgnargs AS arguments,p.proname AS function_name,nf.nspname AS function_schema
+         FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
+         JOIN pg_namespace n ON n.oid=c.relnamespace
+         JOIN pg_proc p ON p.oid=t.tgfoid JOIN pg_namespace nf ON nf.oid=p.pronamespace
+         WHERE n.nspname='public' AND c.relname=$1 AND t.tgname=$2 AND NOT t.tgisinternal`,
+          [expected.table, expected.name],
+        )
+      ).rows[0];
+      if (
+        !actual ||
+        actual.type !== expected.type ||
+        actual.enabled !== 'O' ||
+        !actual.unconditional ||
+        actual.arguments !== 0 ||
+        actual.function_name !== expected.function ||
+        actual.function_schema !== 'public'
+      )
+        fail('baseline_additional_triggers_mismatch');
+    }
   }
   async #verifyBaseline() {
     const columns = (

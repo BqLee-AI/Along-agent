@@ -1,0 +1,102 @@
+{
+  "version": "0019",
+  "tables": ["run_context_policies"],
+  "columns": [
+    {
+      "table": "run_context_policies",
+      "name": "run_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "run_context_policies",
+      "name": "owner_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "run_context_policies",
+      "name": "policy",
+      "type": "jsonb",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "run_context_policies",
+      "name": "policy_hash",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "run_context_policies",
+      "name": "created_at",
+      "type": "timestamptz",
+      "required": true,
+      "default": "now()"
+    }
+  ],
+  "constraints": [
+    {
+      "table": "run_context_policies",
+      "name": "run_context_policies_pkey",
+      "type": "p",
+      "columns": ["run_id"]
+    },
+    {
+      "table": "run_context_policies",
+      "name": "run_context_policies_run_id_fkey",
+      "type": "f",
+      "columns": ["run_id"],
+      "target": "agent_runs",
+      "target_columns": ["id"],
+      "delete_action": "r"
+    },
+    {
+      "table": "run_context_policies",
+      "name": "run_context_policies_policy_check",
+      "type": "c",
+      "columns": ["policy"],
+      "expression": "run_context_policy_valid(policy)"
+    },
+    {
+      "table": "run_context_policies",
+      "name": "run_context_policies_hash_check",
+      "type": "c",
+      "columns": ["policy_hash"],
+      "expression": "(policy_hash ~ '^[0-9a-f]{64}$'::text)"
+    }
+  ],
+  "functions": [
+    {
+      "name": "run_context_policy_valid",
+      "arguments": "jsonb",
+      "result": "boolean",
+      "volatility": "i",
+      "strict": true
+    },
+    {
+      "name": "run_context_policies_guard_owner",
+      "arguments": "",
+      "result": "trigger",
+      "volatility": "v",
+      "strict": false
+    }
+  ],
+  "triggers": [
+    {
+      "table": "run_context_policies",
+      "name": "run_context_policies_owner",
+      "type": 7,
+      "function": "run_context_policies_guard_owner"
+    },
+    {
+      "table": "run_context_policies",
+      "name": "run_context_policies_no_update_delete",
+      "type": 27,
+      "function": "run_checkpoints_reject_mutation"
+    }
+  ]
+}

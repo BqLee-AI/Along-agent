@@ -6,6 +6,7 @@ import { ThreadEventSchema } from '@along/stream-protocol';
 import { RunViewSchema } from '@along/contracts';
 import { z } from 'zod';
 import { startConversationRun } from '../../src/modules/conversations/service.js';
+import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
 import { loadTimeContext } from '../../src/modules/time/context.js';
 import { handleRequest } from '../../src/http/app.js';
 import { seedSession } from '../../src/modules/identity/seed.js';
@@ -131,7 +132,8 @@ maybe('harness authority signed HTTP boundary', () => {
           binaryPath: process.env.HARNESS_BINARY ?? '/app/harness/bin/along-harness',
           maxIterations: 8,
           maxTokens: 8000,
-          model: () => {
+          contextPolicy: createContextPolicy({ completionCap: 512, model: 'http-test-model' }),
+          model: async function* () {
             models += 1;
             throw new Error('GET/cancel must never call model');
           },
@@ -194,7 +196,8 @@ maybe('harness authority signed HTTP boundary', () => {
           binaryPath: process.env.HARNESS_BINARY ?? '/app/harness/bin/along-harness',
           maxIterations: 8,
           maxTokens: 8000,
-          model: () => {
+          contextPolicy: createContextPolicy({ completionCap: 512, model: 'http-test-model' }),
+          model: async function* () {
             throw new Error('cancel must never execute model');
           },
         },

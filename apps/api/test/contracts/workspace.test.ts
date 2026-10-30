@@ -16,8 +16,9 @@ import {
   HarnessModelMessageSchema,
   workspaceResultSchema,
 } from '@along/contracts';
-import type { WorkspaceResult } from '@along/contracts';
+import type { HarnessModelReply, WorkspaceResult } from '@along/contracts';
 import { createHarnessModelTransport } from '../../src/modules/conversations/harness-model.js';
+import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
 import { configureWorkspaceRegistry } from '../../src/modules/workspaces/service.js';
 import type { WorkspaceRegistration } from '../../src/modules/workspaces/service.js';
 import {
@@ -26,7 +27,7 @@ import {
   listen,
   pending,
   started,
-  writeModelSse,
+  sendModelSse,
 } from '../helpers/harness-consumer.js';
 import type { ConsumerMode, HarnessActor, HarnessConsumer } from '../helpers/harness-consumer.js';
 
@@ -50,9 +51,9 @@ interface Scenario {
   omitReadBack: boolean;
 }
 const ModelBody = z.object({
+  messages: z.array(HarnessModelMessageSchema),
   stream: z.literal(true),
   stream_options: z.object({ include_usage: z.literal(true) }),
-  messages: z.array(HarnessModelMessageSchema),
   parallel_tool_calls: z.boolean().optional(),
 });
 const ToolObservation = z.object({
@@ -124,27 +125,23 @@ function observations(data: readonly unknown[]): Observation[] {
   return result;
 }
 
-function tool(name: string, args: Record<string, unknown>) {
+function tool(name: string, args: Record<string, unknown>): HarnessModelReply {
   return {
-    choices: [
-      {
-        message: {
-          content: '正在依据已读取资料核对文档；保存前会请求批准。',
-          tool_calls: [
-            {
-              id: randomUUID(),
-              type: 'function',
-              function: { name, arguments: JSON.stringify(args) },
-            },
-          ],
+    message: {
+      content: '正在依据已读取资料核对文档；保存前会请求批准。',
+      tool_calls: [
+        {
+          id: randomUUID(),
+          type: 'function',
+          function: { name, arguments: JSON.stringify(args) },
         },
-      },
-    ],
+      ],
+    },
     usage: { total_tokens: 5 },
   };
 }
 
-function modelReply(messages: ModelMessage[], scenario: Scenario) {
+function modelReply(messages: ModelMessage[], scenario: Scenario): HarnessModelReply {
   const data = values(messages);
   const accepted = observations(data);
   if (!latest(accepted, (value) => value.result.kind === 'list')) {
@@ -211,7 +208,7 @@ function modelReply(messages: ModelMessage[], scenario: Scenario) {
   if (apply.result.kind !== 'applied') throw new Error('unexpected apply observation');
   if (scenario.omitReadBack) {
     return {
-      choices: [{ message: { content: 'Finished.', tool_calls: [] } }],
+      message: { content: 'Finished.', tool_calls: [] },
       usage: { total_tokens: 5 },
     };
   }
@@ -224,7 +221,7 @@ function modelReply(messages: ModelMessage[], scenario: Scenario) {
   }
   if (source.result.content !== scenario.source) throw new Error('MCP returned stale source bytes');
   return {
-    choices: [{ message: { content: `Read back ${target.result.version}`, tool_calls: [] } }],
+    message: { content: `Read back ${target.result.version}`, tool_calls: [] },
     usage: { total_tokens: 5 },
   };
 }
@@ -240,15 +237,15 @@ beforeAll(async () => {
       if (!scenario) throw new Error('missing workspace fixture identity');
       scenario.requests.push(body.messages);
       if (body.parallel_tool_calls === false) {
-        writeModelSse(res, modelReply(body.messages, scenario));
+        sendModelSse(res, modelReply(body.messages, scenario));
       } else {
         // This provider defaults to parallel proposals, as the real file task
         // endpoint did. Native must negotiate sequential calls, not discard one.
         const parallel = tool('workspace_list', { path: '' });
-        parallel.choices[0]!.message.tool_calls.push(
-          ...tool('workspace_read', { path: 'brief.md' }).choices[0]!.message.tool_calls,
+        parallel.message.tool_calls.push(
+          ...tool('workspace_read', { path: 'brief.md' }).message.tool_calls,
         );
-        writeModelSse(res, parallel);
+        sendModelSse(res, parallel);
       }
     })().catch((error: unknown) => {
       modelErrors.push(error);
@@ -264,6 +261,10 @@ beforeAll(async () => {
     ...fixture.deps.harness,
     maxIterations: 24,
     maxTokens: 64000,
+    contextPolicy: createContextPolicy({
+      completionCap: 1024,
+      model: 'controlled-workspace-consumer',
+    }),
     model: createHarnessModelTransport({
       baseUrl: `${base}/v1`,
       model: 'controlled-workspace-consumer',
@@ -447,6 +448,7 @@ async function savesDocument(mode: ConsumerMode, conflict: boolean) {
     read_invocation_id: expect.any(String),
   });
   expect(verified.effect.read_invocation_id).not.toBe(verified.effect.apply_invocation_id);
+  if (!conflict) expect(scenario.requests).toHaveLength(8);
   const frozen = await documentFacts(actor.ownerId);
   expect(frozen.tasks).toEqual([]);
   expect(frozen.outbox).toEqual([]);

@@ -35,6 +35,7 @@ import {
 import { readRunDocumentEvidence } from '../../src/modules/tools/query.js';
 import { seedSession } from '../../src/modules/identity/seed.js';
 import { startConversationRun } from '../../src/modules/conversations/service.js';
+import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
 import { loadTimeContext } from '../../src/modules/time/context.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 
@@ -77,7 +78,8 @@ maybe('document approval PostgreSQL authority and frozen content', () => {
           binaryPath: process.env.HARNESS_BINARY ?? '/app/harness/bin/along-harness',
           maxIterations: 24,
           maxTokens: 8000,
-          model: () => {
+          contextPolicy: createContextPolicy({ completionCap: 512, model: 'approval-test-model' }),
+          model: async function* () {
             throw new Error('approval tests never invoke a model');
           },
         },

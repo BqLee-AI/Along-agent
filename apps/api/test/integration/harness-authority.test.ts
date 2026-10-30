@@ -10,11 +10,17 @@ import {
   DocumentApprovalReceiptSchema,
   type HarnessRequest,
   type HarnessSnapshot,
+  type HarnessModelStep,
   type WorkspaceSummary,
 } from '@along/contracts';
 import type { ThreadEvent } from '@along/stream-protocol';
+import { withTransaction } from '../../src/db/transaction.js';
 import { HttpError } from '../../src/http/errors.js';
 import { startConversationRun } from '../../src/modules/conversations/service.js';
+import {
+  createContextPolicy,
+  readRunContextPolicy,
+} from '../../src/modules/conversations/context-policy.js';
 import type {
   ConversationDeps,
   RunContext,
@@ -60,7 +66,11 @@ import {
   lockToolEffectAcceptanceBinding,
   lockToolRunBinding,
 } from '../../src/modules/conversations/tool-binding.js';
-import { BUSINESS_TOOL_IDS, TOOL_IDS } from '../../src/modules/tools/contracts.js';
+import {
+  BUSINESS_TOOL_IDS,
+  HARNESS_BASE_TOOL_IDS,
+  TOOL_IDS,
+} from '../../src/modules/tools/contracts.js';
 
 const maybe = databaseUrl ? describe : describe.skip;
 const idReply = z.object({ invocation_id: z.string().uuid() });
@@ -102,6 +112,7 @@ maybe('harness durable authority against PostgreSQL', () => {
         binaryPath: process.env.HARNESS_BINARY ?? '/app/harness/bin/along-harness',
         maxIterations: 8,
         maxTokens: 8000,
+        contextPolicy: createContextPolicy({ completionCap: 512, model: 'authority-test-model' }),
         model: async function* () {
           yield { type: 'delta', delta: 'answer' };
           yield {
@@ -147,6 +158,11 @@ maybe('harness durable authority against PostgreSQL', () => {
          ) INSERT INTO run_attempts(id,owner_id,run_id,attempt_no,status)
            SELECT $3,owner_id,id,1,'running' FROM legacy`,
         [context.runId, runId, attemptId],
+      );
+      await database.pool.query(
+        `INSERT INTO run_context_policies(run_id,owner_id,policy,policy_hash)
+         SELECT $2,owner_id,policy,policy_hash FROM run_context_policies WHERE run_id=$1`,
+        [context.runId, runId],
       );
       context = { ...context, runId, attemptId };
     }
@@ -224,6 +240,111 @@ maybe('harness durable authority against PostgreSQL', () => {
       checkpointId: checkpoint.checkpoint_ref,
     };
   }
+  async function legacyWaiting(usage: HarnessSnapshot['usage'] = { iterations: 1, tokens: null }) {
+    const source = await fresh();
+    const runId = randomUUID();
+    const attemptId = randomUUID();
+    // Insert pre-policy storage directly; immutable authority is never rewritten.
+    await database.pool.query(
+      `WITH legacy AS (
+        INSERT INTO agent_runs(id,owner_id,conversation_id,agent_revision,mode,status,
+          budget_max_iterations,budget_max_tokens,execution,tools_allowlist,frozen_context,input_message_id)
+        SELECT $2,owner_id,conversation_id,agent_revision,mode,'running',
+          budget_max_iterations,budget_max_tokens,execution,$4::jsonb,frozen_context,input_message_id
+        FROM agent_runs WHERE id=$1 RETURNING id,owner_id
+      ) INSERT INTO run_attempts(id,owner_id,run_id,attempt_no,status)
+        SELECT $3,owner_id,id,1,'running' FROM legacy`,
+      [source.context.runId, runId, attemptId, JSON.stringify(BUSINESS_TOOL_IDS)],
+    );
+    const context = { ...source.context, runId, attemptId, allowlist: [...BUSINESS_TOOL_IDS] };
+    const inboundKey = randomUUID();
+    await database.pool.query(
+      `INSERT INTO conversation_idempotency(owner_id,idempotency_key,request_hash,
+        conversation_id,run_id,user_message_id,expires_at)
+       SELECT owner_id,$2,request_hash,conversation_id,$3,user_message_id,expires_at
+       FROM conversation_idempotency WHERE run_id=$1`,
+      [source.context.runId, inboundKey, runId],
+    );
+    const args = {
+      raw_time_text: context.inputText,
+      timezone_hint: 'Asia/Shanghai',
+      note: '喝水',
+      occurrence: 'once',
+    };
+    const reserved = await gateway.reserveToolInvocation(database.pool, context, {
+      callKey: 'harness/1',
+      toolId: 'propose_task',
+      args,
+    });
+    const outcome = await gateway.invokeTool(database.pool, context, {
+      invocationId: reserved.invocationId,
+      toolId: 'propose_task',
+      args,
+    });
+    const approvalId = proposalReply.parse(outcome).result.approval.approvalId;
+    const snapshot: HarnessSnapshot = {
+      version: 2,
+      message_refs: [context.userMessageId],
+      tool_refs: [reserved.invocationId],
+      next_call_no: 2,
+      usage,
+      waiting: { invocation_id: reserved.invocationId, approval_id: approvalId },
+    };
+    const checkpointId = randomUUID();
+    await database.pool.query(
+      `INSERT INTO run_checkpoints(id,owner_id,attempt_id,seq,kind,payload,stream_protocol_version)
+       VALUES($1,$2,$3,1,'harness_snapshot',$4::jsonb,'harness/v2')`,
+      [checkpointId, context.ownerId, attemptId, JSON.stringify(snapshot)],
+    );
+    await database.pool.query(
+      `UPDATE agent_runs SET status='suspended_approval',waiting_checkpoint_id=$2,
+       waiting_invocation_id=$3,waiting_approval_id=$4 WHERE id=$1`,
+      [runId, checkpointId, reserved.invocationId, approvalId],
+    );
+    await database.pool.query("UPDATE run_attempts SET status='done',ended_at=now() WHERE id=$1", [
+      attemptId,
+    ]);
+    return { actor: source.actor, context, approvalId, checkpointId, inboundKey, snapshot };
+  }
+  async function scriptedModel(steps: (HarnessModelStep | HarnessModelStep[])[]) {
+    const fixture = await fresh();
+    let calls = 0;
+    const session = await createHarnessSession(
+      {
+        ...deps,
+        harness: {
+          ...deps.harness!,
+          model: async function* () {
+            const step = steps[calls++];
+            if (!step) throw new Error('unexpected extra provider request');
+            if (Array.isArray(step)) yield* step;
+            else yield step;
+          },
+        },
+      },
+      fixture.context,
+      async (event) => {
+        fixture.events.push(event);
+        return true;
+      },
+      new AbortController().signal,
+    );
+    const frame = (remaining_tokens: number | null, type: 'model' | 'measure_context' = 'model') =>
+      request(type, {
+        messages: [{ role: 'user', content: fixture.context.inputText }],
+        remaining_tokens,
+        max_output_tokens: 512,
+      });
+    const snapshot = (iterations: number, tokens: number | null): HarnessSnapshot => ({
+      version: 2,
+      message_refs: [fixture.context.userMessageId],
+      tool_refs: [],
+      next_call_no: 1,
+      usage: { iterations, tokens },
+      waiting: null,
+    });
+    return { ...fixture, session, frame, snapshot, calls: () => calls };
+  }
   async function workspaceWaiting(legacyWithoutSummary = false) {
     const root = await mkdtemp(join(tmpdir(), 'along-run-history-'));
     const actor = await seedSession(database.pool, {});
@@ -265,6 +386,11 @@ maybe('harness durable authority against PostgreSQL', () => {
         ) INSERT INTO run_attempts (id,owner_id,run_id,attempt_no,status)
           SELECT $3,owner_id,id,1,'running' FROM legacy`,
         [context.runId, runId, attemptId],
+      );
+      await database.pool.query(
+        `INSERT INTO run_context_policies(run_id,owner_id,policy,policy_hash)
+         SELECT $2,owner_id,policy,policy_hash FROM run_context_policies WHERE run_id=$1`,
+        [context.runId, runId],
       );
       context = { ...context, runId, attemptId };
     }
@@ -363,7 +489,10 @@ maybe('harness durable authority against PostgreSQL', () => {
           ],
     );
   }
-  async function resume(fixture: WaitingFixture, key = randomUUID()) {
+  async function resume(
+    fixture: Pick<WaitingFixture, 'actor' | 'context' | 'checkpointId'>,
+    key = randomUUID(),
+  ) {
     return resumeConversationRun(
       deps,
       fixture.actor.userId,
@@ -452,7 +581,10 @@ maybe('harness durable authority against PostgreSQL', () => {
     const first = await fresh();
     await first.frame(request('answer', { delta: 'accepted first answer' }));
     await first.frame(
-      request('finish', { outcome: 'done', usage: { iterations: 1, tokens: null } }),
+      request('finish', {
+        outcome: 'done',
+        usage: { iterations: 1, tokens: null },
+      }),
     );
     const second = await startConversationRun(
       deps,
@@ -501,7 +633,9 @@ maybe('harness durable authority against PostgreSQL', () => {
     ])
       await expect(
         session.handleRequest(
-          request('snapshot', { context: { ...snapshot, message_refs: refs } }),
+          request('snapshot', {
+            context: { ...snapshot, message_refs: refs },
+          }),
         ),
       ).rejects.toMatchObject({ errorCode: 'STATE_CONFLICT' });
   });
@@ -727,7 +861,7 @@ maybe('harness durable authority against PostgreSQL', () => {
       async () => true,
       new AbortController().signal,
     );
-    expect(session.start.protocol).toBe('harness/v3');
+    expect(session.start.protocol).toBe(HARNESS_PROTOCOL_VERSION);
     expect(session.start.snapshot).toEqual({ ...legacy, version: 2 });
     expect(session.start.approval).toEqual({
       kind: 'task',
@@ -880,7 +1014,15 @@ maybe('harness durable authority against PostgreSQL', () => {
         status,
         task_id: taskId,
       });
-      expect(session.start.observations[0]?.invocation_id).toBe(fixture.invocationId);
+      expect(session.start.observations[0]).toMatchObject({
+        view: 'full',
+        invocation_id: fixture.invocationId,
+        tool_id: 'propose_task',
+        result: {
+          status: 'ok',
+          result: { kind: 'approval', approval: { approvalId: fixture.approvalId } },
+        },
+      });
       expect(session.start.snapshot?.next_call_no).toBe(2);
       await expect(resume(fixture, key)).rejects.toMatchObject({
         errorCode: 'STATE_CONFLICT',
@@ -1405,6 +1547,7 @@ maybe('harness durable authority against PostgreSQL', () => {
     const model = request('model', {
       messages: [{ role: 'user', content: fixture.context.inputText }],
       remaining_tokens: 8000,
+      max_output_tokens: 512,
     });
     try {
       expect(await fixture.frame(model)).toEqual({ type: 'delta', delta: 'answer' });
@@ -1425,6 +1568,7 @@ maybe('harness durable authority against PostgreSQL', () => {
           request('model', {
             messages: [{ role: 'user', content: 'second model' }],
             remaining_tokens: 8000,
+            max_output_tokens: 512,
           }),
         ),
       ).rejects.toMatchObject({ errorCode: 'STATE_CONFLICT' });
@@ -1433,10 +1577,7 @@ maybe('harness durable authority against PostgreSQL', () => {
       });
       expect(
         await fixture.frame(request('model_next', { model_ref: model.request_ref })),
-      ).toMatchObject({
-        type: 'complete',
-        reply: { message: { content: 'answer' } },
-      });
+      ).toMatchObject({ type: 'complete', reply: { message: { content: 'answer' } } });
       await expect(
         fixture.frame(request('model_next', { model_ref: model.request_ref })),
       ).rejects.toMatchObject({ errorCode: 'STATE_CONFLICT' });
@@ -1482,6 +1623,7 @@ maybe('harness durable authority against PostgreSQL', () => {
       request('model', {
         messages: [{ role: 'user', content: fixture.context.inputText }],
         remaining_tokens: 8000,
+        max_output_tokens: 512,
       }),
     );
     await entered.promise;
@@ -1875,7 +2017,7 @@ maybe('harness durable authority against PostgreSQL', () => {
         },
         null,
       );
-      expect(legacy.context?.allowlist).toEqual(BUSINESS_TOOL_IDS);
+      expect(legacy.context?.allowlist).toEqual(HARNESS_BASE_TOOL_IDS);
       expect(
         (
           await database.pool.query(
@@ -1911,6 +2053,7 @@ maybe('harness durable authority against PostgreSQL', () => {
           request('model', {
             messages: [{ role: 'user', content: 'Read now.' }],
             remaining_tokens: 8000,
+            max_output_tokens: 512,
           }),
         ),
       ).rejects.toMatchObject({ httpStatus: 403 });
@@ -1931,7 +2074,7 @@ maybe('harness durable authority against PostgreSQL', () => {
             new AbortController().signal,
           )
         ).start.tools.map((tool) => tool.name),
-      ).toEqual(BUSINESS_TOOL_IDS);
+      ).toEqual(HARNESS_BASE_TOOL_IDS);
     } finally {
       await configureWorkspaceRegistry([]);
       await rm(directory, { recursive: true, force: true });
@@ -1963,6 +2106,7 @@ maybe('harness durable authority against PostgreSQL', () => {
         request('model', {
           messages: [{ role: 'user', content: 'x'.repeat(1024 * 1024) }],
           remaining_tokens: fixture.context.maxTokens,
+          max_output_tokens: 512,
         }),
       ),
     ).rejects.toMatchObject({ errorCode: 'HARNESS_CONTEXT_LIMIT', httpStatus: 422 });
@@ -1974,5 +2118,449 @@ maybe('harness durable authority against PostgreSQL', () => {
         ])
       ).rows[0]?.n,
     ).toBe(0);
+  });
+  it('uses accepted provider totals instead of a native frame balance and stops when the real budget is exhausted', async () => {
+    const fixture = await scriptedModel([
+      {
+        type: 'complete',
+        reply: { message: { content: 'first', tool_calls: [] }, usage: { total_tokens: 100 } },
+      },
+      {
+        type: 'complete',
+        reply: { message: { content: 'second', tool_calls: [] }, usage: { total_tokens: 7900 } },
+      },
+    ]);
+    await expect(fixture.session.handleRequest(fixture.frame(8000))).resolves.toMatchObject({
+      type: 'complete',
+    });
+    for (const type of ['model', 'measure_context'] as const) {
+      await expect(fixture.session.handleRequest(fixture.frame(8000, type))).rejects.toMatchObject({
+        errorCode: 'STATE_CONFLICT',
+      });
+      await expect(fixture.session.handleRequest(fixture.frame(null, type))).rejects.toMatchObject({
+        errorCode: 'STATE_CONFLICT',
+      });
+    }
+    expect(fixture.calls()).toBe(1);
+    await expect(fixture.session.handleRequest(fixture.frame(7900))).resolves.toMatchObject({
+      type: 'complete',
+    });
+    await expect(fixture.session.handleRequest(fixture.frame(0))).rejects.toMatchObject({
+      errorCode: 'BUDGET_EXCEEDED',
+    });
+    expect(fixture.calls()).toBe(2);
+    await fixture.session.handleRequest(
+      request('finish', {
+        outcome: 'failed',
+        usage: { iterations: 2, tokens: 8000 },
+        error: { code: 'BUDGET_EXCEEDED', message: 'budget exhausted' },
+      }),
+    );
+    expect(fixture.events.at(-1)).toMatchObject({
+      type: 'thread.failed',
+      payload: { error: { code: 'BUDGET_EXCEEDED' } },
+    });
+  });
+
+  it('a missing later usage makes a known cumulative total unknown and it never becomes a fresh balance', async () => {
+    const fixture = await scriptedModel([
+      {
+        type: 'complete',
+        reply: { message: { content: 'known', tool_calls: [] }, usage: { total_tokens: 100 } },
+      },
+      { type: 'complete', reply: { message: { content: 'unknown', tool_calls: [] }, usage: null } },
+      {
+        type: 'complete',
+        reply: {
+          message: { content: 'known step only', tool_calls: [] },
+          usage: { total_tokens: 20 },
+        },
+      },
+    ]);
+    await fixture.session.handleRequest(fixture.frame(8000));
+    await fixture.session.handleRequest(request('snapshot', { context: fixture.snapshot(1, 100) }));
+    await fixture.session.handleRequest(fixture.frame(7900));
+    const unknown = checkpointReply.parse(
+      await fixture.session.handleRequest(
+        request('snapshot', { context: fixture.snapshot(2, null) }),
+      ),
+    );
+    expect(
+      (
+        await database.pool.query('SELECT payload FROM run_checkpoints WHERE id=$1', [
+          unknown.checkpoint_ref,
+        ])
+      ).rows[0]?.payload.usage,
+    ).toEqual({ iterations: 2, tokens: null });
+    for (const type of ['model', 'measure_context'] as const) {
+      await expect(fixture.session.handleRequest(fixture.frame(7900, type))).rejects.toMatchObject({
+        errorCode: 'STATE_CONFLICT',
+      });
+      await expect(fixture.session.handleRequest(fixture.frame(8000, type))).rejects.toMatchObject({
+        errorCode: 'STATE_CONFLICT',
+      });
+    }
+    await fixture.session.handleRequest(fixture.frame(null));
+    await expect(
+      fixture.session.handleRequest(request('snapshot', { context: fixture.snapshot(3, 120) })),
+    ).rejects.toMatchObject({ errorCode: 'STATE_CONFLICT' });
+    await expect(
+      fixture.session.handleRequest(
+        request('finish', { outcome: 'done', usage: { iterations: 3, tokens: 120 } }),
+      ),
+    ).rejects.toMatchObject({ errorCode: 'STATE_CONFLICT' });
+    await fixture.session.handleRequest(
+      request('finish', { outcome: 'done', usage: { iterations: 3, tokens: null } }),
+    );
+    expect(fixture.calls()).toBe(3);
+    expect(fixture.events.at(-1)?.type).toBe('thread.completed');
+  });
+
+  for (const failedUsage of [{ total_tokens: 40 }, null]) {
+    it(`accounts for a failed model request with ${failedUsage ? 'available' : 'missing'} usage before persisting failure`, async () => {
+      const fixture = await scriptedModel([
+        {
+          type: 'complete',
+          reply: { message: { content: 'first', tool_calls: [] }, usage: { total_tokens: 100 } },
+        },
+        {
+          type: 'failed',
+          error: { code: 'HARNESS_CONTEXT_LIMIT', message: 'output truncated' },
+          usage: failedUsage,
+        },
+      ]);
+      await fixture.session.handleRequest(fixture.frame(8000));
+      await fixture.session.handleRequest(
+        request('snapshot', { context: fixture.snapshot(1, 100) }),
+      );
+      await expect(fixture.session.handleRequest(fixture.frame(7900))).resolves.toMatchObject({
+        type: 'failed',
+        usage: failedUsage,
+        error: { code: 'HARNESS_CONTEXT_LIMIT' },
+      });
+      const tokens = failedUsage ? 140 : null;
+      const checkpoint = checkpointReply.parse(
+        await fixture.session.handleRequest(
+          request('snapshot', { context: fixture.snapshot(2, tokens) }),
+        ),
+      );
+      expect(
+        (
+          await database.pool.query('SELECT payload FROM run_checkpoints WHERE id=$1', [
+            checkpoint.checkpoint_ref,
+          ])
+        ).rows[0]?.payload.usage,
+      ).toEqual({ iterations: 2, tokens });
+      await expect(
+        fixture.session.handleRequest(
+          request('finish', {
+            outcome: 'failed',
+            usage: { iterations: 1, tokens: 100 },
+            error: { code: 'HARNESS_CONTEXT_LIMIT', message: 'output truncated' },
+          }),
+        ),
+      ).rejects.toMatchObject({ errorCode: 'STATE_CONFLICT' });
+      await fixture.session.handleRequest(
+        request('finish', {
+          outcome: 'failed',
+          usage: { iterations: 2, tokens },
+          error: { code: 'HARNESS_CONTEXT_LIMIT', message: 'output truncated' },
+        }),
+      );
+      expect(fixture.calls()).toBe(2);
+      expect(fixture.events.at(-1)).toMatchObject({
+        type: 'thread.failed',
+        payload: { error: { code: 'HARNESS_CONTEXT_LIMIT' } },
+      });
+    });
+  }
+
+  for (const binding of ['model', 'adapter_revision'] as const) {
+    it(`rejects a changed frozen ${binding} before allocating a resumed attempt`, async () => {
+      const fixture = await waiting();
+      await rejectApproval({ pool: database.pool }, fixture.actor.userId, fixture.approvalId, {
+        idempotency_key: randomUUID(),
+      });
+      const frozen = await readRunContextPolicy(
+        database.pool,
+        fixture.actor.userId,
+        fixture.context.runId,
+      );
+      if (!frozen) throw new Error('accepted harness policy missing');
+      const changedDeps: ConversationDeps = {
+        ...deps,
+        harness: {
+          ...deps.harness!,
+          contextPolicy: {
+            ...deps.harness!.contextPolicy,
+            model_binding: {
+              ...deps.harness!.contextPolicy.model_binding,
+              [binding]: 'incompatible-deployment',
+            },
+          },
+        },
+      };
+      await expect(
+        resumeConversationRun(
+          changedDeps,
+          fixture.actor.userId,
+          fixture.context.conversationId,
+          fixture.context.runId,
+          randomUUID(),
+          { checkpoint_id: fixture.checkpointId, idempotency_key: randomUUID() },
+        ),
+      ).rejects.toMatchObject({ errorCode: 'HARNESS_UNAVAILABLE' });
+      expect(
+        (
+          await database.pool.query('SELECT count(*)::int n FROM run_attempts WHERE run_id=$1', [
+            fixture.context.runId,
+          ])
+        ).rows[0]?.n,
+      ).toBe(1);
+      expect(
+        (
+          await database.pool.query('SELECT count(*)::int n FROM harness_resumes WHERE run_id=$1', [
+            fixture.context.runId,
+          ])
+        ).rows[0]?.n,
+      ).toBe(0);
+      expect(
+        await readRunContextPolicy(database.pool, fixture.actor.userId, fixture.context.runId),
+      ).toEqual(frozen);
+      const resumed = await resume(fixture);
+      expect(resumed.context?.contextPolicy).toEqual(frozen);
+    });
+  }
+
+  it('backfills a legacy policy only on legal explicit resume without changing frozen authority or granting new tools', async () => {
+    const fixture = await legacyWaiting();
+    await withTransaction(database.pool, (client) =>
+      appendEvent(client, fixture.context, 'message.delta', {
+        conversation_id: fixture.context.conversationId,
+        run_id: fixture.context.runId,
+        delta: 'legacy retained reply',
+      }),
+    );
+    const before = (
+      await database.pool.query(
+        'SELECT frozen_context,tools_allowlist,budget_max_iterations,budget_max_tokens,agent_revision FROM agent_runs WHERE id=$1',
+        [fixture.context.runId],
+      )
+    ).rows[0];
+    expect(
+      await readRunContextPolicy(database.pool, fixture.actor.userId, fixture.context.runId),
+    ).toBeNull();
+    expect(
+      (
+        await getRunView(
+          deps,
+          fixture.actor.userId,
+          fixture.context.conversationId,
+          fixture.context.runId,
+        )
+      ).can_resume,
+    ).toBe(false);
+    const replay = await startConversationRun(
+      deps,
+      fixture.actor.userId,
+      randomUUID(),
+      {
+        execution: 'harness',
+        raw_text: fixture.context.inputText,
+        confirmed_timezone: 'Asia/Shanghai',
+        idempotency_key: fixture.inboundKey,
+      },
+      null,
+    );
+    expect(replay.context).toBeNull();
+    await expect(resume(fixture)).rejects.toMatchObject({
+      errorCode: 'STATE_CONFLICT',
+      details: { status: 'pending' },
+    });
+    expect(
+      await readRunContextPolicy(database.pool, fixture.actor.userId, fixture.context.runId),
+    ).toBeNull();
+    const detail = await getApprovalDetail(
+      { pool: database.pool },
+      fixture.actor.userId,
+      fixture.approvalId,
+    );
+    await confirmApproval({ pool: database.pool }, fixture.actor.userId, fixture.approvalId, {
+      presentation_hash: detail.detail.presentation_hash,
+      seen_content: detail.detail.echo_text,
+      idempotency_key: randomUUID(),
+    });
+    expect(
+      (
+        await getRunView(
+          deps,
+          fixture.actor.userId,
+          fixture.context.conversationId,
+          fixture.context.runId,
+        )
+      ).can_resume,
+    ).toBe(true);
+    expect(
+      await readRunContextPolicy(database.pool, fixture.actor.userId, fixture.context.runId),
+    ).toBeNull();
+    const resumed = await resume(fixture);
+    if (!resumed.context) throw new Error('legacy resume context missing');
+    expect(
+      await readRunContextPolicy(database.pool, fixture.actor.userId, fixture.context.runId),
+    ).toEqual(deps.harness!.contextPolicy);
+    expect(
+      (
+        await database.pool.query(
+          'SELECT frozen_context,tools_allowlist,budget_max_iterations,budget_max_tokens,agent_revision FROM agent_runs WHERE id=$1',
+          [fixture.context.runId],
+        )
+      ).rows[0],
+    ).toEqual(before);
+    const session = await createHarnessSession(
+      deps,
+      resumed.context,
+      async () => true,
+      new AbortController().signal,
+    );
+    expect(session.start.tools.map((tool) => tool.name)).toEqual([...BUSINESS_TOOL_IDS]);
+    expect(session.start.snapshot).toEqual(fixture.snapshot);
+    expect(session.start.observations[0]).toMatchObject({
+      view: 'full',
+      invocation_id: fixture.snapshot.tool_refs[0],
+      tool_id: 'propose_task',
+    });
+    await expect(
+      session.handleRequest(
+        request('reserve', {
+          call_key: 'harness/2',
+          tool_id: 'list_tasks',
+          args: {},
+        }),
+      ),
+    ).resolves.toMatchObject({ invocation_id: expect.any(String) });
+    await expect(
+      session.handleRequest(
+        request('reserve', {
+          call_key: 'harness/3',
+          tool_id: 'read_run_observation',
+          args: {
+            source_invocation_id: fixture.snapshot.tool_refs[0],
+            field: 'content',
+            offset: 0,
+            limit: 1,
+          },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(HttpError);
+    expect(
+      (
+        await database.pool.query(
+          'SELECT count(*)::int n FROM run_context_policies WHERE run_id=$1',
+          [fixture.context.runId],
+        )
+      ).rows[0]?.n,
+    ).toBe(1);
+    expect(
+      (
+        await database.pool.query('SELECT count(*)::int n FROM run_attempts WHERE run_id=$1', [
+          fixture.context.runId,
+        ])
+      ).rows[0]?.n,
+    ).toBe(2);
+  });
+  for (const usage of [
+    { iterations: 8, tokens: null },
+    { iterations: 1, tokens: 8000 },
+  ]) {
+    it(`does not backfill policy or allocate an attempt when legacy ${usage.tokens === null ? 'iterations' : 'tokens'} are exhausted`, async () => {
+      const fixture = await legacyWaiting(usage);
+      await rejectApproval({ pool: database.pool }, fixture.actor.userId, fixture.approvalId, {
+        idempotency_key: randomUUID(),
+      });
+      await expect(resume(fixture)).rejects.toMatchObject({ errorCode: 'BUDGET_EXCEEDED' });
+      expect(
+        await readRunContextPolicy(database.pool, fixture.actor.userId, fixture.context.runId),
+      ).toBeNull();
+      expect(
+        (
+          await database.pool.query('SELECT count(*)::int n FROM run_attempts WHERE run_id=$1', [
+            fixture.context.runId,
+          ])
+        ).rows[0]?.n,
+      ).toBe(1);
+      expect(
+        (
+          await database.pool.query('SELECT count(*)::int n FROM harness_resumes WHERE run_id=$1', [
+            fixture.context.runId,
+          ])
+        ).rows[0]?.n,
+      ).toBe(0);
+    });
+  }
+
+  it('permits terminal unknown usage after a known checkpoint when a later actual request has no usage', async () => {
+    const fixture = await scriptedModel([
+      {
+        type: 'complete',
+        reply: { message: { content: 'known', tool_calls: [] }, usage: { total_tokens: 100 } },
+      },
+      {
+        type: 'complete',
+        reply: { message: { content: 'missing usage', tool_calls: [] }, usage: null },
+      },
+    ]);
+    await fixture.session.handleRequest(fixture.frame(8000));
+    await fixture.session.handleRequest(request('snapshot', { context: fixture.snapshot(1, 100) }));
+    await fixture.session.handleRequest(fixture.frame(7900));
+    await fixture.session.handleRequest(
+      request('finish', { outcome: 'done', usage: { iterations: 2, tokens: null } }),
+    );
+    expect(fixture.events.at(-1)?.type).toBe('thread.completed');
+    expect(fixture.calls()).toBe(2);
+  });
+  it('retains only acknowledged provider deltas when a streamed request fails and counts that request once', async () => {
+    const fixture = await scriptedModel([
+      [
+        { type: 'delta', delta: 'accepted prefix 😀' },
+        {
+          type: 'failed',
+          error: { code: 'HARNESS_CONTEXT_LIMIT', message: 'output truncated' },
+          usage: { total_tokens: 37 },
+        },
+      ],
+    ]);
+    const model = fixture.frame(8000);
+    await expect(fixture.session.handleRequest(model)).resolves.toEqual({
+      type: 'delta',
+      delta: 'accepted prefix 😀',
+    });
+    const next = request('model_next', { model_ref: model.request_ref });
+    await expect(fixture.session.handleRequest(next)).rejects.toMatchObject({
+      errorCode: 'STATE_CONFLICT',
+    });
+    await expect(
+      fixture.session.handleRequest(request('answer', { delta: 'fabricated output' })),
+    ).rejects.toMatchObject({ errorCode: 'STATE_CONFLICT' });
+    expect(fixture.events).toEqual([]);
+    await fixture.session.handleRequest(request('answer', { delta: 'accepted prefix 😀' }));
+    await expect(fixture.session.handleRequest(next)).resolves.toMatchObject({
+      type: 'failed',
+      error: { code: 'HARNESS_CONTEXT_LIMIT' },
+      usage: { total_tokens: 37 },
+    });
+    await fixture.session.handleRequest(request('snapshot', { context: fixture.snapshot(1, 37) }));
+    await fixture.session.handleRequest(
+      request('finish', {
+        outcome: 'failed',
+        usage: { iterations: 1, tokens: 37 },
+        error: { code: 'HARNESS_CONTEXT_LIMIT', message: 'output truncated' },
+      }),
+    );
+    expect(fixture.calls()).toBe(1);
+    expect(fixture.events.map((event) => event.type)).toEqual(['message.delta', 'thread.failed']);
+    expect(fixture.events[0]).toMatchObject({ payload: { delta: 'accepted prefix 😀' } });
+    expect(await listRunEvents(database.pool, fixture.actor.userId, fixture.context.runId)).toEqual(
+      fixture.events,
+    );
   });
 });

@@ -12,7 +12,7 @@ import {
   resumeConversationRun,
 } from './harness-authority.js';
 import { appendEvent, commitTerminal } from './run-state.js';
-import { BUSINESS_TOOL_IDS, TOOL_IDS } from '../tools/contracts.js';
+import { BUSINESS_TOOL_IDS, HARNESS_BASE_TOOL_IDS, TOOL_IDS } from '../tools/contracts.js';
 import { getWorkspaceGrant, validateWorkspaceGrant } from '../workspaces/service.js';
 import { findReminderDirective } from '@along/time-core';
 import { requireTimeContext } from '../time/context.js';
@@ -44,13 +44,14 @@ import {
   insertIdempotency,
   insertMessage,
   insertRun,
+  listHarnessMessageRefs,
   listConversationEvents,
   listRunEvents,
-  listHarnessMessageRefs,
   lockRun,
   type ConversationRow,
 } from './repository.js';
 import { requireHistoryRun } from './history-repository.js';
+import { ensureRunContextPolicy } from './context-policy.js';
 
 const AGENT_REVISION = 'assistant/r1';
 const BUSINESS_MAX_ITERATIONS = 10;
@@ -160,7 +161,12 @@ export async function startConversationRun(
       const workspaceSummary = workspaceGrant
         ? validateWorkspaceGrant(ownerId, workspaceGrant)
         : null;
-      const allowlist = workspaceGrant ? TOOL_IDS : BUSINESS_TOOL_IDS;
+      const allowlist =
+        execution === 'harness'
+          ? workspaceGrant
+            ? TOOL_IDS
+            : HARNESS_BASE_TOOL_IDS
+          : BUSINESS_TOOL_IDS;
 
       let conversation: ConversationRow | null = null;
       if (input.conversation_id) {
@@ -212,6 +218,14 @@ export async function startConversationRun(
       const maxIterations =
         execution === 'harness' ? deps.harness!.maxIterations : BUSINESS_MAX_ITERATIONS;
       const maxTokens = execution === 'harness' ? deps.harness!.maxTokens : BUSINESS_MAX_TOKENS;
+      const messageRefs =
+        execution === 'harness'
+          ? await listHarnessMessageRefs(client, {
+              ownerId,
+              conversationId: conversation.id,
+              userMessageId,
+            })
+          : undefined;
       const frozenContext = {
         confirmedTimezone,
         anchorReceivedAtUtc: utcSecondIso(conversation.anchor_received_at_utc),
@@ -220,15 +234,7 @@ export async function startConversationRun(
         rulesetId: deps.timeContext.ruleset_id,
         tzdbVersion: deps.timeContext.tzdb_version,
         aliasVersion: deps.timeContext.available ? deps.timeContext.aliases.version : null,
-        ...(execution === 'harness'
-          ? {
-              messageRefs: await listHarnessMessageRefs(client, {
-                ownerId,
-                conversationId: conversation.id,
-                userMessageId,
-              }),
-            }
-          : {}),
+        ...(messageRefs ? { messageRefs } : {}),
         ...(workspaceGrant ? { workspaceGrant, workspaceSummary } : {}),
       };
       await insertRun(client, {
@@ -244,6 +250,10 @@ export async function startConversationRun(
         frozenContext,
         inputMessageId: userMessageId,
       });
+      const contextPolicy =
+        execution === 'harness'
+          ? await ensureRunContextPolicy(client, ownerId, runId, deps.harness!.contextPolicy)
+          : undefined;
       await insertAttempt(client, {
         attemptId,
         ownerId,
@@ -279,6 +289,8 @@ export async function startConversationRun(
           execution,
           userMessageId,
           allowlist,
+          ...(messageRefs ? { messageRefs } : {}),
+          ...(contextPolicy ? { contextPolicy } : {}),
           ...(workspaceGrant ? { workspaceGrant } : {}),
           timeContext: deps.timeContext,
         },

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { HARNESS_MAX_FRAME_BYTES, HarnessModelReplySchema } from '@along/contracts';
 import type { HarnessServices } from './harness-process.js';
+import { buildHarnessModelBody } from './harness-context.js';
 import { HttpError } from '../../http/errors.js';
 
 export interface HarnessModelConfig {
@@ -9,8 +10,7 @@ export interface HarnessModelConfig {
   apiKey?: string;
 }
 
-// Provider envelopes are external data, not the native wire DTOs. Unknown
-// provider metadata is ignored; choices and function proposals are never selected.
+// Provider metadata may evolve; choice/function identity must remain unambiguous.
 const ProviderChunkSchema = z.object({
   choices: z
     .array(
@@ -42,15 +42,22 @@ const ProviderChunkSchema = z.object({
     .max(1),
   usage: z.object({ total_tokens: z.number().int().safe().nonnegative() }).nullish(),
 });
-
 function modelUnavailable(): HttpError {
   return new HttpError(503, 503, 'HARNESS_UNAVAILABLE', 'harness model transport unavailable');
 }
 function modelProtocolError(): HttpError {
   return new HttpError(502, 502, 'HARNESS_PROTOCOL_ERROR', 'harness model response rejected');
 }
+function contextLimit(): HttpError {
+  return new HttpError(
+    422,
+    422,
+    'HARNESS_CONTEXT_LIMIT',
+    'harness model context capacity exceeded',
+  );
+}
 
-/** Decode complete SSE lines, not arbitrary HTTP chunks or partial UTF-8. */
+/** SSE lines are decoded only when complete, including complete UTF-8 scalars. */
 async function* modelEvents(response: Response): AsyncGenerator<string> {
   const reader = response.body?.getReader();
   if (!reader) throw modelProtocolError();
@@ -91,35 +98,53 @@ async function* modelEvents(response: Response): AsyncGenerator<string> {
         }
       }
     }
-    // A truncated event or missing [DONE] is never a completed model result.
-    throw modelProtocolError();
+    throw modelProtocolError(); // Truncation and a missing [DONE] are failures.
   } finally {
     await reader.cancel().catch(() => undefined);
     reader.releaseLock();
   }
 }
 
-/** Fixed server configuration; native pulls each step and owns continuation. */
+// Only structured provider codes count as a capacity rejection. Diagnostic prose
+// and arbitrary error bodies never enter either native frames or public output.
+async function isWindowRejection(response: Response): Promise<boolean> {
+  if (response.status !== 400 && response.status !== 413 && response.status !== 422) return false;
+  const reader = response.body?.getReader();
+  if (!reader) return false;
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  try {
+    for (;;) {
+      const next = await reader.read();
+      if (next.done) break;
+      bytes += next.value.byteLength;
+      if (bytes > 8192) return false;
+      chunks.push(next.value);
+    }
+    const json = JSON.parse(
+      new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)),
+    );
+    return ['context_length_exceeded', 'context_window_exceeded'].includes(json?.error?.code);
+  } catch {
+    return false;
+  } finally {
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
+}
+
+/** Pull/ack transport: native alone chooses whether another model step is read. */
 export function createHarnessModelTransport(config: HarnessModelConfig): HarnessServices['model'] {
   const base = config.baseUrl.endsWith('/') ? config.baseUrl : `${config.baseUrl}/`;
   const endpoint = new URL('chat/completions', base);
   return async function* (request, tools, signal) {
+    // Rejections before fetch are not model iterations, hence no failed step.
     if (request.remaining_tokens === 0) {
       throw new HttpError(429, 400008, 'BUDGET_EXCEEDED', 'harness token budget exhausted');
     }
-    const body = JSON.stringify({
-      model: config.model,
-      messages: request.messages,
-      tools: tools.map((tool) => ({
-        type: 'function',
-        function: { name: tool.name, description: tool.description, parameters: tool.parameters },
-      })),
-      stream: true,
-      stream_options: { include_usage: true },
-      parallel_tool_calls: false,
-      max_tokens: request.remaining_tokens,
-    });
-    if (Buffer.byteLength(body, 'utf8') > HARNESS_MAX_FRAME_BYTES) throw modelProtocolError();
+    const body = buildHarnessModelBody(config.model, request, tools);
+    if (Buffer.byteLength(body, 'utf8') > HARNESS_MAX_FRAME_BYTES) throw contextLimit();
+    let usage: { total_tokens: number } | null = null;
     try {
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -132,8 +157,9 @@ export function createHarnessModelTransport(config: HarnessModelConfig): Harness
         signal,
       });
       if (!response.ok) {
-        await response.body?.cancel();
-        throw modelUnavailable();
+        const capacity = await isWindowRejection(response);
+        await response.body?.cancel().catch(() => undefined);
+        throw capacity ? contextLimit() : modelUnavailable();
       }
       if (response.headers.get('content-type')?.split(';')[0]?.trim() !== 'text/event-stream') {
         await response.body?.cancel();
@@ -147,19 +173,17 @@ export function createHarnessModelTransport(config: HarnessModelConfig): Harness
       let hasTool = false;
       let hasFunctionType = false;
       let finish: string | undefined;
-      let usage: { total_tokens: number } | null = null;
       let outputBytes = 0;
       let idUnits = 0;
       let nameUnits = 0;
       const account = (fragment: string) => {
-        // Escaped JSON size, including tool argument escaping, bounds the final
-        // native frame before retaining any unbounded accumulated content.
         outputBytes += Buffer.byteLength(JSON.stringify(fragment), 'utf8') - 2;
         if (outputBytes > HARNESS_MAX_FRAME_BYTES - 1024) throw modelProtocolError();
       };
       for await (const event of modelEvents(response)) {
         if (signal.aborted) throw signal.reason;
         if (event === '[DONE]') {
+          if (finish === 'length') throw contextLimit();
           if (
             !finish ||
             (!hasContent && !hasTool) ||
@@ -215,8 +239,6 @@ export function createHarnessModelTransport(config: HarnessModelConfig): Harness
           account(fragment);
           hasContent = true;
           content.push(fragment);
-          // This only bounds an actual provider delta for the public event
-          // contract. It never slices a completed model answer to mimic timing.
           for (let offset = 0; offset < fragment.length;) {
             if (signal.aborted) throw signal.reason;
             let end = Math.min(offset + 4000, fragment.length);
@@ -245,14 +267,14 @@ export function createHarnessModelTransport(config: HarnessModelConfig): Harness
           nameUnits += call.function?.name?.length ?? 0;
           if (idUnits > 128 || nameUnits > 128) throw modelProtocolError();
         }
-        if (choice.finish_reason === 'length')
-          throw new HttpError(429, 400008, 'BUDGET_EXCEEDED', 'harness model token limit reached');
         if (choice.finish_reason === 'content_filter') throw modelProtocolError();
+        // Read the usage-only trailer before turning length into a failed step.
         if (choice.finish_reason) finish = choice.finish_reason;
       }
     } catch (error) {
-      if (error instanceof HttpError || signal.aborted) throw error;
-      throw modelUnavailable();
+      if (signal.aborted) throw error;
+      const typed = error instanceof HttpError ? error : modelUnavailable();
+      yield { type: 'failed', error: { code: typed.errorCode, message: typed.message }, usage };
     }
   };
 }

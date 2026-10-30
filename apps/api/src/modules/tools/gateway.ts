@@ -30,6 +30,7 @@ import { applyWorkspaceReplace, type ApprovedWorkspaceTarget } from '../workspac
 import { utf8Bytes, WorkspaceDeniedError } from '../workspaces/service.js';
 import { callWorkspaceMcp, type WorkspaceReadTool } from './mcp-workspace.js';
 import { readRunDocumentEvidence } from './query.js';
+import { readObservationPage } from './observation-page.js';
 
 const workspaceDenied = (): ToolResult => ({
   status: 'denied',
@@ -415,6 +416,7 @@ export function reserveToolInvocation(
     'workspace_list',
     'workspace_grep',
     'workspace_read',
+    'read_run_observation',
   ].includes(input.toolId);
   return reserveInvocation(pool, ctx, {
     ...input,
@@ -433,6 +435,25 @@ export function invokeTool(
   input: { invocationId: string; toolId: string; args: unknown },
 ): Promise<ToolOutcome> {
   if (input.toolId === 'workspace_apply_replace') return invokeWorkspaceApply(pool, ctx, input);
+  if (input.toolId === 'read_run_observation') {
+    return executeReadOnlyInvocation(pool, ctx, input, async (frozen) => {
+      const parsed = TOOL_INPUT_SCHEMAS.read_run_observation.safeParse(input.args);
+      if (!parsed.success) return workspaceDenied();
+      const client = await pool.connect();
+      try {
+        return await readObservationPage(client, frozen, parsed.data);
+      } catch (error) {
+        if (error instanceof HttpError && error.httpStatus === 403) return workspaceDenied();
+        throw error;
+      } finally {
+        client.release();
+      }
+    }).catch((error: unknown) => {
+      if (error instanceof HttpError && error.httpStatus === 403)
+        return { ...workspaceDenied(), invocationId: input.invocationId, replayed: false };
+      throw error;
+    });
+  }
   if (['workspace_list', 'workspace_grep', 'workspace_read'].includes(input.toolId)) {
     const toolId = input.toolId as WorkspaceReadTool;
     return executeReadOnlyInvocation(pool, ctx, input, async (frozen) => {

@@ -2,8 +2,8 @@
 
 > 状态：Required；本机生命周期使用指南。
 > 范围：Windows Web、Docker Linux x64 的 PG16/API/native/MCP、私有安装配置。
-> 包含：唯一管理员正式开户、原身份本机转正、有限路径工作区收尾及会话历史只读恢复；不包含 R2，以及删除数据或恢复备份的自动操作。
-> 阶段：R1；生命周期依据见 [design/15](design/15-r1-local-lifecycle.md)，账户依据见 [design/16](design/16-r1-account-access.md)，历史依据见 [design/17](design/17-r1-conversation-history.md)。
+> 包含：唯一管理员正式开户、原身份本机转正、有限工作区、会话历史只读恢复与 R2-A 上下文策略；不含 R2-B 路由、长期记忆或自动恢复备份。
+> 阶段：R1 与 R2-A；生命周期见 [design/15](design/15-r1-local-lifecycle.md)，账户见 [design/16](design/16-r1-account-access.md)，历史见 [design/17](design/17-r1-conversation-history.md)，上下文见 [design/18](design/18-r2a-harness-context.md)。
 
 ## 环境与安装身份
 
@@ -24,6 +24,8 @@ bun --no-env-file run local:start
 
 首次按提示选择三个固定端口，默认 PG `55432`、API `3000`、Web `3100`。时间版本必须与本版本内置资源相符，使用提示中的默认值；不要凭日历年份填写。模型可以明确暂不配置；需要配置时输入已获授权的原 provider、模型、key 和预算，不提供替代模型默认值。原服务明确无认证时 key 留空，不额外生成认证材料。敏感输入不回显，也不通过命令行参数传入。
 
+配置模型还必须显式设置独立单次输出上限 `model.completionCap`（正安全整数），不能把 `model.maxTokens` 的 Run 余额填作单次额度。可选 `model.modelWindowTokens` 只有明确模型依据时填写正安全整数，省略/null 表示未知；`model.reserveTokens` 为非负安全整数，省略按0传递。旧私有模型配置缺 completionCap 时明确报 CONFIG_INVALID：停写后在原私有文件补该字段，保留原身份、密钥、卷和其余设置；不重新初始化安装，也不由工具静默猜值。对应容器变量为 `HARNESS_COMPLETION_CAP/HARNESS_MODEL_WINDOW_TOKENS/HARNESS_CONTEXT_RESERVE_TOKENS`。累计预算仍为原 `maxIterations/maxTokens`。
+
 `init` 建立一次配置、准备专用持久卷和成套产物，只有核实为空的新应用库才执行全套迁移。它不启动业务写者。已有配置再次 `init` 只复用，不重新生成密钥或覆盖登记；除下述首次接入原部署的准备阶段外，数据库仍须完整核验为当前目标版本，旧库应显式 `local:upgrade`。
 
 `start` 复用准备好的 API/native/Web，不安装、不构建、不执行 DDL。打开命令输出的 Web 地址；固定地址是认证 origin，不要自行把 `localhost` 与 `127.0.0.1` 混用。在 Web 按“首次建号”创建唯一管理员，再运行下文 `local:account` 完成工作区登记。账户、模型、工作区是三个独立状态；账户成功不意味着资料任务已可用。本入口不 seed 用户。
@@ -32,14 +34,14 @@ bun --no-env-file run local:start
 
 先备份原配置与数据，并按原部署方式停止 **API/worker/Web 及它们的 native/MCP 子进程**。不接管未知进程，不从端口号猜归属。确认原数据库是完整的 `0016` 基线或后续受支持版本；只知道最后一条版本行不足以接入。
 
-旧 `0016`/`0017` 原部署在交互终端执行：
+旧 `0016`/`0017`/`0018` 原部署在交互终端执行：
 
 ```powershell
 bun --no-env-file run local:init --adopt
 bun --no-env-file run local:upgrade
 ```
 
-首次 `init --adopt` 只对完整核验为受支持、且不高于当前目标 `0018` 的原库完成准备和安装归属确认；不会向旧库应用 DDL，也不启动 API/worker/Web。输出会列出原库版本、目标版本及是否必须升级。旧库准备成功不表示可以 `start`：必须显式 `local:upgrade`，由升级流程停写、备份、应用新增迁移、核验并启动；成功后无需再 `start`。若原库已经完整核验为当前 `0018`，则准备后执行 `local:start`，不必为接入而迁移。接入后的日常 `start`、重载及再次常规 `init` 仍只接受当前目标版本；未知/部分库与高于目标的库均拒绝。
+首次 `init --adopt` 只对完整核验为受支持、且不高于当前目标 `0019` 的原库完成准备和安装归属确认；不会向旧库应用 DDL，也不启动 API/worker/Web。输出会列出原库版本、目标版本及是否必须升级。旧库准备成功不表示可以 `start`：必须显式 `local:upgrade`，由升级流程停写、备份、应用新增迁移、核验并启动；成功后无需再 `start`。若原库已经完整核验为当前 `0019`，则准备后执行 `local:start`，不必为接入而迁移。接入后的日常 `start`、重载及再次常规 `init` 仍只接受当前目标版本；未知/部分库与高于目标的库均拒绝。
 
 准备并按提示准确提供：
 
@@ -73,7 +75,7 @@ bun --no-env-file run local:account --config C:\AlongPrivate\local.json
 
 ## 工作区本机收尾
 
-`local:account` 是一次性维护，不运行常驻宿主服务。它读取原私有配置及 identity 公共服务中的已绑定管理员，自动派生登记 owner；浏览器、模型和维护参数都不能指定 owner。命令要求原 PG 已经由同一配置的 `local:start` 启动，且数据库完整核验为 `0018`；旧 `0016`/`0017` 必须先显式 `local:upgrade`，维护不会执行 DDL。
+`local:account` 是一次性维护，不运行常驻宿主服务。它读取原私有配置及 identity 公共服务中的已绑定管理员，自动派生登记 owner；浏览器、模型和维护参数都不能指定 owner。命令要求原 PG 已由同一配置的 `local:start` 启动，并通过完整目标基线核验（含0019）；旧受支持基线须先显式 `local:upgrade`，维护不会执行 DDL。
 
 1. **已有正确登记**：核验管理员的原 workspace_id、root、有限权限及物理根身份，保留登记文件字节，不归并或修改其他 owner。配置已经指向同一登记时不重写配置。原登记无效、不可读或只有其他 owner 时停止，修复原来源再重试，不把坏文件当空白覆盖。
 2. **没有登记**：先由部署者在**原受管资料卷内**准备明确子目录及获授权资料；命令不创建/复制 root，也不默认授权整个卷。仅限刚刚通过本安装 `start` 核验的新安装，可在 PowerShell 使用原私有配置定位本安装容器并准备全新子目录，例如：
@@ -147,6 +149,16 @@ bun --no-env-file run local:upgrade
 ```
 
 升级准备同批产物，取得安装锁及数据库部署许可，停旧写者并禁止其自动重启，确认没有未知数据库客户端，备份数据库和资料卷，再应用新增迁移、核验并启动新版本。备份位于私有安装目录的 `backups/` 下；数据库 dump 和资料归档均完成后才写完整标记。它们含用户资料，必须按私有数据保管，不能上传仓库。
+
+**R2-A 配置与原安装升级：**
+
+保留原安装，不清库、不删卷、不重新建号。先在原版本、原配置仍有效时执行 `local:stop --config <原私有配置>` 停稳；私下备份原配置与登记，再取得目标源码，在原私有配置的既有 `model` 对象中显式补 `completionCap`。旧CLI不认识该新字段，新CLI也不会替缺字段的旧配置猜值，因此不要先改配置再用旧CLI停机。
+
+隔离真实验收使用 completionCap=4096，只是已验证的选择依据，不是工具自动补写的默认值。保留原 provider、model、key、maxIterations/maxTokens、认证密钥、身份、卷、origin和登记；没有可信依据时不填写模型窗口或精确输入meter。400万累计额度仅获授权用于隔离验收，不迁入原安装；原64000额度不能保证完成同规模的六份大资料任务。
+
+随后从目标源码运行 `bun --no-env-file run local:upgrade --config <原私有配置>`；该入口自己备份数据库和资料卷、应用0019、完整核验并启动，不需另做 `init --new`、`init --adopt` 或重复 `start`。仅当尚未由生命周期入口接管的旧部署，才沿“接入原部署”执行adopt准备。
+
+升级后核对目标版本/就绪、原正式账户、原历史与资料登记，并在同一账户走一次完整预览、批准零写、显式原Run继续、唯一写入和新全文回读。历史隔离验收不代替这次原安装核验；失败保持停写，按本节维护合同处理，不删除升级记录或换新卷绕过。
 
 升级期间不要手工启动另一套 API/worker，也不要直接调用全量迁移脚本。`0012` 之前没有版本账，不给 `0001–0011` 补行。无新增迁移时不重放已有步骤；后续迁移配套显式版本核验，而不是用任意最大版本行推断兼容。
 

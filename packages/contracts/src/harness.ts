@@ -1,14 +1,280 @@
 import { z } from 'zod';
-import { workspaceSummarySchema } from './workspaces.js';
-import { DocumentApprovalDecisionSchema } from './document-approvals.js';
+import { workspaceSummarySchema, workspaceResultSchema } from './workspaces.js';
+import {
+  DocumentApprovalDecisionSchema,
+  DocumentApprovalReceiptSchema,
+} from './document-approvals.js';
 
-export const HARNESS_PROTOCOL_VERSION = 'harness/v3' as const;
+export const HARNESS_PROTOCOL_VERSION = 'harness/v4' as const;
 export const HARNESS_MAX_FRAME_BYTES = 1024 * 1024;
 
 const uuid = z.string().uuid();
 const reference = z.string().min(1).max(128);
 const text = z.string().max(HARNESS_MAX_FRAME_BYTES);
 const args = z.record(z.unknown());
+const safe = z.number().int().nonnegative().safe();
+const positive = z.number().int().positive().safe();
+const meterQuality = z.enum(['verified', 'estimated', 'unavailable']);
+const failure = z.object({ code: reference, message: z.string().max(8192) }).strict();
+export const ContextPolicySchema = z
+  .object({
+    revision: z.literal('r2a/1'),
+    completion_cap: positive,
+    model_window_tokens: positive.nullable(),
+    input_meter: meterQuality,
+    meter_revision: z.string().min(1),
+    reserve_tokens: safe,
+    model_binding: z
+      .object({ model: z.string().min(1), adapter_revision: z.string().min(1) })
+      .strict(),
+  })
+  .strict()
+  .refine(
+    (policy) => policy.input_meter === 'unavailable' || policy.meter_revision !== 'unavailable/1',
+    {
+      message: 'a usable input meter requires its capability revision',
+    },
+  );
+export const HarnessContextMeasurementSchema = z
+  .object({
+    wire_bytes: safe,
+    http_bytes: safe,
+    input_meter: z
+      .object({
+        quality: meterQuality,
+        input_tokens: safe.nullable(),
+        meter_revision: z.string().min(1),
+      })
+      .strict()
+      .refine((meter) =>
+        meter.quality === 'unavailable' ? meter.input_tokens === null : meter.input_tokens !== null,
+      ),
+    output_ceiling: safe,
+    limit_reason: z.enum(['budget', 'context']).nullable(),
+  })
+  .strict();
+
+// Shared accepted-result validation: the tool ledger and native observations
+// consume exactly the same closed payload union, never a synthetic summary kind.
+const small = z.string().max(512);
+const payloadText = z.string().max(8192);
+const toolFailure = z.object({ code: small, message: payloadText }).strict();
+const timeFailure = z
+  .object({
+    code: z.enum([
+      'NONEXISTENT_LOCAL_TIME',
+      'AMBIGUOUS_LOCAL_TIME',
+      'TZDB_UNAVAILABLE',
+      'UNKNOWN_TIMEZONE',
+    ]),
+    message: payloadText,
+    http_status: z.union([z.literal(422), z.literal(503)]),
+    details: z
+      .object({
+        wall_time: small,
+        timezone_id: small,
+        ruleset_id: small,
+        candidates: z
+          .array(
+            z
+              .object({
+                fold_choice: z.enum(['first', 'second']),
+                offset_seconds: z.number().int(),
+                fire_at_utc: small,
+              })
+              .strict(),
+          )
+          .max(2)
+          .optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export const HarnessToolPayloadSchema = z.union([
+  z
+    .object({
+      kind: z.literal('approval'),
+      approval: z
+        .object({
+          approvalId: uuid,
+          originalText: payloadText,
+          presentationHash: small,
+          presentationVersion: small,
+          expiresAt: small,
+          wallTime: small,
+          timezoneId: small,
+          fold: z.union([z.literal(0), z.literal(1)]),
+          offsetSeconds: z.number().int(),
+          fireAtUtc: small,
+        })
+        .strict(),
+      echo_text: payloadText,
+      card_id: small,
+      original_text: payloadText,
+    })
+    .strict(),
+  z
+    .object({ kind: z.literal('clarify'), reason: small, phrase_key: small, text: payloadText })
+    .strict(),
+  z.object({ kind: z.literal('time_error'), error: timeFailure }).strict(),
+  z
+    .object({
+      kind: z.literal('list_tasks'),
+      tasks: z
+        .array(
+          z
+            .object({
+              task_id: uuid,
+              note_preview: z.string().max(30),
+              fire_at_local_text: small,
+              timezone_id: small,
+              state: small,
+            })
+            .strict(),
+        )
+        .max(50),
+      has_more: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('brief'),
+      brief_id: small,
+      date: small,
+      cards: z
+        .array(
+          z
+            .object({
+              card_id: small,
+              kind: small,
+              title: z.string().max(30),
+              body_text: payloadText,
+              source_refs: z.array(small).max(10),
+              presentation_version: small,
+            })
+            .strict(),
+        )
+        .max(50),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('prefs'),
+      timezone_id: small.nullable(),
+      alias_version: small,
+      quiet_hours: z.null(),
+      locale: z.null(),
+    })
+    .strict(),
+  z.object({ kind: z.literal('effect_evidence'), evidence_ref: small }).strict(),
+  z
+    .object({ kind: z.literal('document_approval'), approval: DocumentApprovalReceiptSchema })
+    .strict(),
+  workspaceResultSchema,
+]);
+export const HarnessToolResultSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('ok'), result: HarnessToolPayloadSchema }).strict(),
+  z.object({ status: z.literal('denied'), error: toolFailure }).strict(),
+  z.object({ status: z.literal('failed'), error: toolFailure }).strict(),
+  z.object({ status: z.literal('unknown'), error: toolFailure }).strict(),
+]);
+const source = { result_version: z.literal(1), omitted: z.literal(true) };
+const sourceVersion = z.string().regex(/^[a-f0-9]{64}$/);
+const projectedSource = z
+  .discriminatedUnion('kind', [
+    z
+      .object({
+        ...source,
+        kind: z.literal('read'),
+        path: z.string(),
+        version: sourceVersion,
+        byte_length: safe,
+        content_total: safe,
+      })
+      .strict(),
+    z
+      .object({
+        ...source,
+        kind: z.literal('list'),
+        path: z.string(),
+        entries_total: safe,
+        failures_total: safe,
+      })
+      .strict(),
+    z
+      .object({
+        ...source,
+        kind: z.literal('search'),
+        path: z.string(),
+        matches_total: safe,
+        failures_total: safe,
+      })
+      .strict(),
+    z
+      .object({
+        ...source,
+        kind: z.literal('context_slice'),
+        source_invocation_id: uuid,
+        source_tool_id: reference,
+        source_result_version: z.literal(1),
+        source_kind: z.enum(['read', 'list', 'search']),
+        field: z.enum(['content', 'matches', 'entries', 'failures']),
+        unit: z.enum(['unicode_scalar', 'items']),
+        offset: safe,
+        end: safe,
+        total: safe,
+        has_more: z.boolean(),
+        path: z.string().optional(),
+        version: sourceVersion.optional(),
+        byte_length: safe.optional(),
+      })
+      .strict(),
+  ])
+  .refine(
+    (value) => {
+      if (value.kind !== 'context_slice') return true;
+      const read = value.source_kind === 'read';
+      const metadata = read
+        ? value.path !== undefined && value.version !== undefined && value.byte_length !== undefined
+        : value.path === undefined &&
+          value.version === undefined &&
+          value.byte_length === undefined;
+      const fieldValid = read
+        ? value.field === 'content'
+        : value.source_kind === 'search'
+          ? value.field === 'matches' || value.field === 'failures'
+          : value.field === 'entries' || value.field === 'failures';
+      return (
+        metadata &&
+        fieldValid &&
+        value.unit === (read ? 'unicode_scalar' : 'items') &&
+        value.end >= value.offset &&
+        (value.offset >= value.total ? value.end === value.offset : value.end <= value.total) &&
+        value.has_more === value.end < value.total
+      );
+    },
+    { message: 'invalid projected source range or provenance' },
+  );
+export const HarnessObservationSchema = z.discriminatedUnion('view', [
+  z
+    .object({
+      view: z.literal('full'),
+      invocation_id: uuid,
+      tool_id: reference,
+      result: HarnessToolResultSchema,
+    })
+    .strict(),
+  z
+    .object({
+      view: z.literal('projected'),
+      invocation_id: uuid,
+      tool_id: reference,
+      outcome: z.literal('ok'),
+      source: projectedSource,
+    })
+    .strict(),
+]);
 export const ExecutionKindSchema = z.enum(['business', 'harness']);
 export const RunStatusSchema = z.enum([
   'running',
@@ -80,6 +346,13 @@ export const HarnessModelReplySchema = z
 export const HarnessModelStepSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('delta'), delta: z.string().min(1).max(4000) }).strict(),
   z.object({ type: z.literal('complete'), reply: HarnessModelReplySchema }).strict(),
+  z
+    .object({
+      type: z.literal('failed'),
+      error: failure,
+      usage: z.object({ total_tokens: safe }).strict().nullable(),
+    })
+    .strict(),
 ]);
 const request = {
   protocol: z.literal(HARNESS_PROTOCOL_VERSION),
@@ -91,10 +364,28 @@ export const HarnessRequestSchema = z.discriminatedUnion('type', [
       ...request,
       type: z.literal('model'),
       messages: z.array(HarnessModelMessageSchema).min(1).max(256),
-      remaining_tokens: z.number().int().nonnegative(),
+      remaining_tokens: safe.nullable(),
+      max_output_tokens: positive,
+    })
+    .strict(),
+  z
+    .object({
+      ...request,
+      type: z.literal('measure_context'),
+      messages: z.array(HarnessModelMessageSchema).min(1).max(256),
+      remaining_tokens: safe.nullable(),
+      max_output_tokens: positive,
     })
     .strict(),
   z.object({ ...request, type: z.literal('model_next'), model_ref: reference }).strict(),
+  z
+    .object({
+      ...request,
+      type: z.literal('context_source'),
+      invocation_id: uuid,
+      view: z.enum(['full', 'projected']),
+    })
+    .strict(),
   z
     .object({
       ...request,
@@ -168,6 +459,7 @@ export const HarnessStartSchema = z
       .min(1)
       .max(64),
     tools: z.array(HarnessToolSchema).max(64),
+    context_policy: ContextPolicySchema,
     budget: z
       .object({
         max_iterations: z.number().int().positive(),
@@ -175,9 +467,7 @@ export const HarnessStartSchema = z
       })
       .strict(),
     snapshot: HarnessSnapshotSchema.nullable(),
-    observations: z
-      .array(z.object({ invocation_id: uuid, tool_id: reference, result: z.unknown() }).strict())
-      .max(64),
+    observations: z.array(HarnessObservationSchema).max(64),
     approval: HarnessApprovalDecisionSchema.nullable(),
     workspace: workspaceSummarySchema.nullable().optional(),
   })
@@ -238,9 +528,12 @@ export type HarnessUsage = z.infer<typeof HarnessUsageSchema>;
 export type HarnessSnapshot = z.infer<typeof HarnessSnapshotSchema>;
 export type HarnessTool = z.infer<typeof HarnessToolSchema>;
 export type HarnessModelReply = z.infer<typeof HarnessModelReplySchema>;
-export type HarnessModelStep = z.infer<typeof HarnessModelStepSchema>;
 export type HarnessRequest = z.infer<typeof HarnessRequestSchema>;
 export type HarnessStart = z.infer<typeof HarnessStartSchema>;
 export type HarnessReply = z.infer<typeof HarnessReplySchema>;
 export type HarnessApprovalDecision = z.infer<typeof HarnessApprovalDecisionSchema>;
 export type RunView = z.infer<typeof RunViewSchema>;
+export type ContextPolicy = z.infer<typeof ContextPolicySchema>;
+export type HarnessContextMeasurement = z.infer<typeof HarnessContextMeasurementSchema>;
+export type HarnessModelStep = z.infer<typeof HarnessModelStepSchema>;
+export type HarnessObservation = z.infer<typeof HarnessObservationSchema>;

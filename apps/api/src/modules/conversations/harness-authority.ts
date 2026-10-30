@@ -26,23 +26,29 @@ import {
 } from '../../http/errors.js';
 import { validateDocumentApprovalsDone } from '../approvals/document-service.js';
 import { invokeTool, reserveToolInvocation } from '../tools/gateway.js';
-import { readInvocationSnapshots, readRunInvocationStates } from '../tools/invocations.js';
-import { readRunDocumentEvidence } from '../tools/query.js';
+import { readRunInvocationStates } from '../tools/invocations.js';
+import {
+  readRunContextObservations,
+  readRunContextSource,
+  readRunDocumentEvidence,
+} from '../tools/query.js';
 import type { ToolContext, ToolPayload } from '../tools/contracts.js';
-import { BUSINESS_TOOL_IDS, TOOL_IDS } from '../tools/contracts.js';
+import { HARNESS_BASE_TOOL_IDS, TOOL_IDS } from '../tools/contracts.js';
 import { HARNESS_TOOL_DEFINITIONS } from '../tools/catalog.js';
 import { validateWorkspaceGrant } from '../workspaces/service.js';
 import { runNativeHarness } from './harness-process.js';
 import type { ConversationDeps, EventWriter, RunContext, StartResult } from './contracts.js';
+import { ensureRunContextPolicy, readRunContextPolicy } from './context-policy.js';
+import { measureHarnessContext } from './harness-context.js';
 import { CancelRunBodySchema, ResumeRunBodySchema } from './schemas.js';
 import {
   insertAttempt,
   latestAttemptId,
   listRunEvents,
   lockRun,
-  readHarnessMessages,
   type LockedRun,
   type RunRow,
+  readHarnessMessages,
 } from './repository.js';
 import {
   appendEvent,
@@ -133,6 +139,25 @@ async function contextOf(
   )
     throw new HttpError(503, 503, 'TZDB_UNAVAILABLE', '接纳时的时间规则暂不可用。');
   if (frozen.workspaceGrant) validateWorkspaceGrant(run.owner_id, frozen.workspaceGrant);
+  const contextPolicy = await readRunContextPolicy(client, run.owner_id, run.id);
+  const deployed = deps.harness?.contextPolicy;
+  if (
+    !contextPolicy ||
+    !deployed ||
+    contextPolicy.model_binding.model !== deployed.model_binding.model ||
+    contextPolicy.model_binding.adapter_revision !== deployed.model_binding.adapter_revision
+  )
+    throw unavailable();
+  const messageRefs = frozen.messageRefs ?? [run.input_message_id];
+  const messages = await readHarnessMessages(
+    client,
+    {
+      ownerId: run.owner_id,
+      conversationId: run.conversation_id,
+      userMessageId: run.input_message_id,
+    },
+    messageRefs,
+  );
   return {
     ownerId: run.owner_id,
     conversationId: run.conversation_id,
@@ -150,28 +175,16 @@ async function contextOf(
     maxIterations: run.budget_max_iterations,
     maxTokens: run.budget_max_tokens,
     allowlist: run.tools_allowlist.filter((name) =>
-      ((frozen.workspaceGrant ? TOOL_IDS : BUSINESS_TOOL_IDS) as readonly string[]).includes(name),
+      ((frozen.workspaceGrant ? TOOL_IDS : HARNESS_BASE_TOOL_IDS) as readonly string[]).includes(
+        name,
+      ),
     ),
     ...(frozen.workspaceGrant ? { workspaceGrant: frozen.workspaceGrant } : {}),
+    messageRefs,
+    messages,
+    contextPolicy,
     ...(checkpointId ? { resumeCheckpointId: checkpointId } : {}),
   };
-}
-
-async function harnessMessagesOf(
-  client: PoolClient,
-  run: RunRow,
-  context: RunContext,
-  snapshot: HarnessSnapshot | null,
-): Promise<HarnessStart['messages']> {
-  // Old Runs did not accept conversation history. Never expand them on resume.
-  const refs = run.frozen_context?.messageRefs ?? [context.userMessageId];
-  if (
-    snapshot &&
-    (snapshot.message_refs.length !== refs.length ||
-      snapshot.message_refs.some((id, index) => id !== refs[index]))
-  )
-    throw stateConflict('snapshot message reference conflict');
-  return readHarnessMessages(client, context, refs);
 }
 function eventPayload(context: RunContext) {
   return { conversation_id: context.conversationId, run_id: context.runId };
@@ -189,15 +202,22 @@ function approvalAuthorizesActions(decision: HarnessApprovalDecision | null): bo
 
 function buildHarnessStart(
   context: RunContext,
-  messages: HarnessStart['messages'],
   snapshot: HarnessSnapshot | null,
   observations: HarnessStart['observations'],
   approval: HarnessApprovalDecision | null,
 ): HarnessStart {
+  if (!context.contextPolicy || !context.messages) throw unavailable();
+  if (
+    snapshot &&
+    (snapshot.message_refs.length !== context.messages.length ||
+      snapshot.message_refs.some((id, index) => id !== context.messages![index]?.message_id))
+  )
+    throw stateConflict('snapshot message reference conflict');
   const start: HarnessStart = {
     protocol: HARNESS_PROTOCOL_VERSION,
     type: 'start',
-    messages,
+    messages: context.messages,
+    context_policy: context.contextPolicy,
     tools: HARNESS_TOOL_DEFINITIONS.filter((tool) => context.allowlist.includes(tool.name)),
     budget: { max_iterations: context.maxIterations, max_tokens: context.maxTokens },
     snapshot,
@@ -353,15 +373,21 @@ export async function resumeConversationRun(
     if (decision.status === 'pending')
       throw stateConflict('approval still pending', { status: 'pending' });
     if (!deps.harness) throw unavailable();
+    if (
+      snapshot.usage.iterations >= run.budget_max_iterations ||
+      (snapshot.usage.tokens !== null && snapshot.usage.tokens >= run.budget_max_tokens)
+    )
+      throw new HttpError(429, 429, 'BUDGET_EXCEEDED', '原运行预算已用完，不能继续。');
     const attemptId = randomUUID();
+    await ensureRunContextPolicy(client, ownerId, runId, deps.harness.contextPolicy);
     const context = await contextOf(client, deps, run, attemptId, requestId, input.checkpoint_id);
-    const observations = await readInvocationSnapshots(
+    const observations = await readRunContextObservations(
       client,
       toolContext(context),
       snapshot.tool_refs,
+      { project: context.allowlist.includes('read_run_observation') },
     );
-    const messages = await harnessMessagesOf(client, run, context, snapshot);
-    buildHarnessStart(context, messages, snapshot, observations, decision);
+    buildHarnessStart(context, snapshot, observations, decision);
     await insertAttempt(client, {
       attemptId,
       ownerId,
@@ -408,9 +434,10 @@ export async function createHarnessSession(
       resume?.checkpoint_id,
     );
     const snapshot = resume ? await readSnapshot(client, locked.run, resume.checkpoint_id) : null;
-    const messages = await harnessMessagesOf(client, locked.run, context, snapshot);
     const observations = snapshot
-      ? await readInvocationSnapshots(client, toolContext(context), snapshot.tool_refs)
+      ? await readRunContextObservations(client, toolContext(context), snapshot.tool_refs, {
+          project: context.allowlist.includes('read_run_observation'),
+        })
       : [];
     const approval = snapshot?.waiting
       ? await readRunApprovalDecision(
@@ -420,12 +447,11 @@ export async function createHarnessSession(
           snapshot.waiting.approval_id,
         )
       : null;
-    return { context, messages, snapshot, observations, approval };
+    return { context, snapshot, observations, approval };
   });
   const { context } = initial;
   const start = buildHarnessStart(
     context,
-    initial.messages,
     initial.snapshot,
     initial.observations,
     initial.approval,
@@ -434,6 +460,7 @@ export async function createHarnessSession(
   let stopped = false;
   let lastSnapshot = initial.snapshot;
   const delivered = new Set(initial.snapshot?.tool_refs ?? []);
+  const cumulative = { ...(initial.snapshot?.usage ?? { iterations: 0, tokens: 0 }) };
   const modelController = new AbortController();
   const modelSignal = AbortSignal.any([signal, modelController.signal]);
   let modelStarted = false;
@@ -453,21 +480,33 @@ export async function createHarnessSession(
   async function nextModelStep(): Promise<HarnessModelStep> {
     const current = modelStream;
     if (!current || current.pendingDelta !== null || current.pulling)
-      throw stateConflict('model continuation requires one accepted previous step');
+      throw stateConflict('model continuation requires an acknowledged previous delta');
     current.pulling = true;
     try {
-      const step = await current.iterator.next();
-      if (step.done) throw stateConflict('model ended without complete reply');
-      const value = HarnessModelStepSchema.parse(step.value);
+      const next = await current.iterator.next();
+      if (next.done)
+        throw new HttpError(502, 502, 'HARNESS_PROTOCOL_ERROR', 'model ended without completion');
+      const parsed = HarnessModelStepSchema.safeParse(next.value);
+      if (!parsed.success)
+        throw new HttpError(502, 502, 'HARNESS_PROTOCOL_ERROR', 'model step rejected');
+      const step = parsed.data;
       await guarded(async () => undefined);
-      if (value.type === 'complete') {
+      if (step.type === 'delta') current.pendingDelta = step.delta;
+      else {
+        cumulative.iterations++;
+        const usage = step.type === 'complete' ? step.reply.usage : step.usage;
+        cumulative.tokens =
+          cumulative.tokens === null || usage === null
+            ? null
+            : cumulative.tokens + usage.total_tokens;
+        if (cumulative.tokens !== null && !Number.isSafeInteger(cumulative.tokens))
+          throw new HttpError(502, 502, 'HARNESS_PROTOCOL_ERROR', 'model usage overflow');
         modelStream = null;
         await current.iterator.return();
-      } else current.pendingDelta = value.delta;
-      return value;
+      }
+      return step;
     } catch (error) {
-      modelStream = null;
-      await current.iterator.return();
+      await closeModel();
       throw error;
     } finally {
       current.pulling = false;
@@ -521,8 +560,15 @@ export async function createHarnessSession(
   }
   async function validateSnapshot(client: PoolClient, snapshot: HarnessSnapshot): Promise<void> {
     if (
-      snapshot.message_refs.length !== start.messages.length ||
-      snapshot.message_refs.some((id, index) => id !== start.messages[index]?.message_id)
+      modelStarted &&
+      (snapshot.usage.iterations !== cumulative.iterations ||
+        snapshot.usage.tokens !== cumulative.tokens)
+    )
+      throw stateConflict('snapshot usage must match accepted model steps');
+    const frozenRefs = context.messageRefs ?? [context.userMessageId];
+    if (
+      snapshot.message_refs.length !== frozenRefs.length ||
+      snapshot.message_refs.some((ref, index) => ref !== frozenRefs[index])
     )
       throw stateConflict('snapshot message reference conflict');
     if (new Set(snapshot.tool_refs).size !== snapshot.tool_refs.length)
@@ -534,10 +580,11 @@ export async function createHarnessSession(
       accepted.some((row) => !snapshot.tool_refs.includes(row.invocation_id))
     )
       throw stateConflict('snapshot must retain accepted Run invocations');
-    const observations = await readInvocationSnapshots(
+    const observations = await readRunContextObservations(
       client,
       toolContext(context),
       snapshot.tool_refs,
+      { project: context.allowlist.includes('read_run_observation') },
     );
     const next = accepted.reduce((max, row) => {
       const match = /^harness\/([1-9]\d*)$/.exec(row.call_key);
@@ -561,7 +608,8 @@ export async function createHarnessSession(
       (snapshot.next_call_no < baseline.next_call_no ||
         snapshot.usage.iterations < baseline.usage.iterations ||
         (baseline.usage.tokens !== null &&
-          (snapshot.usage.tokens === null || snapshot.usage.tokens < baseline.usage.tokens)))
+          snapshot.usage.tokens !== null &&
+          snapshot.usage.tokens < baseline.usage.tokens))
     )
       throw stateConflict('snapshot cannot move backwards');
     if (
@@ -594,7 +642,6 @@ export async function createHarnessSession(
     } else if (unresolved.length) throw stateConflict('snapshot omits unresolved approval');
     buildHarnessStart(
       context,
-      start.messages,
       snapshot,
       observations,
       snapshot.waiting
@@ -615,25 +662,48 @@ export async function createHarnessSession(
       if (modelStream && request.type === 'finish' && request.outcome !== 'done')
         await closeModel();
       if (modelStream && request.type !== 'model_next' && request.type !== 'answer')
-        throw stateConflict('model stream must complete before another native action');
+        throw stateConflict('model stream must complete before another action');
       if (request.type === 'model_next') {
         if (!modelStream || request.model_ref !== modelStream.ref)
           throw stateConflict('model continuation reference conflict');
         return nextModelStep();
       }
-      if (request.type === 'model') {
+      if (request.type === 'context_source') {
+        if (!delivered.has(request.invocation_id))
+          throw forbidden('context source outside accepted Run references');
+        const observation = await guarded((client) =>
+          readRunContextSource(client, toolContext(context), request.invocation_id, request.view),
+        );
+        await guarded(async () => undefined);
+        return observation;
+      }
+      if (request.type === 'model' || request.type === 'measure_context') {
         if (!approvalAuthorizesActions(initial.approval))
           throw forbidden('rejected approval cannot authorize another action');
-        if (!deps.harness) throw unavailable();
-        if (request.remaining_tokens > context.maxTokens)
-          throw stateConflict('model request exceeds frozen token limit');
-        if (Buffer.byteLength(JSON.stringify(request), 'utf8') > HARNESS_MAX_FRAME_BYTES)
+        if (!deps.harness || !context.contextPolicy) throw unavailable();
+        const remaining =
+          cumulative.tokens === null ? null : Math.max(0, context.maxTokens - cumulative.tokens);
+        if (request.remaining_tokens !== remaining)
+          throw stateConflict('model balance must match accepted cumulative usage');
+        if (cumulative.iterations >= context.maxIterations)
+          throw new HttpError(429, 429, 'BUDGET_EXCEEDED', '本轮推理预算用完，已停下。');
+        const measurement = (deps.harness.measure ?? measureHarnessContext)(
+          { ...request, type: 'measure_context' },
+          tools,
+          context.contextPolicy,
+        );
+        if (request.type === 'measure_context') return measurement;
+        if (measurement.limit_reason || request.max_output_tokens > measurement.output_ceiling) {
+          const budget =
+            measurement.limit_reason === 'budget' ||
+            (remaining !== null && request.max_output_tokens > remaining);
           throw new HttpError(
-            422,
-            422,
-            'HARNESS_CONTEXT_LIMIT',
-            '模型上下文超过安全范围，已停下。',
+            budget ? 429 : 422,
+            budget ? 429 : 422,
+            budget ? 'BUDGET_EXCEEDED' : 'HARNESS_CONTEXT_LIMIT',
+            '模型请求超过本轮额度或容量。',
           );
+        }
         await guarded(async (client) => {
           const states = await readRunInvocationStates(client, toolContext(context));
           if (states.some((row) => row.state === 'unknown' || row.outcome_kind === 'failed'))
@@ -648,10 +718,10 @@ export async function createHarnessSession(
             throw stateConflict('approval requires suspension before further actions');
         });
         modelStream = {
-          pulling: false,
           ref: request.request_ref,
-          iterator: deps.harness.model(request, tools, modelSignal),
+          iterator: deps.harness.model(request, tools, modelSignal)[Symbol.asyncIterator](),
           pendingDelta: null,
+          pulling: false,
         };
         modelStarted = true;
         return nextModelStep();
@@ -798,7 +868,7 @@ export async function createHarnessSession(
       }
       if (request.type === 'answer') {
         if (modelStarted && (!modelStream || request.delta !== modelStream.pendingDelta))
-          throw stateConflict('native answer must match the current model delta');
+          throw stateConflict('native answer must match the accepted model delta');
         const event = await guarded((client) =>
           appendEvent(client, context, 'message.delta', {
             ...eventPayload(context),
@@ -809,6 +879,12 @@ export async function createHarnessSession(
         if (modelStream) modelStream.pendingDelta = null;
         return { accepted: true };
       }
+      if (
+        modelStarted &&
+        (request.usage.iterations !== cumulative.iterations ||
+          request.usage.tokens !== cumulative.tokens)
+      )
+        throw stateConflict('terminal usage must match accepted model steps');
       const event = await guarded(async (client) => {
         const previous = (
           await client.query<{ payload: unknown }>(
@@ -824,7 +900,8 @@ export async function createHarnessSession(
           baseline &&
           (request.usage.iterations < baseline.usage.iterations ||
             (baseline.usage.tokens !== null &&
-              (request.usage.tokens === null || request.usage.tokens < baseline.usage.tokens)) ||
+              request.usage.tokens !== null &&
+              request.usage.tokens < baseline.usage.tokens) ||
             (baseline.usage.iterations > 0 &&
               baseline.usage.tokens === null &&
               request.usage.tokens !== null))
@@ -896,7 +973,7 @@ export async function executeHarness(
   let cancellation: Promise<unknown> | undefined;
   let cancellationFailure: { error: unknown } | undefined;
   let cancellationProjected = false;
-  let session: HarnessSession | undefined;
+  let closeSession: (() => Promise<void>) | undefined;
   const disconnected = () => {
     cancellation ??= cancelConversationRun(
       deps,
@@ -916,7 +993,7 @@ export async function executeHarness(
       await cancellation;
       return;
     }
-    session = await createHarnessSession(
+    const session = await createHarnessSession(
       deps,
       context,
       async (event) => {
@@ -930,6 +1007,7 @@ export async function executeHarness(
       },
       controller.signal,
     );
+    closeSession = session.close;
     if (session.start.snapshot === null) {
       const event = await withTransaction(pool, async (client) => {
         await lockRun(client, context);
@@ -946,17 +1024,16 @@ export async function executeHarness(
         return;
       }
     }
-    const modelSession = session;
     await runNativeHarness({
       services: deps.harness,
       start: session.start,
       signal: controller.signal,
-      onExit: () => modelSession.close(),
+      onExit: session.close,
       handleRequest: async (request) => {
         // No next native action may overtake a disconnect's durable decision.
         await cancellation;
         if (cancellationFailure) throw cancellationFailure.error;
-        return modelSession.handleRequest(request);
+        return session.handleRequest(request);
       },
     });
   } catch (error) {
@@ -980,7 +1057,7 @@ export async function executeHarness(
       // Cancelled, suspended, stale or terminal authority wins; never overwrite.
     }
   } finally {
-    await session?.close();
+    await closeSession?.();
     signal?.removeEventListener('abort', disconnected);
     if (active.get(context.runId) === controller) active.delete(context.runId);
     // An explicit stop commits on another HTTP request. Project that existing

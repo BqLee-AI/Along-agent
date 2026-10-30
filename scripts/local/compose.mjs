@@ -51,6 +51,10 @@ export function installationEnvironment(config, image = 'along-local:unprepared'
     HARNESS_MODEL_API_KEY: config.model?.apiKey ?? '',
     HARNESS_MAX_ITERATIONS: String(config.model?.maxIterations ?? 24),
     HARNESS_MAX_TOKENS: String(config.model?.maxTokens ?? 64000),
+    HARNESS_COMPLETION_CAP: config.model ? String(config.model.completionCap) : '',
+    HARNESS_MODEL_WINDOW_TOKENS:
+      config.model?.modelWindowTokens == null ? '' : String(config.model.modelWindowTokens),
+    HARNESS_CONTEXT_RESERVE_TOKENS: String(config.model?.reserveTokens ?? 0),
     WORKSPACE_REGISTRY_FILE: config.registryFile ? '/run/along-registry.json' : '',
   });
 }

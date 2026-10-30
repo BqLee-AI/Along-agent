@@ -18,6 +18,8 @@ const groupRanges = { identity: [1, 1], conversation: [2, 14], commitments: [3, 
 const identityAccountMigration = '0017_identity_account_access.sql';
 // History owns exactly this addition; intervening conversation ranges stay frozen.
 const conversationHistoryMigration = '0018_conversation_history.sql';
+// R2-A owns only its immutable per-Run policy migration.
+const conversationContextMigration = '0019_conversation_context_policies.sql';
 const files = readdirSync(dir)
   .filter((f) => f.endsWith('.sql'))
   .sort();
@@ -34,7 +36,8 @@ for (const f of files) {
     range &&
     (+seq < range[0] || +seq > range[1]) &&
     f !== identityAccountMigration &&
-    f !== conversationHistoryMigration
+    f !== conversationHistoryMigration &&
+    f !== conversationContextMigration
   ) {
     failures.push(`${f}: ${group} sequence ${seq} outside ${String(range[0]).padStart(4, '0')}+`);
   }

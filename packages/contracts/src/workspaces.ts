@@ -31,6 +31,7 @@ export const workspaceOperationErrorSchema = z
       'literal_not_unique',
       'unchanged',
       'version_changed',
+      'unsupported_source',
     ]),
   })
   .strict();
@@ -96,6 +97,78 @@ export const workspaceConflictResultSchema = z
     zero_write: z.literal(true),
   })
   .strict();
+
+const contextIndex = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+const contextSliceIdentity = {
+  kind: z.literal('context_slice'),
+  source_invocation_id: z.string().uuid(),
+  source_tool_id: z.string().min(1),
+  source_result_version: z.literal(1),
+  offset: contextIndex,
+  end: contextIndex,
+  total: contextIndex,
+  has_more: z.boolean(),
+};
+export const contextSliceResultSchema = z
+  .union([
+    z
+      .object({
+        ...contextSliceIdentity,
+        source_kind: z.literal('read'),
+        field: z.literal('content'),
+        unit: z.literal('unicode_scalar'),
+        path: z.string(),
+        version: z.string().regex(/^[a-f0-9]{64}$/),
+        byte_length: contextIndex,
+        content: z.string(),
+      })
+      .strict(),
+    z
+      .object({
+        ...contextSliceIdentity,
+        source_kind: z.literal('search'),
+        field: z.literal('matches'),
+        unit: z.literal('items'),
+        items: workspaceSearchResultSchema.shape.matches,
+      })
+      .strict(),
+    z
+      .object({
+        ...contextSliceIdentity,
+        source_kind: z.literal('list'),
+        field: z.literal('entries'),
+        unit: z.literal('items'),
+        items: workspaceListResultSchema.shape.entries,
+      })
+      .strict(),
+    z
+      .object({
+        ...contextSliceIdentity,
+        source_kind: z.enum(['list', 'search']),
+        field: z.literal('failures'),
+        unit: z.literal('items'),
+        items: z.array(workspaceOperationErrorSchema),
+      })
+      .strict(),
+  ])
+  .superRefine((value, ctx) => {
+    const length = 'content' in value ? Array.from(value.content).length : value.items.length;
+    if (
+      value.end < value.offset ||
+      value.end - value.offset !== length ||
+      (value.offset < value.total && value.end === value.offset) ||
+      value.has_more !== value.end < value.total ||
+      (value.offset < value.total && value.end > value.total) ||
+      (value.offset >= value.total && (value.end !== value.offset || value.has_more))
+    )
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid context slice range' });
+    if (
+      'content' in value &&
+      /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(value.content)
+    )
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid Unicode scalar content' });
+  });
+export type ContextSliceResult = z.infer<typeof contextSliceResultSchema>;
 export const workspaceResultSchema = z.union([
   workspaceListResultSchema,
   workspaceSearchResultSchema,
@@ -103,6 +176,7 @@ export const workspaceResultSchema = z.union([
   workspaceAppliedResultSchema,
   workspaceOperationErrorSchema,
   workspaceConflictResultSchema,
+  contextSliceResultSchema,
 ]);
 export type WorkspaceReadResult = z.infer<typeof workspaceReadResultSchema>;
 export type WorkspaceOperationError = z.infer<typeof workspaceOperationErrorSchema>;

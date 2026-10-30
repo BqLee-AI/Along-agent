@@ -11,6 +11,7 @@ import {
   RunViewSchema,
 } from '@along/contracts';
 import type { RunView } from '@along/contracts';
+import type { HarnessModelReply } from '@along/contracts';
 import { ThreadEventSchema } from '@along/stream-protocol';
 import type { ThreadEvent } from '@along/stream-protocol';
 import { handleRequest } from '../../src/http/app.js';
@@ -32,6 +33,7 @@ import type {
   StartResult,
 } from '../../src/modules/conversations/contracts.js';
 import { createHarnessModelTransport } from '../../src/modules/conversations/harness-model.js';
+import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
 import { SendMessageBodySchema } from '../../src/modules/conversations/schemas.js';
 import { seedSession } from '../../src/modules/identity/seed.js';
 import type { SeededSession } from '../../src/modules/identity/seed.js';
@@ -87,6 +89,62 @@ export async function jsonBody(req: IncomingMessage): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
+// A provider fixture emits the production streaming protocol, including explicit
+// choice/call indexes, terminal reason, usage-only chunk and stream terminator.
+export function sendModelSse(res: ServerResponse, reply: HarnessModelReply): void {
+  res.writeHead(200, { 'content-type': 'text/event-stream' });
+  const chunk = (value: unknown) => res.write(`data: ${JSON.stringify(value)}\n\n`);
+  const { content, tool_calls: calls } = reply.message;
+  if (content) {
+    for (let offset = 0; offset < content.length;) {
+      let end = Math.min(offset + 1000, content.length);
+      if (end < content.length && /[\uD800-\uDBFF]/.test(content[end - 1]!)) end--;
+      chunk({
+        choices: [
+          { index: 0, delta: { content: content.slice(offset, end) }, finish_reason: null },
+        ],
+      });
+      offset = end;
+    }
+  }
+  if (calls.length) {
+    chunk({
+      choices: [
+        {
+          index: 0,
+          delta: {
+            tool_calls: calls.map((call, index) => ({
+              index,
+              id: call.id,
+              type: call.type,
+              function: { name: call.function.name, arguments: '' },
+            })),
+          },
+          finish_reason: null,
+        },
+      ],
+    });
+    for (const [index, call] of calls.entries()) {
+      for (const fragment of call.function.arguments.match(/.{1,16}/gsu) ?? []) {
+        chunk({
+          choices: [
+            {
+              index: 0,
+              delta: { tool_calls: [{ index, function: { arguments: fragment } }] },
+              finish_reason: null,
+            },
+          ],
+        });
+      }
+    }
+  }
+  chunk({
+    choices: [{ index: 0, delta: {}, finish_reason: calls.length ? 'tool_calls' : 'stop' }],
+  });
+  if (reply.usage) chunk({ choices: [], usage: reply.usage });
+  res.end('data: [DONE]\n\n');
+}
+
 export async function listen(server: Server): Promise<string> {
   const ready = once(server, 'listening');
   server.listen(0, '127.0.0.1');
@@ -94,70 +152,6 @@ export async function listen(server: Server): Promise<string> {
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('missing port');
   return `http://127.0.0.1:${address.port}`;
-}
-export interface ProviderFixtureReply {
-  choices: {
-    message: {
-      content: string | null;
-      tool_calls: { id: string; type: string; function: { name: string; arguments: string } }[];
-    };
-  }[];
-  usage: { total_tokens: number };
-}
-
-/** Controlled provider wire fixture; production never accepts choices.message. */
-export function writeModelSse(res: ServerResponse, reply: ProviderFixtureReply): void {
-  res.writeHead(200, { 'content-type': 'text/event-stream' });
-  const message = reply.choices[0]!.message;
-  for (const content of message.content?.match(/.{1,256}/gsu) ?? []) {
-    res.write(
-      `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content }, finish_reason: null }] })}\n\n`,
-    );
-  }
-  if (message.tool_calls.length) {
-    res.write(
-      `data: ${JSON.stringify({
-        choices: [
-          {
-            index: 0,
-            delta: {
-              tool_calls: message.tool_calls.map((call, index) => ({
-                index,
-                id: call.id,
-                type: call.type,
-                function: { name: call.function.name, arguments: '' },
-              })),
-            },
-            finish_reason: null,
-          },
-        ],
-      })}\n\n`,
-    );
-    for (const [index, call] of message.tool_calls.entries()) {
-      for (const fragment of call.function.arguments.match(/.{1,16}/gsu) ?? []) {
-        res.write(
-          `data: ${JSON.stringify({
-            choices: [
-              {
-                index: 0,
-                delta: { tool_calls: [{ index, function: { arguments: fragment } }] },
-                finish_reason: null,
-              },
-            ],
-          })}\n\n`,
-        );
-      }
-    }
-  }
-  res.write(
-    `data: ${JSON.stringify({
-      choices: [
-        { index: 0, delta: {}, finish_reason: message.tool_calls.length ? 'tool_calls' : 'stop' },
-      ],
-    })}\n\n`,
-  );
-  res.write(`data: ${JSON.stringify({ choices: [], usage: reply.usage })}\n\n`);
-  res.end('data: [DONE]\n\n');
 }
 
 export type ConsumerMode = 'local' | 'http';
@@ -264,10 +258,8 @@ export class HarnessConsumer {
         }
         const decision = findModelObservation(body.messages, HarnessApprovalDecisionSchema);
         if (decision?.kind === 'task') {
-          writeModelSse(res, {
-            choices: [
-              { message: { content: `记录结果 task:${decision.task_id}`, tool_calls: [] } },
-            ],
+          sendModelSse(res, {
+            message: { content: `记录结果 task:${decision.task_id}`, tool_calls: [] },
             usage: { total_tokens: 5 },
           });
           return;
@@ -275,8 +267,8 @@ export class HarnessConsumer {
         // A second request after a denied result would be a product defect. Return
         // legal final text so the assertions observe that defect, not a fixture error.
         if (calls.length > 1) {
-          writeModelSse(res, {
-            choices: [{ message: { content: 'unexpected retry', tool_calls: [] } }],
+          sendModelSse(res, {
+            message: { content: 'unexpected retry', tool_calls: [] },
             usage: { total_tokens: 5 },
           });
           return;
@@ -291,21 +283,17 @@ export class HarnessConsumer {
                 occurrence: 'once',
               }
             : { owner_id: randomUUID() };
-        writeModelSse(res, {
-          choices: [
-            {
-              message: {
-                content: null,
-                tool_calls: [
-                  {
-                    id: 'provider-id-is-not-invocation',
-                    type: 'function',
-                    function: { name, arguments: JSON.stringify(args) },
-                  },
-                ],
+        sendModelSse(res, {
+          message: {
+            content: null,
+            tool_calls: [
+              {
+                id: 'provider-id-is-not-invocation',
+                type: 'function',
+                function: { name, arguments: JSON.stringify(args) },
               },
-            },
-          ],
+            ],
+          },
           usage: { total_tokens: 5 },
         });
       })().catch((error: unknown) => {
@@ -320,6 +308,7 @@ export class HarnessConsumer {
       libraryPath,
       maxIterations: 8,
       maxTokens: 8000,
+      contextPolicy: createContextPolicy({ completionCap: 1024, model: 'fixture-transport-only' }),
       model: createHarnessModelTransport({
         baseUrl: `${modelBase}/v1`,
         model: 'fixture-transport-only',
