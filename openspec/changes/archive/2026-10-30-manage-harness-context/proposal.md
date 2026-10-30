@@ -13,7 +13,7 @@ Issue: #83
 
 ## Spec
 
-设计真源：[design/18](../../../docs/design/18-r2a-harness-context.md) §2–§9；原职责/有限恢复：[design/09](../../../docs/design/09-agent-runtime-and-checkpoint.md) §1–§6；精确文档动作：[design/14](../../../docs/design/14-r1-document-task-loop.md) §4–§7。行为 delta 归 agent-runtime、tool-gateway、workspaces。
+设计真源：[design/18](../../../../docs/design/18-r2a-harness-context.md) §2–§9；原职责/有限恢复：[design/09](../../../../docs/design/09-agent-runtime-and-checkpoint.md) §1–§6；精确文档动作：[design/14](../../../../docs/design/14-r1-document-task-loop.md) §4–§7。行为 delta 归 agent-runtime、tool-gateway、workspaces。
 
 ## Impact
 
@@ -21,4 +21,4 @@ Issue: #83
 
 ## 非目标 / Deferred
 
-不做 R2-B 自动路由、R3/R4 记忆、LLM 摘要、通用 tokenizer/MCP/遥测平台、多 Agent、任意 crash 恢复、无限大文件；不选择市场、provider、推送或计费。不升级/重启 #70 安装，不 commit/push/创建 PR。真实模型验收使用原配置、独立隔离资料和运行环境，与受控合同分别取证。精确计量依据不可得时只承诺字节门和独立 cap，不承诺精确 token/费用保证。
+不做 R2-B 自动路由、R3/R4 记忆、LLM 摘要、通用 tokenizer/MCP/遥测平台、多 Agent、任意 crash 恢复、无限大文件；不选择市场、provider、推送或计费。不升级/重启原安装，交付与归档不扩大其授权。真实模型验收使用原配置、独立隔离资料和运行环境，与受控合同分别取证。精确计量依据不可得时只承诺字节门和独立 cap，不承诺精确 token/费用保证。

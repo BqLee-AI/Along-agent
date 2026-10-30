@@ -139,7 +139,7 @@ Web 批准链接保留原 conversation/Run，并明确打开新标签页；在�
 
 ## 7. R2-A 上下文容量（#83）
 
-[Required 目标合同] 设计真源为 [design/18 §2–§8](../../design/18-r2a-harness-context.md)，行为 delta 为 [manage-harness-context](../../../openspec/changes/manage-harness-context/proposal.md)。不新增公开 HTTP 路由、请求字段、RunView 字段或 SSE 词；新 context policy、measure_context/context_source、typed observations 为内部 wire/存储合同，不让浏览器选择额度、来源身份或 provider。
+[Required] 设计真源为 [design/18 §2–§8](../../design/18-r2a-harness-context.md)，行为真源见 [agent-runtime](../../../openspec/specs/agent-runtime/spec.md)，分级证据见 [归档清单](../../../openspec/changes/archive/2026-10-30-manage-harness-context/tasks.md)。不新增公开 HTTP 路由、请求字段、RunView 字段或 SSE 词；新 context policy、measure_context/context_source、typed observations 为内部 wire/存储合同，不让浏览器选择额度、来源身份或 provider。
 
 - HARNESS_CONTEXT_LIMIT 表示完整 wire/模型 HTTP/窗口/消息数或保护内容不能容纳，沿既有流内失败投影，不静默裁剪冻结输入。已建流保持 HTTP200，`thread.failed` 的 `payload.error.http_status=422`；恢复预检在 SSE 前失败则 HTTP422 通用 envelope，不创建新 attempt。
 - BUDGET_EXCEEDED/429 保持累计 token 额度、迭代耗尽语义；64 工具引用容量耗尽仍为 HARNESS_CONTEXT_LIMIT。输出 cap 不等于 Run 余额，估算不作 usage，缺 usage 保持 unknown。

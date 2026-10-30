@@ -1,6 +1,6 @@
 # #83 实施与验收任务
 
-勾选仅表示该项已实际完成；实现、受控合同与真实模型分别取证，设计真源为 [design/18](../../../docs/design/18-r2a-harness-context.md)。发布、commit/push/PR、并行安装升级及归档不因实现授权自动执行。
+勾选仅表示该项已实际完成；实现、受控合同与真实模型分别取证，设计真源为 [design/18](../../../../docs/design/18-r2a-harness-context.md)。发布、commit/push/PR、并行安装升级及归档不因实现授权自动执行。
 
 ## 1. 正式合同
 
@@ -30,8 +30,8 @@
 - [x] 4.1 在 #70 最终合同上完成独立生产安装构建/运行，沿既有provider/model配置走 Web→native→TS MCP→PG/真实文件与模型；不替换正式循环、不新增遥测平台。原安装升级另行执行，不是 #83 额外验收门。
 - [x] 4.2 D6/D8/D10 真实长任务：至少六份各自合法较大资料、冲突日期、一次读取失败；证明发生投影且旧证据通过新回取 invocation 查证；完整预览/批准零写/显式原 Run 继续/唯一 apply/新全文 read 与产物一致。
 - [x] 4.3 D8/D9/D10 小任务对照与容量负例；记录版本、模型/材料、每轮完整 bytes、计量依据/质量、可得 usage 或 unknown、调用数、延迟/产物；合成、受控合同、真实模型分账，只补 #70 受影响边界。
-- [ ] 4.4 D1/D6/D8/D9/D10 回归与既有五门全部有效；A1–A4 原保证不扩张。PR 按官方模板记录实际 Verification、未跑项、兼容/迁移及证据。
-- [ ] 4.5 全部验收齐备后执行 `openspec archive manage-harness-context`、严格校验并同步文档；仅收口 PR Closes #83，不提前关闭 #66。
+- [x] 4.4 D1/D6/D8/D9/D10 回归与既有五门全部有效；A1–A4 原保证不扩张。PR 按官方模板记录实际 Verification、未跑项、兼容/迁移及证据。
+- [x] 4.5 全部验收齐备后执行 `openspec archive manage-harness-context`、严格校验并同步文档；仅收口 PR Closes #83，不提前关闭 #66。
 
 ## Verification：实现与受控消费者（2026-10-30，#70 合并前）
 
@@ -131,4 +131,12 @@
 
 独立真实Web功能验收完成，4.1/4.2按生产组件路径和授权额度勾选；原64000额度的大任务失败仍保留，小任务在原额度内通过。#83原验收没有要求先升级原安装，因此不把自订部署清单当额外收口门。原安装升级另行准备，不删除数据、不重建身份、不改认证密钥。
 
-代码交付按独立合同PR、实现PR及最终归档推进。此前实现和实测发生在未提交工作树，合同PR不包含实现代码，不把该提交顺序倒写成开发或验收历史。4.4待五项远端门禁及PR证据齐备后勾选；4.5待实际归档后勾选，不提前关闭 #83或#66。
+代码交付分别通过独立合同PR及实现PR；此前实现和实测发生在未提交工作树，不把远端提交顺序倒写成开发或验收历史。最终归档独立收口，不关闭 #66；原安装升级只准备、不执行。
+
+## Verification：远端交付（2026-10-30）
+
+- 独立合同 [PR #85](https://github.com/BqLee-AI/Along-agent/pull/85)：提交 `6e02540`，[五门全绿](https://github.com/BqLee-AI/Along-agent/actions/runs/41056979680)，squash 为 `52b66e3`。
+- 实现 [PR #86](https://github.com/BqLee-AI/Along-agent/pull/86)：提交 `d7e454a`，[五门全绿](https://github.com/BqLee-AI/Along-agent/actions/runs/41057726485)，squash 为 `c894608`。static、migration-scan、scheduler-fault、contracts-dual、compose-smoke分别实际通过。CodeRabbit跳过，不当作独立审查通过。
+- 本地最后一次 `bun run verify` 十步通过，431 pass、2 Windows skip、0 fail；Linux补验及311个PG集成/80个正式合同结果沿用上文证据。提交前逐文件patch核对：57个实现/配置/测试文件与该已验证工作树相同，唯一后变为升级说明。源码/文件清单及完整diff检查、三项真实私有值扫描均无泄露；未提交本地材料、日志、凭据或生成产物。
+- 协议/额度和来源/权限两个独立AI只读审查均无证据充分的阻断项；未冒充人工审查。原安装升级文档补充旧CLI停机先于配置切换、独立cap必填、0019、同批产物和保留原身份；`local:upgrade --help`实际可用，未执行升级入口。
+- 正式归档执行 `openspec archive manage-harness-context --yes`，未跳过spec合并或验证，更新三份主spec的六项Requirement。命令执行时只剩本归档任务未勾选；实际归档后全部8项严格校验和格式检查通过，再勾选4.5。26份相关Markdown的231个本地链接及41个标题锚点无缺失；修正归档目录加深后的设计相对链接，并将长期入口改指主spec。

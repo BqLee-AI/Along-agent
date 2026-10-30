@@ -68,7 +68,7 @@
 
 ## R2-A 单 Run 上下文（#83）
 
-- [Required] [design/18](../design/18-r2a-harness-context.md) 定义四种额度、不可变 policy、来源投影、原版本回取及有界批准恢复；[OpenSpec change](../../openspec/changes/manage-harness-context/proposal.md) 定义行为增量。实现、受控运行和真实模型验收分别取证，不把文档校验当运行完成。
+- [Required] [design/18](../design/18-r2a-harness-context.md) 定义四种额度、不可变 policy、来源投影、原版本回取及有界批准恢复；[agent-runtime](../../openspec/specs/agent-runtime/spec.md)、[tool-gateway](../../openspec/specs/tool-gateway/spec.md)、[workspaces](../../openspec/specs/workspaces/spec.md) 定义行为，[归档清单](../../openspec/changes/archive/2026-10-30-manage-harness-context/tasks.md) 分列实现、受控运行和真实模型验收，不把文档校验当运行完成。
 - 用户结果：保护输入/必要事实可容纳、预算未耗尽时，不因旧正文重复累积无谓失败；旧资料可查证，批准后沿原 Run 唯一写入并新回读。63＋1 与完整输入、精确批准/当前权限、取消和 unknown 不弱化。
 - D8/D9：六个分别合法大读总量超过1MiB，正式 native/PG/本地和签名 HTTP 的恢复/下一轮仍有界，原接受正文与 snapshot2 全引用不变；独立输出 cap、完整 tools/包装计量、窗口/余额边缘与未知 usage，不能容纳时零后续调用，不增加硬上限。
 - 输入计量不可用或仅为估算时，不承诺累计 tokens 的调用前硬封顶；在途请求可能超额，按返回的真实 usage 记账并停止后续请求。验收须明确区分该后验停止与 verified 输入计量下的调用前可行性判断。

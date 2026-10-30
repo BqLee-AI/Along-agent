@@ -3,7 +3,7 @@
 > 状态：Required；实现与分级验收证据见 change tasks，不由本文证明。
 > 范围：单 Run 的额度、确定性观察投影、原接受事实回取与显式批准等待恢复；Issue #83。
 > 不包含：R2-B 路由、R3 跨窗口记忆、R4 长期记忆、LLM 摘要、任意崩溃恢复、多 Agent 或安装升级。
-> 阶段标签：R2-A；行为 delta 见 [manage-harness-context](../../openspec/changes/manage-harness-context/proposal.md)，运行职责沿用 [09](09-agent-runtime-and-checkpoint.md)。
+> 阶段标签：R2-A；行为真源见 [agent-runtime](../../openspec/specs/agent-runtime/spec.md)、[tool-gateway](../../openspec/specs/tool-gateway/spec.md)、[workspaces](../../openspec/specs/workspaces/spec.md)，分级证据见 [归档清单](../../openspec/changes/archive/2026-10-30-manage-harness-context/tasks.md)，运行职责沿用 [09](09-agent-runtime-and-checkpoint.md)。
 
 ## 1. 决定、事实与驱动力
 
