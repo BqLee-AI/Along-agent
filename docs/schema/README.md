@@ -35,8 +35,12 @@ Content 表（`briefs`、`cards`）为 v1 / Deferred，移出 v0 落地顺序（
 - 授权状态仅 `pending → approved | rejected`，不可反转；完整展示及目标建后不可改。`apply_invocation_id` 唯一且一旦绑定不可换，`replaces_approval_id` 唯一且限同 owner/Run/工作区/目标的已批准已绑定前驱；后继还须由公共用例核验接受的零写冲突及后来的真实全文读。
 - `document_approval_decisions` 以 `(owner_id,idempotency_key)` 为主键，记录目标、动作、请求哈希和原决定，禁止更新/删除。它不复用 task 消费、有效期、调度事件或 outbox。
 - 工具执行结果仍只归 `tool_invocations`；文档批准只保存授权和唯一绑定，不另建文件效果账。批准详情和 Run 完成条件通过 tools 的公共只读证据核对 applied/conflict/unknown 及后续新读取，不直读 tools 私表。
-- Run 的 workspace grant 和安全摘要放既有 `frozen_context`。摘要用于历史展示，不把登记撤销变成历史 GET/取消失败；新动作与批准后继续须重新核对精确 grant。新执行使用 harness/v3，快照仍为snapshot2，旧 task snapshot1 仅作不扩权的读取迁移。
+- Run 的 workspace grant 和安全摘要放既有 `frozen_context`。摘要用于历史展示，不把登记撤销变成历史 GET/取消失败；新动作与批准后继续须重新核对精确 grant。新执行使用 harness/v4，快照仍为snapshot2，旧 task snapshot1 仅作不扩权的读取迁移。
 - FS 替换与 PG 接受非原子：许可后不确定结果保留 `unknown`，不因文件 hash 相同就补写成功。完整效果及回读规则见 [design/14 §§5–7](../design/14-r1-document-task-loop.md)。
+
+## R2-A 上下文策略
+
+[Required] conversations 的不可变 `run_context_policies` 由0019建立，字段/事务见 [conversation schema](conversation-and-runs-schema.md#r2-a-上下文策略83)，语义见 [design/18 §3](../design/18-r2a-harness-context.md#3-冻结策略及旧-run)。不改 frozen_context、原预算、allowlist 或 snapshot2 引用；旧 Run 仅有效显式恢复补入，GET 零写。生命周期同时核验表、约束和不可变触发器，文档不是已部署证据。
 
 ## Enum 策略
 

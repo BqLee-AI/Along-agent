@@ -18,6 +18,7 @@
   - R1：`GET /workspaces`、文档批准详情、确认和拒绝（4；见 §8）。不提供工作区登记写接口或任意文件读写 HTTP 入口。
 - 探针：`GET /healthz`、`GET /readyz`（不计入业务端点，不走 envelope，见 §6）。
 - Web 单端为 v0 唯一客户端；Electron 套壳后复用同一份路由，不新增端点 [Deferred：移动端/公开 OpenAPI 未定]。
+- R2-A #83 不新增公开路由/RunView/SSE 字段；[对话 API §7](conversations/conversations_routes.md#7-r2-a-上下文容量83) 定义容量/预算错误与只读不执行边界，[design/18](../design/18-r2a-harness-context.md) 定义内部 wire/来源工具。内部回取工具不计入 HTTP 端点数量。
 
 ## 2. Envelope [Required]
 

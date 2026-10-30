@@ -125,3 +125,7 @@ assistant tool-loop -> ToolGateway.invoke({invocationId,toolId,args}, trusted ru
 
 - 本篇白名单+zod+风险分级+审计即 design/04 ToolGateway 节的 Agent 侧投影；接口签名以 design 为准。
 - v0确定性turn与TS网关为同进程模块；仓颉仍是唯一模型/工具循环。正式消费者与contracts-dual归design/09/11，R1文件/MCP/文档等待归design/14；D8只对实际生产者消费者证据限定范围enforced，不把healthz双跑、unknown核心探针或受控模型结果当完整真实产品验收（design/13 §4.2）。
+
+## R2-A 来源回取工具（#83）
+
+[Required 目标合同] 新静态 `read_run_observation`（low/read_only）输入、context_slice 输出、页大小/单位/错误唯一真源为 [design/18 §7](../design/18-r2a-harness-context.md#7-原接受观察的网关回取)。同 Run/owner 已完成接受来源，经冻结 allowlist、当前 attempt/授权和网关审计；新 invocation 计入既有预算，读取原账不重跑 MCP。low/medium/high 只是模型可见元数据，不是自动授权引擎。旧 Run 不自动授新工具；内部 context_source 不能成为模型绕网关分页入口。该目标不表示现行十工具目录已有第十一个工具。
