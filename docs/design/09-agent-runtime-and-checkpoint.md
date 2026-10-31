@@ -105,6 +105,18 @@ attempt: running → done | failed | fenced_out
 
 仓颉唯一选择上下文及动作，TS 计量完整包装/查询可信来源，不增加第二 loop。snapshot2 全 message_refs/tool_refs、usage、next_call_no 和 waiting identity 不裁剪；accepted_result/冻结输入不改写。没有回取资格不淘汰唯一正文，保护集不能容纳则失败，旧 Run 不自动扩大 allowlist。精确修改/新回读与 unknown 规则仍沿 §9、design/14；实施和真实模型验收以 change tasks 分账，不由本文证明。
 
+## 11. R2-B 只读意图路由（Proposed，#88）
+
+本节仅关联提议，不替换上文 Required 或 R2-A 合同。当前 [wire schema](../../packages/contracts/src/harness.ts) 为 `harness/v4`，native 的 `loop` 在计量后请求首个模型；尚无下述路由帧。提议的内部合同、不可变记录、工具/展示和失败边界分别以 [design/19](19-r2b-readonly-intent-routing.md) §7、§8、§9、§10 为真源，字段和约束不在本文另立一套。
+
+- 仅 fresh Run 首 attempt 首模型前允许一次路由；`off` 默认且零分类，缺路由策略的旧 Run 按 off，不补录。GET、同入站键补读、批准 resume 零分类；这不改变 R2-A 对上下文策略的独立恢复合同。business/省略 execution 不变，不新增 auto 或公开 execution/SSE。
+- 仓颉唯一决定下一步、工具和停止；TS 只提供可信事实、字面匹配事实、参数来源、编码/打分及 authority、原 ToolGateway、持久化和固定展示，不复制一套 TS agent loop。shadow 只记潜在候选并最终 fallback，不调用候选旁路业务工具，回答仍走原模型路径。
+- 提议 `harness/v5` 同批切换 contracts、TS、native 与消费者；start 增加冻结 routing policy 和阶段资格，内部新增 `route_probe`、`route_decide`、`render_route_result`，snapshot2 不加字段。新 Run 在原接纳事务首 attempt 记录 policy（含 off）；三种内部 checkpoint 及新增迁移见 design/19 §8，不写入 frozen_context、不进入外部七词。
+- enforce 仅接管已批准的 `task_list_bounded→list_tasks`、`prefs_timezone_read→get_user_prefs`、`brief_cards_read→read_brief_cards`。来源必须是本轮原话可定位范围或明确合同默认，owner 由 TS 注入；其他目标完整交原 LLM，不能丢掉筛选、否定或第二目标来凑白名单。
+- direct 接纳后仅一个绑定目标/参数的原 reserve/invoke；真实成功 accepted_result 与 snapshot 接受后，TS 纯 renderer 由事实生成固定展示，同事务保存 delta 和 render 回执，native 不提交任意正文。done 须唯一真实成功结果、render 回执和零模型；不伪造 provider 调用或 usage。展示遵守有界列表/单日卡片限制，不把空值、截页或读取快照说成已配置、查全或新核实。
+- 当前 authority 仅在 `modelStarted` 后要求 answer 匹配 provider pending delta；v5 提议收紧首模型前的自由 answer 入口，只允许真实 provider 来源或上述受控 render 来源，不能把现有宽口当 direct 已实施。
+- direct 前低分/不适用/可选编码失败才可回原 LLM；事实、协议、权限或 DB 错误不能伪作拒识。direct 接纳后 reserve/invoke/render 失败不得再切模型或新 slot 重做。取消先提交仍拒绝迟到候选/输出；编码在锁外且可 abort，原 invocation、入站/取消幂等与只读重放保护不变。
+
 ## 引用
 
 - B02§2/B04/AF§4–§7、B06§8 仅作机制参考，不复制外部产物。
