@@ -91,6 +91,17 @@ TS 事实与只追加事件 → SSE / GET 补读 → Web
 
 文档按钮授权后显式继续同 Run、新 attempt；approved 只提供授权观察，原冻结替换由唯一 apply invocation 执行，新的 read 证明完成，冲突/未知不能假称已写。该协议与执行路径已存在，不再作为 Proposed 或第二套执行器保留。SDK/Bun 镜像兼容、正式消费者合同、真实模型任务和位置/冲突/读失败变体须分别按实测范围举证；实现存在不等于实际材料或完整 R1 真模型验收成功。既有最小接入与 #47 有限 D8 不替代该矩阵。
 
+## 7. R2-B 路由与部署边界（Proposed，#88）
+
+本节不改变 §1–§6 的现有 Required 合同：当前正式 wire 为 `harness/v4`，R2-A 上下文管理仍沿 [design/18](18-r2a-harness-context.md)。只读路由提议的内部协议、记录、工具/展示和失败处理以 [design/19](19-r2b-readonly-intent-routing.md) §7、§8、§9、§10 为真源；不是已经接入的第二执行器。
+
+- 新流程仅插在 fresh 首 attempt 首模型前，仓颉决定 direct/fallback，TS 提供事实、来源与编码/打分，不拥有通用循环。默认 off、旧 Run 缺策略、GET/同键重放/批准 resume 均零分类；shadow 不调用候选旁路业务工具，仍交原模型。business 及公开 execution/SSE 不变，主 Harness 依赖坏仍原类型化失败，不能借路由绕过接纳。
+- v5 提议与共享 schema、TS/native 和消费者同批切换，新增内部 probe/decide/render 帧及三种 routing checkpoint，保留 snapshot2。通过新增迁移扩充封闭 kind 与唯一/来源约束，不改旧迁移；不建新路由表或 Run JSON 列，不让内部记录泄漏到 SSE。
+- direct 仍经原 reserve/invoke，只允许一个冻结目标/参数的只读调用；TS 由真实成功 accepted_result 和已接受 snapshot 固定渲染，同事务持久 delta/render 回执，不假造模型正文、函数调用或 usage。接纳后失败不切 LLM/新 slot；原取消先提交、当前权限、幂等及只读补读不变，详见 design/19 §9–§10。
+- 编码服务目标是独立内网 CPU sidecar，API 经 HTTP 请求固定 binding 的单条向量；采用已离线实测的 ORT/tokenizer 计算路径，不向 Bun 加 Torch，也不接受请求下载/切模型。主候选为 BGE-small 中文 INT8，E5 仅离线对照；精确资产、编码和协议见 design/19 §5，不能沿用旧 Qwen/TEI 参数。
+- Windows 离线 ORT 实验不等于 Linux HTTP sidecar、生产镜像或 TEI 已验证；正式 Linux 镜像/digest、服务正确性、并发/共存资源与冷启动须目标宿主最小实验后锁定，未满足前保持 off。默认关闭不依赖 embedding，不降低核心 readyz；全过程 1000ms、每实例最多 2 inflight、单次编码无重试及拒识增量 p95≤500ms 仅为 Proposed 预算/候选目标，不是实测线上 SLA，见 design/19 §11–§12。
+- 既有消费者合同、真实模型任务和新路由启用门分别取证；静态文档、旧 D8/R2-A 报告或离线相似度不能代替 v5 消费者、真实工具/取消/重放边界及独立评估证据。
+
 ## 引用
 
 - [09 Harness/checkpoint](09-agent-runtime-and-checkpoint.md)、[02 模块边界](02-modular-monolith-and-split-triggers.md)、[04 五缝](04-five-seams-contract.md)、[PRD 待决 D2](../prd/04-acceptance-open-questions.md)。

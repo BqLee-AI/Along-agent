@@ -146,3 +146,14 @@ Web 批准链接保留原 conversation/Run，并明确打开新标签页；在�
 - TOOL_EFFECT_UNKNOWN、HARNESS_EXITED、HARNESS_PROTOCOL_ERROR 保留原义及脱敏规则；不因容量处理重发未知动作。模型/计量绑定不兼容按 HARNESS_UNAVAILABLE/503 在启动新 attempt 前拒绝，不隐式换模型。
 - 新工具 read_run_observation 经既有 ToolGateway，不新增公开“按 UUID 任意取结果”端点；当前授权及新 invocation/预算照常。context_slice 不是新 workspace_read，不足以 verified。
 - 继续仍是显式有效批准等待点、同 Run 唯一新 attempt；完整冻结输入/快照引用不丢弃。GET/刷新/重登/同入站补读不创建策略、调用模型/工具或自动继续。公开查询/错误不泄漏原正文、provider body 或计量配置秘密。
+
+## 8. R2-B 只读路由的公开边界（Proposed，#88）
+
+本节只跟随 [design/19](../../design/19-r2b-readonly-intent-routing.md) §7（内部 v5）、§8（冻结策略与记录）、§9（工具与确定性展示）、§10（失败/取消/重放），不替换 §1–§7 的当前 Required 合同。当前执行仍是 `harness/v4`，没有下述 direct 渲染来源。
+
+- 不新增 HTTP 路由、公开 execution 值/请求策略字段、RunView 字段或 SSE 词；business/省略 execution 仍原业务，显式 harness 仍正式 native，不新增 auto，不用路由掩盖 `HARNESS_UNAVAILABLE`。内部 v5 帧和 routing checkpoint 不传给浏览器。
+- 新接纳 harness Run 冻结路由策略（默认 off），仅 fresh 首 attempt 首模型前可分类一次。off、缺策略旧 Run、所有 GET/历史补读、同入站键重放及批准 resume 零分类、不补路由策略；R2-A 上下文策略的独立恢复规则不受此限制替换。shadow 只记潜在候选，不调用候选旁路业务工具，最终仍原模型回答。
+- enforce direct 仅对已启用白名单且来源/参数/当前资格满足的请求生效；目标/参数由本轮原话或明确默认绑定，owner 从认证事实注入，工具仍通过原 ToolGateway。模型 fallback 继续处理完整其他目标，不把多目标或筛选请求缩水为一次有限查询。
+- direct 回答将是既有 provider 正文之外的明确受控来源：唯一真实只读成功 accepted_result、已接受 snapshot 和 TS 固定 renderer，不接受 native 自写正文，不伪造 provider 调用/usage。delta 与内部 render 回执同事务保存后才投影原 `message.delta`，成功终结须真实结果、回执及零模型；GET/重放只读这些原已存事实，不重新查工具或生成答案。
+- 展示不扩大工具结果含义：提醒仅当前有界活动集合，不宣称查全/筛选/已核实；时区仅本人记录的 timezone_id 或未设置，不声称写入；简报仅明确合法单日且最多50张，不将截页说成全量。精确模板及来源约束归 design/19 §9。
+- direct 前可拒识/可选编码失败回原 LLM，事实、协议、权限或 DB 错误不伪作正常拒识；direct 接纳后 reserve/invoke/render 任一失败不切 LLM、不新 slot 重做。原入站 hash/同键冲突、取消动作幂等和当前权限不变；取消先提交仍禁止迟到候选、工具动作或正文，编码等待可 abort。原 SSE 断连、终态和显式批准恢复语义保持。

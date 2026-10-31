@@ -13,9 +13,9 @@
 | 2    | [产品概览与范围](prd/01-overview-and-scope.md)                 | 定位、P0–P5 范围、非目标、差异化三点                              |
 | 3    | [核心循环与页面](prd/02-core-loop-and-pages.md)                | 个人助理首页、分组顶部导航、简洁登录、流式聊天与精确批准/只读恢复 |
 | 4    | [风险约束与阶段门](prd/03-risk-constraints-and-stage-gates.md) | Top3 风险、指标、准入准出、不承诺口径                             |
-| 5    | [验收与待决事项](prd/04-acceptance-open-questions.md)          | v0/R1 验收、Deferred 清单、重开门槛                               |
+| 5    | [验收与待决事项](prd/04-acceptance-open-questions.md)          | v0/R1/R2-A 验收、R2-B 路由提案、Deferred 与重开门槛               |
 
-## 二、总体设计（真源，18 篇）
+## 二、总体设计（真源，19 篇）
 
 | 序号 | 文档                                                                     | 作用                                                                                                                              |
 | ---- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
@@ -37,6 +37,7 @@
 | 16   | [R1 账户与正式登录](design/16-r1-account-access.md)                      | #68 唯一管理员、原身份转正、库适配、固定会话、401 只读恢复及本机登记收尾合同；独立实验与验收                                      |
 | 17   | [R1 会话历史与只读恢复](design/17-r1-conversation-history.md)            | #69 服务端会话发现、原话/多 Run、稳定分页、批准真实结果及零执行恢复合同                                                           |
 | 18   | [R2-A 单 Run 有界上下文](design/18-r2a-harness-context.md)               | #83 四种额度、可信计量与未知输入的后验超额边界、不可变策略、来源投影/分页回取及有界批准恢复；实现、受控消费者、真实模型分级取证   |
+| 19   | [R2-B 有限只读意图路由](design/19-r2b-readonly-intent-routing.md)        | #88 Proposed：BGE INT8候选、E5对照、三类只读、仓颉首轮决议、默认关闭、来源与逐意图验证；不表示接管获准                            |
 
 ## 三、API（6 篇）
 
@@ -71,23 +72,24 @@
 | 6    | [对话运行与预算](agent/05-chat-runtime-flow-and-budget.md)  | Run/attempt/调用边界、native 累计预算、同 Run 批准恢复与取消       |
 | 7    | [评测夹具](agent/06-eval-fixtures.md)                       | 50 条时间表达集、200 卡片集版本化、指标口径                        |
 
-## 六、Demo、收口规划与验收记录（13 篇）
+## 六、Demo、收口规划与验收记录（14 篇）
 
-| 序号 | 文档                                                                             | 作用                                                                      |
-| ---- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| 1    | [v0 全链路 smoke](demo/v0-slice-smoke.md)                                        | 7 步复现、断言取消后触发数=0                                              |
-| 2    | [time-core 黄金用例](demo/time-core-golden-cases.md)                             | 4 基准+DST+50 表达，fixture 可被测试消费                                  |
-| 3    | [故障注入 smoke](demo/fault-injection-smoke.md)                                  | 真实强杀、取消竞争及规则故障；分别计数实际调用与持久结果                  |
-| 4    | [v0 七步 smoke 收口计划](demo/v0-smoke-closeout-plan.md)                         | 真实链路缺口、最小实施顺序、七步证据与完整 v0 验收边界                    |
-| 5    | [2026-10-21 七步真实验收记录](demo/v0-smoke-evidence-2026-10-21.md)              | 浏览器/通知/取消真实时窗、调用正控制与零调用、脱敏原始证据及未覆盖边界    |
-| 6    | [v0 完整收口计划](demo/v0-closeout-plan.md)                                      | A2 原子替代、A3 崩溃恢复与不确定窗口、A4 时间合同、镜像部署及完整验收门槛 |
-| 7    | [2026-10-21 A3 崩溃恢复验收](demo/v0-crash-recovery-evidence-2026-10-21.md)      | 六个真实强杀窗口、取消 COMMIT 后零调用、完整宽限与组合镜像适用边界        |
-| 8    | [2026-10-22 A1 失败与部署恢复](demo/v0-a1-recovery-evidence-2026-10-22.md)       | 原始字面任务失败、新任务独立登记与容器重启策略实测                        |
-| 9    | [2026-10-21 A4 时间错误与规则就绪](demo/v0-time-errors-evidence-2026-10-21.md)   | 真实资源故障、DB断开、未来DST错误及first-v2版本化修复与运行证据           |
-| 10   | [2026-10-21 A2 修改与重新确认](demo/v0-approval-revision-evidence-2026-10-21.md) | 真实原子替代、丢响应重放、明确新确认、原生双击及first-v2补充              |
-| 11   | [2026-10-23 v0 完整验收记录](demo/v0-closeout-evidence-2026-10-23.md)            | 新字面 A1 自然到点、真实页面/活动链、A1–A4 证据映射与收口保证边界         |
-| 12   | [2026-10-27 账户与本机登记验收](account-access-verification-2026-10-27.md)       | #68 库实验、真实 Web/PG、本机维护、固定会话与原身份两次重启保留           |
-| 13   | [2026-10-28—30 Web 体验验证](web-task-experience-verification-2026-10-28.md)     | #70 生产页面矩阵、受控交互/分页/SSE、原安装及个人助理改版的分段证据       |
+| 序号 | 文档                                                                             | 作用                                                                                          |
+| ---- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| 1    | [v0 全链路 smoke](demo/v0-slice-smoke.md)                                        | 7 步复现、断言取消后触发数=0                                                                  |
+| 2    | [time-core 黄金用例](demo/time-core-golden-cases.md)                             | 4 基准+DST+50 表达，fixture 可被测试消费                                                      |
+| 3    | [故障注入 smoke](demo/fault-injection-smoke.md)                                  | 真实强杀、取消竞争及规则故障；分别计数实际调用与持久结果                                      |
+| 4    | [v0 七步 smoke 收口计划](demo/v0-smoke-closeout-plan.md)                         | 真实链路缺口、最小实施顺序、七步证据与完整 v0 验收边界                                        |
+| 5    | [2026-10-21 七步真实验收记录](demo/v0-smoke-evidence-2026-10-21.md)              | 浏览器/通知/取消真实时窗、调用正控制与零调用、脱敏原始证据及未覆盖边界                        |
+| 6    | [v0 完整收口计划](demo/v0-closeout-plan.md)                                      | A2 原子替代、A3 崩溃恢复与不确定窗口、A4 时间合同、镜像部署及完整验收门槛                     |
+| 7    | [2026-10-21 A3 崩溃恢复验收](demo/v0-crash-recovery-evidence-2026-10-21.md)      | 六个真实强杀窗口、取消 COMMIT 后零调用、完整宽限与组合镜像适用边界                            |
+| 8    | [2026-10-22 A1 失败与部署恢复](demo/v0-a1-recovery-evidence-2026-10-22.md)       | 原始字面任务失败、新任务独立登记与容器重启策略实测                                            |
+| 9    | [2026-10-21 A4 时间错误与规则就绪](demo/v0-time-errors-evidence-2026-10-21.md)   | 真实资源故障、DB断开、未来DST错误及first-v2版本化修复与运行证据                               |
+| 10   | [2026-10-21 A2 修改与重新确认](demo/v0-approval-revision-evidence-2026-10-21.md) | 真实原子替代、丢响应重放、明确新确认、原生双击及first-v2补充                                  |
+| 11   | [2026-10-23 v0 完整验收记录](demo/v0-closeout-evidence-2026-10-23.md)            | 新字面 A1 自然到点、真实页面/活动链、A1–A4 证据映射与收口保证边界                             |
+| 12   | [2026-10-27 账户与本机登记验收](account-access-verification-2026-10-27.md)       | #68 库实验、真实 Web/PG、本机维护、固定会话与原身份两次重启保留                               |
+| 13   | [2026-10-28—30 Web 体验验证](web-task-experience-verification-2026-10-28.md)     | #70 生产页面矩阵、受控交互/分页/SSE、原安装及个人助理改版的分段证据                           |
+| 14   | [2026-10-31 R2-B 候选实验记录](demo/r2b-embedding-evidence-2026-10-31.md)        | 七版本离线CPU实测摘要、冻结材料与模型哈希、已知错误及独立性限制；不冒充正式服务或自然流量验收 |
 
 ## 七、References（3 篇）
 
@@ -109,6 +111,7 @@
 - [R1 会话历史（#69）](design/17-r1-conversation-history.md) 的行为真源为 [conversations](../openspec/specs/conversations/spec.md)，覆盖服务端发现、可见原文/回复、全部批准和结果、旧深链与只读重登；[使用说明](local-lifecycle.md#找回会话run-和真实结果)、[验证记录](conversation-history-verification-2026-10-28.md)和[归档清单](../openspec/changes/archive/2026-10-28-close-r1-conversation-history/tasks.md)分别记录使用、版本化运行证据与六项验收。`0018` 四个非唯一查询索引含旧原话回退查找，新增索引和单次事件聚合有独立补证；不改变执行/工作区/身份主规格，不替代 #66 全路径验收。
 - [R1 个人助理](design/01-tech-stack-and-repo-structure.md#6-r1-web个人助理与职责边界) 与[页面 PRD](prd/02-core-loop-and-pages.md#r1-个人助理)记录分组顶部导航、对话首页、简洁登录、LumenUI/Base UI/Tailwind v4、React 职责、精确批准和原 Run 显式继续；[Web 使用说明](../apps/web/README.md)与[本机任务流程](local-lifecycle.md#开始任务与审阅文档)说明实际操作与原安装边界。[版本化验证记录](web-task-experience-verification-2026-10-28.md)区分各轮源码、生产页面、受控交互与原安装实际验收，不把旧 CI 或页面示例当作新增迁移已验证。
 - [R2-A 上下文合同（#83）](design/18-r2a-harness-context.md) 的行为真源为 [agent-runtime](../openspec/specs/agent-runtime/spec.md)、[tool-gateway](../openspec/specs/tool-gateway/spec.md) 与 [workspaces](../openspec/specs/workspaces/spec.md)，实施/分级验收记录见 [归档清单](../openspec/changes/archive/2026-10-30-manage-harness-context/tasks.md)。[schema](schema/conversation-and-runs-schema.md#r2-a-上下文策略83)、[API](api/conversations/conversations_routes.md#7-r2-a-上下文容量83)、[PRD](prd/04-acceptance-open-questions.md#r2-a-单-run-上下文83) 跟随。保留 accepted facts、snapshot2 全引用与精确批准，原事实回取不是新读取；纯合同校验不算正式 native/真实模型验收。
+- [R2-B 路由提案（#88）](design/19-r2b-readonly-intent-routing.md) 沿完整规则→BGE INT8→原模型的有限只读路径，保持仓颉唯一循环、原网关/取消/批准恢复，默认off并逐意图验证；行为提案见 [change](../openspec/changes/define-readonly-intent-routing/proposal.md) 与 [任务](../openspec/changes/define-readonly-intent-routing/tasks.md)，[PRD](prd/04-acceptance-open-questions.md#r2-b-有限只读路由88proposed) 跟随。[离线证据](demo/r2b-embedding-evidence-2026-10-31.md)保留BGE误接与弱独立性，不能当作正式HTTP服务、真实Web或自然接管批准。
 - 冲突矩阵：行为/验收以 spec 为准，字段/路由以 design/api/schema 为准，why 以 ADR 为准。
 
 ## 维护约定

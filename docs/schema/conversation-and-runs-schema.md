@@ -197,6 +197,17 @@ snapshot2 原字段/集合不变，typed views/context_slice 不写入快照正�
 - [Required] 新写入/执行仅 `harness/v4`、snapshot `version=2`；harness_snapshot 保存已接受消息/工具结果引用、usage/next_call_no/等待引用，不保存 raw args、provider body、密钥或完整推理链。真实模型增量沿既有message.delta持久，不新建数据表。TS 验证同 owner/Run、真实接受事实与单调进度；旧 task snapshot1 的限定读取迁移见本篇 R1 节。
 - [Required] 同 conversation 先持 NO KEY UPDATE 锁再分配游标，并保持至提交，避免小游标晚提交被客户端永久漏掉，并与终态消息插入取得的外键 KEY SHARE 兼容。内部快照不交给外部 ThreadEventSchema；GET/同入站键只读不启动执行。
 
+## R2-B 路由策略与内部执行记录（Proposed，#88）
+
+本节只跟随 [design/19](../design/19-r2b-readonly-intent-routing.md) §7–§10，不改上文当前 `harness/v4`/snapshot2 和 R2-A Required 合同。精确 payload、摘要、关联、唯一性及来源约束以 design/19 §8 为主，不在本篇复制字段表；本节不表示迁移或 v5 已实施。
+
+- 路由策略不用 `run_context_policies`、新路由表或 Run JSON 列承载，不改 `frozen_context`。提议复用只追加 `run_checkpoints`，新增内部 `harness_routing_policy`、`harness_routing_decision`、`harness_routing_render` 三种 kind；snapshot2 不加字段。v5 的 start/probe/decide/render 消费关系见 design/19 §7。
+- 新 harness Run 在原接纳事务的首 attempt 写不可变 routing policy，off 也记录。旧 Run 缺策略按 off；GET/同键补读/批准 resume 不补路由策略、不分类，R2-A 上下文策略在有效恢复时的独立补录仍按原合同。仅 fresh 首模型前产生一次路由决策；shadow 只记录潜在候选、最终 fallback，不调用候选旁路业务工具。
+- 另起新迁移扩充 `0015` 的封闭 checkpoint kind check，并落实首 attempt、同 kind 唯一及同 owner/conversation/Run 的真实来源约束；不改已合并迁移，不预占编号。沿原只追加、锁序与 conversation 游标分配，内部行形成游标间隙仍合法。
+- 外部读取继续显式只取七词，不将三种内部路由行交给 ThreadEventSchema；HTTP/RunView/execution/SSE 不新增字段或词。策略、潜在候选和决策引用不是浏览器授权、恢复点或工具效果事实。
+- direct 决策绑定唯一原 reserve/invoke 的目标/参数和合法来源，不造新的工具结果账。真实成功 accepted_result 与已接受 snapshot 是渲染依据，TS 固定 renderer 在同一事务写原 `message.delta` 与内部 render 回执；finish(done) 须唯一成功结果、render 回执和零模型，不伪造 provider/usage。正文不能由 native 任意传入，详细来源与展示约束见 design/19 §9。
+- 接纳 direct 后失败不改走 LLM/新 slot；DB/协议/权限错误不是正常拒识。原取消先提交即拒绝迟到候选/输出，工具已提交事实保留；原入站/取消幂等与只读 GET/重放不变，不重新执行工具、编码或渲染，见 design/19 §10。
+
 ## `harness_resumes` / `harness_cancellations`
 
 0015 的最小持久动作关系，均只追加、禁止 UPDATE/DELETE，不另造工具结果账。
