@@ -27,6 +27,8 @@
 | 格式修复 / 阻塞检查 | `bun run format` / `bun run format:check`                                                            |
 | 契约校验            | `openspec validate <name> --strict`（如 `openspec validate v0-safety-contract --strict`）            |
 
+数据库集成与调度入口、D8 契约入口使用每项 30 秒测试预算，涵盖真实迁移部署、行为执行与夹具清理；这不是应用 SLA，不改变各协议自身的 deadline 或业务断言。
+
 环境变量占位（只占位，不写真实值）：`DATABASE_URL`、`TZDB_VERSION`（见 `.env.example`）。
 缺 `TZDB_VERSION` 时 `/readyz` 返回 `503 TZDB_UNAVAILABLE`，属预期行为（D1/D7）。
 

@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Pool } from 'pg';
 import type { DocumentApprovalActionResult, DocumentApprovalReceipt } from '@along/contracts';
@@ -55,7 +56,7 @@ maybe('document approval PostgreSQL authority and frozen content', () => {
   });
   async function fresh(content = '\uFEFFprefix\r\nold  \r\nsuffix\n') {
     const actor = await seedSession(pool, {});
-    const root = await mkdtemp(join(process.cwd(), '.document-approval-test-'));
+    const root = await mkdtemp(join(tmpdir(), 'along-document-approval-test-'));
     roots.push(root);
     await writeFile(join(root, 'memo.txt'), content);
     await writeFile(join(root, 'other.txt'), content);
