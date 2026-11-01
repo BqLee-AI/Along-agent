@@ -115,4 +115,21 @@ describe('governance scripts', () => {
       }
     }
   });
+  it('permits exactly readonly routing migration 0020 without broadening conversation ownership', () => {
+    for (const [name, accepted] of [
+      ['0020_conversation_readonly_routing.sql', true],
+      ['0019_conversation_readonly_routing.sql', false],
+      ['0021_conversation_readonly_routing.sql', false],
+      ['0020_conversation_unapproved_change.sql', false],
+    ] as const) {
+      const target = mkdtempSync(join(tmpdir(), 'migration-routing-'));
+      try {
+        mkdirSync(join(target, 'infra', 'migrations'), { recursive: true });
+        writeFileSync(join(target, 'infra', 'migrations', name), 'BEGIN; COMMIT;');
+        expect(run('check-migrations.mjs', target).code === 0).toBe(accepted);
+      } finally {
+        rmSync(target, { recursive: true, force: true });
+      }
+    }
+  });
 });

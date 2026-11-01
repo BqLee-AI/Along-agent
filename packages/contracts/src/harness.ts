@@ -4,8 +4,9 @@ import {
   DocumentApprovalDecisionSchema,
   DocumentApprovalReceiptSchema,
 } from './document-approvals.js';
+import { RoutingPolicySchema, RoutingIntentSchema } from './routing.js';
 
-export const HARNESS_PROTOCOL_VERSION = 'harness/v4' as const;
+export const HARNESS_PROTOCOL_VERSION = 'harness/v5' as const;
 export const HARNESS_MAX_FRAME_BYTES = 1024 * 1024;
 
 const uuid = z.string().uuid();
@@ -358,76 +359,123 @@ const request = {
   protocol: z.literal(HARNESS_PROTOCOL_VERSION),
   request_ref: reference,
 };
-export const HarnessRequestSchema = z.discriminatedUnion('type', [
-  z
-    .object({
-      ...request,
-      type: z.literal('model'),
-      messages: z.array(HarnessModelMessageSchema).min(1).max(256),
-      remaining_tokens: safe.nullable(),
-      max_output_tokens: positive,
-    })
-    .strict(),
-  z
-    .object({
-      ...request,
-      type: z.literal('measure_context'),
-      messages: z.array(HarnessModelMessageSchema).min(1).max(256),
-      remaining_tokens: safe.nullable(),
-      max_output_tokens: positive,
-    })
-    .strict(),
-  z.object({ ...request, type: z.literal('model_next'), model_ref: reference }).strict(),
-  z
-    .object({
-      ...request,
-      type: z.literal('context_source'),
-      invocation_id: uuid,
-      view: z.enum(['full', 'projected']),
-    })
-    .strict(),
-  z
-    .object({
-      ...request,
-      type: z.literal('reserve'),
-      call_key: reference,
-      tool_id: reference,
-      args,
-    })
-    .strict(),
-  z
-    .object({
-      ...request,
-      type: z.literal('invoke'),
-      invocation_id: uuid,
-      tool_id: reference,
-      args,
-    })
-    .strict(),
-  z.object({ ...request, type: z.literal('snapshot'), context: HarnessSnapshotSchema }).strict(),
-  z
-    .object({
-      ...request,
-      type: z.literal('suspend'),
-      checkpoint_ref: uuid,
-      invocation_id: uuid,
-      approval_id: uuid,
-    })
-    .strict(),
-  z.object({ ...request, type: z.literal('answer'), delta: z.string().min(1).max(4000) }).strict(),
-  z
-    .object({
-      ...request,
-      type: z.literal('finish'),
-      outcome: z.enum(['done', 'failed', 'cancelled']),
-      usage: HarnessUsageSchema,
-      error: z
-        .object({ code: reference, message: z.string().max(8192) })
-        .strict()
-        .optional(),
-    })
-    .strict(),
-]);
+export const HarnessRequestSchema = z
+  .discriminatedUnion('type', [
+    z
+      .object({
+        ...request,
+        type: z.literal('route_probe'),
+        stage: z.enum(['facts', 'embedding']),
+        facts_ref: uuid.nullable(),
+      })
+      .strict(),
+    z
+      .object({
+        ...request,
+        type: z.literal('route_decide'),
+        decision: z.enum(['direct', 'fallback']),
+        facts_ref: uuid,
+        candidate_intent: RoutingIntentSchema.nullable(),
+        reason: reference,
+      })
+      .strict(),
+    z
+      .object({
+        ...request,
+        type: z.literal('render_route_result'),
+        decision_ref: uuid,
+        invocation_ref: uuid,
+        template_revision: reference,
+      })
+      .strict(),
+    z
+      .object({
+        ...request,
+        type: z.literal('model'),
+        messages: z.array(HarnessModelMessageSchema).min(1).max(256),
+        remaining_tokens: safe.nullable(),
+        max_output_tokens: positive,
+      })
+      .strict(),
+    z
+      .object({
+        ...request,
+        type: z.literal('measure_context'),
+        messages: z.array(HarnessModelMessageSchema).min(1).max(256),
+        remaining_tokens: safe.nullable(),
+        max_output_tokens: positive,
+      })
+      .strict(),
+    z.object({ ...request, type: z.literal('model_next'), model_ref: reference }).strict(),
+    z
+      .object({
+        ...request,
+        type: z.literal('context_source'),
+        invocation_id: uuid,
+        view: z.enum(['full', 'projected']),
+      })
+      .strict(),
+    z
+      .object({
+        ...request,
+        type: z.literal('reserve'),
+        call_key: reference,
+        tool_id: reference,
+        args,
+      })
+      .strict(),
+    z
+      .object({
+        ...request,
+        type: z.literal('invoke'),
+        invocation_id: uuid,
+        tool_id: reference,
+        args,
+      })
+      .strict(),
+    z.object({ ...request, type: z.literal('snapshot'), context: HarnessSnapshotSchema }).strict(),
+    z
+      .object({
+        ...request,
+        type: z.literal('suspend'),
+        checkpoint_ref: uuid,
+        invocation_id: uuid,
+        approval_id: uuid,
+      })
+      .strict(),
+    z
+      .object({ ...request, type: z.literal('answer'), delta: z.string().min(1).max(4000) })
+      .strict(),
+    z
+      .object({
+        ...request,
+        type: z.literal('finish'),
+        outcome: z.enum(['done', 'failed', 'cancelled']),
+        usage: HarnessUsageSchema,
+        error: z
+          .object({ code: reference, message: z.string().max(8192) })
+          .strict()
+          .optional(),
+      })
+      .strict(),
+  ])
+  .superRefine((value, context) => {
+    if (value.type === 'route_probe' && (value.stage === 'facts') !== (value.facts_ref === null)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'probe stage requires its exact facts reference',
+      });
+    }
+    if (
+      value.type === 'route_decide' &&
+      (value.decision === 'direct') !== (value.candidate_intent !== null)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'only direct may authorize a candidate intent',
+      });
+    }
+  });
 export const HarnessTaskApprovalDecisionSchema = z
   .object({
     kind: z.literal('task'),
@@ -460,6 +508,8 @@ export const HarnessStartSchema = z
       .max(64),
     tools: z.array(HarnessToolSchema).max(64),
     context_policy: ContextPolicySchema,
+    routing_policy: RoutingPolicySchema.nullable(),
+    eligible_phase: z.enum(['fresh_first_step', 'disabled']),
     budget: z
       .object({
         max_iterations: z.number().int().positive(),

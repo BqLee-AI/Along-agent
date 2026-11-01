@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "scope": "Externally mounted model weights only; not complete encoder-image dependency clearance.",
+  "original_model": {
+    "publisher": "BAAI",
+    "id": "BAAI/bge-small-zh-v1.5",
+    "revision": "7999e1d3359715c523056ef9478215996d62a620"
+  },
+  "quantized_model": {
+    "publisher": "Xenova",
+    "id": "Xenova/bge-small-zh-v1.5",
+    "revision": "75c43b069aac4d136ba6bc1122f995fedcfd2781"
+  },
+  "asset": {
+    "path": "onnx/model_int8.onnx",
+    "bytes": 23903394,
+    "sha256": "b9837c19ce154ff0726d398ee77abbc03a7faf0476c6f93016c84e531be7ebb5",
+    "url": "https://huggingface.co/Xenova/bge-small-zh-v1.5/resolve/75c43b069aac4d136ba6bc1122f995fedcfd2781/onnx/model_int8.onnx"
+  },
+  "license": {
+    "assessment": "MIT",
+    "basis": [
+      "The pinned original model card declares MIT and explicitly permits free commercial use.",
+      "The quantized model card identifies BAAI/bge-small-zh-v1.5 as its base model.",
+      "The quantization publisher states that all their quantizations should fall under the original model license."
+    ],
+    "quantized_repository_license_field": null,
+    "quantized_repository_contains_license_file": false,
+    "model_specific_upstream_license_amendment": false,
+    "inference": "[INFERENCE] Applying the publisher statement to this exact bge-small-zh-v1.5 INT8 revision is supported by its all-quantizations wording and the exact repository base_model link; the comment itself is on bge-m3, not a model-specific amendment.",
+    "notice_obligation": "Retain the MIT copyright and permission notices with copies or substantial portions.",
+    "bundled_license_file": "LICENSE"
+  },
+  "publisher_statement": {
+    "author": "Xenova",
+    "created_at": "2026-02-10T19:47:02.000Z",
+    "url": "https://huggingface.co/Xenova/bge-m3/discussions/9#698b8b36426c7281cce51330",
+    "quote": "Hi there 👋 Yep, all quantizations I have made should fall under the same license of the original model. I'll update the repo accordingly."
+  },
+  "evidence": [
+    {
+      "name": "upstream-card.txt",
+      "url": "https://huggingface.co/BAAI/bge-small-zh-v1.5/raw/7999e1d3359715c523056ef9478215996d62a620/README.md",
+      "bytes": 27670,
+      "sha256": "c48a4eeea77f6b1d38b48ec1c5b8d4f86d5550cc43fa345a0db1b2ca1d082369"
+    },
+    {
+      "name": "upstream-repository.json",
+      "url": "https://huggingface.co/api/models/BAAI/bge-small-zh-v1.5/revision/7999e1d3359715c523056ef9478215996d62a620",
+      "bytes": 4129,
+      "sha256": "8779ee9de690882b309de44ed8de6d40089e6e9dffdec954d42e0383fa87bf1d"
+    },
+    {
+      "name": "quantized-card.txt",
+      "url": "https://huggingface.co/Xenova/bge-small-zh-v1.5/raw/75c43b069aac4d136ba6bc1122f995fedcfd2781/README.md",
+      "bytes": 1057,
+      "sha256": "cb22054df1a98f7ee9d5b281d023e67c27cc316e1733baf03fc994d95c3048ab"
+    },
+    {
+      "name": "quantized-repository.json",
+      "url": "https://huggingface.co/api/models/Xenova/bge-small-zh-v1.5/revision/75c43b069aac4d136ba6bc1122f995fedcfd2781",
+      "bytes": 1649,
+      "sha256": "47e241fbc439641e1d741da24c11b4e7de90ea23df4962eb0a1fea75e2572340"
+    },
+    {
+      "name": "quantized-onnx-tree.json",
+      "url": "https://huggingface.co/api/models/Xenova/bge-small-zh-v1.5/tree/75c43b069aac4d136ba6bc1122f995fedcfd2781/onnx",
+      "bytes": 2425,
+      "sha256": "8177d25c91c37b85c3dd6c12a760de05c819a8a02aee7a15b5f91d4901a5faae"
+    },
+    {
+      "name": "publisher-license-statement.json",
+      "url": "https://huggingface.co/api/models/Xenova/bge-m3/discussions/9",
+      "bytes": 4754,
+      "sha256": "fcecfbe71a5469d0aa24e74285accf36ee5d81f7a8fbcb30a6602e30123ff1e9"
+    },
+    {
+      "name": "upstream-MIT-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/FlagOpen/FlagEmbedding/c086741f5e117b7b8ce1745ea00b6c262f281a01/LICENSE",
+      "bytes": 1065,
+      "sha256": "587a673933425dbc36ec61268d3b954051b2d3ef3c9b322ede357976055ffdd5"
+    }
+  ],
+  "limitations": [
+    "The publisher statement is in a bge-m3 discussion, not a declaration specific to this quantized model revision.",
+    "Raw API response bodies and personal metadata are not bundled; evidence hashes identify saved original response contents.",
+    "No complete image, base-image, dependency, tokenizer or other-asset license clearance is claimed.",
+    "No weights are bundled, no frozen manifest or binding is changed, and no deployment, publication or enforcement is authorized."
+  ]
+}

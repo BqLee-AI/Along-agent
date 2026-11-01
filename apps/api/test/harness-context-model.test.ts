@@ -47,7 +47,7 @@ test('R2-A sends the independent completion cap rather than the cumulative balan
   });
   const response = model(
     {
-      protocol: 'harness/v4',
+      protocol: 'harness/v5',
       type: 'model',
       request_ref: 'm1',
       messages: [{ role: 'user', content: 'hello' }],
@@ -81,7 +81,7 @@ test('verified complete input enforces both window reserve and cumulative balanc
     meterRevision: 'complete-fixture/1',
   });
   const candidate: Extract<HarnessRequest, { type: 'measure_context' }> = {
-    protocol: 'harness/v4',
+    protocol: 'harness/v5',
     type: 'measure_context',
     request_ref: 'm1',
     messages: [{ role: 'user', content: 'hello' }],
@@ -125,7 +125,7 @@ test('missing current meter and missing provider usage remain unknown rather tha
     meterRevision: 'temporarily-offline/1',
   });
   const candidate: Extract<HarnessRequest, { type: 'measure_context' }> = {
-    protocol: 'harness/v4',
+    protocol: 'harness/v5',
     type: 'measure_context',
     request_ref: 'm1',
     messages: [{ role: 'user', content: 'hello' }],

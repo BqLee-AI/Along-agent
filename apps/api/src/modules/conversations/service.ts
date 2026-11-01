@@ -52,6 +52,8 @@ import {
 } from './repository.js';
 import { requireHistoryRun } from './history-repository.js';
 import { ensureRunContextPolicy } from './context-policy.js';
+import { insertRoutingPolicy } from './routing-checkpoints.js';
+import { routingRuntimeOf } from './harness-config.js';
 
 const AGENT_REVISION = 'assistant/r1';
 const BUSINESS_MAX_ITERATIONS = 10;
@@ -260,6 +262,12 @@ export async function startConversationRun(
         runId,
         attemptNo: 1,
       });
+      if (execution === 'harness')
+        await insertRoutingPolicy(
+          client,
+          { ownerId, runId, attemptId, userMessageId },
+          routingRuntimeOf(deps).policy(),
+        );
       await deleteExpiredIdempotency(client, ownerId, key);
       await insertIdempotency(client, {
         ownerId,

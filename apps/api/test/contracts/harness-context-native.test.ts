@@ -24,6 +24,15 @@ async function nativeCase(options: {
   handle?: (
     request: Extract<HarnessRequest, { type: 'reserve' | 'invoke' | 'context_source' }>,
   ) => unknown;
+  route?: (
+    request: Extract<
+      HarnessRequest,
+      { type: 'route_probe' | 'route_decide' | 'render_route_result' }
+    >,
+  ) => unknown;
+  reject?: (request: HarnessRequest) => string | null;
+  cancel?: (request: HarnessRequest) => boolean;
+  expectedExit?: number;
 }) {
   if (!binaryPath)
     throw new Error('R2-A native requires HARNESS_BINARY from the current production build');
@@ -39,8 +48,10 @@ async function nativeCase(options: {
   const requests: HarnessRequest[] = [];
   const send = (frame: unknown) => child.stdin.write(JSON.stringify(frame) + '\n');
   send({
-    protocol: 'harness/v4',
+    protocol: 'harness/v5',
     type: 'start',
+    routing_policy: { revision: 'r2b/1', mode: 'off' },
+    eligible_phase: 'disabled',
     context_policy: policy,
     messages: [
       { message_id: randomUUID(), role: 'user', content: 'Keep the complete frozen input.' },
@@ -64,6 +75,24 @@ async function nativeCase(options: {
         const request = HarnessRequestSchema.parse(JSON.parse(pending.slice(0, newline)));
         pending = pending.slice(newline + 1);
         requests.push(request);
+        if (options.cancel?.(request)) {
+          send({
+            protocol: 'harness/v5',
+            type: 'cancel',
+            reason: 'controlled accepted cancellation',
+          });
+          continue;
+        }
+        const rejected = options.reject?.(request);
+        if (rejected) {
+          send({
+            protocol: 'harness/v5',
+            type: 'reply',
+            reply_to: request.request_ref,
+            error: { code: rejected, message: 'controlled protocol boundary failure' },
+          });
+          continue;
+        }
         let value: unknown;
         if (request.type === 'measure_context')
           value = options.measure?.(request) ?? {
@@ -81,16 +110,24 @@ async function nativeCase(options: {
           value = options.model(request, modelCount++);
         else if (request.type === 'snapshot') value = { checkpoint_ref: randomUUID() };
         else if (
+          request.type === 'route_probe' ||
+          request.type === 'route_decide' ||
+          request.type === 'render_route_result'
+        )
+          value = options.route?.(request);
+        else if (
           request.type === 'reserve' ||
           request.type === 'invoke' ||
           request.type === 'context_source'
         )
           value = options.handle?.(request);
         else value = { accepted: true };
-        send({ protocol: 'harness/v4', type: 'reply', reply_to: request.request_ref, value });
+        send({ protocol: 'harness/v5', type: 'reply', reply_to: request.request_ref, value });
       }
     }
-    expect(await child.exited, await new Response(child.stderr).text()).toBe(0);
+    expect(await child.exited, await new Response(child.stderr).text()).toBe(
+      options.expectedExit ?? 0,
+    );
     return requests;
   } finally {
     child.stdin.end();
@@ -616,3 +653,381 @@ test('R2-A a full 64-reference snapshot rejects a new tool call before reservati
     usage: { iterations: 65, tokens: 65 },
   });
 }, 30_000);
+
+const routeIntents = ['task_list_bounded', 'prefs_timezone_read', 'brief_cards_read'] as const;
+type RouteIntent = (typeof routeIntents)[number];
+const routeTools = {
+  task_list_bounded: 'list_tasks',
+  prefs_timezone_read: 'get_user_prefs',
+  brief_cards_read: 'read_brief_cards',
+};
+function routingPolicy(mode: 'shadow' | 'enforce' = 'enforce') {
+  return {
+    revision: 'r2b/1',
+    mode,
+    bundle_sha256: 'a'.repeat(64),
+    encoding_sha256: 'b'.repeat(64),
+    candidate_intents: [...routeIntents],
+    direct_intents: mode === 'shadow' ? [] : [...routeIntents],
+    competition: [...routeIntents, 'other_query'],
+    thresholds: Object.fromEntries(
+      routeIntents.map((intent) => [intent, { tau_intent: 0.8, tau_gap: 0.1 }]),
+    ),
+    deadline_ms: 1000,
+    max_inflight: 2,
+    guard_revision: 'guard/1',
+    parser_revision: 'parser/1',
+    handler_revision: 'handler/1',
+    renderer_revision: 'renderer/1',
+    scorer_revision: 'scorer/1',
+  };
+}
+async function routingCase(options: {
+  intent?: RouteIntent;
+  embedding?: boolean;
+  mode?: 'shadow' | 'enforce';
+  scores?: { intent: string; score: number; exclusion_score: number | null }[];
+  reason?: string;
+  status?: 'ok' | 'denied' | 'failed' | 'unknown';
+  start?: Record<string, unknown>;
+  rejectAt?: HarnessRequest['type'];
+  malformedBinding?: boolean;
+  eligible?: boolean;
+  resumed?: boolean;
+  cancelAt?: HarnessRequest['type'];
+  directDisabled?: boolean;
+  cancelEmbedding?: boolean;
+  protocolError?: boolean;
+}) {
+  const intent = options.intent ?? 'prefs_timezone_read';
+  const tool = routeTools[intent];
+  const id = randomUUID(),
+    decisionRef = randomUUID(),
+    factsRef = randomUUID(),
+    messageId = randomUUID();
+  const args =
+    intent === 'task_list_bounded'
+      ? { limit: 20 }
+      : intent === 'brief_cards_read'
+        ? { date: '2026-10-31' }
+        : {};
+  const policy = routingPolicy(options.mode);
+  if (options.directDisabled) policy.direct_intents = [];
+  return nativeCase({
+    start: {
+      routing_policy: policy,
+      eligible_phase: 'fresh_first_step',
+      messages: [
+        { message_id: messageId, role: 'user', content: 'Keep the complete frozen input.' },
+      ],
+      ...(options.resumed
+        ? {
+            snapshot: {
+              version: 2,
+              message_refs: [messageId],
+              tool_refs: [],
+              next_call_no: 1,
+              usage: { iterations: 1, tokens: null },
+              waiting: null,
+            },
+          }
+        : {}),
+      tools: [
+        { name: tool, description: 'Original read-only capability', parameters: {}, risk: 'low' },
+      ],
+      ...options.start,
+    },
+    expectedExit: options.malformedBinding || options.protocolError ? 2 : 0,
+    reject: (request) => (request.type === options.rejectAt ? 'CONTROLLED_FAILURE' : null),
+    cancel: (request) =>
+      request.type === options.cancelAt ||
+      !!(
+        options.cancelEmbedding &&
+        request.type === 'route_probe' &&
+        request.stage === 'embedding'
+      ),
+    model: () => ({
+      type: 'failed',
+      error: { code: 'MODEL_FALLBACK_OBSERVED', message: 'controlled model request' },
+      usage: { total_tokens: 7 },
+    }),
+    route: (request) => {
+      if (request.type === 'route_probe') {
+        if (request.stage === 'facts') {
+          expect(request.facts_ref).toBeNull();
+          return {
+            facts_ref: factsRef,
+            input_sha256: 'c'.repeat(64),
+            bundle_sha256: policy.bundle_sha256,
+            eligible: options.eligible ?? true,
+            reason: options.eligible === false ? 'CONTEXT_UNKNOWN' : null,
+            rule_intent: options.embedding || options.eligible === false ? null : intent,
+            candidates: [{ intent, tool_id: tool, args, sources: [] }],
+          };
+        }
+        expect(request.facts_ref).toBe(factsRef);
+        return {
+          facts_ref: options.malformedBinding ? randomUUID() : factsRef,
+          input_sha256: 'c'.repeat(64),
+          bundle_sha256: policy.bundle_sha256,
+          reason: options.reason ?? null,
+          scores:
+            options.scores ??
+            policy.competition.map((candidate) => ({
+              intent: candidate,
+              score: candidate === intent ? 0.92 : 0.3,
+              exclusion_score: 0.1,
+            })),
+        };
+      }
+      if (request.type === 'route_decide') {
+        expect(request.facts_ref).toBe(factsRef);
+        return request.decision === 'direct'
+          ? { decision_ref: decisionRef, decision: 'direct', intent, tool_id: tool, args }
+          : {
+              decision_ref: decisionRef,
+              decision: 'fallback',
+              intent: null,
+              tool_id: null,
+              args: null,
+            };
+      }
+      expect(request).toMatchObject({
+        type: 'render_route_result',
+        decision_ref: decisionRef,
+        invocation_ref: id,
+        template_revision: policy.renderer_revision,
+      });
+      return { rendered: true };
+    },
+    handle: (request) => {
+      if (request.type === 'reserve') {
+        expect(request).toMatchObject({ call_key: 'harness/1', tool_id: tool, args });
+        return { invocation_id: id };
+      }
+      if (request.type !== 'invoke') throw new Error('direct must not retrieve context');
+      expect(request).toMatchObject({ invocation_id: id, tool_id: tool, args });
+      const status = options.status ?? 'ok';
+      if (status !== 'ok')
+        return {
+          status,
+          invocationId: id,
+          replayed: false,
+          error: { code: 'READ_FAILED', message: 'actual gateway failure' },
+        };
+      const result =
+        intent === 'task_list_bounded'
+          ? { kind: 'list_tasks', tasks: [], has_more: false }
+          : intent === 'prefs_timezone_read'
+            ? {
+                kind: 'prefs',
+                timezone_id: null,
+                alias_version: 'fixture',
+                quiet_hours: null,
+                locale: null,
+              }
+            : { kind: 'brief', brief_id: 'fixture', date: '2026-10-31', cards: [] };
+      return { status, invocationId: id, replayed: false, result };
+    },
+  });
+}
+for (const intent of routeIntents) {
+  test(`R2-B rule direct ${intent} invokes original tool and renders after snapshot with zero model usage`, async () => {
+    const requests = await routingCase({ intent });
+    expect(requests.map((request) => request.type)).toEqual([
+      'route_probe',
+      'route_decide',
+      'reserve',
+      'invoke',
+      'snapshot',
+      'render_route_result',
+      'finish',
+    ]);
+    expect(requests.at(-1)).toMatchObject({ outcome: 'done', usage: { iterations: 0, tokens: 0 } });
+    expect(requests.find((request) => request.type === 'snapshot')).toMatchObject({
+      context: { version: 2, next_call_no: 2, usage: { iterations: 0, tokens: 0 } },
+    });
+  }, 30_000);
+}
+test('R2-B embedding direct probes once and never fabricates provider calls or native answer', async () => {
+  const requests = await routingCase({ embedding: true });
+  expect(requests.map((request) => request.type)).toEqual([
+    'route_probe',
+    'route_probe',
+    'route_decide',
+    'reserve',
+    'invoke',
+    'snapshot',
+    'render_route_result',
+    'finish',
+  ]);
+  expect(requests.at(-1)).toMatchObject({ outcome: 'done', usage: { iterations: 0, tokens: 0 } });
+}, 30_000);
+for (const refusal of [
+  'tie',
+  'veto',
+  'no_exclusion',
+  'absolute',
+  'gap',
+  'outside',
+  'encoder_refusal',
+] as const) {
+  test(`R2-B ${refusal} records one fallback then uses the unchanged model path`, async () => {
+    const scores = routingPolicy().competition.map((intent) => ({
+      intent,
+      score: intent === 'prefs_timezone_read' ? 0.92 : 0.3,
+      exclusion_score: 0.1 as number | null,
+    }));
+    if (refusal === 'tie') scores[0]!.score = 0.92;
+    if (refusal === 'veto') scores[1]!.exclusion_score = 0.92;
+    if (refusal === 'no_exclusion') scores[1]!.exclusion_score = null;
+    if (refusal === 'absolute') scores[1]!.score = 0.79;
+    if (refusal === 'gap') scores[0]!.score = 0.85;
+    if (refusal === 'outside') scores[3]!.score = 0.99;
+    const requests = await routingCase({
+      embedding: true,
+      scores,
+      reason: refusal === 'encoder_refusal' ? 'ENCODER_UNAVAILABLE' : undefined,
+    });
+    expect(requests.map((request) => request.type)).toEqual([
+      'route_probe',
+      'route_probe',
+      'route_decide',
+      'measure_context',
+      'model',
+      'finish',
+    ]);
+    expect(requests[2]).toMatchObject({ decision: 'fallback' });
+    expect(requests.at(-1)).toMatchObject({ usage: { iterations: 1, tokens: 7 } });
+  }, 30_000);
+}
+for (const embedding of [false, true]) {
+  test(`R2-B shadow ${embedding ? 'embedding' : 'rule'} never reserves a tool`, async () => {
+    const requests = await routingCase({ mode: 'shadow', embedding });
+    expect(requests.filter((request) => request.type === 'route_decide')).toHaveLength(1);
+    expect(requests.find((request) => request.type === 'route_decide')).toMatchObject({
+      decision: 'fallback',
+    });
+    expect(
+      requests.some(
+        (request) => request.type === 'reserve' || request.type === 'render_route_result',
+      ),
+    ).toBe(false);
+    expect(requests.some((request) => request.type === 'model')).toBe(true);
+  }, 30_000);
+}
+for (const start of [
+  { routing_policy: null },
+  { routing_policy: { revision: 'r2b/1', mode: 'off' } },
+  { eligible_phase: 'disabled' },
+]) {
+  test(`R2-B off, old or disabled phase never probes: ${JSON.stringify(start)}`, async () => {
+    const requests = await routingCase({ start });
+    expect(requests.map((request) => request.type)).toEqual(['measure_context', 'model', 'finish']);
+  }, 30_000);
+}
+for (const rejectAt of ['reserve', 'invoke', 'snapshot', 'render_route_result'] as const) {
+  test(`R2-B accepted direct ${rejectAt} failure cannot switch to model or a second slot`, async () => {
+    const requests = await routingCase({ rejectAt });
+    expect(requests.filter((request) => request.type === 'reserve').length).toBeLessThanOrEqual(1);
+    expect(requests.some((request) => request.type === 'model' || request.type === 'answer')).toBe(
+      false,
+    );
+    expect(requests.at(-1)).toMatchObject({
+      outcome: 'failed',
+      error: { code: 'CONTROLLED_FAILURE' },
+      usage: { iterations: 0, tokens: 0 },
+    });
+  }, 30_000);
+}
+for (const status of ['denied', 'failed', 'unknown'] as const) {
+  test(`R2-B accepted direct ${status} retains original failure without rendering or fallback`, async () => {
+    const requests = await routingCase({ status });
+    expect(
+      requests.some(
+        (request) => request.type === 'model' || request.type === 'render_route_result',
+      ),
+    ).toBe(false);
+    expect(requests.filter((request) => request.type === 'reserve')).toHaveLength(1);
+    expect(requests.at(-1)).toMatchObject({
+      outcome: 'failed',
+      error: {
+        code: status === 'unknown' ? 'TOOL_EFFECT_UNKNOWN' : 'READ_FAILED',
+      },
+    });
+    expect(requests.some((request) => request.type === 'snapshot')).toBe(status !== 'unknown');
+  }, 30_000);
+}
+test('R2-B corrupted embedding reference stops rather than disguising it as refusal', async () => {
+  const requests = await routingCase({ embedding: true, malformedBinding: true });
+  expect(requests.map((request) => request.type)).toEqual(['route_probe', 'route_probe']);
+}, 30_000);
+test('R2-B ineligible facts record fallback without probing embedding', async () => {
+  const requests = await routingCase({ eligible: false });
+  expect(requests.map((request) => request.type)).toEqual([
+    'route_probe',
+    'route_decide',
+    'measure_context',
+    'model',
+    'finish',
+  ]);
+}, 30_000);
+test('R2-B enforce operator subset does not execute a disabled intent', async () => {
+  const requests = await routingCase({ directDisabled: true });
+  expect(requests.find((request) => request.type === 'route_decide')).toMatchObject({
+    decision: 'fallback',
+    candidate_intent: null,
+  });
+  expect(requests.some((request) => request.type === 'reserve')).toBe(false);
+}, 30_000);
+test('R2-B a restored snapshot never probes even if fresh phase is mistakenly supplied', async () => {
+  const requests = await routingCase({ resumed: true });
+  expect(requests.map((request) => request.type)).toEqual(['measure_context', 'model', 'finish']);
+  expect(requests.at(-1)).toMatchObject({ usage: { iterations: 2, tokens: null } });
+}, 30_000);
+for (const cancelAt of [
+  'route_probe',
+  'route_decide',
+  'reserve',
+  'invoke',
+  'snapshot',
+  'render_route_result',
+] as const) {
+  test(`R2-B accepted cancellation at ${cancelAt} stops without later actions or terminal replay`, async () => {
+    const requests = await routingCase({ cancelAt });
+    expect(requests.at(-1)?.type).toBe(cancelAt);
+    expect(requests.some((request) => request.type === 'model' || request.type === 'finish')).toBe(
+      false,
+    );
+  }, 30_000);
+}
+test('R2-B cancellation while embedding is outstanding cannot accept late scores', async () => {
+  const requests = await routingCase({ embedding: true, cancelEmbedding: true });
+  expect(requests.map((request) => request.type)).toEqual(['route_probe', 'route_probe']);
+}, 30_000);
+for (const rejectAt of ['route_probe', 'route_decide'] as const) {
+  test(`R2-B ${rejectAt} authority failure stops rather than treating DB or qualification errors as a miss`, async () => {
+    const requests = await routingCase({ rejectAt });
+    expect(requests.some((request) => request.type === 'model' || request.type === 'reserve')).toBe(
+      false,
+    );
+    expect(requests.at(-1)).toMatchObject({
+      outcome: 'failed',
+      error: { code: 'CONTROLLED_FAILURE' },
+    });
+  }, 30_000);
+}
+for (const malformed of ['incomplete', 'duplicate', 'nonfinite'] as const) {
+  test(`R2-B ${malformed} competition evidence is a protocol error, not a fallback`, async () => {
+    const scores = routingPolicy().competition.map((intent) => ({
+      intent,
+      score: intent === 'prefs_timezone_read' ? 0.92 : 0.3,
+      exclusion_score: 0.1,
+    }));
+    if (malformed === 'incomplete') scores.pop();
+    if (malformed === 'duplicate') scores.push(scores[0]!);
+    if (malformed === 'nonfinite') scores[0]!.score = Infinity;
+    const requests = await routingCase({ embedding: true, scores, protocolError: true });
+    expect(requests.map((request) => request.type)).toEqual(['route_probe', 'route_probe']);
+  }, 30_000);
+}

@@ -7,12 +7,18 @@ import {
   HistoricalHarnessSnapshotSchema,
   HarnessStartSchema,
   HarnessModelStepSchema,
+  HarnessRequestSchema,
   type HarnessModelStep,
   type HarnessRequest,
   type HarnessSnapshot,
   type HarnessStart,
   type HarnessApprovalDecision,
   type RunView,
+  RoutingFactsSchema,
+  RoutingEmbeddingSchema,
+  type RoutingFacts,
+  type RoutingEmbedding,
+  type RoutingPolicy,
 } from '@along/contracts';
 import { THREAD_PROTOCOL_VERSION } from '@along/stream-protocol';
 import type { ThreadEvent } from '@along/stream-protocol';
@@ -26,7 +32,7 @@ import {
 } from '../../http/errors.js';
 import { validateDocumentApprovalsDone } from '../approvals/document-service.js';
 import { invokeTool, reserveToolInvocation } from '../tools/gateway.js';
-import { readRunInvocationStates } from '../tools/invocations.js';
+import { readRunInvocationStates, readInvocationSnapshots } from '../tools/invocations.js';
 import {
   readRunContextObservations,
   readRunContextSource,
@@ -41,6 +47,19 @@ import type { ConversationDeps, EventWriter, RunContext, StartResult } from './c
 import { ensureRunContextPolicy, readRunContextPolicy } from './context-policy.js';
 import { measureHarnessContext } from './harness-context.js';
 import { CancelRunBodySchema, ResumeRunBodySchema } from './schemas.js';
+import { routingRuntimeOf } from './harness-config.js';
+import {
+  readRoutingPolicy,
+  readRoutingRecord,
+  acceptRoutingDecision,
+  decisionPayload,
+  routingDecisionReply,
+  insertRoutingRender,
+  routingHash,
+  routingIdentity,
+  type RoutingDecisionPayload,
+  type RoutingRenderPayload,
+} from './routing-checkpoints.js';
 import {
   insertAttempt,
   latestAttemptId,
@@ -65,6 +84,7 @@ export interface HarnessSession {
 }
 
 const active = new Map<string, AbortController>();
+const sessionAborts = new Map<string, Set<AbortController>>();
 
 function poolOf(deps: ConversationDeps): Pool {
   if (!deps.pool) throw notReady();
@@ -205,6 +225,8 @@ function buildHarnessStart(
   snapshot: HarnessSnapshot | null,
   observations: HarnessStart['observations'],
   approval: HarnessApprovalDecision | null,
+  routingPolicy: RoutingPolicy | null = null,
+  eligiblePhase: HarnessStart['eligible_phase'] = 'disabled',
 ): HarnessStart {
   if (!context.contextPolicy || !context.messages) throw unavailable();
   if (
@@ -218,6 +240,8 @@ function buildHarnessStart(
     type: 'start',
     messages: context.messages,
     context_policy: context.contextPolicy,
+    routing_policy: routingPolicy,
+    eligible_phase: eligiblePhase,
     tools: HARNESS_TOOL_DEFINITIONS.filter((tool) => context.allowlist.includes(tool.name)),
     budget: { max_iterations: context.maxIterations, max_tokens: context.maxTokens },
     snapshot,
@@ -295,6 +319,8 @@ export async function cancelConversationRun(
   );
   // Qualification has already been revoked durably before model/pipe abort.
   if (result.status === 'cancelled') active.get(runId)?.abort();
+  if (result.status === 'cancelled')
+    for (const controller of sessionAborts.get(runId) ?? []) controller.abort();
   return result;
 }
 
@@ -447,7 +473,27 @@ export async function createHarnessSession(
           snapshot.waiting.approval_id,
         )
       : null;
-    return { context, snapshot, observations, approval };
+    const policy = await readRoutingPolicy(client, context.ownerId, context.runId);
+    const decision = await readRoutingRecord<RoutingDecisionPayload>(
+      client,
+      context,
+      'harness_routing_decision',
+    );
+    const states = await readRunInvocationStates(client, toolContext(context));
+    const checkpoint = await client.query(
+      `SELECT 1 FROM run_checkpoints WHERE attempt_id=$1 AND kind='harness_snapshot' LIMIT 1`,
+      [context.attemptId],
+    );
+    const eligible =
+      locked.attempt.attempt_no === 1 &&
+      !resume &&
+      !snapshot &&
+      !decision &&
+      !states.length &&
+      !checkpoint.rowCount &&
+      policy?.payload.policy.mode !== 'off' &&
+      policy !== null;
+    return { context, snapshot, observations, approval, policy, eligible, decision };
   });
   const { context } = initial;
   const start = buildHarnessStart(
@@ -455,14 +501,28 @@ export async function createHarnessSession(
     initial.snapshot,
     initial.observations,
     initial.approval,
+    initial.policy?.payload.policy ?? null,
+    initial.eligible ? 'fresh_first_step' : 'disabled',
   );
   const tools = start.tools;
   let stopped = false;
   let lastSnapshot = initial.snapshot;
   const delivered = new Set(initial.snapshot?.tool_refs ?? []);
   const cumulative = { ...(initial.snapshot?.usage ?? { iterations: 0, tokens: 0 }) };
+  const sessionController = new AbortController();
+  const sessionSignal = AbortSignal.any([signal, sessionController.signal]);
   const modelController = new AbortController();
-  const modelSignal = AbortSignal.any([signal, modelController.signal]);
+  const modelSignal = AbortSignal.any([sessionSignal, modelController.signal]);
+  const controllers = sessionAborts.get(context.runId) ?? new Set<AbortController>();
+  controllers.add(sessionController);
+  sessionAborts.set(context.runId, controllers);
+  const routing = routingRuntimeOf(deps);
+  const policy = initial.policy?.payload.policy ?? null;
+  let facts: RoutingFacts | null = null;
+  let embedding: RoutingEmbedding | null = null;
+  let encodingCount = 0;
+  let encodingPending = false;
+  let routingDecision = initial.decision;
   let modelStarted = false;
   let modelStream: {
     ref: string;
@@ -515,12 +575,153 @@ export async function createHarnessSession(
   async function guarded<T>(
     action: (client: PoolClient, locked: LockedRun) => Promise<T>,
   ): Promise<T> {
-    if (stopped || signal.aborted) throw stateConflict('harness attempt stopped');
+    if (stopped || sessionSignal.aborted) throw stateConflict('harness attempt stopped');
     return withTransaction(pool, async (client) => {
       const locked = await lockRun(client, context);
+      if (stopped || sessionSignal.aborted) throw stateConflict('harness attempt stopped');
       if (context.workspaceGrant) validateWorkspaceGrant(context.ownerId, context.workspaceGrant);
       return action(client, locked);
     });
+  }
+  async function routingEligible(client: PoolClient, locked: LockedRun): Promise<void> {
+    if (
+      !initial.eligible ||
+      !policy ||
+      policy.mode === 'off' ||
+      locked.attempt.attempt_no !== 1 ||
+      modelStarted ||
+      lastSnapshot ||
+      cumulative.iterations !== 0 ||
+      cumulative.tokens !== 0 ||
+      routingDecision
+    )
+      throw stateConflict('routing requires fresh first step');
+    if ((await readRunInvocationStates(client, toolContext(context))).length)
+      throw stateConflict('routing must precede tool reservation');
+  }
+  function validateFacts(value: RoutingFacts): RoutingFacts {
+    const result = RoutingFactsSchema.parse(value);
+    if (
+      !policy ||
+      policy.mode === 'off' ||
+      result.input_sha256 !== routingHash(context.inputText) ||
+      result.bundle_sha256 !== policy.bundle_sha256
+    )
+      throw stateConflict('routing facts input or bundle binding conflict');
+    const scalars = Array.from(context.inputText);
+    for (const candidate of result.candidates) {
+      if (!policy.candidate_intents.includes(candidate.intent))
+        throw forbidden('routing candidate outside frozen policy');
+      const keys = Object.keys(candidate.args);
+      if (candidate.intent === 'task_list_bounded') {
+        if (
+          candidate.tool_id !== 'list_tasks' ||
+          !keys.includes('limit') ||
+          keys.some((key) => key !== 'limit' && key !== 'state') ||
+          ('state' in candidate.args && candidate.args.state !== null) ||
+          !Number.isInteger(candidate.args.limit) ||
+          Number(candidate.args.limit) < 1 ||
+          Number(candidate.args.limit) > 50
+        )
+          throw stateConflict('routing task arguments outside bounded contract');
+      } else if (candidate.intent === 'prefs_timezone_read') {
+        if (candidate.tool_id !== 'get_user_prefs' || keys.length || candidate.sources.length)
+          throw stateConflict('routing prefs must use server owner and empty arguments');
+      } else {
+        const date = candidate.args.date;
+        if (
+          candidate.tool_id !== 'read_brief_cards' ||
+          keys.length !== 1 ||
+          keys[0] !== 'date' ||
+          typeof date !== 'string' ||
+          !/^\d{4}-\d{2}-\d{2}$/.test(date)
+        )
+          throw stateConflict('routing brief requires one Gregorian date');
+        const year = Number(date.slice(0, 4)),
+          month = Number(date.slice(5, 7)),
+          day = Number(date.slice(8));
+        const days = [
+          31,
+          year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0) ? 29 : 28,
+          31,
+          30,
+          31,
+          30,
+          31,
+          31,
+          30,
+          31,
+          30,
+          31,
+        ];
+        if (year < 1 || month < 1 || month > 12 || day < 1 || day > days[month - 1]!)
+          throw stateConflict('routing brief requires valid Gregorian date');
+      }
+      if (candidate.sources.length !== keys.length)
+        throw stateConflict('routing requires one source for every parameter');
+      const seen = new Set<string>();
+      for (const source of candidate.sources) {
+        if (
+          !keys.includes(source.field) ||
+          seen.has(source.field) ||
+          source.parser_revision !== policy.parser_revision
+        )
+          throw stateConflict('routing parameter source binding conflict');
+        seen.add(source.field);
+        if (source.source === 'contract_default') {
+          if (
+            candidate.intent !== 'task_list_bounded' ||
+            !(
+              (source.field === 'limit' && candidate.args.limit === 20) ||
+              (source.field === 'state' && candidate.args.state === null)
+            )
+          )
+            throw stateConflict('routing parameter has no contract default');
+        } else if (
+          (source.field !== 'limit' && source.field !== 'date') ||
+          source.message_id !== context.userMessageId ||
+          source.end > scalars.length ||
+          scalars.slice(source.start, source.end).join('') !== source.raw ||
+          (source.field === 'date'
+            ? candidate.args.date !== source.raw
+            : !/^\d+$/.test(source.raw) || Number(source.raw) !== candidate.args.limit)
+        )
+          throw stateConflict('routing message source does not match frozen input');
+      }
+    }
+    // Keep the runtime-owned evidence identity; its private input binding is not serializable.
+    return value;
+  }
+  async function directInvocation(client: PoolClient, invocationId: string): Promise<void> {
+    const decision = routingDecision?.payload;
+    if (!decision || decision.decision !== 'direct')
+      throw stateConflict('routing direct decision missing');
+    const rows = (
+      await client.query<{
+        invocation_id: string;
+        tool_id: string;
+        args_hash: string;
+        first_attempt_id: string;
+        call_key: string;
+        execution_kind: string;
+      }>(
+        `SELECT invocation_id,tool_id,args_hash,first_attempt_id,call_key,execution_kind
+        FROM tool_invocations WHERE owner_id=$1 AND conversation_id=$2 AND run_id=$3`,
+        [context.ownerId, context.conversationId, context.runId],
+      )
+    ).rows;
+    const row = rows[0];
+    if (
+      rows.length !== 1 ||
+      !row ||
+      row.invocation_id !== invocationId ||
+      row.first_attempt_id !== context.attemptId ||
+      row.call_key !== 'harness/1' ||
+      row.execution_kind !== 'read_only' ||
+      row.tool_id !== decision.tool_id ||
+      row.args_hash !== decision.args_hash
+    )
+      throw stateConflict('routing direct requires unique original invocation');
   }
   async function send(event: ThreadEvent): Promise<void> {
     if (!(await write(event))) throw stateConflict('client disconnected');
@@ -593,6 +794,15 @@ export async function createHarnessSession(
     }, 1);
     if (snapshot.next_call_no !== next || snapshot.usage.iterations > context.maxIterations)
       throw stateConflict('snapshot usage or call counter conflict');
+    if (
+      routingDecision?.payload.decision === 'direct' &&
+      (snapshot.usage.iterations !== 0 ||
+        snapshot.usage.tokens !== 0 ||
+        snapshot.waiting ||
+        snapshot.tool_refs.length !== 1 ||
+        accepted.length !== 1)
+    )
+      throw stateConflict('routing snapshot must retain unique result and zero model usage');
     const previous = (
       await client.query<{ payload: unknown }>(
         `SELECT c.payload FROM run_checkpoints c JOIN run_attempts a ON a.id=c.attempt_id
@@ -656,306 +866,645 @@ export async function createHarnessSession(
   }
   return {
     start,
-    close: closeModel,
-    handleRequest: async (request) => {
-      await guarded(async () => undefined);
-      if (modelStream && request.type === 'finish' && request.outcome !== 'done')
-        await closeModel();
-      if (modelStream && request.type !== 'model_next' && request.type !== 'answer')
-        throw stateConflict('model stream must complete before another action');
-      if (request.type === 'model_next') {
-        if (!modelStream || request.model_ref !== modelStream.ref)
-          throw stateConflict('model continuation reference conflict');
-        return nextModelStep();
-      }
-      if (request.type === 'context_source') {
-        if (!delivered.has(request.invocation_id))
-          throw forbidden('context source outside accepted Run references');
-        const observation = await guarded((client) =>
-          readRunContextSource(client, toolContext(context), request.invocation_id, request.view),
-        );
+    close: async () => {
+      stopped = true;
+      sessionController.abort();
+      controllers.delete(sessionController);
+      if (!controllers.size && sessionAborts.get(context.runId) === controllers)
+        sessionAborts.delete(context.runId);
+      await closeModel();
+    },
+    handleRequest: async (suppliedRequest) => {
+      try {
+        const request = HarnessRequestSchema.parse(suppliedRequest);
         await guarded(async () => undefined);
-        return observation;
-      }
-      if (request.type === 'model' || request.type === 'measure_context') {
-        if (!approvalAuthorizesActions(initial.approval))
-          throw forbidden('rejected approval cannot authorize another action');
-        if (!deps.harness || !context.contextPolicy) throw unavailable();
-        const remaining =
-          cumulative.tokens === null ? null : Math.max(0, context.maxTokens - cumulative.tokens);
-        if (request.remaining_tokens !== remaining)
-          throw stateConflict('model balance must match accepted cumulative usage');
-        if (cumulative.iterations >= context.maxIterations)
-          throw new HttpError(429, 429, 'BUDGET_EXCEEDED', '本轮推理预算用完，已停下。');
-        const measurement = (deps.harness.measure ?? measureHarnessContext)(
-          { ...request, type: 'measure_context' },
-          tools,
-          context.contextPolicy,
-        );
-        if (request.type === 'measure_context') return measurement;
-        if (measurement.limit_reason || request.max_output_tokens > measurement.output_ceiling) {
-          const budget =
-            measurement.limit_reason === 'budget' ||
-            (remaining !== null && request.max_output_tokens > remaining);
-          throw new HttpError(
-            budget ? 429 : 422,
-            budget ? 429 : 422,
-            budget ? 'BUDGET_EXCEEDED' : 'HARNESS_CONTEXT_LIMIT',
-            '模型请求超过本轮额度或容量。',
-          );
-        }
-        await guarded(async (client) => {
-          const states = await readRunInvocationStates(client, toolContext(context));
-          if (states.some((row) => row.state === 'unknown' || row.outcome_kind === 'failed'))
-            throw stateConflict('Run has unresolved tool effects');
-          if (
-            states.some(
-              (row) =>
-                row.outcome_kind === 'approval_pending' &&
-                !initial.snapshot?.tool_refs.includes(row.invocation_id),
+        if (modelStream && request.type === 'finish' && request.outcome !== 'done')
+          await closeModel();
+        if (modelStream && request.type !== 'model_next' && request.type !== 'answer')
+          throw stateConflict('model stream must complete before another action');
+        if (request.type === 'route_probe') {
+          if (request.stage === 'facts') {
+            return await guarded(async (client, locked) => {
+              await routingEligible(client, locked);
+              if (facts || encodingCount || encodingPending)
+                throw stateConflict('routing facts probe out of order');
+              const pending = (
+                await client.query<{
+                  id: string;
+                  waiting_invocation_id: string;
+                  waiting_approval_id: string;
+                }>(
+                  `SELECT id,waiting_invocation_id,waiting_approval_id FROM agent_runs
+              WHERE owner_id=$1 AND conversation_id=$2 AND status='suspended_approval'`,
+                  [context.ownerId, context.conversationId],
+                )
+              ).rows;
+              let hasPendingApproval = false;
+              for (const run of pending) {
+                const decision = await readRunApprovalDecision(
+                  client,
+                  {
+                    ownerId: context.ownerId,
+                    conversationId: context.conversationId,
+                    runId: run.id,
+                  },
+                  run.waiting_invocation_id,
+                  run.waiting_approval_id,
+                );
+                if (decision.status === 'pending') hasPendingApproval = true;
+              }
+              facts = validateFacts(
+                routing.facts(
+                  {
+                    messageId: context.userMessageId,
+                    text: context.inputText,
+                    messages: context.messages!.map(({ role, content }) => ({ role, content })),
+                    hasPendingApproval,
+                    workspaceSelected: !!context.workspaceGrant,
+                  },
+                  policy!,
+                ),
+              );
+              return structuredClone(facts);
+            });
+          }
+          const cached = await guarded(async (client, locked) => {
+            await routingEligible(client, locked);
+            if (
+              !facts ||
+              request.facts_ref !== facts.facts_ref ||
+              !facts.eligible ||
+              facts.rule_intent !== null ||
+              encodingCount ||
+              encodingPending
             )
-          )
-            throw stateConflict('approval requires suspension before further actions');
-        });
-        modelStream = {
-          ref: request.request_ref,
-          iterator: deps.harness.model(request, tools, modelSignal)[Symbol.asyncIterator](),
-          pendingDelta: null,
-          pulling: false,
-        };
-        modelStarted = true;
-        return nextModelStep();
-      }
-      if (request.type === 'reserve') {
-        if (!approvalAuthorizesActions(initial.approval))
-          throw forbidden('rejected approval cannot authorize another action');
-        if (!context.allowlist.includes(request.tool_id))
-          throw forbidden('tool outside frozen Run grant');
-        await guarded(async (client) => {
-          const states = await readRunInvocationStates(client, toolContext(context));
-          if (states.some((row) => row.state === 'unknown' || row.outcome_kind === 'failed'))
-            throw stateConflict('Run has unresolved tool effects');
-          if (
-            states.some(
-              (row) =>
-                row.outcome_kind === 'approval_pending' &&
-                !initial.snapshot?.tool_refs.includes(row.invocation_id),
-            )
-          )
-            throw stateConflict('approval requires suspension before further actions');
-          const accepted = states.filter((row) => row.state === 'completed').length;
-          if (accepted >= 64)
-            throw new HttpError(
-              422,
-              422,
-              'HARNESS_CONTEXT_LIMIT',
-              '工具引用达到安全上限，已停下。',
+              throw stateConflict('routing embedding probe out of order');
+            encodingCount = 1;
+            encodingPending = true;
+            return facts;
+          });
+          try {
+            const encoded = RoutingEmbeddingSchema.parse(
+              await routing.embedding(context.inputText, cached, policy!, sessionSignal),
             );
-          if (request.call_key !== `harness/${accepted + 1}`)
-            throw stateConflict('invalid next harness slot');
-        });
-        const reserved = await reserveToolInvocation(
-          pool,
-          { ...toolContext(context), signal },
-          {
-            callKey: request.call_key,
-            toolId: request.tool_id,
-            args: request.args,
-          },
-        );
-        await guarded(async () => undefined);
-        return { invocation_id: reserved.invocationId };
-      }
-      if (request.type === 'invoke') {
-        if (!approvalAuthorizesActions(initial.approval))
-          throw forbidden('rejected approval cannot authorize another action');
-        if (initial.snapshot?.tool_refs.includes(request.invocation_id))
-          throw stateConflict('resume consumes stored observations without reinvoking them');
-        await guarded(async (client) => {
-          const states = await readRunInvocationStates(client, toolContext(context));
-          if (states.some((row) => row.state === 'unknown' || row.outcome_kind === 'failed'))
-            throw stateConflict('Run has unresolved tool effects');
-          if (
-            states.some(
-              (row) =>
-                row.outcome_kind === 'approval_pending' &&
-                !initial.snapshot?.tool_refs.includes(row.invocation_id) &&
-                row.invocation_id !== request.invocation_id,
+            return await guarded(async (client, locked) => {
+              await routingEligible(client, locked);
+              if (
+                encoded.facts_ref !== cached.facts_ref ||
+                encoded.input_sha256 !== cached.input_sha256 ||
+                encoded.bundle_sha256 !== cached.bundle_sha256
+              )
+                throw stateConflict('routing embedding evidence binding conflict');
+              embedding = encoded;
+              return structuredClone(encoded);
+            });
+          } finally {
+            encodingPending = false;
+          }
+        }
+        if (request.type === 'route_decide') {
+          const accepted = await guarded(async (client, locked) => {
+            if (
+              encodingPending ||
+              !facts ||
+              request.facts_ref !== facts.facts_ref ||
+              !initial.policy ||
+              !policy ||
+              policy.mode === 'off'
             )
-          )
-            throw stateConflict('approval requires suspension before further actions');
-        });
-        const outcome = await invokeTool(
-          pool,
-          { ...toolContext(context), signal },
-          {
-            invocationId: request.invocation_id,
-            toolId: request.tool_id,
-            args: request.args,
-          },
-        );
-        await guarded(async () => undefined);
+              throw stateConflict('routing decision requires cached completed evidence');
+            const candidate =
+              request.decision === 'direct'
+                ? (facts.candidates.find((entry) => entry.intent === request.candidate_intent) ??
+                  null)
+                : null;
+            const payload = decisionPayload(
+              context,
+              initial.policy.id,
+              facts,
+              embedding,
+              encodingCount,
+              request.decision,
+              request.reason,
+              candidate,
+            );
+            const previous = await readRoutingRecord<RoutingDecisionPayload>(
+              client,
+              context,
+              'harness_routing_decision',
+            );
+            if (previous) {
+              if (request.candidate_intent !== previous.payload.intent)
+                throw stateConflict('routing decision is immutable');
+              return acceptRoutingDecision(client, context, payload);
+            }
+            await routingEligible(client, locked);
+            if (request.decision === 'fallback') {
+              if (request.candidate_intent !== null)
+                throw stateConflict('fallback cannot authorize candidate');
+            } else {
+              if (
+                !candidate ||
+                !facts.eligible ||
+                policy.mode !== 'enforce' ||
+                !policy.direct_intents.includes(candidate.intent) ||
+                !context.allowlist.includes(candidate.tool_id) ||
+                routing.choose(facts, embedding, policy) !== candidate.intent
+              )
+                throw forbidden(
+                  'routing direct not authorized by cached evidence and frozen policy',
+                );
+            }
+            return acceptRoutingDecision(client, context, payload);
+          });
+          routingDecision = accepted;
+          return routingDecisionReply(accepted);
+        }
+        if (request.type === 'render_route_result') {
+          const prepared = await guarded(async (client) => {
+            if (
+              !routingDecision ||
+              routingDecision.payload.decision !== 'direct' ||
+              request.decision_ref !== routingDecision.id ||
+              !policy ||
+              policy.mode === 'off' ||
+              request.template_revision !== policy.renderer_revision ||
+              modelStarted ||
+              !lastSnapshot ||
+              lastSnapshot.waiting ||
+              lastSnapshot.tool_refs.length !== 1 ||
+              lastSnapshot.tool_refs[0] !== request.invocation_ref ||
+              lastSnapshot.usage.iterations !== 0 ||
+              lastSnapshot.usage.tokens !== 0 ||
+              !delivered.has(request.invocation_ref)
+            )
+              throw stateConflict(
+                'routing render requires accepted result and zero-model snapshot',
+              );
+            await directInvocation(client, request.invocation_ref);
+            const previous = await readRoutingRecord<RoutingRenderPayload>(
+              client,
+              context,
+              'harness_routing_render',
+            );
+            if (previous) {
+              if (
+                previous.payload.decision_ref !== request.decision_ref ||
+                previous.payload.invocation_ref !== request.invocation_ref ||
+                previous.payload.template_revision !== request.template_revision
+              )
+                throw stateConflict('routing render is immutable');
+              return null;
+            }
+            const accepted = (
+              await readInvocationSnapshots(client, toolContext(context), [request.invocation_ref])
+            )[0];
+            if (!accepted || accepted.result.status !== 'ok')
+              throw stateConflict('routing requires successful accepted result');
+            return accepted.result;
+          });
+          if (prepared === null) return { rendered: true };
+          // Pure projection and all byte/chunk preparation deliberately happen outside locks.
+          let text: string;
+          try {
+            text = routing.render(routingDecision!.payload.intent!, prepared);
+          } catch (error) {
+            if (error instanceof Error && error.message === 'ROUTING_RENDER_CAPACITY')
+              throw new HttpError(422, 422, 'HARNESS_CONTEXT_LIMIT', '只读结果超过完整展示容量。');
+            throw error;
+          }
+          if (!text || Buffer.byteLength(text, 'utf8') > HARNESS_MAX_FRAME_BYTES)
+            throw new HttpError(422, 422, 'HARNESS_CONTEXT_LIMIT', '只读结果超过完整展示容量。');
+          const chunks: string[] = [];
+          let chunk = '';
+          for (const scalar of text) {
+            if (chunk.length + scalar.length > 4000) {
+              chunks.push(chunk);
+              chunk = '';
+            }
+            chunk += scalar;
+          }
+          if (chunk) chunks.push(chunk);
+          const events = await guarded(async (client) => {
+            await directInvocation(client, request.invocation_ref);
+            if (await readRoutingRecord(client, context, 'harness_routing_render'))
+              throw stateConflict('routing render already accepted');
+            const events: ThreadEvent[] = [];
+            for (const delta of chunks)
+              events.push(
+                await appendEvent(client, context, 'message.delta', {
+                  ...eventPayload(context),
+                  delta,
+                }),
+              );
+            await insertRoutingRender(client, context, {
+              decision_ref: request.decision_ref,
+              invocation_ref: request.invocation_ref,
+              template_revision: request.template_revision,
+              body_sha256: routingHash(text),
+              chunk_count: chunks.length,
+            });
+            return events;
+          });
+          for (const event of events) {
+            await guarded(async () => undefined);
+            await send(event);
+          }
+          return { rendered: true };
+        }
         if (
-          !delivered.has(outcome.invocationId) &&
-          outcome.status === 'ok' &&
-          (outcome.result.kind === 'approval' || outcome.result.kind === 'document_approval')
+          routingDecision?.payload.decision === 'direct' &&
+          (request.type === 'model' ||
+            request.type === 'measure_context' ||
+            request.type === 'model_next' ||
+            request.type === 'suspend' ||
+            request.type === 'answer')
         )
-          await approvalEvents(outcome.result);
-        delivered.add(outcome.invocationId);
-        return outcome;
-      }
-      if (request.type === 'snapshot') {
-        const snapshot = HarnessSnapshotSchema.parse(request.context);
-        const id = await guarded(async (client) => {
-          await validateSnapshot(client, snapshot);
-          const seq = (
-            await client.query<{ seq: number }>(
-              'SELECT COALESCE(max(seq),0)::int+1 AS seq FROM run_checkpoints WHERE attempt_id=$1',
-              [context.attemptId],
-            )
-          ).rows[0]?.seq;
-          const id = randomUUID();
-          await client.query(
-            `INSERT INTO run_checkpoints(id,owner_id,attempt_id,seq,kind,payload,stream_protocol_version)
-          VALUES($1,$2,$3,$4,'harness_snapshot',$5::jsonb,$6)`,
-            [
-              id,
-              context.ownerId,
-              context.attemptId,
-              seq,
-              JSON.stringify(snapshot),
-              HARNESS_PROTOCOL_VERSION,
-            ],
-          );
-          return id;
-        });
-        lastSnapshot = snapshot;
-        return { checkpoint_ref: id };
-      }
-      if (request.type === 'suspend') {
-        await guarded(async (client, locked) => {
-          const latest = (
-            await client.query<{ id: string }>(
-              `SELECT id FROM run_checkpoints WHERE attempt_id=$1 AND kind='harness_snapshot' ORDER BY seq DESC LIMIT 1`,
-              [context.attemptId],
-            )
-          ).rows[0]?.id;
-          if (latest !== request.checkpoint_ref)
-            throw stateConflict('suspend requires latest attempt checkpoint');
-          const snapshot = await readSnapshot(client, locked.run, request.checkpoint_ref);
-          await validateSnapshot(client, snapshot);
-          if (
-            snapshot.waiting?.invocation_id !== request.invocation_id ||
-            snapshot.waiting.approval_id !== request.approval_id
-          )
-            throw stateConflict('suspend waiting reference conflict');
-          if (initial.snapshot?.tool_refs.includes(request.invocation_id))
-            throw stateConflict('original approval waiting point cannot suspend again');
-          const states = await readRunInvocationStates(client, toolContext(context));
-          if (states.some((row) => row.state !== 'completed' || row.outcome_kind === 'failed'))
-            throw stateConflict('cannot suspend unresolved tool effects');
-          await client.query(
-            `UPDATE agent_runs SET status='suspended_approval',waiting_checkpoint_id=$2,
-          waiting_invocation_id=$3,waiting_approval_id=$4 WHERE id=$1`,
-            [context.runId, request.checkpoint_ref, request.invocation_id, request.approval_id],
-          );
-          await client.query(`UPDATE run_attempts SET status='done',ended_at=now() WHERE id=$1`, [
-            context.attemptId,
-          ]);
-        });
-        stopped = true;
-        return { suspended: true };
-      }
-      if (request.type === 'answer') {
-        if (modelStarted && (!modelStream || request.delta !== modelStream.pendingDelta))
-          throw stateConflict('native answer must match the accepted model delta');
-        const event = await guarded((client) =>
-          appendEvent(client, context, 'message.delta', {
-            ...eventPayload(context),
-            delta: request.delta,
-          }),
-        );
-        await send(event);
-        if (modelStream) modelStream.pendingDelta = null;
-        return { accepted: true };
-      }
-      if (
-        modelStarted &&
-        (request.usage.iterations !== cumulative.iterations ||
-          request.usage.tokens !== cumulative.tokens)
-      )
-        throw stateConflict('terminal usage must match accepted model steps');
-      const event = await guarded(async (client) => {
-        const previous = (
-          await client.query<{ payload: unknown }>(
-            `SELECT c.payload FROM run_checkpoints c JOIN run_attempts a ON a.id=c.attempt_id
-          WHERE a.run_id=$1 AND c.kind='harness_snapshot' ORDER BY c.event_seq DESC LIMIT 1`,
-            [context.runId],
-          )
-        ).rows[0];
-        const baseline = previous
-          ? HistoricalHarnessSnapshotSchema.parse(previous.payload)
-          : lastSnapshot;
+          throw forbidden('routing direct cannot call model or accept native answer');
         if (
-          baseline &&
-          (request.usage.iterations < baseline.usage.iterations ||
-            (baseline.usage.tokens !== null &&
-              request.usage.tokens !== null &&
-              request.usage.tokens < baseline.usage.tokens) ||
-            (baseline.usage.iterations > 0 &&
-              baseline.usage.tokens === null &&
-              request.usage.tokens !== null))
+          initial.eligible &&
+          !routingDecision &&
+          (request.type === 'model' ||
+            request.type === 'measure_context' ||
+            request.type === 'reserve' ||
+            request.type === 'invoke')
         )
-          throw stateConflict('terminal usage cannot move backwards');
-        if (request.outcome === 'done') {
-          if (initial.approval?.kind === 'document' && !approvalAuthorizesActions(initial.approval))
-            throw forbidden('rejected approval cannot complete the original action');
-          if (
-            request.usage.iterations > context.maxIterations ||
-            (request.usage.tokens !== null && request.usage.tokens > context.maxTokens)
-          )
+          throw stateConflict('routing requires terminal decision before original path');
+        if (request.type === 'model_next') {
+          if (!modelStream || request.model_ref !== modelStream.ref)
+            throw stateConflict('model continuation reference conflict');
+          return nextModelStep();
+        }
+        if (request.type === 'context_source') {
+          if (!delivered.has(request.invocation_id))
+            throw forbidden('context source outside accepted Run references');
+          const observation = await guarded((client) =>
+            readRunContextSource(client, toolContext(context), request.invocation_id, request.view),
+          );
+          await guarded(async () => undefined);
+          return observation;
+        }
+        if (request.type === 'model' || request.type === 'measure_context') {
+          if (!approvalAuthorizesActions(initial.approval))
+            throw forbidden('rejected approval cannot authorize another action');
+          if (!deps.harness || !context.contextPolicy) throw unavailable();
+          const remaining =
+            cumulative.tokens === null ? null : Math.max(0, context.maxTokens - cumulative.tokens);
+          if (request.remaining_tokens !== remaining)
+            throw stateConflict('model balance must match accepted cumulative usage');
+          if (cumulative.iterations >= context.maxIterations)
             throw new HttpError(429, 429, 'BUDGET_EXCEEDED', '本轮推理预算用完，已停下。');
-          const states = await readRunInvocationStates(client, toolContext(context));
-          for (const row of states) {
-            if (row.state !== 'completed' || row.outcome_kind === 'failed')
+          const measurement = (deps.harness.measure ?? measureHarnessContext)(
+            { ...request, type: 'measure_context' },
+            tools,
+            context.contextPolicy,
+          );
+          if (request.type === 'measure_context') return measurement;
+          if (measurement.limit_reason || request.max_output_tokens > measurement.output_ceiling) {
+            const budget =
+              measurement.limit_reason === 'budget' ||
+              (remaining !== null && request.max_output_tokens > remaining);
+            throw new HttpError(
+              budget ? 429 : 422,
+              budget ? 429 : 422,
+              budget ? 'BUDGET_EXCEEDED' : 'HARNESS_CONTEXT_LIMIT',
+              '模型请求超过本轮额度或容量。',
+            );
+          }
+          await guarded(async (client) => {
+            const states = await readRunInvocationStates(client, toolContext(context));
+            if (states.some((row) => row.state === 'unknown' || row.outcome_kind === 'failed'))
               throw stateConflict('Run has unresolved tool effects');
             if (
-              row.outcome_kind === 'approval_pending' &&
-              row.approval_id &&
-              (await readRunApprovalDecision(client, context, row.invocation_id, row.approval_id))
-                .status === 'pending'
+              states.some(
+                (row) =>
+                  row.outcome_kind === 'approval_pending' &&
+                  !initial.snapshot?.tool_refs.includes(row.invocation_id),
+              )
             )
-              throw stateConflict('Run has unresolved approval');
-            if (
-              row.outcome_kind === 'approval_pending' &&
-              !initial.snapshot?.tool_refs.includes(row.invocation_id)
-            )
-              throw stateConflict('approval requires explicit suspension and resume');
-          }
-          await validateDocumentApprovalsDone(
-            client,
-            context,
-            await readRunDocumentEvidence(client, context),
-          );
+              throw stateConflict('approval requires suspension before further actions');
+          });
+          modelStream = {
+            ref: request.request_ref,
+            iterator: deps.harness.model(request, tools, modelSignal)[Symbol.asyncIterator](),
+            pendingDelta: null,
+            pulling: false,
+          };
+          modelStarted = true;
+          return nextModelStep();
         }
-        const payload =
-          request.outcome === 'done'
-            ? { ...eventPayload(context), approval_id: null }
-            : request.outcome === 'cancelled'
-              ? { ...eventPayload(context), reason: 'harness_cancelled' }
-              : {
-                  ...eventPayload(context),
-                  error: {
-                    code: request.error?.code ?? 'HARNESS_EXITED',
-                    message: request.error?.message ?? '原生执行失败。',
-                    http_status: request.error?.code === 'BUDGET_EXCEEDED' ? 429 : 500,
-                  },
-                };
-        return commitTerminal(client, context, request.outcome, payload);
-      });
-      stopped = true;
-      await send(event);
-      return { accepted: true };
+        if (request.type === 'reserve') {
+          if (!approvalAuthorizesActions(initial.approval))
+            throw forbidden('rejected approval cannot authorize another action');
+          if (!context.allowlist.includes(request.tool_id))
+            throw forbidden('tool outside frozen Run grant');
+          if (
+            routingDecision?.payload.decision === 'direct' &&
+            (request.call_key !== 'harness/1' ||
+              request.tool_id !== routingDecision.payload.tool_id ||
+              routingIdentity(request.args) !== routingIdentity(routingDecision.payload.args))
+          )
+            throw forbidden('routing direct must reserve original unique tool and arguments');
+          await guarded(async (client) => {
+            if (routingDecision?.payload.decision === 'direct') {
+              const states = await readRunInvocationStates(client, toolContext(context));
+              if (
+                states.length > 1 ||
+                states.some(
+                  (state) =>
+                    state.call_key !== 'harness/1' ||
+                    state.tool_id !== routingDecision!.payload.tool_id ||
+                    state.state !== 'reserved',
+                )
+              )
+                throw stateConflict('routing direct cannot reserve a second slot');
+            }
+            const states = await readRunInvocationStates(client, toolContext(context));
+            if (states.some((row) => row.state === 'unknown' || row.outcome_kind === 'failed'))
+              throw stateConflict('Run has unresolved tool effects');
+            if (
+              states.some(
+                (row) =>
+                  row.outcome_kind === 'approval_pending' &&
+                  !initial.snapshot?.tool_refs.includes(row.invocation_id),
+              )
+            )
+              throw stateConflict('approval requires suspension before further actions');
+            const accepted = states.filter((row) => row.state === 'completed').length;
+            if (accepted >= 64)
+              throw new HttpError(
+                422,
+                422,
+                'HARNESS_CONTEXT_LIMIT',
+                '工具引用达到安全上限，已停下。',
+              );
+            if (request.call_key !== `harness/${accepted + 1}`)
+              throw stateConflict('invalid next harness slot');
+          });
+          const reserved = await reserveToolInvocation(
+            pool,
+            { ...toolContext(context), signal: sessionSignal },
+            {
+              callKey: request.call_key,
+              toolId: request.tool_id,
+              args: request.args,
+            },
+          );
+          await guarded(async () => undefined);
+          return { invocation_id: reserved.invocationId };
+        }
+        if (request.type === 'invoke') {
+          if (!approvalAuthorizesActions(initial.approval))
+            throw forbidden('rejected approval cannot authorize another action');
+          if (
+            routingDecision?.payload.decision === 'direct' &&
+            (request.tool_id !== routingDecision.payload.tool_id ||
+              routingIdentity(request.args) !== routingIdentity(routingDecision.payload.args))
+          )
+            throw forbidden('routing direct must invoke original tool and arguments');
+          if (initial.snapshot?.tool_refs.includes(request.invocation_id))
+            throw stateConflict('resume consumes stored observations without reinvoking them');
+          await guarded(async (client) => {
+            if (routingDecision?.payload.decision === 'direct')
+              await directInvocation(client, request.invocation_id);
+            const states = await readRunInvocationStates(client, toolContext(context));
+            if (states.some((row) => row.state === 'unknown' || row.outcome_kind === 'failed'))
+              throw stateConflict('Run has unresolved tool effects');
+            if (
+              states.some(
+                (row) =>
+                  row.outcome_kind === 'approval_pending' &&
+                  !initial.snapshot?.tool_refs.includes(row.invocation_id) &&
+                  row.invocation_id !== request.invocation_id,
+              )
+            )
+              throw stateConflict('approval requires suspension before further actions');
+          });
+          const outcome = await invokeTool(
+            pool,
+            { ...toolContext(context), signal: sessionSignal },
+            {
+              invocationId: request.invocation_id,
+              toolId: request.tool_id,
+              args: request.args,
+            },
+          );
+          await guarded(async () => undefined);
+          if (
+            !delivered.has(outcome.invocationId) &&
+            outcome.status === 'ok' &&
+            (outcome.result.kind === 'approval' || outcome.result.kind === 'document_approval')
+          )
+            await approvalEvents(outcome.result);
+          delivered.add(outcome.invocationId);
+          return outcome;
+        }
+        if (request.type === 'snapshot') {
+          const snapshot = HarnessSnapshotSchema.parse(request.context);
+          const id = await guarded(async (client) => {
+            await validateSnapshot(client, snapshot);
+            const seq = (
+              await client.query<{ seq: number }>(
+                'SELECT COALESCE(max(seq),0)::int+1 AS seq FROM run_checkpoints WHERE attempt_id=$1',
+                [context.attemptId],
+              )
+            ).rows[0]?.seq;
+            const id = randomUUID();
+            await client.query(
+              `INSERT INTO run_checkpoints(id,owner_id,attempt_id,seq,kind,payload,stream_protocol_version)
+          VALUES($1,$2,$3,$4,'harness_snapshot',$5::jsonb,$6)`,
+              [
+                id,
+                context.ownerId,
+                context.attemptId,
+                seq,
+                JSON.stringify(snapshot),
+                HARNESS_PROTOCOL_VERSION,
+              ],
+            );
+            return id;
+          });
+          lastSnapshot = snapshot;
+          return { checkpoint_ref: id };
+        }
+        if (request.type === 'suspend') {
+          await guarded(async (client, locked) => {
+            const latest = (
+              await client.query<{ id: string }>(
+                `SELECT id FROM run_checkpoints WHERE attempt_id=$1 AND kind='harness_snapshot' ORDER BY seq DESC LIMIT 1`,
+                [context.attemptId],
+              )
+            ).rows[0]?.id;
+            if (latest !== request.checkpoint_ref)
+              throw stateConflict('suspend requires latest attempt checkpoint');
+            const snapshot = await readSnapshot(client, locked.run, request.checkpoint_ref);
+            await validateSnapshot(client, snapshot);
+            if (
+              snapshot.waiting?.invocation_id !== request.invocation_id ||
+              snapshot.waiting.approval_id !== request.approval_id
+            )
+              throw stateConflict('suspend waiting reference conflict');
+            if (initial.snapshot?.tool_refs.includes(request.invocation_id))
+              throw stateConflict('original approval waiting point cannot suspend again');
+            const states = await readRunInvocationStates(client, toolContext(context));
+            if (states.some((row) => row.state !== 'completed' || row.outcome_kind === 'failed'))
+              throw stateConflict('cannot suspend unresolved tool effects');
+            await client.query(
+              `UPDATE agent_runs SET status='suspended_approval',waiting_checkpoint_id=$2,
+          waiting_invocation_id=$3,waiting_approval_id=$4 WHERE id=$1`,
+              [context.runId, request.checkpoint_ref, request.invocation_id, request.approval_id],
+            );
+            await client.query(`UPDATE run_attempts SET status='done',ended_at=now() WHERE id=$1`, [
+              context.attemptId,
+            ]);
+          });
+          stopped = true;
+          return { suspended: true };
+        }
+        if (request.type === 'answer') {
+          if (
+            !modelStream ||
+            modelStream.pendingDelta === null ||
+            request.delta !== modelStream.pendingDelta
+          )
+            throw stateConflict('native answer must match the accepted model delta');
+          const event = await guarded((client) =>
+            appendEvent(client, context, 'message.delta', {
+              ...eventPayload(context),
+              delta: request.delta,
+            }),
+          );
+          await send(event);
+          if (modelStream) modelStream.pendingDelta = null;
+          return { accepted: true };
+        }
+        if (
+          modelStarted &&
+          (request.usage.iterations !== cumulative.iterations ||
+            request.usage.tokens !== cumulative.tokens)
+        )
+          throw stateConflict('terminal usage must match accepted model steps');
+        const event = await guarded(async (client) => {
+          const previous = (
+            await client.query<{ payload: unknown }>(
+              `SELECT c.payload FROM run_checkpoints c JOIN run_attempts a ON a.id=c.attempt_id
+          WHERE a.run_id=$1 AND c.kind='harness_snapshot' ORDER BY c.event_seq DESC LIMIT 1`,
+              [context.runId],
+            )
+          ).rows[0];
+          const baseline = previous
+            ? HistoricalHarnessSnapshotSchema.parse(previous.payload)
+            : lastSnapshot;
+          if (
+            baseline &&
+            (request.usage.iterations < baseline.usage.iterations ||
+              (baseline.usage.tokens !== null &&
+                request.usage.tokens !== null &&
+                request.usage.tokens < baseline.usage.tokens) ||
+              (baseline.usage.iterations > 0 &&
+                baseline.usage.tokens === null &&
+                request.usage.tokens !== null))
+          )
+            throw stateConflict('terminal usage cannot move backwards');
+          if (request.outcome === 'done') {
+            if (routingDecision?.payload.decision === 'direct') {
+              const render = await readRoutingRecord<RoutingRenderPayload>(
+                client,
+                context,
+                'harness_routing_render',
+              );
+              if (
+                modelStarted ||
+                cumulative.iterations !== 0 ||
+                cumulative.tokens !== 0 ||
+                request.usage.iterations !== 0 ||
+                request.usage.tokens !== 0 ||
+                !render ||
+                render.payload.decision_ref !== routingDecision.id
+              )
+                throw stateConflict(
+                  'routing completion requires accepted render receipt and zero model usage',
+                );
+              await directInvocation(client, render.payload.invocation_ref);
+              const accepted = await readRunInvocationStates(client, toolContext(context));
+              if (
+                accepted.length !== 1 ||
+                accepted[0]?.state !== 'completed' ||
+                accepted[0].outcome_kind !== 'success'
+              )
+                throw stateConflict(
+                  'routing completion requires unique successful accepted result',
+                );
+            }
+            if (
+              initial.approval?.kind === 'document' &&
+              !approvalAuthorizesActions(initial.approval)
+            )
+              throw forbidden('rejected approval cannot complete the original action');
+            if (
+              request.usage.iterations > context.maxIterations ||
+              (request.usage.tokens !== null && request.usage.tokens > context.maxTokens)
+            )
+              throw new HttpError(429, 429, 'BUDGET_EXCEEDED', '本轮推理预算用完，已停下。');
+            const states = await readRunInvocationStates(client, toolContext(context));
+            for (const row of states) {
+              if (row.state !== 'completed' || row.outcome_kind === 'failed')
+                throw stateConflict('Run has unresolved tool effects');
+              if (
+                row.outcome_kind === 'approval_pending' &&
+                row.approval_id &&
+                (await readRunApprovalDecision(client, context, row.invocation_id, row.approval_id))
+                  .status === 'pending'
+              )
+                throw stateConflict('Run has unresolved approval');
+              if (
+                row.outcome_kind === 'approval_pending' &&
+                !initial.snapshot?.tool_refs.includes(row.invocation_id)
+              )
+                throw stateConflict('approval requires explicit suspension and resume');
+            }
+            await validateDocumentApprovalsDone(
+              client,
+              context,
+              await readRunDocumentEvidence(client, context),
+            );
+            if (
+              !modelStarted &&
+              cumulative.iterations === 0 &&
+              routingDecision?.payload.decision !== 'direct'
+            )
+              throw stateConflict('zero-model completion requires accepted routing render receipt');
+          }
+          const payload =
+            request.outcome === 'done'
+              ? { ...eventPayload(context), approval_id: null }
+              : request.outcome === 'cancelled'
+                ? { ...eventPayload(context), reason: 'harness_cancelled' }
+                : {
+                    ...eventPayload(context),
+                    error: {
+                      code: request.error?.code ?? 'HARNESS_EXITED',
+                      message: request.error?.message ?? '原生执行失败。',
+                      http_status: request.error?.code === 'BUDGET_EXCEEDED' ? 429 : 500,
+                    },
+                  };
+          return commitTerminal(client, context, request.outcome, payload);
+        });
+        stopped = true;
+        await send(event);
+        return { accepted: true };
+      } catch (error) {
+        if (
+          suppliedRequest.type === 'route_probe' ||
+          suppliedRequest.type === 'route_decide' ||
+          suppliedRequest.type === 'render_route_result' ||
+          routingDecision?.payload.decision === 'direct'
+        ) {
+          stopped = true;
+          sessionController.abort();
+        }
+        throw error;
+      }
     },
   };
 }

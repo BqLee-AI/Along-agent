@@ -839,6 +839,8 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
       start: HarnessStartSchema.parse({
         protocol: HARNESS_PROTOCOL_VERSION,
         type: 'start',
+        routing_policy: { revision: 'r2b/1', mode: 'off' },
+        eligible_phase: 'disabled',
         context_policy: contextPolicy,
         messages: [{ message_id: randomUUID(), role: 'user', content: input(id, 'hold').raw_text }],
         tools: [],

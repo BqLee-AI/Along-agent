@@ -577,7 +577,7 @@ export class DeploymentDatabase {
       if (last > this.targetVersion) return unknown('database_newer_than_artifacts', last);
       if (last < BASELINE) return unknown('unsupported_legacy_database', last);
       try {
-        await this.#verifyBaseline();
+        await this.#verifyBaseline(last);
         for (const migration of this.#migrations.filter((m) => m.version > last)) {
           if (typeof migration.verify !== 'object' || !migration.verify) continue;
           const pending = migration.verify;
@@ -748,8 +748,32 @@ export class DeploymentDatabase {
       )
         fail('baseline_additional_triggers_mismatch');
     }
+    for (const expected of manifest.indexes ?? []) {
+      const actual = (
+        await this.#query(
+          `SELECT i.indisvalid AS valid,i.indisready AS ready,i.indisunique AS unique,
+          am.amname AS method,pg_get_expr(i.indpred,i.indrelid) AS predicate,
+          ARRAY(SELECT pg_get_indexdef(i.indexrelid,n,true)
+            FROM generate_series(1,i.indnkeyatts) n) AS keys
+          FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid
+          JOIN pg_class t ON t.oid=i.indrelid JOIN pg_am am ON am.oid=c.relam
+          WHERE c.relnamespace='public'::regnamespace AND c.relname=$1 AND t.relname=$2`,
+          [expected.name, expected.table],
+        )
+      ).rows[0];
+      if (
+        !actual ||
+        !actual.valid ||
+        !actual.ready ||
+        actual.unique !== expected.unique ||
+        actual.method !== expected.method ||
+        actual.keys.join(',') !== expected.keys.join(',') ||
+        actual.predicate !== expected.predicate
+      )
+        fail('baseline_additional_indexes_mismatch');
+    }
   }
-  async #verifyBaseline() {
+  async #verifyBaseline(version) {
     const columns = (
       await this.#query(`SELECT c.relname AS table_name,a.attname AS name,t.typname AS type,a.attnotnull AS required,
       pg_get_expr(d.adbin,d.adrelid) AS default_value,c.relkind,c.relrowsecurity
@@ -811,9 +835,20 @@ export class DeploymentDatabase {
     // Captured from an isolated PG16 database after the unchanged 0001–0016
     // migrations. Preserve constraint identity and all Boolean grouping/casts.
     const actualChecks = constraints.filter((c) => c.type === 'c' && TABLES[c.table_name]);
+    const expectedChecks = new Map(
+      this.#baselineChecks.map((check) => [`${check.table}.${check.name}`, check]),
+    );
+    for (const migration of this.#migrations.filter((item) => item.version <= version)) {
+      if (typeof migration.verify !== 'object' || migration.verify === null) continue;
+      for (const check of migration.verify.baseline_checks ?? []) {
+        const key = `${check.table}.${check.name}`;
+        if (!expectedChecks.has(key)) fail('migration_inventory_invalid');
+        expectedChecks.set(key, check);
+      }
+    }
     if (
-      actualChecks.length !== this.#baselineChecks.length ||
-      this.#baselineChecks.some(
+      actualChecks.length !== expectedChecks.size ||
+      [...expectedChecks.values()].some(
         (expected) =>
           !actualChecks.some(
             (actual) =>

@@ -94,7 +94,8 @@ export const HARNESS_TOOL_DEFINITIONS = [
   },
   {
     name: 'list_tasks',
-    description: '读取当前用户提醒任务。',
+    description:
+      '读取当前用户提醒任务；默认只列活动任务，不是全量历史。saved/pending_schedule表示确认后等待后台调度，无需重复确认或手动排期；cancel_pending表示取消已提交、禁止后续新触发请求，等撤销回执不需重新取消，但不代表能撤回已发出通知。scheduled/cancelled只按实际回执状态报告。',
     risk: 'low' as const,
     parameters: workspaceParameters({
       state: { type: ['string', 'null'], enum: [...TASK_STATES, null] },

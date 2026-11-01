@@ -133,7 +133,7 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 
 PK 已支持恢复点查，不新增无查询依据的索引。DB 禁 UPDATE/DELETE；应用及约束验证 policy 正安全整数、枚举/null 语义与 owner/Run 一致性。新 Run 与原接纳事务插入；旧 Run 仅在有效显式批准恢复同事务补录，并发唯一，失败全回滚；GET/历史补读不补录。工具权限仍只由原冻结 allowlist 与当前授权决定。
 
-snapshot2 原字段/集合不变，typed views/context_slice 不写入快照正文，accepted_result 不被投影覆写。wire v4 目标切换与旧 Run 行为见 design/18 §6、§8；原文其他 v2 记载保留 R1 适用范围，不作为 v4 实现证明。后续只新增迁移并同步生命周期基线/扫描规则，不修改已合并迁移，不预占编号。
+snapshot2 原字段/集合不变，typed views/context_slice 不写入快照正文，accepted_result 不被投影覆写。wire 已随 R2-B 切换为 `harness/v5`，容量/回取合同不变；旧 Run 行为见 design/18 §6、§8；原文其他 v2 记载保留 R1 适用范围，不作为 wire 版本实现证明。后续只新增迁移并同步生命周期基线/扫描规则，不修改已合并迁移，不预占编号。
 
 ## `run_attempts`
 
@@ -172,17 +172,17 @@ snapshot2 原字段/集合不变，typed views/context_slice 不写入快照正�
 
 ### 字段
 
-| 字段                      | 类型          | 约束                                                       | 说明                                                                                              |
-| ------------------------- | ------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `id`                      | `uuid`        | primary key                                                | checkpoint ID                                                                                     |
-| `owner_id`                | `uuid`        | not null                                                   | 所属用户，查询必带                                                                                |
-| `attempt_id`              | `uuid`        | not null, references `run_attempts(id)` on delete restrict | 所属 attempt                                                                                      |
-| `seq`                     | `bigint`      | not null                                                   | attempt 内序号，从 1 递增                                                                         |
-| `event_seq`               | `bigint`      | not null, unique                                           | 全局不透明流游标；before-insert 持 conversation 锁后重新分配，锁持至提交；允许内部行/回滚导致间隙 |
-| `kind`                    | `text`        | not null                                                   | 保留既有内部/七词事件，新增内部 `harness_snapshot`；读取外部流显式过滤                            |
-| `payload`                 | `jsonb`       | not null, default `'{}'`                                   | 结构化摘要（tool 名 + 参数摘要 + 结果摘要）；不存敏感原文                                         |
-| `stream_protocol_version` | `text`        | not null                                                   | 投影协议版本（`packages/stream-protocol` 版本号），AG-UI 投影依据                                 |
-| `created_at`              | `timestamptz` | not null, default `now()`                                  | 创建时间                                                                                          |
+| 字段                      | 类型          | 约束                                                       | 说明                                                                                                               |
+| ------------------------- | ------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `id`                      | `uuid`        | primary key                                                | checkpoint ID                                                                                                      |
+| `owner_id`                | `uuid`        | not null                                                   | 所属用户，查询必带                                                                                                 |
+| `attempt_id`              | `uuid`        | not null, references `run_attempts(id)` on delete restrict | 所属 attempt                                                                                                       |
+| `seq`                     | `bigint`      | not null                                                   | attempt 内序号，从 1 递增                                                                                          |
+| `event_seq`               | `bigint`      | not null, unique                                           | 全局不透明流游标；before-insert 持 conversation 锁后重新分配，锁持至提交；允许内部行/回滚导致间隙                  |
+| `kind`                    | `text`        | not null                                                   | 保留既有内部/七词事件，新增内部 `harness_snapshot` 及 `harness_routing_policy/decision/render`；读取外部流显式过滤 |
+| `payload`                 | `jsonb`       | not null, default `'{}'`                                   | 结构化摘要（tool 名 + 参数摘要 + 结果摘要）；不存敏感原文                                                          |
+| `stream_protocol_version` | `text`        | not null                                                   | 投影协议版本（`packages/stream-protocol` 版本号），AG-UI 投影依据                                                  |
+| `created_at`              | `timestamptz` | not null, default `now()`                                  | 创建时间                                                                                                           |
 
 ### 约束与索引
 
@@ -194,16 +194,16 @@ snapshot2 原字段/集合不变，typed views/context_slice 不写入快照正�
 
 - [Required] 只追加，禁 `UPDATE`/`DELETE`。
 - [Required] `payload` 不存敏感值原文；tool 参数摘要脱敏。
-- [Required] 新写入/执行仅 `harness/v4`、snapshot `version=2`；harness_snapshot 保存已接受消息/工具结果引用、usage/next_call_no/等待引用，不保存 raw args、provider body、密钥或完整推理链。真实模型增量沿既有message.delta持久，不新建数据表。TS 验证同 owner/Run、真实接受事实与单调进度；旧 task snapshot1 的限定读取迁移见本篇 R1 节。
+- [Required] 新写入/执行仅 `harness/v5`、snapshot `version=2`；harness_snapshot 保存已接受消息/工具结果引用、usage/next_call_no/等待引用，不保存 raw args、provider body、密钥或完整推理链。真实模型增量沿既有message.delta持久，不新建数据表。TS 验证同 owner/Run、真实接受事实与单调进度；旧 task snapshot1 的限定读取迁移见本篇 R1 节。
 - [Required] 同 conversation 先持 NO KEY UPDATE 锁再分配游标，并保持至提交，避免小游标晚提交被客户端永久漏掉，并与终态消息插入取得的外键 KEY SHARE 兼容。内部快照不交给外部 ThreadEventSchema；GET/同入站键只读不启动执行。
 
-## R2-B 路由策略与内部执行记录（Proposed，#88）
+## R2-B 路由策略与内部执行记录（已实现，默认 off，#88）
 
-本节只跟随 [design/19](../design/19-r2b-readonly-intent-routing.md) §7–§10，不改上文当前 `harness/v4`/snapshot2 和 R2-A Required 合同。精确 payload、摘要、关联、唯一性及来源约束以 design/19 §8 为主，不在本篇复制字段表；本节不表示迁移或 v5 已实施。
+本节只跟随 [design/19](../design/19-r2b-readonly-intent-routing.md) §7–§10，不改上文 snapshot2 与 R2-A Required 合同。精确 payload、摘要、关联、唯一性及来源约束以 design/19 §8 为主，不在本篇复制字段表；三种 kind 由迁移 `0020_conversation_readonly_routing.sql` 建立，实现存在不等于已启用或已验收路由接管。
 
-- 路由策略不用 `run_context_policies`、新路由表或 Run JSON 列承载，不改 `frozen_context`。提议复用只追加 `run_checkpoints`，新增内部 `harness_routing_policy`、`harness_routing_decision`、`harness_routing_render` 三种 kind；snapshot2 不加字段。v5 的 start/probe/decide/render 消费关系见 design/19 §7。
+- 路由策略不用 `run_context_policies`、新路由表或 Run JSON 列承载，不改 `frozen_context`。复用只追加 `run_checkpoints`，新增内部 `harness_routing_policy`、`harness_routing_decision`、`harness_routing_render` 三种 kind；snapshot2 不加字段。v5 的 start/probe/decide/render 消费关系见 design/19 §7。
 - 新 harness Run 在原接纳事务的首 attempt 写不可变 routing policy，off 也记录。旧 Run 缺策略按 off；GET/同键补读/批准 resume 不补路由策略、不分类，R2-A 上下文策略在有效恢复时的独立补录仍按原合同。仅 fresh 首模型前产生一次路由决策；shadow 只记录潜在候选、最终 fallback，不调用候选旁路业务工具。
-- 另起新迁移扩充 `0015` 的封闭 checkpoint kind check，并落实首 attempt、同 kind 唯一及同 owner/conversation/Run 的真实来源约束；不改已合并迁移，不预占编号。沿原只追加、锁序与 conversation 游标分配，内部行形成游标间隙仍合法。
+- 迁移 `0020_conversation_readonly_routing.sql` 扩充 `0015` 的封闭 checkpoint kind check，并落实首 attempt、同 kind 唯一及同 owner/conversation/Run 的真实来源约束；不改已合并迁移。沿原只追加、锁序与 conversation 游标分配，内部行形成游标间隙仍合法。
 - 外部读取继续显式只取七词，不将三种内部路由行交给 ThreadEventSchema；HTTP/RunView/execution/SSE 不新增字段或词。策略、潜在候选和决策引用不是浏览器授权、恢复点或工具效果事实。
 - direct 决策绑定唯一原 reserve/invoke 的目标/参数和合法来源，不造新的工具结果账。真实成功 accepted_result 与已接受 snapshot 是渲染依据，TS 固定 renderer 在同一事务写原 `message.delta` 与内部 render 回执；finish(done) 须唯一成功结果、render 回执和零模型，不伪造 provider/usage。正文不能由 native 任意传入，详细来源与展示约束见 design/19 §9。
 - 接纳 direct 后失败不改走 LLM/新 slot；DB/协议/权限错误不是正常拒识。原取消先提交即拒绝迟到候选/输出，工具已提交事实保留；原入站/取消幂等与只读 GET/重放不变，不重新执行工具、编码或渲染，见 design/19 §10。
@@ -362,7 +362,7 @@ snapshot2 原字段/集合不变，typed views/context_slice 不写入快照正�
 - `agent_runs.frozen_context` 增加 `workspaceGrant={workspace_id,owner_id,registration_digest,root_identity}` 和独立 `workspaceSummary={workspace_id,label,readable_paths,writable_paths}`。不保存真实 root、不单建 workspace 表、不给历史 Run 补授工具。RunView 只投影冻结安全摘要；历史缺摘要不从当前登记补造。
 - 历史 Run/事件、取消及冻结文档批准详情可在登记撤销后继续 owner-scoped 读取；摘要不是当前授权。新批准/拒绝、新恢复、新工具动作均核对当前登记与原 grant，撤销/变更使 `can_resume=false`；工具历史结果披露仍有独立当前权限门，不因历史 GET 可读而绕过它。
 - 等待继续复用三个 UUID 列；可信已接受提议结果决定 `kind=task|document` 及批准读取入口。document 的 RunView waiting 额外含 `approval_kind:"document"`，旧 task 形状不变。恢复给 native 的 task decision 保留 consumed/task_id/successor_id；document decision 仅 approval_id/status/apply_invocation_id，不制造 task、时间字段或新事件词。
-- 新执行与新快照仅 `harness/v4` / snapshot2。读取 snapshot1 时拒绝携 workspace grant，并验证每个 tool_ref 都是 completed 的旧业务工具、非 document receipt；仅转换内存中的版本供 v4 启动，保留原 Run/预算/工具范围和历史行，不改旧 writer 或 completed 事实。
+- 新执行与新快照仅 `harness/v5` / snapshot2。读取 snapshot1 时拒绝携 workspace grant，并验证每个 tool_ref 都是 completed 的旧业务工具、非 document receipt；仅转换内存中的版本供 v5 启动，保留原 Run/预算/工具范围和历史行，不改旧 writer 或 completed 事实。
 - `workspace_list/grep/read` 为 read_only，事务外 MCP IO 后首次接受有界快照；`workspace_propose_replace` 为 local，批准/receipt/审计同事务；`workspace_apply_replace` 是 non_transactional，原批准唯一绑定在预约事务建立，在 dispatch 一次许可事务再验，先提交 unknown 才可写文件。
 - `tool_invocations` 唯一持有接受结果/真实效果；`tools/query.ts#readRunDocumentEvidence` 公开同 Run 安全证据投影，approvals/conversations 不另建效果账。只有绑定的 applied 与其后创建且接受的新全文 read（目标、版本、完整内容及字节数均匹配）才满足完成；conflict 后继须有零写证据、新读和新批准。unknown 不重写、不靠文件 hash 补报成功、不制造可恢复等待点。
 

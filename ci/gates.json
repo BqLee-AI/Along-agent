@@ -96,8 +96,8 @@
     },
     "D8": {
       "status": "enforced",
-      "scope": "controlled-model current-tree production native/MCP; local/signed-HTTP Run, task/document approval, bounded six-large-document context, original-observation retrieval, actual replacement and independent readback; zero-write conflict recovery, rejection/cancellation/replay/strict DTO, wire rejection and unknown effects",
-      "owner": "#47, #62, #83",
+      "scope": "controlled-model current-tree production native/MCP; local/signed-HTTP Run, task/document approval, bounded six-large-document context, original-observation retrieval, actual replacement and independent readback; bounded readonly routing, zero-write conflict recovery, rejection/cancellation/replay/strict DTO, wire rejection and unknown effects",
+      "owner": "#47, #62, #83, #88",
       "remaining": {
         "status": "partial",
         "scope": "other external tool/connector seams; real-provider task quality, arbitrary crash recovery and generic external exactly-once"
@@ -115,6 +115,7 @@
           "apps/api/test/contracts/workspace.test.ts",
           "apps/api/test/contracts/harness-context-consumer.test.ts",
           "apps/api/test/contracts/harness-context-native.test.ts",
+          "apps/api/test/contracts/harness-routing-consumer.test.ts",
           "apps/api/test/contracts/context-observation.test.ts"
         ],
         "consumer_cases": [
@@ -140,7 +141,21 @@
           "D8.workspace-unknown.http",
           "D8.workspace-no-reread.http",
           "D8.context.local",
-          "D8.context.http"
+          "D8.context.http",
+          "D8.local.native-readonly-list-tasks",
+          "D8.local.native-readonly-get-user-prefs",
+          "D8.local.native-readonly-read-brief-cards",
+          "D8.http.native-readonly-list-tasks",
+          "D8.http.native-readonly-get-user-prefs",
+          "D8.http.native-readonly-read-brief-cards",
+          "D8.local.readonly-required-harness-routing-policy",
+          "D8.local.readonly-required-harness-routing-decision",
+          "D8.local.readonly-required-harness-snapshot",
+          "D8.local.readonly-required-harness-routing-render",
+          "D8.http.readonly-required-harness-routing-policy",
+          "D8.http.readonly-required-harness-routing-decision",
+          "D8.http.readonly-required-harness-snapshot",
+          "D8.http.readonly-required-harness-routing-render"
         ]
       }
     },

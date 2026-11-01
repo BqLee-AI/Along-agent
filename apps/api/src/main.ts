@@ -4,6 +4,7 @@ import { startWorkerLoop } from './worker/loop.js';
 import { createPool } from './db/pool.js';
 import { loadHarnessServices } from './modules/conversations/harness-config.js';
 import { loadWorkspaceRegistry } from './modules/workspaces/service.js';
+import { createRoutingRuntime } from './modules/conversations/routing/index.js';
 
 const role = parseRole(process.env.ROLE);
 
@@ -22,7 +23,12 @@ if (role === 'api' || role === 'all') {
 }
 const server =
   role === 'api' || role === 'all'
-    ? serve({ port: Number(process.env.PORT ?? 3000), pool, harness: loadHarnessServices() })
+    ? serve({
+        port: Number(process.env.PORT ?? 3000),
+        pool,
+        harness: loadHarnessServices(),
+        routing: createRoutingRuntime(),
+      })
     : null;
 const worker = role === 'worker' || role === 'all' ? startWorkerLoop({ pool }) : null;
 

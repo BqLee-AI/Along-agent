@@ -1,6 +1,6 @@
 # 仓颉原生 Harness
 
-生产源位于本目录，目标平台 Linux x86_64，仅使用继承的 stdin/stdout 交换 `harness/v4`，不执行或写出旧 wire 协议；snapshot 仅接受/输出 `version: 2`。不监听端口、不持有模型凭据、不包含 fixture 或网络 transport。准确 wire DTO 见 `packages/contracts/src/harness.ts`；身份、授权、调用预约、效果、批准与持久事实由 TypeScript 裁决。
+生产源位于本目录，目标平台 Linux x86_64，仅使用继承的 stdin/stdout 交换 `harness/v5`，不执行或写出旧 wire 协议；snapshot 仅接受/输出 `version: 2`。不监听端口、不持有模型凭据、不包含 fixture 或网络 transport。准确 wire DTO 见 `packages/contracts/src/harness.ts` 与 `routing.ts`；身份、授权、调用预约、效果、批准与持久事实由 TypeScript 裁决。
 
 ## 可复现构建与安装
 
@@ -48,6 +48,8 @@ unknown 与取消后迟到调用另验证真实非事务调用核心到 native �
 - snapshot2 保存有限已接受引用、usage、next_call_no 与等待身份，不保存工具参数或完整推理链。收到 unknown 立即 `finish(failed,TOOL_EFFECT_UNKNOWN)`，不加入 toolRefs、不推进调用号、不发 checkpoint/suspend、不再模型/预约；已接受的 denied/failed 仍保存 checkpoint 后按原错误正常失败，均不伪装成功。
 - 历史 snapshot1 仅由 TS 在无 workspace grant、引用均为已完成的旧业务/task 能力且不含 document 批准时读取并构造 snapshot2 bootstrap；不改写历史行，不把 v1 发给 native，不保留旧执行器回退。
 - TS 先持久取消再通知/终止 native 并 abort 模型请求；native 观察 cancel 后不继续。终止进程不撤销已接受工具或已消费按钮确认的任务。
+- `start` 必须携带冻结 `routing_policy`（旧 Run 为 null）与 `eligible_phase`。仅 fresh 首模型前且策略启用时请求一次 facts；完整规则命中优先，否则只请求一次 embedding。全竞争第一/第二类、同分、固定排除及每意图双阈值共同决定候选；shadow 总提交 fallback，off/旧 Run/恢复零 probe。fallback 不修改原上下文或预算。
+- direct 的唯一决议接纳后仅使用原 `harness/N` reserve/invoke，保存真实工具引用的 snapshot2，再以 decision/invocation 引用请求固定 renderer；从不伪造 provider toolcall 或发送自编 answer。成功 finish 的真实模型 iterations/tokens 均为0；reserve/invoke/snapshot/render 任一步失败或 denied/unknown 都不转模型、不开第二 slot。普通 answer 仅转发真实 provider delta。
 
 ## 证据边界
 

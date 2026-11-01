@@ -1,0 +1,40 @@
+{
+  "version": "0020",
+  "tables": [],
+  "columns": [],
+  "constraints": [],
+  "baseline_checks": [
+    {
+      "table": "run_checkpoints",
+      "name": "run_checkpoints_kind_check",
+      "expression": "(kind = ANY (ARRAY['thinking'::text, 'tool_call'::text, 'tool_result'::text, 'approval_required'::text, 'answer'::text, 'thread.started'::text, 'message.delta'::text, 'card.proposed'::text, 'thread.completed'::text, 'thread.failed'::text, 'thread.cancelled'::text, 'harness_snapshot'::text, 'harness_routing_policy'::text, 'harness_routing_decision'::text, 'harness_routing_render'::text]))"
+    }
+  ],
+  "functions": [
+    {
+      "name": "run_checkpoints_guard_routing",
+      "arguments": "",
+      "result": "trigger",
+      "volatility": "v",
+      "strict": false
+    }
+  ],
+  "triggers": [
+    {
+      "table": "run_checkpoints",
+      "name": "run_checkpoints_routing_source",
+      "type": 7,
+      "function": "run_checkpoints_guard_routing"
+    }
+  ],
+  "indexes": [
+    {
+      "table": "run_checkpoints",
+      "name": "run_checkpoints_routing_attempt_kind_unique",
+      "unique": true,
+      "method": "btree",
+      "keys": ["attempt_id", "kind"],
+      "predicate": "(kind = ANY (ARRAY['harness_routing_policy'::text, 'harness_routing_decision'::text, 'harness_routing_render'::text]))"
+    }
+  ]
+}

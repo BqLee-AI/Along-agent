@@ -3,6 +3,21 @@ import { createHarnessModelTransport } from './harness-model.js';
 import type { HarnessServices } from './harness-process.js';
 import { createContextPolicy } from './context-policy.js';
 import { measureHarnessContext } from './harness-context.js';
+import type { ConversationDeps } from './contracts.js';
+import { createRoutingRuntime, type RoutingRuntime } from './routing/index.js';
+
+const routingByDeps = new WeakMap<ConversationDeps, RoutingRuntime>();
+
+/** Freeze optional routing configuration once for each server dependency set. */
+export function routingRuntimeOf(deps: ConversationDeps): RoutingRuntime {
+  if (deps.routing) return deps.routing;
+  let runtime = routingByDeps.get(deps);
+  if (!runtime) {
+    runtime = createRoutingRuntime({ mode: 'off' });
+    routingByDeps.set(deps, runtime);
+  }
+  return runtime;
+}
 
 /** Called once by server startup. Missing configuration never enables a fixture. */
 export function loadHarnessServices(

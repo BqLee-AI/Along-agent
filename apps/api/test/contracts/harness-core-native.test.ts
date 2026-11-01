@@ -92,6 +92,8 @@ test('D8.unknown-core-native', async () => {
   const start = HarnessStartSchema.parse({
     protocol: HARNESS_PROTOCOL_VERSION,
     type: 'start',
+    routing_policy: { revision: 'r2b/1', mode: 'off' },
+    eligible_phase: 'disabled',
     context_policy: contextPolicy,
     messages: [{ message_id: messageId, role: 'user', content: 'Run the fsync probe once.' }],
     tools: [
@@ -305,6 +307,8 @@ test('D8.cancelled-core-native', async () => {
     start: HarnessStartSchema.parse({
       protocol: HARNESS_PROTOCOL_VERSION,
       type: 'start',
+      routing_policy: { revision: 'r2b/1', mode: 'off' },
+      eligible_phase: 'disabled',
       context_policy: contextPolicy,
       messages: [{ message_id: randomUUID(), role: 'user', content: 'Run the fsync probe once.' }],
       tools: [
@@ -524,6 +528,8 @@ test('native terminates boundedly when valid bootstrap observations cannot fit s
   const start = HarnessStartSchema.parse({
     protocol: HARNESS_PROTOCOL_VERSION,
     type: 'start',
+    routing_policy: { revision: 'r2b/1', mode: 'off' },
+    eligible_phase: 'disabled',
     context_policy: contextPolicy,
     messages: [{ message_id: messageId, role: 'user', content: 'Use accepted read observations.' }],
     tools: [

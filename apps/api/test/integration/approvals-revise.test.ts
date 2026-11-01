@@ -432,7 +432,7 @@ maybe('approval revise durable PostgreSQL behavior', () => {
   it('ambiguous choice uses a new key and confirms only the selected occurrence and frozen offset', async () => {
     for (const fold of ['first', 'second'] as const) {
       const old = await seedApproval(pool, {});
-      const input = { ...body('2026-11-01 01:30 喝水'), confirmed_timezone: 'America/New_York' };
+      const input = { ...body('2027-11-07 01:30 喝水'), confirmed_timezone: 'America/New_York' };
       await expect(revise(old.ownerId, old.id, input)).rejects.toMatchObject({
         errorCode: 'AMBIGUOUS_LOCAL_TIME',
       });
@@ -448,7 +448,7 @@ maybe('approval revise durable PostgreSQL behavior', () => {
       expect(row.fold).toBe(fold === 'first' ? 0 : 1);
       expect(row.resolved_utc_offset_seconds).toBe(fold === 'first' ? -14400 : -18000);
       expect(row.fire_at_utc.toISOString()).toBe(
-        fold === 'first' ? '2026-11-01T05:30:00.000Z' : '2026-11-01T06:30:00.000Z',
+        fold === 'first' ? '2027-11-07T05:30:00.000Z' : '2027-11-07T06:30:00.000Z',
       );
       const { detail } = await getApprovalDetail({ pool }, old.ownerId, next.successor_approval_id);
       expect(detail.echo_text).toContain(fold === 'first' ? '第一次出现' : '第二次出现');

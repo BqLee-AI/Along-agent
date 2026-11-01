@@ -269,7 +269,7 @@ maybe('conversation runtime', () => {
       ownerId,
       randomUUID(),
       {
-        raw_text: '2026-11-01 01:30 提醒我喝水',
+        raw_text: '2027-11-07 01:30 提醒我喝水',
         confirmed_timezone: 'America/New_York',
         fold_choice: 'second',
       },

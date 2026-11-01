@@ -1,23 +1,25 @@
 # 19. R2-B 有限只读意图路由
 
-> 状态：Proposed；供行为合同审阅，不表示已实现或获准接管流量。
+> 状态：受控实现合同；默认关闭，实现、质量、真实 Web 与自然流量分层验收，不自动授权接管。
 > 范围：Issue #88，完整规则、轻量语义匹配与原聊天模型之间的路由，限三类现成只读用例。
 > 不包含：写动作、批准或恢复接管、工作区任务、多目标执行、记忆、额外聊天分类器、自动上线或原安装升级。
-> 阶段标签：R2-B；行为提案见 [OpenSpec change](../../openspec/changes/define-readonly-intent-routing/proposal.md)，既有职责见 [09](09-agent-runtime-and-checkpoint.md) 与 [R2-A](18-r2a-harness-context.md)。
+> 阶段标签：R2-B；行为增量见 [OpenSpec change](../../openspec/changes/define-readonly-intent-routing/proposal.md)，既有职责见 [09](09-agent-runtime-and-checkpoint.md) 与 [R2-A](18-r2a-harness-context.md)。
 
 ## 1. 范围与不变项
 
-[Proposed] 在仓颉 Harness 首次调用模型前增加一次有界判断：完整规则能处理则直接走原只读工具；规则未命中时，可由 BGE INT8 判断是否适合直读；其余完整交回原聊天模型路径。原路径在既有验证中使用 DeepSeek，本方案不另选应用 provider，不将实验工具的角色配置当作应用配置。
+[Required] 在仓颉 Harness 首次调用模型前增加一次有界判断：完整规则能处理则直接走原只读工具；规则未命中时，可由 BGE INT8 判断是否适合直读；其余完整交回原聊天模型路径。原路径在既有验证中使用 DeepSeek，本方案不另选应用 provider，不将实验工具的角色配置当作应用配置。
 
 目标是减少实际发生的聊天模型请求，而不是给所有输入强塞三个标签。提醒创建/取消、资料分析、普通交流和能力外问题仍有原处理路径。候选模型是 BGE-small 中文 INT8；multilingual E5-small FP32 仅作离线对照，不双模型常驻、轮询或自动切换。
 
 [Required，沿用] 仓颉唯一组织模型/工具循环及停止；TS 拥有可信身份、事实、时间、批准、ToolGateway 与存储。`execution=business|harness`、缺省 business、原入站 hash/幂等、取消裁决、批准后同 Run 显式继续、snapshot2 和外部七种 SSE 事件不变。没有 `execution=auto`，也不通过扩大 business 的关键词匹配实现路由。
 
-[Proposed] 功能默认 `off`。写出本合同不授权实现或开量；实现、真实服务、质量评估、自然影子和实际接管分别取证。不需要先满足大样本统计声明才开始开发，但任何离线“零错”都不能自动打开开关。
+[Required] 功能默认 `off`。实现及隔离验证不构成自然流量或接管授权；真实服务、质量评估、正式消费者、真实 Web、自然影子和实际接管分别取证。不需要先满足大样本统计声明才开始开发，但任何离线“零错”都不能自动打开开关。
+
+[Required · 实施交付边界] 默认 `off` 的实施 PR 可独立交付三类只读路由、v5/迁移、来源与原子展示保护及其有效验证，使用 `Refs #88`；不以自然 shadow、受控接管或最终归档全部完成为前置，也不因此标记这些验收通过。实施相关消费者与既有门禁须有覆盖最终变更的有效证据；自然质量、保守净收益、逐意图授权与完整镜像/依赖分发清算仍各自保留门槛，不自动部署、发布、archive 或关闭 #88。
 
 ## 2. 现状与证据
 
-[Observed，静态核对] HTTP 接纳冻结输入、execution、allowlist 和预算；正式 native 在首轮构造/计量上下文后请求模型。内部 wire 为 `harness/v4`，快照为 version 2。TS 的模型 transport 不决定下一工具；三个现成只读工具是 `list_tasks`、`get_user_prefs`、`read_brief_cards`。仓库源码入口见 §14，静态核对不冒充本提案的运行验收。
+[Observed，规范编写时的基线] HTTP 接纳冻结输入、execution、allowlist 和预算；基线 native 在首轮构造/计量上下文后请求模型，内部 wire 为 `harness/v4`、快照为 version 2。R2-B 的后继 v5 与路由分支见 §7。TS 的模型 transport 不决定下一工具；三个现成只读工具是 `list_tasks`、`get_user_prefs`、`read_brief_cards`。源码入口见 §14；历史静态核对不充当运行验收。
 
 [Observed，离线实验] [2026-10-31 实验记录](../demo/r2b-embedding-evidence-2026-10-31.md)保留模型版本、材料哈希、成绩和错误。BGE INT8 新材料正确接管 66/72、旧回归 62/72，旧回归仍有一次时区→提醒误接；E5 为 61/72、55/72，两主集及控制组未见误接。BGE 的离线 batch1 p95 为 2.21ms、进程峰值 145.72MiB，E5 为 15.49ms、676.61MiB。这是 Windows CPU 短输入实验，不含 HTTP、队列、工具、仓颉或自然流量。
 
@@ -62,6 +64,8 @@ TS 中的命令、中文参数与模板只有一份；仓颉使用可信事实�
 
 非 LLM 参数解析仅提取明确数量/日期、约束和来源，不再造完整动作语法来重复第一层。过去“添加的提醒”不等于现在创建；“读到”不等于日期范围；“不用更长”不等于取消本次读取；场景词“今天想读”不覆盖后文明示的唯一查询日期。无法可靠区分时仍回原模型，不通过逐句白名单或删词提高覆盖。
 
+完整目标检查须区分动作、对象和约束：将事项放进/记入待办、把内容加入简报或把卡片发给收件人，都不是普通读取；停用状态与标星要求也不能丢弃后返回默认活动集合。时区只读限本人账户保存值，其他人的账户、手机或操作系统时区不能替换为本人偏好。历史叙述“先前放进列表的提醒”本身不是新增动作；明确读取已有对象仍按后续语义阈值判断。
+
 ## 5. 模型、编码与服务合同
 
 ### 5.1 固定资产，而不是只固定名字
@@ -77,6 +81,10 @@ TS 中的命令、中文参数与模板只有一份；仓颉使用可信事实�
 
 BGE INT8 的逻辑架构来自 BGE-small，但量化文件是社区发布，不能写成 BAAI 原 FP32 文件或官方自制导出。模型 SHA256、tokenizer 与实测依赖见实验记录；构建产物必须带逐文件 manifest 并复核许可。不能借原始模型 MIT 名称跳过量化发行物及镜像的许可核对。
 
+量化仓库缺少独立许可声明，不等于已经确认禁止使用，也不能仅凭基础模型 MIT 自动宣称全部发行物已清算。[模型第三方声明](../../apps/embedding/third-party/bge-small-zh-v1.5/NOTICE.md)及同目录 `LICENSE`、`provenance.json` 记录原模型 MIT、量化作者“所有量化沿用原许可”的公开声明、固定版本与实物哈希；作者声明位于其他型号讨论，应用到当前固定文件的推断边界须保留。模型的 MIT 使用依据与完整镜像/依赖分发清算分开。
+
+历史冻结 manifest 的 `quantized_distribution: not_declared` 与 `production_distribution_cleared: false` 保持原样，新增许可核验记录不回写旧实验或改变编码 binding。编码服务镜像携带上述声明，但模型权重始终作为外部只读资产，不装入应用或编码服务镜像；分发权重时同时保留相应版权及完整 MIT 文本。
+
 ### 5.2 编码路径
 
 起步保留已实测的 AutoTokenizer/ONNX Runtime CPU 计算路径：tokenizer 来自同一固定目录，`local_files_only=true`、`trust_remote_code=false`；含特殊 token 的实际长度上限 256，禁止截断。模型使用顺序执行、intra-op 4、inter-op 1；重用预热 session/tokenizer，不逐请求装模型、不导入 Torch。提取已锁定图输出的 CLS，转 float32，检查 512 维、有限且非零，再做 L2 归一化。
@@ -85,7 +93,7 @@ BGE INT8 的逻辑架构来自 BGE-small，但量化文件是社区发布，不�
 
 ### 5.3 内网服务边界
 
-[Proposed] 用独立 Python CPU sidecar 包装上述已实测计算路径，API 通过内网 HTTP 请求；HTTP 薄壳选用 FastAPI/Uvicorn，不自写服务器。它不是应用业务层或第二个 agent，也不是在 Bun API 内安装 Torch，更不能把旧 Qwen/TEI 方案直接套到社区 ONNX 文件。服务只拥有编码资产与缓存，无 DB、业务密钥或工作区挂载；不另建 tokenizer 服务或模型调度平台。HTTP 库的精确版本与镜像在 §5.3 的 Linux 最小实验中锁定，不把未验证组合说成可部署产物。
+[Required] 独立 Python CPU sidecar 包装固定计算路径，API 通过内网 HTTP 请求；HTTP 薄壳使用 FastAPI/Uvicorn，不自写服务器。它不是应用业务层或第二个 agent，也不在 Bun API 内安装 Torch。服务只拥有编码资产与缓存，无 DB、业务密钥或工作区挂载；不另建 tokenizer 服务或模型调度平台。Linux 依赖版本及 wheel 哈希见 `apps/embedding/requirements.txt`；运行清单绑定依赖及许可来源，镜像身份按实际构建记录，不把本地 image ID 冒称 registry digest。
 
 私有 `POST /encode` 严格单文本合同：
 
@@ -109,7 +117,7 @@ type EncodeResponse = {
 
 token_count 是对本次完整字符串含特殊 token 的精确计数，不按字符估算。超长返回可区分的受控拒识，零 forward、无向量；binding 不符、未就绪或编码异常不得返回伪向量。TS 核对 binding、token_count、维数、有限值和非零范数，并统一 L2 归一化；有证据表明响应不属于本次完整输入时不接纳。服务不能接受任意仓库/revision、临时下载或换模型字段。
 
-该 HTTP 服务与正式 Linux 镜像没有由离线脚本验证。实现阶段先用固定资产验证 token IDs、special tokens、图输入、pooling/归一化与参考路径一致，完成超限零 forward、异常/取消及真实 HTTP 资源实验后，才锁定镜像 digest 和依赖清单。没有可验证镜像时保持 off，不编造 digest，也不静默退到 FP32、E5 或 TEI。
+离线脚本不能证明 HTTP 服务或 Linux 镜像验收。固定资产须验证 token IDs、special tokens、图输入、pooling/归一化与参考路径一致，并完成超限零 forward、异常/取消及真实 HTTP 资源实验，才锁定镜像身份和依赖清单。没有可验证运行产物时保持 off，不编造 digest，也不静默退到 FP32、E5 或 TEI。
 
 ## 6. 目录、打分与参数
 
@@ -123,7 +131,7 @@ token_count 是对本次完整字符串含特殊 token 的精确计数，不按�
 
 1. 仅 fresh 首 attempt、首次模型前；无当前执行资格直接停止，不编码。
 2. 当前输入处于确认/继续/撤回/改动流程，或有指代、纠正、条件、顺序、多目标、引文测试、写动作、分析/查全要求，不能截取只读部分。
-3. 使用已有真实 Run/批准状态及冻结历史判断承接；不发明 `pending_clarification` 字段。无法可靠确认独立时以 `CONTEXT_UNKNOWN` 回原模型；存在历史本身不永久禁用自足新问题。
+3. 使用已有真实 Run/批准状态及冻结历史判断承接；不发明 `pending_clarification` 字段。无法可靠确认独立时以 `CONTEXT_UNKNOWN` 回原模型；存在历史本身不永久禁用自足新问题。有历史时，明确的读取动词和“哪些”等自主疑问表达均可进入后续判断，不要求用户把自然问句改写成命令。此处仅解除上下文误挡，不直接认定意图；指代、否定、多目标、筛选等拒识门和全竞争语义阈值仍须通过。
 4. 不完整/重复/冲突日期或数量、不支持的数量写法/筛选、无效 Gregorian 日期、handler/规则版本不符均拒识。明确有数量要求但解析不了时不能擅用默认 20；日期不能从时钟、样例或历史补。
 5. 槽位值必须带本轮 message 引用、原文 raw 和 Unicode 标量半开范围、parser revision，或标明合同默认来源。JS UTF-16 下标不能直接当跨语言标量下标；owner、权限和 Run 身份不是用户槽位。
 6. 所有前提满足仍仅为候选；实际 direct 还要满足冻结 mode/逐意图开关及 TS authority 当前资格。
@@ -134,7 +142,7 @@ bundle manifest 绑定目录/矩阵哈希、模型与 tokenizer、编码 binding
 
 ## 7. harness/v5 内部合同
 
-[Proposed] TS/shared contracts/native/消费者/镜像同批升级 `harness/v5`，无 v4 偷加字段、双写或兼容 shim；snapshot 保持 version 2。旧 Run 在新软件中可沿原路径读取/有效恢复，不因此获得路由。
+[Required] TS/shared contracts/native/消费者/镜像同批使用 `harness/v5`，无 v4 偷加字段、双写或兼容 shim；snapshot 保持 version 2。旧 Run 在新软件中可沿原路径读取/有效恢复，不因此获得路由。
 
 `start` 增加 `routing_policy` 和 `eligible_phase=fresh_first_step|disabled`。旧缺记录的策略为 null 并等价禁用；新关闭策略最小为 `{revision:'r2b/1',mode:'off'}`，不要求编码资产。shadow/enforce 策略须有完整 bundle、候选/可直读意图、阈值与预算。shadow 可计算潜在命中，但 direct 意图集合为空；enforce 只有通过审阅的逐意图子集可执行。
 
@@ -160,6 +168,8 @@ off/旧 Run/resume 不发 probe；probe 不插入在途模型 stream。shadow �
 | `harness_routing_render`   | 引用 decision、唯一真实 invocation、模板 revision、正文 hash 与分块数；不再复制全文/向量                                                                      |
 
 新迁移扩充既有 `0015` 的封闭 kind CHECK，并添加同首 attempt/kind 唯一及来源/owner/Run 绑定的受限写入校验；编号按实施时下一迁移选择，不改已合并文件。policy 与原接纳失败一起回滚；网络编码不在锁事务中。decision 相同内容重交只回原回执，冲突拒绝，不重新编码；路由记录不是恢复点。
+
+三类路由记录追加必须确认实际插入一行；触发器吞掉写入等零行结果同样属于持久化失败。策略失败回滚接纳，决议失败不调用模型，展示失败回滚正文与收据，不能等到终态核验才隐藏已经发出的正文。
 
 所有新 kind 继续由内部过滤器排除，不交外部 ThreadEvent parser。共享 seq 导致对外游标间隙合法；GET/同键重放只补已存事实，不创建策略或 attempt。旧 Run 有效批准恢复不补路由策略；R2-A 自己的上下文策略补录规则不被此处改变。
 
@@ -222,6 +232,8 @@ off 不要求编码服务或缓存。可选路由故障只停优化，核心 `/r
 
 建议顺序是时区、活动提醒、单日简报；各自过门才能开启，不用总平均分抵消。起步 5% 合法新 Run 的稳定分桶是 Proposed 限制，不是自动发布许可；单租户样本少可使用明确受控小批，不凑百分比。达不到收益/质量门就保留 L1＋原模型、关闭 L2；没有义务为了三层形式在线保留编码器。
 
+自然 shadow 可以专项暂停，而非必须持续运行；暂停与验收通过不同。未满足质量或收益准入时可保持 `off` 并停止专用编码服务，保留应用、历史事实与审阅证据。恢复观察或进入受控接管均需对应授权和有效证据，不能因实施 PR 合并而自动重启 shadow 或开启 enforce。
+
 自然错误率与收益不能由合成分数代替。若声称独立 Bernoulli 假设下零误接的单侧 95% 上界≤1%，每意图至少 299 个独立接受单元（`1-0.05^(1/n)`）；同故事改写、总输入数或三意图合计不能充数。299 只是该统计声明示例，不是开发或受控小批的前置门；相关流量必须披露其限制。
 
 ### 12.3 收益与回滚
@@ -232,7 +244,7 @@ off 不要求编码服务或缓存。可选路由故障只停优化，核心 `/r
 
 ## 13. 实施拆分与验证所有权
 
-本提案只交付第 1 项；后续实现需要在审阅后的独立实现范围中执行。
+各负责人按下列边界交付并记录实际证据；实现授权不延伸为自然流量、原安装升级、自动启用或归档授权。
 
 1. 合同负责人：设计、行为 delta、PRD/API/schema/索引与静态校验；交付不适用运行时 TDD，也不计成部署验证。
 2. 编码负责人：固定资产的最薄 HTTP CPU 服务与目标 Linux 真实实验，证明精确 tokenizer/CLS/归一化和长度/异常/取消行为，锁定真实镜像而不是只跑 mock。
@@ -241,7 +253,7 @@ off 不要求编码服务或缓存。可选路由故障只停优化，核心 `/r
 5. 端到端负责人：正式 Web→API→仓颉→真实编码→原网关→PG→SSE 的三只读成功、拒识、失败及原模型/批准恢复；与受控 provider 的消费者证据分账。
 6. 发布负责人：自然 shadow、受控小批、停用/回滚验证及最终 archive；发布/付费自然实验/原安装升级不由本合同自动授权。
 
-每验收项一个验证负责人，复用有效证据；后续只补代码变化、集成或证据缺口，不再主线程重跑相同检查。沿现有根 scripts/五门，不新建替代 CI；全部通过前不把实现任务、收口或 archive 勾选为完成。
+每验收项一个验证负责人，复用有效证据；后续只补代码变化、集成或证据缺口，不再主线程重跑相同检查。沿现有根 scripts/五门，不新建替代 CI；实施交付须完成受其变更影响的验收与门禁，不能将未完成的自然/接管验收或最终 archive 勾选为完成。
 
 ## 14. 行为验收与追溯
 
@@ -256,4 +268,53 @@ off 不要求编码服务或缓存。可选路由故障只停优化，核心 `/r
 | 资源与收益   | 目标宿主真实 HTTP 冷/热/并发、拒识增量和整体完成，L1 miss 的新增正确交付与真实模型调用数分账                         | D6/D8/D10，非仅单元测试 |
 | 原有保证     | R2-A 额度/unknown usage/来源/批准恢复、冻结展示、取消回执及 A1–A4 不削弱；新 kind 不泄漏外部 SSE                     | D1–D10、A1–A4 原范围    |
 
-静态依据：`packages/contracts/src/harness.ts`（wire/snapshot）；`apps/harness/src/main.cj`（首模型前/原循环）；`apps/api/src/modules/conversations/service.ts`（接纳）、`harness-authority.ts`（资格/answer/render）、`repository.ts`（内部记录/外部过滤）；`apps/api/src/modules/tools/schemas.ts` 与公共只读用例（原参数/投影）；`infra/migrations/0015_cangjie_harness_authority.sql`（封闭 kind CHECK）。实现变更清单、可评审块和实测结果记录在 [change tasks](../../openspec/changes/define-readonly-intent-routing/tasks.md)，本长期合同不保存临时交付进度。
+源码依据：`packages/contracts/src/harness.ts`、`routing.ts`（wire/snapshot）；`apps/harness/src/main.cj`（首模型前/原循环）；`apps/api/src/modules/conversations/service.ts`（接纳）、`harness-authority.ts`（资格/answer/render）、`routing-checkpoints.ts`（内部记录）、`routing/`（事实/资产/编码/打分/展示）、`repository.ts`（公开过滤）；`apps/api/src/modules/tools/schemas.ts` 与公共只读用例（原参数/投影）；`infra/migrations/0020_conversation_readonly_routing.sql`（扩充0015封闭 kind 及来源约束）。实现变更与分级实测结果记录在 [change tasks](../../openspec/changes/define-readonly-intent-routing/tasks.md)，长期合同不保存临时交付进度。
+
+## 15. 配置与受控实验
+
+### 15.1 API 开关
+
+| 配置                          | 行为                                                           |
+| ----------------------------- | -------------------------------------------------------------- |
+| `HARNESS_ROUTING_MODE`        | `off`（缺省）/`shadow`/`enforce`；非法模式直接报配置错误       |
+| `HARNESS_ROUTING_BUNDLE`      | 外部绝对路径的完整、不可变 `bundle.json`，不是模型目录         |
+| `HARNESS_ROUTING_ENCODER_URL` | 私有 HTTP origin；sidecar 不提供业务权限                       |
+| `HARNESS_ROUTING_INTENTS`     | `enforce` 允许的逗号分隔意图子集；缺省为空，不自动授权三个意图 |
+
+`off` 不读资产或访问编码服务。启用配置缺失、资产损坏/版本不符或私有 URL 不合法时，输出固定诊断 `ROUTING_CONFIG_UNAVAILABLE` 并关闭优化，不阻断原聊天或核心 readyz。每个新 Run 冻结启动时的有效策略；修改开关或资产不改写旧 Run。生产停用优先设置 `off` 或移除指定意图，保留 v5 与已存事实。
+
+编码地址允许 IPv4 环回/私网、IPv6 `::1`、单标签内部服务名及 `.internal`/`.localhost` 主机名；先验证真正的 IPv4，再判断私网范围，`127.example.com` 等公网域名不是私网 IP。禁止凭据、非根路径、query/hash 与跨 origin 重定向；编码地址不授予任何业务权限。
+
+### 15.2 编码服务
+
+Linux wheelhouse、固定模型/tokenizer、许可来源与 manifest 均放仓库外。wheelhouse 必须满足 `apps/embedding/requirements.txt` 的精确版本及 SHA256；构建只从命名 `wheels` context 安装，不联网换包或下载模型。下面为 POSIX shell 命令，`WHEELS`/`ASSETS` 分别指向外部 wheelhouse/固定资产目录：
+
+```sh
+docker build --build-context wheels="$WHEELS" -t along-routing-encoder:local apps/embedding
+docker run --rm --network none \
+  --mount type=bind,source="$ASSETS",target=/assets \
+  --entrypoint python along-routing-encoder:local build_manifest.py --assets /assets
+docker run -d --name along-routing-encoder --read-only --cpus 4 --memory 768m \
+  --cap-drop ALL --security-opt no-new-privileges:true \
+  --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+  --mount type=bind,source="$ASSETS",target=/assets,readonly \
+  -p 127.0.0.1:18088:8080 along-routing-encoder:local
+```
+
+manifest 生成前须备齐固定文件及可验证许可来源；运行时核对全部文件、依赖、图和 binding，预热成功才 ready。仅一个 Uvicorn 进程、一个 ORT session、两个真实占用名额。客户端断连不等于 CPU 已停，名额只能在实际 forward 结束后释放。运行只读挂载不代表网络出口已隔离，不能把普通 bridge 冒称无出口网络。
+
+镜像内 `/app/third-party/bge-small-zh-v1.5/` 提供模型许可全文、来源及核验依据。该目录不含权重；随服务携带模型声明不代表基础镜像、全部依赖或生产启用已经通过验收。
+
+### 15.3 校准和评估
+
+根入口复用生产事实/打分/编码实现；不下载模型，不覆盖已有输出目录。`INDEX`、`CALIBRATION`、`HIDDEN_HOLDOUT` 指向仓库外的冻结材料；`ENCODER` 是已经就绪的私有 origin，`MANIFEST` 指向与其 binding 相同的 Linux manifest；`CAL_OUT`、`EVAL_OUT` 必须是不同且尚不存在的外部目录。实验材料、向量和逐条报告不进入业务仓库：
+
+```sh
+bun run routing:calibrate --index "$INDEX" \
+  --dataset "$CALIBRATION" --manifest "$MANIFEST" \
+  --encoder "$ENCODER" --out "$CAL_OUT"
+bun run routing:evaluate --bundle "$CAL_OUT/bundle.json" \
+  --dataset "$HIDDEN_HOLDOUT" --encoder "$ENCODER" --out "$EVAL_OUT"
+```
+
+先锁定分组、数据哈希与全部阈值候选，再冻结 bundle 后评估未见留出；失败输出与 `run.json` 也保留在仓库外。任何 guard/parser/资产/数值/展示规则变化须生成新版本 bundle、重新校准和新留出，已暴露留出降为回归。合成质量记录不代表实际业务执行、自然泛化或启用授权；有已知实质误接的 bundle 不得开启 enforce，只能关闭或按 §12.2 保持零旁路 shadow，并保留失败等待审阅。仓库只保留实现、必要行为测试与精简验收结论。

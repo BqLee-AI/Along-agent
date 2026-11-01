@@ -12,7 +12,7 @@
     "test": "bun test --parallel=4 --path-ignore-patterns '**/test/integration/**' ./test",
     "test:unit": "bun test --parallel=4 --path-ignore-patterns '**/test/integration/**' ./test",
     "test:contracts": "bun test --parallel=4 ./test/contracts.test.ts",
-    "test:integration": "bun test --parallel=4 ./test/integration"
+    "test:integration": "bun test --parallel=4 --timeout 30000 ./test/integration"
   },
   "dependencies": {
     "@along/contracts": "workspace:*",
