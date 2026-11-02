@@ -7,6 +7,8 @@
 - **不包含**：实际供应商选型、完整 R1 产物验收、全 TS 后端迁移或通用恢复
 - **阶段标签**：正式 native 核心与 TS 能力层；验收按覆盖行为和环境分别声明
 
+> 协议与授权作用域：本文正式 v5/逐项按钮是现行/legacy；拟议 v6、新 profile、GoalResult 与受限旧恢复见 [design/20 §6、§8–§9](20-goal-scoped-delegation.md)。旧 native 严格拒绝 v6，不能换 wire 就扩旧 Run 权限；新 TS/native/Web 配套后才接纳新 profile。本次只定合同，不升级产物/安装。
+
 ## 1. 位置与分工（Required）
 
 仓颉从第一条真实 Agent 闭环起就是唯一宿主 Harness，不是 TS 通用 Agent 的候选第二实现。TS 是长期能力/业务层，不退役 API/worker，也不在工具内部隐藏完整 Agent。原因见 [ADR0009](../adr/0009-cangjie-harness-ts-capabilities.md)。

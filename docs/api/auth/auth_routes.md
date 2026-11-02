@@ -4,6 +4,8 @@
 >
 > 蓝图引用：B03；B06（v0 Web 单端）。
 
+> Proposed 演进：本人时区窄工具用例、单次时区不保存、退出/到期不撤销新已接纳委托与disabled阻止新动作见 [design/20 §4.1、§6、§8](../../design/20-goal-scoped-delegation.md)。不开放通用账户patch或新增认证端点；本页固定会话/服务端撤销/CSRF/安全只读重登保持，本规范不启用新能力。
+
 ## 1. 方案状态 [Required]
 
 - [Required] 鉴权方案为 Better Auth 自建 credential；v0 保留 GET /me。R1 新增窄接口见 §4，不挂库全部 handler，未列出的认证能力不开放。

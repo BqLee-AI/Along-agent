@@ -7,6 +7,8 @@
 - **不包含**：表字段 DDL（见 schema 组）、AgentEvent 语义（见 09）、Spike 标准（见 11）
 - **阶段标签**：v0 全链路；P1 起五缝全接口化后本篇增补接口但不改 v0 语义
 
+> 版本作用域：本文既有 SSE/断连/批准策略为现行与 legacy 合同；新 profile 的 v6 start/finish、SSE v2 结果及仅断订阅见 [design/20 §6.3、§8–§9](20-goal-scoped-delegation.md)（Proposed）。旧 v1 事件保持可读，TS/native/Web 必须配套，不能在旧严格 shape 暗塞字段；本次不改路由或运行行为。
+
 ## 标记约定
 
 Observed / Required / Proposed / Deferred 同 01。

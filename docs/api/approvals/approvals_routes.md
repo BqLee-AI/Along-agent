@@ -4,6 +4,8 @@
 >
 > 蓝图引用：B06（`presentation_hash` 三件套；24h 有效；重复确认回原 task；状态 pending→consumed|rejected|expired|superseded）；S0 #14 冻结 v0 只认按钮确认。
 
+> 授权作用域：本文为现行/legacy task批准，不是新委托必须逐项通过的入口。新profile正常目标直接用例和新增影响授权见 [design/20 §1、§3、§6–§7](../../design/20-goal-scoped-delegation.md)（Proposed）；本页hash/时限/原子消费保持，旧pending不自动消费，文档批准不套task统一24小时TTL，本规范不模拟confirm或改当前路由。
+
 ## 1. 路由
 
 | 方法 | 路径                              | 鉴权 | CSRF | 幂等键    | 说明                                      |

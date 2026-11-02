@@ -115,6 +115,8 @@
 
 不要求单独提交红色 commit 或合入失败测试；CI 检查最终行为和回归，不能仅凭绿色结果证明开发顺序。沿用现有 issue、Spec、PR 字段和合并门，不新增 TDD 文档、labels、审批或独立 CI 门。
 
+本人目标内委托的拟议合同见 [design/20](docs/design/20-goal-scoped-delegation.md) 与 #105 OpenSpec change。审阅/实现时区分正常自主、必要缺口、新增影响授权与硬拒绝；逐项按钮、wall必问及断流取消只约束现行/legacy profile，不能用旧文案断言把新目标拒绝当成功。保留所有有效的 owner、纯时间、事务、append-only、取消/回执、文件版本/许可及 unknown 覆盖，按 profile 更新授权行为，不以源码字符串重钉实现。真实模型语义正反例、真实 Web/native/PG/文件结果与纯规范校验分别举证；规范合入不启用权限、不归档未实施 change，五门不删。
+
 ### D1 依赖边界与变红证据
 
 - `bun run depcruise` 实际扫描 `apps packages`；`scripts/test/boundaries.test.ts` 使用 `bun:test` 运行真实 depcruise 的正反 fixture，属于 `bun run test:unit`，两者均由 `bun run verify` 执行。

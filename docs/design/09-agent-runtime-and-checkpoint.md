@@ -7,6 +7,8 @@
 - **不包含**：实际供应商选型、完整 R1 真实产物验收结论、任意崩溃无人值守恢复或通用 external exactly-once
 - **阶段标签**：业务与 Harness 明确分派；跨语言 CI 证明范围见 design/11 §4
 
+> profile 作用域：本文 v5、单 grant、逐项批准及断流取消继续描述现行/legacy。新可信 start、GoalResult、v6、服务端执行占有和受限旧恢复见 [design/20 §4–§9](20-goal-scoped-delegation.md)（Proposed）；唯一 Harness、累计预算、稳定结果和未知不重做保留，本次无业务实现。
+
 ## 标记约定
 
 Observed / Required / Proposed / Deferred 同 01；运行记录只写进对应验收记录或 PR，不混作长期能力保证。

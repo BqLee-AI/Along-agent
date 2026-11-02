@@ -6,6 +6,8 @@
 
 ## ToolGateway 边界
 
+> 授权作用域：下文v0提议工具、按钮唯一承诺和R1逐文件批准为现行/legacy。新profile的真实设置/创建/取消/文件目标工具由单一目录发布，正常委托直接执行，见 [design/20 §2、§6–§7](../design/20-goal-scoped-delegation.md)（Proposed）。不模拟confirm，不把扩大allowlist当实现；稳定身份、原子结果、精确版本/一次许可与unknown不重做保留。
+
 [Required] Agent 永不直调工具实现。调用路径唯一：
 
 ```text

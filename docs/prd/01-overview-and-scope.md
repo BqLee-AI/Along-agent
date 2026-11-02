@@ -2,6 +2,8 @@
 
 > 状态：草案 / 范围：产品定位、用户、P0–P5 范围切片、非目标、差异化 / 不包含：路由表与字段定义（见 api/schema）、Spike 细节（见 agent/04）/ 阶段：P0–P5
 
+> 授权作用域：下文 v0“点头/确认唯一入口”仅约束现行和 legacy profile。新目标合同见 [design/20](../design/20-goal-scoped-delegation.md)（Proposed）：本人委托内自主正常步骤，只问实质缺口或新增影响；本规范不启用权限。
+
 ## 产品定位
 
 - [Required] Along-agent 是云端多租户 SaaS：Web 先行，后用 Electron 套同一份 Next.js。
@@ -25,7 +27,7 @@
 
 ## 差异化三点（全落 P1）
 
-- [Required] 确认门一等公民：任何写入（建 task、调度、通知）必须经过 approval confirm；"好/嗯/行"不算确认。
+- [Required · legacy] 确认门保护旧批准路径的所见/hash/时限，不以“好/嗯/行”消费 pending。[Proposed · 新 profile] 目标内自主执行本人设置、明确提醒创建/取消与受管资料创建/修改，不把所有写入变成逐项审批；模型不直接排期/通知，仍走领域事务与真实回执。
 - [Required] 服务端确定性时间层：time-core 纯函数 normalize(wall_time,timezone_id,fold_choice,ruleset)→{fire_at_utc,offset,fold,ruleset_id}；LLM 只产出自然语言方案，不算时间。
 - [Required] 只追加事件账 + 可解释主动行为：task_events type / evidence_ref 可核对；未观测到的能力不作承诺引用，以自家可测指标为准。
 
@@ -43,6 +45,13 @@
 - 用户说清一件事和一个时间，服务端给出唯一触发瞬间，用户一次点头，到点私下响一次；任何一步没把握就停下来说明白，绝不报成功。
 - 取消已提交后触发请求数 = 0；超 15 分钟只标 missed 不补发；重复确认只回同一 task。
 - "明天"按服务端首次接收时刻 + 已确认时区解析一次并冻结；DST 不存在时刻拒收、歧义时刻追问两候选。
+
+### 本人委托助理的成功标准（Proposed，#104/#105）
+
+- 一次混合委托可检索资料、保存真实简报文件、创建明确提醒并核实结果；用户不需指定工具、抄内部 ID 或逐步批准。明确重写/取消不重复索同一授权。
+- 时间、对象、目的位置确有影响结果的缺口才问；资料可提供事实不能自己授权。只摘要不执行嵌入指令，按资料建提醒又可合法完成。
+- 严格 elapsed 从可信 UTC 锚计算，无关时区/时段不问；completed/partial/blocked/unknown 与实际任务/文件效果分开，语义误判不宣称消除。
+- 资源有界、显式停止和真实结果可核对；新 profile 才有新能力，旧 pending/快照/冻结展示不迁写或自动消费。实施验收见 [PRD 04](04-acceptance-open-questions.md#本人目标内委托105proposed)。
 
 ## 术语（本目录内）
 

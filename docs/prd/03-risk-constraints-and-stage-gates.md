@@ -2,6 +2,8 @@
 
 > 状态：草案 / 范围：v0 Top 风险、硬约束、可测指标、阶段准入准出、对外口径 / 不包含：Spike 执行步骤（见 agent/04）、部署操作（见 deploy）/ 阶段：P0–P2
 
+> 授权作用域：本篇批准指标约束现行/legacy，不把“全部写入按钮”保留为新产品策略。新委托自主/语义误判/unknown/停止与前向发布风险见 [design/20 §1–§10](../design/20-goal-scoped-delegation.md)（Proposed）；D/A、五门、纯时间/事务/append-only/取消回执和冻结展示不降级，24小时 task 批准不泛化到文档批准。
+
 ## Top3 风险
 
 - [Required] R1 时间语义算错：DST 不存在/歧义时刻、时区未确认却解析"明天"、展示层私自换算。对策：time-core 纯函数唯一权威；LLM 不算时间；展示层只读冻结字段；错误码 NONEXISTENT_LOCAL_TIME / AMBIGUOUS_LOCAL_TIME（带两候选）/ UNKNOWN_TIMEZONE / TZDB_UNAVAILABLE。

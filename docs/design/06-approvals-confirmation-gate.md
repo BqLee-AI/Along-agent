@@ -7,6 +7,8 @@
 - **不包含**：task 调度触发细则（见 08）、事件账词汇（见 07）、time-core 归一（见 05）；实现代码
 - **阶段标签**：v0 / P0（P1 起为三差异化之首常驻）
 
+> 授权作用域：本文“唯一承诺入口/所有写入按钮”仅约束现行 legacy 批准路径；新 profile 正常委托内直接用例及新增影响授权见 [design/20 §1、§3、§6–§7](20-goal-scoped-delegation.md)（Proposed）。原 pending 不自动消费，hash/所见/事务仍保留；文档批准不套 task 的统一24小时 TTL。本次不启用免批准。
+
 ## 引用
 
 - B06 §5 确认与 C 草稿；B03 §4.3 HITL；B02 §2.9 HITL；AF checkpoint 思想

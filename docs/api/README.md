@@ -6,6 +6,8 @@
 >
 > 标记说明：节内以 [Required] / [Proposed] / [Deferred] 标注确定性。[Required] 为 v0 必须遵守；[Proposed] 为推荐写法，可评审调整；[Deferred] 为明确未定事项，不猜。
 
+> Proposed 演进：本人委托的新 profile、真实直接工具、v6/SSE v2 目标结果和旧恢复见 [design/20 §4–§9](../design/20-goal-scoped-delegation.md)。本表仍是现行路由，不因规范新增端点或启用权限；逐项按钮/先选单登记/断流取消只约束现行/legacy，旧读取与安全门不变。
+
 ## 1. Base Path 与路由总数 [Required]
 
 - Base Path：`/api/v1`。下文路由表省略该前缀，如 `GET /me` 即 `GET /api/v1/me`。

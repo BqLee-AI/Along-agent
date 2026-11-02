@@ -7,6 +7,8 @@
 - **不包含**：LLM 提示词写法、SQL 建表、全 IANA tzdb、实现代码；客户端仅规定候选选择契约
 - **阶段标签**：v0 / P0（P1 起为三差异化之一常驻）
 
+> 时间作用域：本文现行 wall 入口/必问/按钮规则继续约束 legacy。新 profile 的可信设置事实、严格 elapsed/UTC 分支、过窗和 task/今日投影迁移见 [design/20 §4](20-goal-scoped-delegation.md)（Proposed）；纯函数、真实规则、DST、冻结显示及 typed readiness 不弱化，本次不改运行行为。
+
 ## 引用
 
 - B06 §3 时间入口、§4 归一函数；B02 §2.1（人话由入口翻完再递）；外部参考均不抄

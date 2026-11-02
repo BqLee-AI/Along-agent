@@ -4,6 +4,8 @@
 
 节内标记：Observed = 沿用业界既定做法；Required = v0 必须；Proposed = 推荐；Deferred = 延后。
 
+> Proposed 演进：本人默认时区保存/清除复用 identity 真实字段与公共用例，与工具接受结果原子提交，见 [design/20 §4.1、§6.1、§8](../design/20-goal-scoped-delegation.md)。单次时区不保存；普通退出/会话到期与账户禁用的执行资格分开，不新增任意账户patch，本规范不改当前表或会话实现。
+
 ## 设计依据
 
 - B03 会话/用户归 TS 侧，仓颉与 CangjieMagic 永不直连业务库 [B03]。
