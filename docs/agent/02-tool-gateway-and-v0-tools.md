@@ -40,7 +40,7 @@ assistant tool-loop -> ToolGateway.invoke({invocationId,toolId,args}, trusted ru
 
 `set_user_timezone` 使用 strict 输入 `{timezone_id:string|null}`，只接受现有规则包中的规范时区或有限别名；`null` 真正清除。owner、资源范围、修订与生命周期由 conversations 的冻结事实注入，不接受模型指定任意账户或额外字段。identity 的窄公共用例与本次接受结果、只追加审计处于同一个 PostgreSQL 事务；稳定调用重放返回原结果，同 slot 异参拒绝。没有批准、pending 或 consumed 的中间伪状态。
 
-成功结果为 `{kind:'timezone_setting',timezone_id,previous_timezone_id,alias_version}`，引用真实 invocation UUID，只证明这次保存或清除。未知时区为明确 `UNKNOWN_TIMEZONE`，不写偏好；新 profile 将确定性拒绝作为真实观察交还同一模型以产生 blocked 结果，不把拒绝当保存成功，也不自动重试原动作。unknown 仍立即停止，legacy 仍按原失败合同终结。
+成功结果为 `{kind:'timezone_setting',timezone_id,previous_timezone_id,alias_version}`，引用真实 invocation UUID，只证明这次保存或清除。`UNKNOWN_TIMEZONE` / `TZDB_UNAVAILABLE` 是输入/规则拒绝，不写偏好，可交同一模型如实反馈并提交 blocked/partial 结果，不自动重试原动作。`TOOL_FORBIDDEN` / `TOOL_DENIED` 是硬权限拒绝：native 不再预约或调用业务工具，TS 的原 Run/attempt 门也拒绝后续预约及已预约调用的执行；拒绝观察仍可见，`finish_goal` 仍可在原预算内如实终结，不伪造接受回执。unknown 立即停止，legacy 沿原失败合同终结。
 
 此 profile 只开放该设置和既有只读工具；不包含 `propose_task`、提醒直接写入、资料写入或 elapsed 能力。`finish_goal` 是同一 Harness 的控制出口，不是领域工具。TS 验证收据真实归属、成功状态和所有已接受设置均被目标结果列出，工具成功本身不证明整体目标完成。
 

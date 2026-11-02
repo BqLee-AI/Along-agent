@@ -32,6 +32,13 @@ import type { ConversationDeps, RunContext } from '../../src/modules/conversatio
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
 import { createHarnessModelTransport } from '../../src/modules/conversations/harness-model.js';
 import { seedSession, type SeededSession } from '../../src/modules/identity/seed.js';
+import { interruptedGoalResult } from '../../src/modules/conversations/goal-result.js';
+import type { ToolContext } from '../../src/modules/tools/contracts.js';
+import {
+  readInvocationSnapshots,
+  readRunInvocationStates,
+} from '../../src/modules/tools/invocations.js';
+import { readRunTimezoneSettings } from '../../src/modules/tools/query.js';
 import { loadTimeContext } from '../../src/modules/time/context.js';
 import { createIntegrationDatabase, type IntegrationDatabase } from '../integration/setup.js';
 import {
@@ -53,6 +60,7 @@ type Kind =
   | 'forged'
   | 'omit'
   | 'interrupt'
+  | 'revoke'
   | 'legacy'
   | 'unsupported';
 const ModelBodySchema = z.object({
@@ -90,6 +98,7 @@ interface Scenario {
   observations: Observation[];
   held: PromiseWithResolvers<void>;
   closed: PromiseWithResolvers<boolean>;
+  released: PromiseWithResolvers<void>;
 }
 
 let database: IntegrationDatabase;
@@ -109,6 +118,7 @@ function scenario(kind: Kind): Scenario {
     observations: [],
     held: Promise.withResolvers<void>(),
     closed: Promise.withResolvers<boolean>(),
+    released: Promise.withResolvers<void>(),
   };
   scenarios.set(value.id, value);
   return value;
@@ -136,7 +146,7 @@ function goal(description: string, answer: string, refs: string[] = []): GoalRes
     answer,
   });
 }
-function serveModel(res: ServerResponse, body: ModelBody): void {
+async function serveModel(res: ServerResponse, body: ModelBody): Promise<void> {
   const original = body.messages.findLast(
     (message) => message.role === 'user' && message.content.includes('timezoneCase:'),
   );
@@ -214,6 +224,14 @@ function serveModel(res: ServerResponse, body: ModelBody): void {
     res.once('close', () => value.closed.resolve(!res.writableEnded && res.destroyed));
     res.writeHead(200, { 'content-type': 'text/event-stream' });
     res.write(': waiting for explicit cancellation\n\n', () => value.held.resolve());
+    return;
+  }
+  if (value.kind === 'revoke') {
+    // A real accepted receipt has reached the second model request. The test
+    // disables the owner before releasing this attempted subsequent effect.
+    value.held.resolve();
+    await value.released.promise;
+    sendModelSse(res, reply('set_user_timezone', { timezone_id: 'Asia/Shanghai' }));
     return;
   }
   let result: GoalResult;
@@ -328,6 +346,7 @@ function input(value: Scenario, overrides: Record<string, unknown> = {}) {
     forged: '保存纽约时间为默认时区，然后报告真实收据。',
     omit: '保存纽约时间为默认时区，然后报告真实结果。',
     interrupt: '先保存纽约时间为默认时区，再回答当前设置。',
+    revoke: '先保存纽约默认时区，然后再改为上海时间。',
     legacy: '请仅回答，不修改任何默认时区。',
     unsupported: '请保存 Atlantis/Mars 默认时区；不支持则保留原值并如实报告。',
   };
@@ -743,6 +762,178 @@ for (const mode of ['local', 'http'] as const) {
     expect(await cancel(who, run.conversation_id, run.id, cancellation)).toEqual(stopped);
     expect(await (await message(who, body)).events).toEqual(events);
     expect(await view(who, run.conversation_id, run.id)).toEqual(stopped);
+    expect(await facts(who)).toEqual(frozen);
+    expect(value.transcript).toHaveLength(2);
+    await noUnrelatedEffects(who);
+  }, 30_000);
+
+  test(`D8.timezone-${mode}-revoke-accepted`, async () => {
+    const who = await actor(mode);
+    const other = await actor(mode);
+    const value = scenario('revoke');
+    const body = input(value);
+    const stream = await message(who, body);
+    await value.held.promise;
+    const runs = (
+      await database.pool.query<{
+        id: string;
+        conversation_id: string;
+        tools_allowlist: string[];
+        frozen_context: Pick<
+          ToolContext,
+          'confirmedTimezone' | 'anchorReceivedAtUtc' | 'receivedAtUtc' | 'foldChoice'
+        >;
+      }>(
+        "SELECT id,conversation_id,tools_allowlist,frozen_context FROM agent_runs WHERE owner_id=$1 AND status='running'",
+        [who.session.userId],
+      )
+    ).rows;
+    expect(runs).toHaveLength(1);
+    const run = runs[0]!;
+    const attempts = (
+      await database.pool.query<{ id: string; status: string; ended_at: Date | null }>(
+        'SELECT id,status,ended_at FROM run_attempts WHERE run_id=$1',
+        [run.id],
+      )
+    ).rows;
+    expect(attempts).toHaveLength(1);
+    const context: ToolContext = stream.context ?? {
+      ...run.frozen_context,
+      ownerId: who.session.userId,
+      conversationId: run.conversation_id,
+      runId: run.id,
+      attemptId: attempts[0]!.id,
+      requestId: randomUUID(),
+      allowlist: run.tools_allowlist,
+      authorizationRevision: 'delegation/1',
+      timeContext: deps.timeContext,
+    };
+    const receipts = await invocations(run.id);
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0]).toMatchObject({
+      tool_id: 'set_user_timezone',
+      state: 'completed',
+      outcome_kind: 'success',
+      result_version: 1,
+      accepted_result: {
+        status: 'ok',
+        result: {
+          kind: 'timezone_setting',
+          timezone_id: 'America/New_York',
+          previous_timezone_id: 'Asia/Shanghai',
+        },
+      },
+    });
+    expect(value.observations[0]?.invocation_id).toBe(receipts[0]!.invocation_id);
+    const acceptedPreference = await preferences(who);
+    expect(acceptedPreference.timezone_id).toBe('America/New_York');
+    let events: ThreadEvent[] = [];
+    try {
+      await database.pool.query("UPDATE users SET status='disabled' WHERE id=$1", [
+        who.session.userId,
+      ]);
+      value.released.resolve();
+      events = await stream.events;
+      const persisted = (
+        await database.pool.query<{ status: string; ended_at: Date | null; goal_result: unknown }>(
+          'SELECT status,ended_at,goal_result FROM agent_runs WHERE id=$1',
+          [run.id],
+        )
+      ).rows[0]!;
+      // This is the R1 Red: previously terminal accounting re-authorized the
+      // disabled owner, rolled back, and silently left this Run running.
+      expect(persisted.status).toBe('failed');
+      expect(persisted.ended_at).not.toBeNull();
+      const result = GoalResultSchema.parse(persisted.goal_result);
+      expect(result.status).toBe('partial');
+      expect(result.outcomes.find((item) => item.status === 'achieved')?.receipt_refs).toEqual([
+        receipts[0]!.invocation_id,
+      ]);
+      expect(result.outcomes.some((item) => item.status === 'not_done')).toBe(true);
+      expect(result.outcomes.flatMap((item) => item.receipt_refs)).toEqual([
+        receipts[0]!.invocation_id,
+      ]);
+      expect(
+        events.filter((event) =>
+          ['thread.completed', 'thread.failed', 'thread.cancelled'].includes(event.type),
+        ),
+      ).toEqual([]);
+      expect(events.some((event) => event.type === 'message.delta')).toBe(false);
+      expect(
+        (
+          await database.pool.query(
+            `SELECT c.kind,c.payload->'payload' AS payload FROM run_checkpoints c
+             JOIN run_attempts a ON a.id=c.attempt_id
+             WHERE a.run_id=$1 AND c.kind IN ('thread.completed','thread.failed','thread.cancelled')`,
+            [run.id],
+          )
+        ).rows,
+      ).toMatchObject([{ kind: 'thread.failed', payload: { goal_result: result } }]);
+      expect(
+        (
+          await database.pool.query<{ status: string; ended_at: Date | null }>(
+            'SELECT status,ended_at FROM run_attempts WHERE run_id=$1',
+            [run.id],
+          )
+        ).rows,
+      ).toEqual([{ status: 'failed', ended_at: expect.any(Date) }]);
+      expect(await preferences(who)).toEqual(acceptedPreference);
+      expect(await invocations(run.id)).toEqual(receipts);
+      const client = await database.pool.connect();
+      try {
+        for (const binding of [
+          context,
+          { ...context, ownerId: other.session.userId },
+          { ...context, conversationId: randomUUID() },
+          { ...context, runId: randomUUID() },
+        ]) {
+          await expect(readRunTimezoneSettings(client, binding)).rejects.toMatchObject({
+            httpStatus: 403,
+          });
+          await expect(readRunInvocationStates(client, binding)).rejects.toMatchObject({
+            httpStatus: 403,
+          });
+          await expect(
+            readInvocationSnapshots(client, binding, [receipts[0]!.invocation_id]),
+          ).rejects.toMatchObject({ httpStatus: 403 });
+        }
+        for (const binding of [
+          { ...context, ownerId: other.session.userId },
+          { ...context, conversationId: randomUUID() },
+          { ...context, runId: randomUUID() },
+        ])
+          await expect(interruptedGoalResult(client, binding, 'failed')).rejects.toMatchObject({
+            httpStatus: 403,
+          });
+      } finally {
+        client.release();
+      }
+      await expect(
+        getRunView(deps, who.session.userId, run.conversation_id, run.id),
+      ).rejects.toMatchObject({ httpStatus: 403 });
+      for (const path of [
+        `/api/v1/conversations/${run.conversation_id}/runs/${run.id}`,
+        `/api/v1/conversations/${run.conversation_id}`,
+      ])
+        expect((await request(who, path)).status).toBe(401);
+    } finally {
+      value.released.resolve();
+      // Fixture-only reset also lets existing teardown clean up a Red Run.
+      await database.pool.query("UPDATE users SET status='active' WHERE id=$1", [
+        who.session.userId,
+      ]);
+    }
+    // Only an authorized historical read may disclose the durable GoalResult.
+    // The revoked live stream intentionally contains just the earlier prefix.
+    const durableEvents = await history(who, run.conversation_id);
+    expect(durableEvents.slice(0, events.length)).toEqual(events);
+    const failed = await final(who, durableEvents, 'failed');
+    const frozen = await facts(who);
+    for (let repeat = 0; repeat < 2; repeat++) {
+      expect(await history(who, run.conversation_id)).toEqual(durableEvents);
+      expect(await view(who, run.conversation_id, run.id)).toEqual(failed.projection);
+      expect(await (await message(who, body)).events).toEqual(durableEvents);
+    }
     expect(await facts(who)).toEqual(frozen);
     expect(value.transcript).toHaveLength(2);
     await noUnrelatedEffects(who);

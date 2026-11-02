@@ -2,7 +2,7 @@ import type { PoolClient } from 'pg';
 import { GoalResultSchema, type GoalResult } from '@along/contracts';
 import type { ToolContext } from '../tools/contracts.js';
 import { readRunInvocationStates, readInvocationSnapshots } from '../tools/invocations.js';
-import { readRunTimezoneSettings } from '../tools/query.js';
+import { readRunTimezoneSettings, readRunInterruptionEvidence } from '../tools/query.js';
 import { stateConflict } from '../../http/errors.js';
 
 type Binding = Pick<ToolContext, 'ownerId' | 'conversationId' | 'runId'>;
@@ -47,8 +47,7 @@ export async function interruptedGoalResult(
   binding: Binding,
   status: 'failed' | 'cancelled',
 ): Promise<GoalResult> {
-  const settings = await readRunTimezoneSettings(client, binding);
-  const states = await readRunInvocationStates(client, binding);
+  const { settings, states } = await readRunInterruptionEvidence(client, binding);
   const unknown = states.some((row) => row.state === 'unknown');
   const outcomes: GoalResult['outcomes'] = settings.map((setting) => ({
     description:

@@ -10,6 +10,7 @@ import type { DocumentRunEvidence } from '../approvals/document-evidence.js';
 import type { ToolContext, TimezoneSettingPayload } from './contracts.js';
 import { parseResult, resultKind } from './result-schema.js';
 import { readAcceptedInvocationResult } from './accepted-result.js';
+import { readRunTerminalInvocationStates } from './invocations.js';
 import {
   authorizeSliceOrigin,
   authorizeContextSource,
@@ -26,11 +27,23 @@ export async function readRunTimezoneSettings(
   client: PoolClient,
   binding: RunBinding,
 ): Promise<Array<{ invocation_id: string } & Omit<TimezoneSettingPayload, 'kind'>>> {
-  await assertToolRunBinding(client, {
-    ownerId: binding.ownerId,
-    conversationId: binding.conversationId,
-    runId: binding.runId,
-  });
+  await assertToolRunBinding(client, binding);
+  return readTimezoneSettings(client, binding);
+}
+
+// Internal terminal projection, never a content/observation read boundary.
+// Binding is checked before reading any receipts; hydration retains the same
+// accepted-result version, outcome, payload and frozen-profile integrity checks.
+export async function readRunInterruptionEvidence(client: PoolClient, binding: RunBinding) {
+  const states = await readRunTerminalInvocationStates(client, binding);
+  const settings = await readTimezoneSettings(client, binding);
+  return { states, settings };
+}
+
+async function readTimezoneSettings(
+  client: PoolClient,
+  binding: RunBinding,
+): Promise<Array<{ invocation_id: string } & Omit<TimezoneSettingPayload, 'kind'>>> {
   const { rows } = await client.query<{
     invocation_id: string;
     tool_id: string;

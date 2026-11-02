@@ -1661,9 +1661,12 @@ export async function executeHarness(
           },
         });
       });
+      // Durable accounting does not authorize disclosure to the old connection.
+      // Reuse the ordinary owner/Run read gate after the terminal commit.
+      await withTransaction(pool, (client) => lockRun(client, context, false));
       await write(failed);
     } catch {
-      // Cancelled, suspended, stale or terminal authority wins; never overwrite.
+      // Stale/terminal authority wins; revoked readers receive no failure content.
     }
   } finally {
     await closeSession?.();

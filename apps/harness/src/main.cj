@@ -357,6 +357,7 @@ class Harness {
     var routingPolicy: JsonValue = JsonNull()
     var routingEligible: Bool = false
     var delegated: Bool = false
+    var hardDenied: String = ""
     let acceptedReceipts = HashSet<String>()
 
     init(pipe: Pipe) { this.pipe = pipe }
@@ -1039,6 +1040,12 @@ class Harness {
                 finishGoal(args)
                 return
             }
+            if (hardDenied != "") {
+                // Reject only the proposal locally: no reservation, invocation,
+                // or invented accepted receipt. Keep the original model budget.
+                message("system", "This Run stopped business actions after ${hardDenied}. The proposed tool call was not executed. Call finish_goal with truthful blocked/partial outcomes and preserve already accepted receipts.")
+                continue
+            }
             if (!tools.contains(name)) { finish("failed", "TOOL_DENIED"); return }
             if (toolRefs.size() >= 64) { finish("failed", "HARNESS_CONTEXT_LIMIT"); return }
             require(nextCall < SAFE_INTEGER)
@@ -1056,6 +1063,10 @@ class Harness {
                 checkpoint()
                 finish("failed", code)
                 return
+            }
+            if (delegated && status == "denied") {
+                let code = errorCheck(field(result.asObject(), "error"))
+                if (code == "TOOL_FORBIDDEN" || code == "TOOL_DENIED") { hardDenied = code }
             }
             if (status == "ok") { acceptedReceipts.add(id) }
             let approvalId = pendingApproval(result)

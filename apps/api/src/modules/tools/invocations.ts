@@ -8,7 +8,8 @@ import { forbidden, notFound, stateConflict, HttpError } from '../../http/errors
 import { readFrozenToolApproval } from '../approvals/tool-result.js';
 import {
   assertToolRunBinding,
-  lockToolRunBinding,
+  assertToolRunInterruptionBinding,
+  lockToolRunBinding as lockConversationToolBinding,
   lockToolEffectAcceptanceBinding,
 } from '../conversations/tool-binding.js';
 import type {
@@ -108,6 +109,23 @@ const permissionDenied: ToolResult = {
   status: 'denied',
   error: { code: 'TOOL_DENIED', message: 'tool not in allowlist' },
 };
+
+// Conversations owns execution qualification; tools owns the immutable result
+// ledger. Keep the permission-stop check under the same Run lock as acceptance.
+async function lockToolRunBinding(client: PoolClient, ctx: ToolContext) {
+  const binding = await lockConversationToolBinding(client, ctx);
+  if (!binding.canExecute || ctx.authorizationRevision !== 'delegation/1') return binding;
+  const result = await client.query<{ denied: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM tool_invocations
+       WHERE owner_id=$1 AND conversation_id=$2 AND run_id=$3 AND state='completed'
+         AND accepted_result->>'status'='denied'
+         AND accepted_result->'error'->>'code' IN ('TOOL_FORBIDDEN','TOOL_DENIED')
+     ) AS denied`,
+    [ctx.ownerId, ctx.conversationId, ctx.runId],
+  );
+  return { canExecute: !result.rows[0]!.denied };
+}
 
 function freezeContext(ctx: ToolContext): z.infer<typeof frozenSchema> {
   return {
@@ -358,6 +376,24 @@ export async function readRunInvocationStates(
   ctx: Pick<ToolContext, 'ownerId' | 'conversationId' | 'runId'>,
 ): Promise<RunInvocationState[]> {
   await assertToolRunBinding(client, ctx);
+  return readInvocationStates(client, ctx);
+}
+
+// Internal interruption accounting only. The terminal writer already holds the
+// current attempt -> Run locks; revoked execution eligibility must not erase
+// accepted facts. This grants neither tool execution nor public receipt reads.
+export async function readRunTerminalInvocationStates(
+  client: PoolClient,
+  ctx: Pick<ToolContext, 'ownerId' | 'conversationId' | 'runId'>,
+): Promise<RunInvocationState[]> {
+  await assertToolRunInterruptionBinding(client, ctx);
+  return readInvocationStates(client, ctx);
+}
+
+async function readInvocationStates(
+  client: PoolClient,
+  ctx: Pick<ToolContext, 'ownerId' | 'conversationId' | 'runId'>,
+): Promise<RunInvocationState[]> {
   const { rows } = await client.query(
     `SELECT invocation_id, call_key, tool_id, state, outcome_kind, approval_id FROM tool_invocations
      WHERE owner_id = $1 AND conversation_id = $2 AND run_id = $3

@@ -40,6 +40,22 @@ const timezoneTool = {
   },
   risk: 'low',
 };
+const observationTool = {
+  name: 'read_run_observation',
+  description: 'Read a page from an accepted invocation in this Run.',
+  parameters: {
+    type: 'object',
+    properties: {
+      source_invocation_id: { type: 'string', format: 'uuid' },
+      field: { type: 'string', enum: ['content', 'entries', 'matches', 'failures'] },
+      offset: { type: 'integer', minimum: 0 },
+      limit: { type: 'integer', minimum: 1 },
+    },
+    required: ['source_invocation_id', 'field', 'offset', 'limit'],
+    additionalProperties: false,
+  },
+  risk: 'low',
+};
 const call = (name: string, args: unknown): Model => ({
   content: null,
   tool_calls: [
@@ -467,3 +483,143 @@ test('accepted setting bootstrap retains receipt refs and partial/blocked/unknow
     expect(requests.some((request) => request.type === 'reserve')).toBe(false);
   }
 });
+
+for (const code of ['TOOL_FORBIDDEN', 'TOOL_DENIED']) {
+  for (const status of ['blocked', 'partial']) {
+    test(`hard denial ${code} exposes feedback but blocks later business dispatch before ${status} finish_goal`, async () => {
+      const receipts: string[] = [];
+      const partial = status === 'partial';
+      const result = {
+        status,
+        outcomes: [
+          ...(partial
+            ? [{ description: 'Saved Shanghai', status: 'achieved', receipt_refs: receipts }]
+            : []),
+          {
+            description: 'Forbidden source and later setting not executed',
+            status: 'blocked',
+            receipt_refs: [],
+          },
+        ],
+        clarification: null,
+        answer: '权限拒绝后没有继续执行；保留已接受的真实结果。',
+      };
+      const requests = await nativeCase({
+        start: { tools: [timezoneTool, observationTool] },
+        model: (request, index) => {
+          if (partial && index === 0)
+            return call('set_user_timezone', { timezone_id: 'Asia/Shanghai' });
+          const step = index - (partial ? 1 : 0);
+          if (step === 0)
+            return call('read_run_observation', {
+              source_invocation_id: randomUUID(),
+              field: 'content',
+              offset: 0,
+              limit: 10,
+            });
+          expect(
+            (request.messages as { content: string }[]).some((message) =>
+              message.content.includes(code),
+            ),
+          ).toBe(true);
+          if (step === 1) return call('set_user_timezone', { timezone_id: 'America/New_York' });
+          return call('finish_goal', result);
+        },
+        invoke: (request) => {
+          if (request.tool_id === 'read_run_observation')
+            return {
+              status: 'denied',
+              invocationId: request.invocation_id,
+              replayed: false,
+              error: { code, message: 'The referenced invocation is not authorized.' },
+            };
+          receipts.push(request.invocation_id as string);
+          return {
+            status: 'ok',
+            invocationId: request.invocation_id,
+            replayed: false,
+            result: {
+              kind: 'timezone_setting',
+              timezone_id: 'Asia/Shanghai',
+              previous_timezone_id: null,
+              alias_version: 'controlled/1',
+            },
+          };
+        },
+      });
+      const permitted = partial
+        ? ['set_user_timezone', 'read_run_observation']
+        : ['read_run_observation'];
+      expect(
+        requests.filter((request) => request.type === 'reserve').map((request) => request.tool_id),
+      ).toEqual(permitted);
+      expect(
+        requests.filter((request) => request.type === 'invoke').map((request) => request.tool_id),
+      ).toEqual(permitted);
+      expect(requests.filter((request) => request.type === 'finish_goal')).toHaveLength(1);
+      expect(requests.at(-1)).toMatchObject({ type: 'finish_goal', goal_result: result });
+    });
+  }
+}
+
+for (const code of ['UNKNOWN_TIMEZONE', 'TZDB_UNAVAILABLE']) {
+  test(`${code} rule denial remains visible for blocked completion while legacy denial still stops immediately`, async () => {
+    const prefsTool = {
+      name: 'get_user_prefs',
+      description: 'Read the saved default timezone.',
+      parameters: { type: 'object', properties: {}, additionalProperties: false },
+      risk: 'low',
+    };
+    const result = {
+      status: 'blocked',
+      outcomes: [
+        {
+          description: 'Unsupported timezone, original unchanged',
+          status: 'blocked',
+          receipt_refs: [],
+        },
+      ],
+      clarification: null,
+      answer: '不支持 Atlantis/Mars，原默认时区未更改。',
+    };
+    const invoke = (request: Request) => ({
+      status: 'denied',
+      invocationId: request.invocation_id,
+      replayed: false,
+      error: { code, message: 'Timezone unavailable or unsupported; original unchanged.' },
+    });
+    const requests = await nativeCase({
+      start: { tools: [timezoneTool, prefsTool] },
+      model: (request, index) => {
+        if (index === 0) return call('set_user_timezone', { timezone_id: 'Atlantis/Mars' });
+        expect(
+          (request.messages as { content: string }[]).some((message) =>
+            message.content.includes(code),
+          ),
+        ).toBe(true);
+        if (index === 1) return call('get_user_prefs', {});
+        return call('finish_goal', result);
+      },
+      invoke: (request) =>
+        request.tool_id === 'get_user_prefs'
+          ? {
+              status: 'ok',
+              invocationId: request.invocation_id,
+              replayed: false,
+              result: { kind: 'prefs', timezone_id: 'America/New_York' },
+            }
+          : invoke(request),
+    });
+    expect(
+      requests.filter((request) => request.type === 'invoke').map((request) => request.tool_id),
+    ).toEqual(['set_user_timezone', 'get_user_prefs']);
+    expect(requests.at(-1)).toMatchObject({ type: 'finish_goal', goal_result: result });
+    const legacy = await nativeCase({
+      start: { trusted_context: null, tools: [prefsTool] },
+      model: () => call('get_user_prefs', {}),
+      invoke,
+    });
+    expect(legacy.filter((request) => request.type === 'model')).toHaveLength(1);
+    expect(legacy.at(-1)).toMatchObject({ type: 'finish', outcome: 'failed', error: { code } });
+  });
+}

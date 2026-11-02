@@ -79,6 +79,22 @@ export async function assertToolRunBinding(
     validateFrozenWorkspace(binding.ownerId, row.frozen_context, binding);
 }
 
+// Internal interruption accounting only: immutable ownership/profile binding,
+// not current execution eligibility or authorization to disclose content.
+export async function assertToolRunInterruptionBinding(
+  client: PoolClient,
+  binding: Pick<ToolRunBinding, 'ownerId' | 'conversationId' | 'runId'>,
+): Promise<void> {
+  const result = await client.query(
+    `SELECT 1 FROM agent_runs r JOIN conversations c ON c.id=r.conversation_id
+     WHERE r.id=$1 AND r.owner_id=$2 AND c.owner_id=$2 AND r.conversation_id=$3
+       AND r.execution='harness'
+       AND r.frozen_context->>'authorization_revision'='delegation/1'`,
+    [binding.runId, binding.ownerId, binding.conversationId],
+  );
+  if (!result.rows[0]) throw forbidden('invalid terminal accounting conversation/Run binding');
+}
+
 // Match terminal writers: attempt before Run. Never acquire either after an
 // invocation lock. Holding both through the business transaction serializes
 // execution with cancellation; a historical read never grants execution.
