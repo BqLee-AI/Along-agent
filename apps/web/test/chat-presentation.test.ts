@@ -144,6 +144,7 @@ describe('composer consumer states', () => {
   it('disables new sends for controller-blocked and unresolved DST choices', () => {
     const ambiguousProposal: NonNullable<ConversationTask['ambiguousProposal']> = {
       raw_text: 'original',
+      source_run_id: '00000000-0000-4000-8000-000000000092',
       wall_time: '2026-11-01T01:30:00',
       timezone_id: 'America/New_York',
       ruleset_id: 'FIXTURE_V1',

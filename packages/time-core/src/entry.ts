@@ -84,11 +84,7 @@ function offsetAtUtc(ruleset: TimeRuleset, tz: string, epoch: number): number | 
   return offset;
 }
 
-function localDate(
-  ruleset: TimeRuleset,
-  tz: string,
-  utc: string,
-): { date: string; epoch: number } | null {
+function localDate(ruleset: TimeRuleset, tz: string, utc: string): { date: string } | null {
   const epoch = parseUtcEpoch(utc);
   if (epoch === null) return null;
   const offset = offsetAtUtc(ruleset, tz, epoch);
@@ -96,7 +92,7 @@ function localDate(
   const local = civilFromEpoch(epoch + offset);
   const mm = local.mo < 10 ? `0${local.mo}` : `${local.mo}`;
   const dd = local.d < 10 ? `0${local.d}` : `${local.d}`;
-  return { date: `${local.y}-${mm}-${dd}`, epoch };
+  return { date: `${local.y}-${mm}-${dd}` };
 }
 
 function shiftDate(date: string, days: number): string {
@@ -258,7 +254,7 @@ function classifyEntryInner(input: EntryInput): EntryClassifyResult {
     else if (/昨天/.test(text)) baseDate = shiftDate(anchor.date, -1);
     if (RELATIVE_DATE.test(text) && input.receivedAtUtc) {
       const received = localDate(input.ruleset, tz, input.receivedAtUtc);
-      if (!received || received.date !== anchor.date || received.epoch - anchor.epoch > 60) {
+      if (!received || received.date !== anchor.date) {
         return { class: 'clarify', reason: 'DATE_CHANGED', phrase_key: 'ASK_DATE_RECONFIRM' };
       }
     }

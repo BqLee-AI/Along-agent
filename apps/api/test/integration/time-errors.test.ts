@@ -176,6 +176,55 @@ maybe('A4 real HTTP and database boundaries', () => {
     });
   });
 
+  it('bad rules reject inherited timezone replies without consuming their source or idempotency key', async () => {
+    await withApi(pool, async (base, deps, ownerId) => {
+      const first = frames(
+        await (await post(base, { raw_text: '2027-01-02 15:20提醒我喝水' })).text(),
+      );
+      const source = first.find((event) => event.type === 'thread.started');
+      if (!source || source.type !== 'thread.started') throw new Error('missing source Run');
+      expect(
+        (
+          await pool.query('SELECT accepted_result FROM tool_invocations WHERE run_id=$1', [
+            source.payload.run_id,
+          ])
+        ).rows,
+      ).toEqual([
+        {
+          accepted_result: expect.objectContaining({
+            status: 'ok',
+            result: expect.objectContaining({ kind: 'clarify', reason: 'TIMEZONE_MISSING' }),
+          }),
+        },
+      ]);
+      const before = await counts(pool, ownerId);
+      const key = randomUUID();
+      const reply = { raw_text: '北京时间', conversation_id: source.payload.conversation_id };
+      deps.timeContext = unavailable;
+      const blocked = await post(base, reply, key);
+      expect(blocked.status).toBe(503);
+      expect(blocked.headers.get('content-type')).toContain('application/json');
+      expect(await blocked.json()).toMatchObject({ error: { code: 'TZDB_UNAVAILABLE' } });
+      expect(await counts(pool, ownerId)).toEqual(before);
+      deps.timeContext = healthy;
+      const repaired = await post(base, reply, key);
+      expect(repaired.status).toBe(200);
+      const resumed = frames(await repaired.text());
+      expect(resumed.some((event) => event.type === 'approval_required')).toBe(true);
+      const accepted = resumed.find((event) => event.type === 'thread.started');
+      if (!accepted || accepted.type !== 'thread.started') throw new Error('missing reply Run');
+      expect(
+        (
+          await pool.query(
+            `SELECT frozen_context->'reminderDateSource'->>'sourceRunId' AS source
+             FROM agent_runs WHERE id=$1`,
+            [accepted.payload.run_id],
+          )
+        ).rows,
+      ).toEqual([{ source: source.payload.run_id }]);
+    });
+  });
+
   it('authentication, CSRF, body, owner, missing resource and idempotency conflicts precede the rules gate', async () => {
     await withApi(pool, async (base, deps, ownerId) => {
       const started = await startConversationRun(
@@ -434,6 +483,7 @@ maybe('A4 real HTTP and database boundaries', () => {
       const original = await post(base, proposal, key);
       const failed = frames(await original.text());
       const conversationId = failed[0].payload.conversation_id;
+      let sourceRunId = failed[0].payload.run_id;
       const { rows: before } = await pool.query(
         'SELECT anchor_received_at_utc FROM conversations WHERE id = $1',
         [conversationId],
@@ -442,7 +492,18 @@ maybe('A4 real HTTP and database boundaries', () => {
         ['first', '2026-11-01T05:30:00.000Z', -14400, 0],
         ['second', '2026-11-01T06:30:00.000Z', -18000, 1],
       ] as const) {
-        const body = { ...proposal, conversation_id: conversationId, fold_choice };
+        if (fold_choice === 'second') {
+          const next = frames(
+            await (await post(base, { ...proposal, conversation_id: conversationId })).text(),
+          );
+          sourceRunId = next[0].payload.run_id;
+        }
+        const body = {
+          ...proposal,
+          conversation_id: conversationId,
+          fold_choice,
+          clarification_of_run_id: sourceRunId,
+        };
         expect((await post(base, body, key)).status).toBe(409);
         const response = await post(base, body);
         expect(response.status).toBe(200);

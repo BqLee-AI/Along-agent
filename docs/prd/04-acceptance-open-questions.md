@@ -10,6 +10,8 @@
   - 确认后从未排期、首次 worker 处理已超 15min 的 `saved/pending_schedule` 同样终结为 `missed`；遗留已失败排期命令不阻碍恢复。重复/并发处理只有一条 missed，无虚构 scheduled/sent/回执、无 provider 调用；状态/事件/队列失败全回滚，取消先提交不被覆盖（design/08 §5，#42）。历史已排期 A1 证据不代替本分支验证。
 - [Required] A4 时间错误：不存在本地时刻、重复未选、未知时区/显式别名分别 typed 422 失败；两候选由服务端提供，Web保留完整输入/时区，以 first/second 与新键重提议，不算 UTC、不当作确认。缺信息/模糊仍澄清。三 zone 的有限 2026–2027 本地区间及精确 UTC 边缘见 design/05 §5；范围外/规则不可用为 TZDB_UNAVAILABLE，未知别名不得因已有确认时区被忽略。认证/结构等边界后、SSE与新 run 前预检规则；已开流故障唯一失败终结，承诺零写/零调用。readyz共享实际规则/alias/版本与DB可达判断，不接受任意非空版本；真实缺失装载与旧冻结读取/确认/取消/执行隔离需取证，不能以mock代替（design/05 §9–§10、API §6）。
   - first/second 的待确认正文须同时展示选中的次数与冻结数值偏移；新 first 使用 v2，既有普通/second/cancel v1 不换模板。已确认显示有误的旧提议作废重来，不改旧快照或已建任务；规则缺失仍可读取并按冻结版本校验正确的新旧提议（design/05 §4、design/06 §2）。
+- [Required · #92] 提醒日期锚归属请求：旧会话的新明确今天/明天使用本轮服务端接纳锚；仅同 owner/conversation、全部未完成候选唯一且紧邻上一 user 消息、原输入/冻结来源可追溯的终态 done/failed 缺时区澄清或歧义失败可继承。整条明确时区别名/规范 ID 可补原缺时区；精确 fold 重提议须原文完全相同、实际候选时区及 `clarification_of_run_id` 指原失败 Run，不是确认。多候选、无关中间目标、旧数据缺来源或其他不明补充要求完整重述，不从模型历史凑日期（design/05 §3、§9.2）。
+  - 同日本地 120 秒不报 `DATE_CHANGED`，真正本地午夜 20 秒仍问具体日期；无时区先问，缺日期/时段/事项不建批准。新 Run 冻结 anchor/received 与 `reminderDateSource`，不新建表/迁移、不回填旧 Run；工具重放、批准恢复、历史只沿原冻结，未来时间/确认有效期不变。纯函数、真实 HTTP/隔离 PG、正式 native 与真实模型质量须分别取证，规范采纳或历史运行证据不代替新锚实施验收。
 - [Required] 验收环境：单镜像 all 角色 + compose 冒烟；Postgres 唯一事实源；Redis 缺席不得影响验收（Redis 已延后）。
 - [Required] CI 合并门：`static` 通过后，迁移约束、调度故障、契约双跑与 `compose-smoke` 四条下游只依赖 static、各自隔离并行；static 失败则全部下游不运行。五个 job 必须全部成功才允许合并，人工保护约定与 D1–D10 语义不变；Compose 可在其他下游失败前已消耗资源，但不共享用户数据或可变数据库（见 design/13 §3–§4、ADR 0007）。
 - [Required] 工具链验收遵循 Bun 1.4.2 冻结安装、Oxlint 1.89.0、Oxfmt 0.74.0 与 `bun:test`；`bun run verify` 是本地与 static 的共同阻塞入口。依赖优先构建后串行执行全部 workspace 类型检查，保留源码、测试与 Next route typegen。文件级并行保留隔离及 mock/时钟恢复；只有只读边界 fixture 可最多两个真实 CLI 并行，逐项拒绝断言、绿例两种扫描和清理前等待均须保留。`test:contracts` 包含 API 两种传输及契约包，`test:integration` 覆盖全部真实 PostgreSQL 16 集成文件，`test:scheduler` 保留 D9 指定集。D1/D2 原边界与断言不因工具或调度改变（见 design/01 §5、design/13 §3–§4、ADR 0006、0008）。
@@ -110,7 +112,7 @@
 ## 重开门槛（什么情况重开已定事项）
 
 - [Required] 取消后触发数破 0：重开 P1，Scheduler claim/lease/fencing 与 outbox 核对逻辑必须复审，人复核放行前不得发版。
-- [Required] missed 率或触发延迟持续超基线 2 倍：重开实验起步值（24h/15min/1min/30s/3 退避），以 P1 实测 rescues 为准重新冻结。
+- [Required] missed 率或触发延迟持续超基线 2 倍：重开实验起步值（24h/15min/30s/3 退避），以 P1 实测 rescues 为准重新冻结；提醒日期不按锚龄设重问阈值。
 - [Required] 仓颉实现/选库验证失败需修正适配或选库，不降为 TS 隐藏 Agent 或迁移全后端；旧 S1–S3 第二实现转正门不再适用。实际恢复保证按工具/故障窗口举证（design/11）。
 - [Required] presentation_hash 比对失败率异常（展示与快照系统性对不上）：停在待核对，重开 stream-protocol 版本对照（thread-stream.schema.json）与卡片渲染链。
 - [Required] /readyz 类型化错误（tzdb/别名表缺失）出现：服务保持不就绪，重开 deploy 单镜像构建流程，不得手动放行。

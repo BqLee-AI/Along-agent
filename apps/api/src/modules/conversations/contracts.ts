@@ -19,6 +19,8 @@ export interface RunContext {
   attemptId: string;
   requestId: string;
   inputText: string;
+  reminderInputText?: string;
+  reminderNeedsRestatement?: boolean;
   confirmedTimezone: string | null;
   anchorReceivedAtUtc: string;
   receivedAtUtc: string;

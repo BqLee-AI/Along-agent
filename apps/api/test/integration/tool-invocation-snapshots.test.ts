@@ -37,7 +37,7 @@ maybe('read-only accepted invocation bootstrap', () => {
       { pool, timeContext: loadTimeContext('fixture-v1') },
       ownerId,
       randomUUID(),
-      { raw_text: '你好', confirmed_timezone: 'Asia/Shanghai' },
+      { raw_text: '2026-11-02 09:20提醒我喝水', confirmed_timezone: 'Asia/Shanghai' },
       randomUUID(),
     );
     if (!started.context) throw new Error('expected a fresh run');

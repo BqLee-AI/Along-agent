@@ -17,6 +17,7 @@ import {
   ThreadEventSchema,
   type ThreadEvent,
 } from '@along/stream-protocol';
+import type { ReminderDateSource } from './reminder-date.js';
 
 export interface RunRow {
   id: string;
@@ -41,6 +42,7 @@ export interface FrozenContext {
   rulesetId: string;
   tzdbVersion: string;
   aliasVersion: string | null;
+  reminderDateSource?: ReminderDateSource;
   messageRefs?: string[];
   workspaceGrant?: WorkspaceGrant | null;
   workspaceSummary?: WorkspaceSummary | null;
@@ -166,8 +168,8 @@ export async function insertMessage(
   },
 ): Promise<string> {
   const { rows } = await client.query<{ id: string }>(
-    `INSERT INTO messages (id, owner_id, conversation_id, role, content, request_id)
-     VALUES (gen_random_uuid(), $1, $2, $3, $4, $5) RETURNING id`,
+    `INSERT INTO messages (id, owner_id, conversation_id, role, content, request_id, created_at)
+     VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, clock_timestamp()) RETURNING id`,
     [args.ownerId, args.conversationId, args.role, args.content, args.requestId],
   );
   const id = rows[0]?.id;

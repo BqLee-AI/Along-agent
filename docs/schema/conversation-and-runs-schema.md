@@ -30,16 +30,16 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 
 ### 字段
 
-| 字段                     | 类型          | 约束                       | 说明                                             |
-| ------------------------ | ------------- | -------------------------- | ------------------------------------------------ |
-| `id`                     | `uuid`        | primary key                | 会话 ID                                          |
-| `owner_id`               | `uuid`        | not null                   | 所属用户，查询必带                               |
-| `title`                  | `text`        | not null, default `''`     | 会话题，可由首问生成；不影响语义                 |
-| `status`                 | `text`        | not null, default `'open'` | 按 `open/closed` 约束                            |
-| `confirmed_timezone_id`  | `text`        | nullable                   | 本会话已确认时区；“明天”锚，未确认则 NULL        |
-| `anchor_received_at_utc` | `timestamptz` | nullable                   | 服务端首次接收时刻（“明天”锚钟），冻结后不再重算 |
-| `created_at`             | `timestamptz` | not null, default `now()`  | 创建时间                                         |
-| `updated_at`             | `timestamptz` | not null, default `now()`  | 更新时间                                         |
+| 字段                     | 类型          | 约束                       | 说明                                              |
+| ------------------------ | ------------- | -------------------------- | ------------------------------------------------- |
+| `id`                     | `uuid`        | primary key                | 会话 ID                                           |
+| `owner_id`               | `uuid`        | not null                   | 所属用户，查询必带                                |
+| `title`                  | `text`        | not null, default `''`     | 会话题，可由首问生成；不影响语义                  |
+| `status`                 | `text`        | not null, default `'open'` | 按 `open/closed` 约束                             |
+| `confirmed_timezone_id`  | `text`        | nullable                   | 会话先前明确时区默认值；不是日期锚，未确认则 NULL |
+| `anchor_received_at_utc` | `timestamptz` | nullable                   | 历史会话建立锚；保留旧事实，不用于新请求日期锚    |
+| `created_at`             | `timestamptz` | not null, default `now()`  | 创建时间                                          |
+| `updated_at`             | `timestamptz` | not null, default `now()`  | 更新时间                                          |
 
 ### 约束与索引
 
@@ -48,8 +48,8 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 
 ### 写入规则
 
-- [Required] `anchor_received_at_utc` 取服务端可信钟（BFF 盖戳），客户端 `client_sent_at` 只诊断不用。
-- [Required] 时区未确认时不解析相对日期；确认后冻结，会话内不再重算（B06 §3.5）。
+- [Required] 新消息接纳时由 conversations 在事务内读取 DB `clock_timestamp()`，将提醒请求 anchor 与本轮 received 分别冻结到 Run，不从客户端时刻、会话建立锚或模型生成值取锚；会话历史 `anchor_received_at_utc` 保持原事实，不回写或迁移。
+- [Required] 时区未确认先澄清，不猜设备/位置。先前明确时区可作新请求默认，但日期归属按 `design/05 §3` 的新请求/可信澄清合同判断，不因同会话永久复用日期。
 
 ## `messages`
 
@@ -88,25 +88,25 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 
 ### 字段
 
-| 字段                    | 类型          | 约束                                                        | 说明                                                                            |
-| ----------------------- | ------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `id`                    | `uuid`        | primary key                                                 | run ID                                                                          |
-| `owner_id`              | `uuid`        | not null                                                    | 所属用户，查询必带                                                              |
-| `conversation_id`       | `uuid`        | not null, references `conversations(id)` on delete restrict | 所属会话                                                                        |
-| `agent_revision`        | `text`        | not null                                                    | 不可变 agent 版本号（逻辑引用 `agent_revisions.revision`）                      |
-| `mode`                  | `text`        | not null                                                    | 按 `chat/task` 约束（v0 提醒路多为 `task`，纯问为 `chat`）                      |
-| `status`                | `text`        | not null, default `'running'`                               | 按 `running/suspended_approval/done/failed/cancelled` 约束                      |
-| `budget_max_iterations` | `integer`     | not null                                                    | 接受时冻结；harness 的累计模型迭代上限                                          |
-| `budget_max_tokens`     | `integer`     | not null                                                    | 可得 usage 的起步上限；缺 usage 不冒充可证明费用                                |
-| `execution`             | `text`        | not null, default business                                  | business/harness，禁止执行中切换                                                |
-| `tools_allowlist`       | `jsonb`       | not null, array                                             | 冻结服务端工具范围；历史 business 为[]，不伪造授权                              |
-| `frozen_context`        | `jsonb`       | harness 必须 object                                         | 接受时输入时间/规则；选工作区时另冻 workspaceGrant/workspaceSummary，不是推理链 |
-| `input_message_id`      | `uuid`        | nullable FK messages；harness 必填                          | 该 Run 实际接受的用户消息                                                       |
-| `waiting_checkpoint_id` | `uuid`        | nullable FK run_checkpoints                                 | 最后有效批准等待点                                                              |
-| `waiting_invocation_id` | `uuid`        | nullable                                                    | 同 Run 已接受批准提议调用                                                       |
-| `waiting_approval_id`   | `uuid`        | nullable                                                    | 原冻结批准；当前决议另从公共读取获取                                            |
-| `created_at`            | `timestamptz` | not null, default `now()`                                   | 创建时间                                                                        |
-| `ended_at`              | `timestamptz` | nullable                                                    | 结束时间                                                                        |
+| 字段                    | 类型          | 约束                                                        | 说明                                                                                    |
+| ----------------------- | ------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `id`                    | `uuid`        | primary key                                                 | run ID                                                                                  |
+| `owner_id`              | `uuid`        | not null                                                    | 所属用户，查询必带                                                                      |
+| `conversation_id`       | `uuid`        | not null, references `conversations(id)` on delete restrict | 所属会话                                                                                |
+| `agent_revision`        | `text`        | not null                                                    | 不可变 agent 版本号（逻辑引用 `agent_revisions.revision`）                              |
+| `mode`                  | `text`        | not null                                                    | 按 `chat/task` 约束（v0 提醒路多为 `task`，纯问为 `chat`）                              |
+| `status`                | `text`        | not null, default `'running'`                               | 按 `running/suspended_approval/done/failed/cancelled` 约束                              |
+| `budget_max_iterations` | `integer`     | not null                                                    | 接受时冻结；harness 的累计模型迭代上限                                                  |
+| `budget_max_tokens`     | `integer`     | not null                                                    | 可得 usage 的起步上限；缺 usage 不冒充可证明费用                                        |
+| `execution`             | `text`        | not null, default business                                  | business/harness，禁止执行中切换                                                        |
+| `tools_allowlist`       | `jsonb`       | not null, array                                             | 冻结服务端工具范围；历史 business 为[]，不伪造授权                                      |
+| `frozen_context`        | `jsonb`       | harness 必须 object                                         | 接受时输入时间/规则；新 Run 冻 reminderDateSource，工作区另冻 grant/summary，不是推理链 |
+| `input_message_id`      | `uuid`        | nullable FK messages；harness 必填                          | 该 Run 实际接受的用户消息                                                               |
+| `waiting_checkpoint_id` | `uuid`        | nullable FK run_checkpoints                                 | 最后有效批准等待点                                                                      |
+| `waiting_invocation_id` | `uuid`        | nullable                                                    | 同 Run 已接受批准提议调用                                                               |
+| `waiting_approval_id`   | `uuid`        | nullable                                                    | 原冻结批准；当前决议另从公共读取获取                                                    |
+| `created_at`            | `timestamptz` | not null, default `now()`                                   | 创建时间                                                                                |
+| `ended_at`              | `timestamptz` | nullable                                                    | 结束时间                                                                                |
 
 ### 约束与索引
 
@@ -118,6 +118,24 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 - [Required] 创建时冻结 execution、owner/conversation、revision、mode、预算、工具范围、上下文与输入引用；0015 trigger 禁止事后改变，终态 Run 不可改写。
 - [Required] harness suspended_approval 时三个 waiting 引用必须齐备；其他 harness 状态必须为空。TS 锁内进一步验证实际 owner/Run/已接受调用/批准对应关系，引用本身不作授权。
 - [Required] 已接受助手 delta 合并的消息、终态 checkpoint、attempt/Run 同事务；无助手输出的结构化失败不合成助手消息。取消不能覆盖已提交事实或伪撤销既成效果。预算失败保留已产出。
+
+### 提醒请求日期来源（#92）
+
+[Required] 复用既有 `frozen_context` JSON 与 0015 不可变约束，不新增列、表或迁移。新 Run 在原消息接纳事务冻结以下值；公开请求只增加可选 `clarification_of_run_id`（见 conversations API），不允许客户端提交内部来源 JSON。
+
+| JSON 字段                               | 语义                                                                                                          |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `anchorReceivedAtUtc`                   | 新请求为本轮 DB 接纳时刻；经核验的同一提醒澄清复制原请求锚，不从会话建立时刻取得                              |
+| `receivedAtUtc`                         | 本轮 DB 接纳时刻，始终独立冻结；供纯层按确认时区判定真实本地跨日                                              |
+| `reminderDateSource.version`            | 固定 `1`                                                                                                      |
+| `reminderDateSource.kind`               | `new` 为新请求，`clarification` 为已证明的原提醒澄清，`unresolved` 为关系不明、不授权创建提醒                 |
+| `reminderDateSource.inputMessageId`     | 权威原 user 消息；new/unresolved 为本轮输入，clarification 为原提醒输入，与本轮 `input_message_id` 区分       |
+| `reminderDateSource.sourceRunId`        | clarification 的实际来源 Run；同 owner/conversation、终态 done/failed、紧邻上一 user 消息                     |
+| `reminderDateSource.sourceInvocationId` | clarification 所依据的真实已接受调用：`TIMEZONE_MISSING` 澄清或 `AMBIGUOUS_LOCAL_TIME` 候选失败；不是模型自报 |
+
+conversations 验证消息与 Run 关系，tools 公共来源投影提供实际接受结果；检索同 owner/conversation 全部未完成候选，排除已被后继 `sourceRunId` 引用的源，恰好一个且满足紧邻关系才继承。整条明确时区回复可补原缺时区；fold 必须显式来源引用、原文完全相同及实际候选时区/结构化选择。多个候选、无关中间 user 目标、缺/坏来源及其他不明补充要求完整重述，不猜最新 Run。不存在“终态 Run 自动等于提醒已完成”的推导：仅实际未完成澄清/候选失败属于此候选集合。
+
+gateway 读取当前 Run 的持久来源，约束日期表达等于权威原输入、`raw_time_text` 为原文子串；澄清 `note` 也须为原文子串。所有时区/本地日期运算仍由纯层执行。同 Run 工具/重放、批准恢复及只读历史只消费既有冻结值；缺来源旧 Run 不回填，其历史执行合同保持，不能被新消息用作继承证据。批准/任务快照、未来时间和有效期检查不变。
 
 ## R2-A 上下文策略（#83）
 
@@ -227,16 +245,16 @@ snapshot2 原字段/集合不变，typed views/context_slice 不写入快照正�
 
 ### 字段
 
-| 字段              | 类型          | 约束                                     | 说明                                                                                                                                |
-| ----------------- | ------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `owner_id`        | `uuid`        | not null, references `users(id)`         | 所属用户                                                                                                                            |
-| `idempotency_key` | `text`        | not null                                 | 客户端键；缺省回退 body `idempotency_key` 或 `request_id`                                                                           |
-| `request_hash`    | `text`        | not null                                 | business 保持历史材料；无workspace harness域为harness/v1，有workspace为harness/workspace/v2并追加workspace_id；同owner/key异输入409 |
-| `conversation_id` | `uuid`        | not null, references `conversations(id)` | 命中的会话                                                                                                                          |
-| `run_id`          | `uuid`        | not null, references `agent_runs(id)`    | 命中的 run                                                                                                                          |
-| `user_message_id` | `uuid`        | nullable, references `messages(id)`      | 该次用户消息                                                                                                                        |
-| `created_at`      | `timestamptz` | not null, default `now()`                | 创建时间                                                                                                                            |
-| `expires_at`      | `timestamptz` | not null                                 | 24h 重放窗口                                                                                                                        |
+| 字段              | 类型          | 约束                                     | 说明                                                                                                                            |
+| ----------------- | ------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `owner_id`        | `uuid`        | not null, references `users(id)`         | 所属用户                                                                                                                        |
+| `idempotency_key` | `text`        | not null                                 | 客户端键；缺省回退 body `idempotency_key` 或 `request_id`                                                                       |
+| `request_hash`    | `text`        | not null                                 | business 保持历史材料；harness沿原域/workspace绑定；提供clarification_of_run_id时追加来源引用，省略不追加；同owner/key异输入409 |
+| `conversation_id` | `uuid`        | not null, references `conversations(id)` | 命中的会话                                                                                                                      |
+| `run_id`          | `uuid`        | not null, references `agent_runs(id)`    | 命中的 run                                                                                                                      |
+| `user_message_id` | `uuid`        | nullable, references `messages(id)`      | 该次用户消息                                                                                                                    |
+| `created_at`      | `timestamptz` | not null, default `now()`                | 创建时间                                                                                                                        |
+| `expires_at`      | `timestamptz` | not null                                 | 24h 重放窗口                                                                                                                    |
 
 ### 约束与索引
 

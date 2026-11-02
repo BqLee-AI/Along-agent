@@ -54,6 +54,7 @@ import { requireHistoryRun } from './history-repository.js';
 import { ensureRunContextPolicy } from './context-policy.js';
 import { insertRoutingPolicy } from './routing-checkpoints.js';
 import { routingRuntimeOf } from './harness-config.js';
+import { acceptReminderDate } from './reminder-date.js';
 
 const AGENT_REVISION = 'assistant/r1';
 const BUSINESS_MAX_ITERATIONS = 10;
@@ -89,9 +90,11 @@ function requestHashOf(input: {
   fold: string;
   execution: ExecutionKind;
   workspaceId?: string;
+  clarificationOfRunId?: string;
 }): string {
   const material = [input.conversationId ?? null, input.text, input.timezone, input.fold];
   if (input.workspaceId !== undefined) material.push(input.workspaceId);
+  if (input.clarificationOfRunId !== undefined) material.push(input.clarificationOfRunId);
   const canonical = JSON.stringify(material);
   return createHash('sha256')
     .update(
@@ -133,6 +136,9 @@ export async function startConversationRun(
     fold: input.fold_choice,
     execution,
     ...(input.workspace_id !== undefined ? { workspaceId: input.workspace_id } : {}),
+    ...(input.clarification_of_run_id
+      ? { clarificationOfRunId: input.clarification_of_run_id }
+      : {}),
   });
   const pool = requirePool(deps);
 
@@ -178,27 +184,24 @@ export async function startConversationRun(
         if (found.status !== 'open') throw stateConflict('conversation closed') as HttpError;
         conversation = found;
       }
-      // Only new proposal turns need rules. Reads, cancellation and stored
-      // idempotent results keep their own existing boundaries.
-      if (execution === 'business' && findReminderDirective(text) >= 0 && !CANCEL_INTENT.test(text))
-        requireTimeContext(deps.timeContext);
+      const acceptedClock = (await client.query<{ now: Date }>('SELECT clock_timestamp() AS now'))
+        .rows[0]?.now;
+      if (!acceptedClock) throw new Error('database clock unavailable');
+      const receivedAtUtc = utcSecondIso(acceptedClock);
       if (!conversation) {
-        const anchorIso = (await client.query<{ now: Date }>('SELECT now() AS now')).rows[0]?.now;
-        if (!anchorIso) throw new Error('database clock unavailable');
+        const anchorIso = acceptedClock;
         conversation = await createConversation(client, {
           ownerId,
           anchorIso: utcSecondIso(anchorIso),
           title: text.slice(0, 40),
         });
       }
+      await client.query('SELECT id FROM conversations WHERE id=$1 FOR UPDATE', [conversation.id]);
 
       let confirmedTimezone = timezone ?? conversation.confirmed_timezone_id;
       if (!conversation.confirmed_timezone_id && timezone) {
         await freezeConversationTimezone(client, conversation.id, timezone);
         confirmedTimezone = timezone;
-      }
-      if (!conversation.anchor_received_at_utc) {
-        throw stateConflict('conversation anchor missing') as HttpError;
       }
 
       const userMessageId = await insertMessage(client, {
@@ -208,6 +211,28 @@ export async function startConversationRun(
         content: text,
         requestId,
       });
+      const reminderDate = await acceptReminderDate(client, {
+        ownerId,
+        conversationId: conversation.id,
+        inputMessageId: userMessageId,
+        text,
+        receivedAtUtc,
+        foldChoice: input.fold_choice,
+        confirmedTimezone,
+        ...(input.clarification_of_run_id
+          ? { clarificationOfRunId: input.clarification_of_run_id }
+          : {}),
+      });
+      // Resolve inherited reminders before the rules gate; a failure rolls back
+      // admission without consuming the source or reserving the retry key.
+      const reminderText = reminderDate.originalText ?? text;
+      if (
+        execution === 'business' &&
+        findReminderDirective(reminderText) >= 0 &&
+        !CANCEL_INTENT.test(reminderText)
+      )
+        requireTimeContext(deps.timeContext);
+      confirmedTimezone = reminderDate.timezone ?? confirmedTimezone;
       const runId = randomUUID();
       const attemptId = randomUUID();
       const mode =
@@ -216,7 +241,6 @@ export async function startConversationRun(
           : findReminderDirective(text) >= 0 || CANCEL_INTENT.test(text)
             ? 'task'
             : 'chat';
-      const receivedAtUtc = utcSecondIso(new Date());
       const maxIterations =
         execution === 'harness' ? deps.harness!.maxIterations : BUSINESS_MAX_ITERATIONS;
       const maxTokens = execution === 'harness' ? deps.harness!.maxTokens : BUSINESS_MAX_TOKENS;
@@ -230,12 +254,13 @@ export async function startConversationRun(
           : undefined;
       const frozenContext = {
         confirmedTimezone,
-        anchorReceivedAtUtc: utcSecondIso(conversation.anchor_received_at_utc),
+        anchorReceivedAtUtc: reminderDate.anchor,
         receivedAtUtc,
         foldChoice: input.fold_choice,
         rulesetId: deps.timeContext.ruleset_id,
         tzdbVersion: deps.timeContext.tzdb_version,
         aliasVersion: deps.timeContext.available ? deps.timeContext.aliases.version : null,
+        reminderDateSource: reminderDate.source,
         ...(messageRefs ? { messageRefs } : {}),
         ...(workspaceGrant ? { workspaceGrant, workspaceSummary } : {}),
       };
@@ -288,8 +313,10 @@ export async function startConversationRun(
           attemptId,
           requestId,
           inputText: text,
+          ...(reminderDate.originalText ? { reminderInputText: reminderDate.originalText } : {}),
+          ...(reminderDate.source.kind === 'unresolved' ? { reminderNeedsRestatement: true } : {}),
           confirmedTimezone,
-          anchorReceivedAtUtc: utcSecondIso(conversation.anchor_received_at_utc),
+          anchorReceivedAtUtc: reminderDate.anchor,
           receivedAtUtc,
           foldChoice: input.fold_choice,
           maxIterations,
@@ -570,8 +597,17 @@ async function executeBusinessTurn(
     await cancelRun(pool, session);
     return;
   }
+  if (session.context.reminderNeedsRestatement) {
+    await completeClarify(
+      pool,
+      session,
+      write,
+      '请完整重述这条提醒的具体日期、时间、时区和事项；不能确定它与原请求的关系。',
+    );
+    return;
+  }
 
-  const text = session.context.inputText;
+  const text = session.context.reminderInputText ?? session.context.inputText;
   const wantsReminder = findReminderDirective(text) >= 0;
   const wantsCancel = CANCEL_INTENT.test(text);
 

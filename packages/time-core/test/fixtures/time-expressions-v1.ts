@@ -403,10 +403,15 @@ export const TIME_EXPRESSIONS_V1: ExpressionRow[] = [
     expr_id: 'e40',
     text: '明天 9:20',
     anchor_received_at_utc: A,
-    received_at_utc: '2026-10-16T15:22:30Z',
+    received_at_utc: '2026-10-16T15:22:00Z',
     confirmed_tz: S,
-    expect: 'clarify',
-    expect_detail: { reason: 'DATE_CHANGED' },
+    expect: 'normalize_ok',
+    expect_detail: {
+      wall_time: '2026-10-17T09:20:00',
+      timezone_id: S,
+      fold: 'none',
+      fire_at_utc: '2026-10-17T01:20:00Z',
+    },
   },
   {
     expr_id: 'e41',
