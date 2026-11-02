@@ -6,6 +6,8 @@
 
 ## 定位
 
+> 作用域：本篇“只提议/必须approval/缺时区必问”仅描述现行/legacy。新profile中，模型理解本人委托并自主选择正常步骤，TS仍独占时间计算/业务提交/事实；严格elapsed无需无关时区，见 [design/20 §1–§4、§6](../design/20-goal-scoped-delegation.md)（Proposed）。本次不改运行行为或将模型语义当确定证明。
+
 [Required] Along 助理 Agent 是用户在线对话的唯一推理编排者。它负责理解用户意图、调用白名单工具取数、产出提议（proposal）与澄清问句；它不负责确定时间、不负责落盘承诺、不负责触达用户。
 
 ```text

@@ -15,7 +15,7 @@
 | 4    | [风险约束与阶段门](prd/03-risk-constraints-and-stage-gates.md) | Top3 风险、指标、准入准出、不承诺口径                             |
 | 5    | [验收与待决事项](prd/04-acceptance-open-questions.md)          | v0/R1/R2-A 验收、R2-B 默认关闭路由合同、Deferred 与重开门槛       |
 
-## 二、总体设计（真源，19 篇）
+## 二、总体设计（真源，20 篇）
 
 | 序号 | 文档                                                                     | 作用                                                                                                                              |
 | ---- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
@@ -38,6 +38,7 @@
 | 17   | [R1 会话历史与只读恢复](design/17-r1-conversation-history.md)            | #69 服务端会话发现、原话/多 Run、稳定分页及零执行恢复；#91 当前 Harness 提醒完整冻结审阅、明确确认并继续，不扩展 business 或文档  |
 | 18   | [R2-A 单 Run 有界上下文](design/18-r2a-harness-context.md)               | #83 四种额度、可信计量与未知输入的后验超额边界、不可变策略、来源投影/分页回取及有界批准恢复；实现、受控消费者、真实模型分级取证   |
 | 19   | [R2-B 有限只读意图路由](design/19-r2b-readonly-intent-routing.md)        | #88：BGE INT8、三类只读、v5仓颉首轮决议、默认关闭、来源/资产/落盘原子性与逐意图验证；含配置、服务及校准入口，不自动授权接管       |
+| 20   | [本人目标内委托与授权](design/20-goal-scoped-delegation.md)              | Proposed：自主/缺口/升级/硬拒绝、可信时间与接续、真实效果、执行占有和 legacy 前向迁移；不启用权限                                 |
 
 活动列表为空与历史创建事实、批量请求部分完成及标题序号的证据边界见[design/09 §5](design/09-agent-runtime-and-checkpoint.md#5-toolgateway-交互required)。
 
@@ -76,7 +77,7 @@ R2-B 的完整目标及多轮自主查询边界见[design/19 §4、§6](design/1
 | 6    | [对话运行与预算](agent/05-chat-runtime-flow-and-budget.md)  | Run/attempt/调用边界、native 累计预算、同 Run 批准恢复与取消       |
 | 7    | [评测夹具](agent/06-eval-fixtures.md)                       | 50 条时间表达集、200 卡片集版本化、指标口径                        |
 
-## 六、Demo、收口规划与验收记录（16 篇）
+## 六、Demo、收口规划与验收记录（17 篇）
 
 | 序号 | 文档                                                                             | 作用                                                                                          |
 | ---- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
@@ -96,6 +97,7 @@ R2-B 的完整目标及多轮自主查询边界见[design/19 §4、§6](design/1
 | 14   | [2026-10-31 R2-B 候选实验记录](demo/r2b-embedding-evidence-2026-10-31.md)        | 七版本离线CPU实测摘要、冻结材料与模型哈希、已知错误及独立性限制；不冒充正式服务或自然流量验收 |
 | 15   | [#91 对话内提醒确认收口计划](demo/inline-reminder-closeout-plan.md)              | 已有证据的版本边界、真实文档/后继补验、隔离范围与独立归档 PR 要求                             |
 | 16   | [2026-11-02 对话内提醒确认验收](inline-reminder-verification-2026-11-02.md)      | #91 分版本证据、正式文档独立授权/继续、真实并发后继与 15/19 表只读核对                        |
+| 17   | [助理能力与授权模型重构方案](demo/agent-capability-refactor-plan.md)             | Proposed：委托内自主执行、可信上下文、真实工具/产物、必要澄清、停止与兼容迁移；不启用新权限   |
 
 ## 七、References（3 篇）
 
@@ -108,6 +110,7 @@ R2-B 的完整目标及多轮自主查询边界见[design/19 §4、§6](design/1
 ## 八、OpenSpec 行为契约与 ADR
 
 - [OpenSpec 说明](../openspec/README.md)：`openspec/specs/` 为可验收行为契约真源（SHALL + Scenario），`docs/design/` 为设计真源；spec 只写行为并引用 design 章节，不复制字段/路由表。
+- [本人目标内委托（#105）](design/20-goal-scoped-delegation.md) 是#104首阶段Proposed合同，见 [change](../openspec/changes/refactor-assistant-capability-authorization/proposal.md) 与 [任务](../openspec/changes/refactor-assistant-capability-authorization/tasks.md)。授权修订、真实阶段能力和冻结执行生命周期独立：正常步骤自主可先以request-bound交付，最终server-owned须独立真实验收；旧/先前Run不随部署升级改义，不对模型/页面虚报能力。PRD、Agent、API/schema及仓库规则同步，不将文档/历史绿当新能力已实现，不提前归档、关闭或建后续议题。
 - [会话与 Web 任务体验主规格](../openspec/specs/conversations/spec.md)约束入口、真实状态、显式动作、流式对话和一致首屏；[体验设计与实施归档](../openspec/changes/archive/2026-10-30-close-r1-web-task-experience/)保留方案、任务及分版本证据。
 - [ADR 决策记录](adr/README.md)：0000 模板、0001–0005 种子 ADR、[0006 Bun + Ox 工具链](adr/0006-bun-ox-toolchain.md)（取代 0002）、[0007 CI 关键路径局部修订](adr/0007-ci-critical-path.md)（调整 0006 的编排/失败传播）及 [0008 static 内部调度](adr/0008-static-scheduling.md)（局部修订 0007 的内部并发边界）；Bun/Ox 选型和五门全成功不变，冻结决策正文保留，改口径另起新 ADR。
 - [ADR0009](adr/0009-cangjie-harness-ts-capabilities.md) 确定仓颉唯一 Harness/TS 长期能力，并局部修订0003的 outbox/确认事务绝对范围；历史 ADR/验收保留其适用边界。同步公共用例/DTO、只读投影、确认创建/取消单事务和可靠异步 outbox 分列，D1 不证明 SQL 所有权。正式实现与分级验收见 design/09/11，[native 构建/运行说明](../apps/harness/README.md) 不等于真实 provider/完整 R1 验收。

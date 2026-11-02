@@ -2,6 +2,8 @@
 
 > 状态：既有 task 与 R1 独立文档批准 schema 合同。范围：`approvals`、`approval_revision_requests`、`document_approvals`、`document_approval_decisions`、`tasks`、`task_events`、`outbox`、`notifications`；合同不表示迁移演练或真实模型/用户材料验收已通过。不包含：重复提醒、日历授权、投递对账网关（v1 盒子）。
 
+> Proposed 演进：tasks直接来源`source_invocation_id`与旧`source_approval_id`分别受约束，新增可空`time_basis`不回填历史；仅严格UTC elapsed依据且UTC/offset0/fold0分支允许tzdb_version空，其余时间字段/真实规则身份继续约束，见 [design/20 §4.3、§6–§7](../design/20-goal-scoped-delegation.md)。旧批准只属legacy，新正常写不制造consumed批准；文档无task统一24小时TTL。事务、append-only/回执保留，本规范不实施DDL。
+
 ## 设计依据
 
 - B06 §5 确认/C 草稿、`pending_confirmation` 一行定义；§6 R 正式表与状态机；§9 取消优先与安全指标 [B06]。

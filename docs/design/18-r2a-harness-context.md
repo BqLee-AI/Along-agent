@@ -5,6 +5,8 @@
 > 不包含：R2-B 路由、R3 跨窗口记忆、R4 长期记忆、LLM 摘要、任意崩溃恢复、多 Agent 或安装升级。
 > 阶段标签：R2-A；行为真源见 [agent-runtime](../../openspec/specs/agent-runtime/spec.md)、[tool-gateway](../../openspec/specs/tool-gateway/spec.md)、[workspaces](../../openspec/specs/workspaces/spec.md)，分级证据见 [归档清单](../../openspec/changes/archive/2026-10-30-manage-harness-context/tasks.md)，运行职责沿用 [09](09-agent-runtime-and-checkpoint.md)。
 
+> 演进作用域：四种额度、完整 snapshot2 与来源事实保留。本文现行批准等待/单 grant/v5 的授权策略不限制新委托的正常步骤；新 profile 与可信接续见 [design/20 §4–§9](20-goal-scoped-delegation.md)（Proposed）。不新增 suspended_input、输入长等待、snapshot3 或系统自建 Run 绕预算；旧事实回取不是新执行/新回读，本次不改运行权限。
+
 ## 1. 决定、事实与驱动力
 
 [Required] 采用独立输出额度、完整请求计量、确定性有来源投影和原事实按需读取。仓颉唯一决定上下文选择、行动、预算、等待与停止；TS 提供计量、可信来源、ToolGateway、当前授权、批准和持久化，不增加 TS agent loop。外部参考、用户消息、工具正文与投影都是资料，不是系统授权。

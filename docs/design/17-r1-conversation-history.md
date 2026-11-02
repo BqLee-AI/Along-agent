@@ -5,6 +5,8 @@
 > 不包含：#70视觉/全站目标导航、账户机制修改、搜索、第二份任务事实表、自动执行恢复及R2。
 > 阶段：R1 日常可用性第三步；行为归 conversations capability，既有执行、授权和身份合同不变。
 
+> profile作用域：历史GET零执行对全部Run不变。手动资料/逐项批准属现行/legacy，离开断流也适用于早期request-bound；新目标/接续与冻结生命周期见 [design/20 §1、§5–§9](20-goal-scoped-delegation.md)（Proposed）。只有server-owned仅断订阅，旧/先前Run不随新部署改义；新界面不消费旧pending、不回填权能或重连自动POST。
+
 ## 1. 结论与事实依据
 
 Required：清空临时状态且不保留旧URL，退出后同账户登录，仍能由服务端找到原会话、原话、指定Run、全部可见回复、批准及结果。历史导航不得产生执行或自动业务POST。

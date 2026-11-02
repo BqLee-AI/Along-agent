@@ -2,6 +2,8 @@
 
 > 状态：业务与正式 Harness 存储合同。范围：对话/Run/attempt、只追加事件/有限快照、冻结执行权威与调用接受结果。不包含：任意崩溃自动恢复或通用 exactly-once。TS 长期持有 PostgreSQL 与事实，仓颉组织循环和本次上下文（design/09/11）。
 
+> Proposed演进：Run独立冻结授权修订、实际能力及execution_lifecycle，持久事实供可信start和只读投影；早期request-bound不因部署变server-owned，见 [design/20 §1、§4–§9](../design/20-goal-scoped-delegation.md)。旧Run/pending/快照/模板/accepted result不迁写或扩权，保持snapshot2，不增输入长等待/目标表/模型去重层；新SSE结果显式v2，本规范不实施迁移或后台。
+
 ## 设计依据
 
 - B03 §4.1 在线对话数据流：BFF 拉上下文 → 调 Agent → SSE → 落库本轮对话 [B03]。

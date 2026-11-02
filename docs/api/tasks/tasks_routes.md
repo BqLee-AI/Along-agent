@@ -4,6 +4,8 @@
 >
 > 蓝图引用：B06（R 状态机 saved→pending_schedule→scheduled→fired|missed→cancel 路；超 15min 标 missed 不补发；取消后触发数=0 一级指标；06 喝水 task.kind=notify_only 不走 LLM 先验调度）。
 
+> Proposed 演进：新直接创建/取消通过 tasks 公共用例，不模拟本页之外的 confirm；新来源/time_basis、UTC秒精度冻结和完整分页定位见 [design/20 §4.3、§5–§6](../../design/20-goal-scoped-delegation.md)。任务列表/详情/通知消费者须同批识别新字段，旧冻结不回填；created/排期/取消中/撤销回执分呈。本页仍约束现行 API，本规范不改路由/DTO或当前行为。
+
 ## 1. 路由
 
 | 方法 | 路径                         | 鉴权 | CSRF | 幂等键 | 说明         |

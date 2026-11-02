@@ -25,13 +25,14 @@ TypeScript + Next.js（App Router）+ PostgreSQL 16 的云端个人助理；包�
 
 - TypeScript 严格模式；模块按 `apps/api/src/modules/<name>/` 划分所有权，一模块一 schema 前缀。
 - 跨模块资源关联 ID-first；允许同步公共用例、显式 DTO 与只读投影，不直读对方私有表。确认创建或取消保持受控单事务，其他可靠异步命令/事件走 outbox，不将公共读取/同步调用强制入队；D1 只证明存储实现导入边界，不证明 SQL 所有权（见 design/02、04、ADR 0009）。
+- 授权演进见 `docs/design/20-goal-scoped-delegation.md` 与 `openspec/changes/refactor-assistant-capability-authorization/`（#105，Proposed）。下列安全内核保留；“全部写入必须按钮/只提议”和 wall 缺字段必问仅约束现行/legacy profile。新 profile 的本人委托内设置、明确提醒、受管资料正常写入无需逐项审批，严格 elapsed 不问无关时区；实质缺口/新增影响才问，硬资格不能按钮突破。规范 PR 不启用运行权限，不自动消费旧 pending；后续实施须配套 TS/native/Web 和真实验收，不能模拟 confirm。
 - 安全内核 5 条（硬规则）：
   1. confirm 创建分支单事务：验 owner/pending/有效期 → 比 `presentation_hash` → 建 task → 写 `task_events.created` → 写 outbox → consumed，全回滚，重复回同一 task。取消分支经相同冻结校验后，同事务调用 tasks 公共取消用例并 consumed，取消状态/事件/命令保持原子；重复回原目标，仍须遵守撤销回执门（design/06）。
-  2. 时间唯一权威 `time-core.normalize` 纯函数（零依赖，不读时钟/env/网络）；入口必问（缺年份/时区/时段就问）/模糊词挡（“左右/尽快/有空时”）；`/readyz` 类型化不降级。
+  2. 时间唯一权威为 `time-core.normalize` 纯函数（零依赖，不读时钟/env/网络）；wall 入口缺关键年份/时区/时段才问，模糊词挡（“左右/尽快/有空时”）；拟议 elapsed 按可信 UTC 锚纯计算，不伪造规则版本；`/readyz` 类型化不降级（design/05、20）。
   3. `task_events` 只追加，DB 禁 UPDATE/DELETE；`UNIQUE(task_id, fire_at)`；`recreated_from` 唯一。
   4. 取消赢过一切（`cancel_pending` 提交计时）+ 无回执不停终态（无 `schedule_receipt` 不标 `scheduled`，无撤销回执不标 `cancelled`）。
   5. 展示只读冻结字段，不换算不改写；口径只说已记录步骤，不承诺必达。
-- S0 冻结（#14）：错误码用 design 系（`PRESENTATION_MISMATCH 409`、时间四错 `422`、`BUDGET 429`）；事件词用 design/07 封闭集；表统一 `outbox`；v0 只认按钮确认；简报只读投影不建表。
+- S0 冻结（#14）：错误码用 design 系（`PRESENTATION_MISMATCH 409`、时间四错 `422`、`BUDGET 429`）；事件词用 design/07 封闭集；表统一 `outbox`；v0/legacy 批准只认按钮确认，新 profile 授权按 design/20；简报只读投影不建表。
 - 引用外部蓝图一律用 B00–B06 / AF 代号，不复制外部产物原文；服务端行为均为[INFERENCE]。
 
 ## 测试要求

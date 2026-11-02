@@ -2,6 +2,8 @@
 
 > 状态：v0 可开工（design 真源，prd 跟随）。范围：Postgres 表结构约定的字段/约束/索引/写入规则，不含迁移 SQL 与 ORM 实现。不包含：具体 DDL、API DTO、鉴权方案选型、计费/推送供应商字段。阶段标签：v0 MVP 全链路；P1 起五缝接口化。
 
+> Proposed 演进：新 profile/可信上下文/GoalResult/接续/执行占有归 conversations，新任务来源/time_basis归 tasks，真实偏好归 identity，登记集合/输出目录归 workspaces，接受结果仍归 tools；唯一详细合同见 [design/20 §4–§9](../design/20-goal-scoped-delegation.md)。只新增前向迁移，不改既有 migration 或回填旧授权；本规范不实施 DDL，不新增目标表、语义去重表或 briefs/cards 表。
+
 ## 落地顺序
 
 推荐 migration 落地顺序（v0）[Required]：

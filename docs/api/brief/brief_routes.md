@@ -4,6 +4,8 @@
 >
 > 蓝图引用：B06（v0 切片首环：简报→卡片→对话；06 喝水提醒降级为调度子用例 `task.kind=notify_only`）。
 
+> Proposed 演进：新 UTC/跨冻结时区提醒同批改为明确浏览时区的服务端 UTC 日区间查询，卡片仍读各自冻结字段，见 [design/20 §4.3](../../design/20-goal-scoped-delegation.md#43-存储api-和今日投影同交付)。本文参数语义为现行/legacy，不把新分支漏项留到收口；生成保存的简报是 workspace 文件，不建 briefs/cards 表，本规范不改当前 API。
+
 ## 1. 路由
 
 | 方法 | 路径     | 鉴权 | CSRF | 说明                |
