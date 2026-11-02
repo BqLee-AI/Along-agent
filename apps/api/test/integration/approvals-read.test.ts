@@ -171,7 +171,7 @@ maybe('approvals read routes', () => {
       seed.ownerId,
       seed.id,
       {
-        raw_text: '2026-11-02 09:20 喝水',
+        raw_text: '2027-11-02 09:20 喝水',
         confirmed_timezone: 'Asia/Shanghai',
         idempotency_key: randomUUID(),
       },
