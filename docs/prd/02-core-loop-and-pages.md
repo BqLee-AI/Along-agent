@@ -8,7 +8,7 @@
 - [Required] 2 卡片：每条简报条目为结构化卡片，只读 presentation 冻结字段做固定格式呈现，不换算、不推断、不改写。
 - [Required] 3 对话：POST /conversations/messages 经 SSE 流式返回思考 / 工具调用 / 回复 / 待审批；预算超限（BUDGET_EXCEEDED）自动停并告知。
 - [Required] 4 提议：Agent 产出待确认方案并冻结 presentation（含 presentation_version）；confirm 请求携带当时看到的完整内容 + presentation_hash，对不上即停（PRESENTATION_MISMATCH）。
-- [Required] 5 确认：只有整句确认或点确认按钮算数；回显有效 24 小时（实验起步值，待校准）；两条待确认并存时无指向的确认直接挡回。
+- [Required] 5 确认：只认明确按钮确认，不把“是的/好”当写入授权；回显有效24小时，确认绑定所见冻结内容。
 - [Required] 6 调度：Approval 消费 + 建 Task 同事务；收到 Scheduler 登记回执才标 scheduled，否则停在 pending_schedule。
 - [Required] 7 触发与通知：到点先查三样（task 对得上、状态为 scheduled、登记凭据绑同一 task）；15 分钟内触发一次；超窗标 missed 不补发。
 - [Required] 8 活动账：task_events 只追加投影，用户可核对每一步 type 与 evidence_ref（有凭据写号，无则写"服务端记录"）。
@@ -21,6 +21,7 @@
 - [Required] 06 喝水提醒降级为调度子用例：task.kind=notify_only，不走 LLM 先验调度；time-core 仅做 wall_time → fire_at_utc 的确定性归一。
 - [Required] 确认后才建单次 task 并排期；到点写触发记录、生成应用内通知；对外只报告系统记录到的状态，不声称用户已读。
 - [Required] 未完成提醒列表为空，只说明没有匹配的活动任务，不代表之前没有创建成功；已触发、已错过、已取消的任务须按历史状态核对。不因当前列表为空否定已确认回执或建议重建提醒。
+- [Required] 当前 Harness 提醒等待点就地完整展示并提供明确的“确认创建并继续”或“确认取消并继续”按钮；一次点击依次确认并继续同Run，不强迫切页或再点继续。成功只展示真实任务结果；未知响应先只读核实，历史、business快捷入口和文档批准不自动执行。
 - [Required] 归一失败回澄清；存摆、确认、排期、触发任一步失败都保持未完成并进可重试队列，绝不报成功。
 
 ## 场景 B：每日简报（聚合场景）

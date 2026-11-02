@@ -42,6 +42,7 @@ export default function Chat({
     task.effectsUnknown ||
     task.run?.status === 'suspended_approval' ||
     Boolean(task.run?.can_resume);
+  const showReminderResult = Object.keys(task.reminderResults).length > 0;
   const otherBlockingRuns = task.runs.filter(
     (run) =>
       run.run_id !== selected?.runId &&
@@ -193,7 +194,7 @@ export default function Chat({
             {runEntries.length && selected ? (
               <details
                 id="run-results"
-                open={needsAction || undefined}
+                open={needsAction || showReminderResult || undefined}
                 className="min-w-0 px-4 py-2"
                 data-testid="run-results"
               >
@@ -202,7 +203,7 @@ export default function Chat({
                 </summary>
                 <div className="space-y-4 py-3">
                   <p className="text-xs text-muted-foreground">
-                    助手文本不代表工具已执行。决议、效果与终态分别读取；批准后仍需明确继续。
+                    助手文本不代表工具已执行。提醒可在此确认并继续原运行；文档批准后仍需明确继续。
                   </p>
                   {runEntries.map((entry) => {
                     const isSelected = entry.runId === selected.runId;
@@ -224,7 +225,7 @@ export default function Chat({
                     return (
                       <details
                         className="min-w-0 border-t border-border pt-2"
-                        open={(isSelected && needsAction) || undefined}
+                        open={(isSelected && (needsAction || showReminderResult)) || undefined}
                         key={entry.runId}
                       >
                         <summary className="min-h-11 content-center text-sm font-medium [overflow-wrap:anywhere]">
@@ -275,6 +276,7 @@ export default function Chat({
                                   conversationId={selected.conversationId}
                                   runId={entry.runId}
                                   onUnknownEffect={task.observeEffect}
+                                  task={isSelected ? task : undefined}
                                 />
                               ))}
                             </ul>
