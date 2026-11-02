@@ -26,7 +26,7 @@
 
 ### Requirement: 文档批准绑定精确基线与完整目标
 
-文档修改 SHALL 绑定本Run真实完整读取、精确基线及完整目标。legacy和新增影响授权仍经冻结预览/按钮；delegation正常步骤直接绑定invocation，不创建自动批准。用户明确整篇重写不再次索权。见 [design/20 §3、§7](../../../../../docs/design/20-goal-scoped-delegation.md)。
+文档修改 SHALL 绑定本Run真实完整读取、精确基线及完整目标。legacy和新增影响仍需精确冻结审阅；新profile新增影响按 [design/20 §3](../../../../../docs/design/20-goal-scoped-delegation.md#3-自主澄清授权升级与硬拒绝) 允许一次明确授权并继续，不机械追加继续按钮，决议自身零文件写。正常步骤直接绑定invocation，不创建自动批准；用户明确整篇重写不再次索权，效果边界见design/20 §7。
 
 #### Scenario: 正常精确修改或明确重写（D2/D6/D8）
 
@@ -36,7 +36,7 @@
 #### Scenario: legacy预览和新增影响（D6/D8/D10）
 
 - WHEN 旧profile提出修改，或新动作需要未获委托的破坏性影响
-- THEN 展示完整冻结预览并只授该精确动作，批准本身零文件写入且不是保存；拒绝不能同义重提绕过
+- THEN 只授完整冻结的精确动作；legacy沿原显式继续合同，新profile可一次授权并继续且仍验当前Run/等待点/停止/预算和冻结资源；决议本身不是写入/保存，拒绝不能同义重提绕过，unknown/迟到失效不推进
 
 #### Scenario: 错误引用或目标（D1/D8）
 

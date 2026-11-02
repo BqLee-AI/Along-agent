@@ -6,7 +6,7 @@
 >
 > 时间失败、有限真实规则与 Web 候选选择按 #30 合同；安全 spec Scenario 1.2 的 typed failed 不得改成 completed。合同与实际验收记录分开。
 
-> Proposed 演进：新 profile 可信执行上下文、#103 typed缺口唯一接续、GoalResult、v6/SSE v2 及执行/订阅分离见 [design/20 §4–§9](../../design/20-goal-scoped-delegation.md)。现行消息shape、单workspace、逐项批准和断流取消继续约束legacy；新字段/事件消费者须显式配套，不在旧严格shape暗塞字段。GET/重连/重登仍零业务写，入站重放仅限既有有效保留窗口，本规范不改运行协议。
+> Proposed演进：可信上下文/接续、GoalResult及v6/SSE v2见 [design/20 §1、§4–§9](../../design/20-goal-scoped-delegation.md)。Run冻结授权、实际能力和execution_lifecycle分别投影；早期request-bound不承诺后台，server-owned验收后仅新Run采用，旧Run不改义。现行shape/legacy批准保持，新消费者配套，GET/重连/重登零业务写，入站重放仅限有效窗口；规范不改运行协议。
 
 ## 1. 路由
 

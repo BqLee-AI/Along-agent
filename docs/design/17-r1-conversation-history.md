@@ -5,7 +5,7 @@
 > 不包含：#70视觉/全站目标导航、账户机制修改、搜索、第二份任务事实表、自动执行恢复及R2。
 > 阶段：R1 日常可用性第三步；行为归 conversations capability，既有执行、授权和身份合同不变。
 
-> profile 作用域：本文历史 GET 零执行对所有 profile 不变。手动资料选择、逐项批准和主动流离开取消仅描述现行/legacy；新目标结果、缺口接续和订阅分离见 [design/20 §5–§9](20-goal-scoped-delegation.md)（Proposed）。新界面不能消费旧 pending、回填历史权能或以重连自动发 POST，本次不启用后台执行。
+> profile作用域：历史GET零执行对全部Run不变。手动资料/逐项批准属现行/legacy，离开断流也适用于早期request-bound；新目标/接续与冻结生命周期见 [design/20 §1、§5–§9](20-goal-scoped-delegation.md)（Proposed）。只有server-owned仅断订阅，旧/先前Run不随新部署改义；新界面不消费旧pending、不回填权能或重连自动POST。
 
 ## 1. 结论与事实依据
 

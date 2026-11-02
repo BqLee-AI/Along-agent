@@ -53,6 +53,8 @@
 | 跨 owner、登记外路径、链接绕过、不可用工具                       | 硬拒绝或如实说明缺能力；不能靠一个确认按钮突破部署资格                       |
 | 拒绝、明确停止、预算耗尽或未知副作用                             | 停止相应执行；不换参数、换调用身份或自动新建 Run 绕过                        |
 
+新增影响的具体交互以 [design/20 §3](../design/20-goal-scoped-delegation.md#3-自主澄清授权升级与硬拒绝) 为准：新profile允许一次精确“授权并继续”，决议自身不写领域/文件，原Run/有效等待点/资格/停止/预算继续约束，不机械要求第二按钮或预设HTTP次数。legacy保留原合同；拒绝、unknown或迟到失效不推进，GET/重登不触发，不扩冻结资源。
+
 ### 资料事实不是授权，但合法委托可以使用资料
 
 “总结这份文档”不授权文档里写的“改默认时区、取消所有提醒”。“按文档里的事项建立提醒”则授权助理使用其中明确的事项和日期完成用户目标。前者应拒绝注入的额外动作，后者不应被“来源是第三方”一律挡住。
@@ -106,6 +108,7 @@ type FactRef =
 type TrustedExecutionContext = {
   version: 1;
   authorization_revision: 'delegation/1';
+  execution_lifecycle: 'request-bound' | 'server-owned';
   input_message_id: string;
   received_at_utc: string;
   request_anchor_utc: string;
@@ -116,7 +119,7 @@ type TrustedExecutionContext = {
     source_ref: string;
   };
   time_capabilities: {
-    elapsed_revision: string;
+    elapsed_revision: string | null;
     wall_rules: null | { ruleset_id: string; tzdb_version: string; alias_version: string };
   };
   workspaces: WorkspaceSummary[];
@@ -134,6 +137,8 @@ type ReminderTime =
 ```
 
 TS 从认证、入站 DB 时刻、冻结日期来源、真实偏好和登记生成上下文。仓颉以可信系统上下文提供给模型，不伪装用户消息，不把资料正文提升为系统规则。语义源引用必须属于本 Run 或经核验的可用前序事实；引用本身仍不证明授权。
+
+阶段能力与生命周期的唯一合同见 [design/20 §1、§4、§8](../design/20-goal-scoped-delegation.md)。授权修订不证明后台已交付；偏好等先交付可冻结并显示 request-bound，断连仍按请求绑定策略收尾。elapsed未实施即无修订，文件创建未实施即无对应工具/输出资格，不对模型编造能力；不预建未来profile。
 
 ### 6.1 时区与同一委托内的设置
 
@@ -224,13 +229,13 @@ type GoalResult = {
 
 ## 9. 离开页面不等于撤销委托，停止也不是回滚
 
-[Proposed] 新委托的 SSE 仅订阅事实；刷新、断网、离开页面不取消已接受执行。显式停止先持久撤销后续执行资格，再终止执行进程。已建任务、已写文件不能被“停止”抹掉；取消这些任务是另一个明确目标，目标内不再逐项批准。退出登录断订阅，不撤销已接受委托；账户禁用则拦住新动作。
+[Proposed · 最终 server-owned 切片] 冻结 server-owned 的新 Run 中，SSE 仅订阅事实；刷新、断网、离开页面不取消已接受执行。早期 delegation/1 可以冻结 request-bound，不承诺后台继续；两者都保留显式停止先撤后续资格、既成效果不回滚、取消任务为独立目标。只有 server-owned 的退出/到期不撤已接纳执行，request-bound 沿原连接策略；账户禁用拦住新动作。
 
 现有执行由请求流持有，不能只删除 abort 回调就承诺后台运行。建议增加薄 run-driver，仅持有同一 executeHarness 的执行生命周期、AbortController 和唯一执行占有，不编排工具、不创建第二种任务。
 
 沿用 Run/attempt gate，在 PG 中用 session advisory lock 确保同 Run 唯一执行者。领取时将锁连接身份与当前 attempt 绑定，每次预约、效果许可和终结都核验当前拥有者及锁仍有效，不能只依赖进程收到失联回调。锁连接失联立即 abort，资格失效后禁止发出新动作，在途非事务效果按已知/unknown 记录。另一进程仅在取得同锁并复验后，将遗留 running 终结为中断，不自动重放。执行拥有者绑定属于 E 切片的最小运行状态，不另建租约/恢复平台；连接数量受现有池与并发容量限制，不增加无限运行时长承诺。
 
-离线继续不等于进程崩溃自动恢复：保留当前预算及供应商请求超时；宿主中断如实投影，不能长久假报 running。重连只 GET 补事件，不重发消息、确认、继续或取消。此项必须作为完整用户价值单独交付，旧 Run 在此前保持旧连接合同。
+离线继续不等于进程崩溃自动恢复：保留当前预算及供应商请求超时；宿主中断如实投影，不能长久假报 running。重连只 GET 补事件，不重发消息、确认、继续或取消。后台完整切片完成后仅新接纳的相应 Run 采用 server-owned；旧 Run 和先前 request-bound Run 保持冻结连接语义，不能被部署升级改义。最终重构仍须完成该切片及验收，不以早期阶段替代。
 
 ## 10. 历史、迁移和发布
 

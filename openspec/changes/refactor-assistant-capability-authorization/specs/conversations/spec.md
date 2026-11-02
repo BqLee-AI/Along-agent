@@ -16,22 +16,27 @@
 
 ### Requirement: 精确批准与显式继续原运行
 
-系统 SHALL 对legacy及真实新增影响授权保留完整冻结审阅、按钮零写和显式同Run继续；新profile已委托正常编辑/创建不要求逐项批准。适用边界见 [design/20 §1、§3、§7](../../../../../docs/design/20-goal-scoped-delegation.md)，不能模拟用户批准或消费历史pending。
+系统 SHALL 对legacy保留原精确审阅/决议及显式同Run继续合同；新profile正常编辑/创建不逐项批准，真实新增影响则允许一次范围精确的“授权并继续”用户动作，不机械要求第二次继续。授权决议自身仍零领域/文件写入，不等于保存，后续执行仍走原Run/等待点及当前资格。见 [design/20 §3、§7](../../../../../docs/design/20-goal-scoped-delegation.md)，不模拟批准或消费历史pending，不预设HTTP请求数量。
 
 #### Scenario: 正常写入不是批准队列（D6/D8/D10）
 
 - WHEN 新委托内资料正常编辑、明确重写或有限文件创建
 - THEN 可直接执行并展示真实效果/回读，不制造自动approved记录、不因写入/多文件重复索权
 
-#### Scenario: 精确批准仍零写（D2/D6/D8）
+#### Scenario: legacy精确审阅与原显式继续（D2/D6/D8）
 
-- WHEN legacy或新增影响需要用户核对冻结文档预览
-- THEN before/after、完整目标和原preview.body/hash可读，按钮不trim/重建所见，不写文件；返回原Run显式继续，不能把approved当saved
+- WHEN legacy文档需用户核对冻结预览并作原决议/继续动作，或只GET历史批准
+- THEN 完整before/after、目标与preview.body/hash可读且不trim/重建；决议本身零文件写，仍按原Run显式继续合同，不因新profile自动消费旧pending或把approved当saved
 
-#### Scenario: 早决议和不可继续（D8/D10）
+#### Scenario: 拒绝停止未知与迟到（D8/D9/D10）
 
-- WHEN 批准早于等待提交、仍pending、已拒绝或can_resume=false
-- THEN 只读真实决议和不可继续原因，不自动恢复或跟随新批准；保留原授权和结果，不因页面刷新重发动作
+- WHEN 已拒绝/停止/终结、效果unknown、预算耗尽、失去资格或等待点未有效时收到早到/迟到授权
+- THEN 不推进或复活Run、不新建工具调用、不排队稍后自动恢复；只读实际决议/不可继续原因，GET/导航/重登不触发授权或继续，不用新引用绕过
+
+#### Scenario: 新增影响一次明确授权并继续（D2/D6/D8/D10）
+
+- WHEN 新profile在当前有效等待点展示冻结的新增影响，用户一次明确选择授权并继续
+- THEN 仅授该精确范围并显式续原Run，用户无需再点继续；可复用已有决议/继续请求，后续Harness/工具仍验稳定调用、当前资格、停止/预算和生命周期，不扩冻结资源，只有真实写入及新回读才报相应完成
 
 ### Requirement: 效果与运行状态依据可信事实
 
@@ -54,7 +59,7 @@
 
 ### Requirement: 错误恢复不自动产生副作用
 
-系统 SHALL 准确区分401/403/404/依赖/领域错误；历史、刷新、回退、重登和重连仍只读，不重放消息/批准/继续/取消。新/legacy连接语义按 [design/20 §8–§9](../../../../../docs/design/20-goal-scoped-delegation.md) 冻结profile解释，不用前端自动补POST实现后台能力。
+系统 SHALL 准确区分401/403/404/依赖/领域错误；历史、刷新、回退、重登和重连仍只读，不重放消息/批准/继续/取消。按 [design/20 §1、§8–§9](../../../../../docs/design/20-goal-scoped-delegation.md) 读取冻结授权及execution_lifecycle，不以delegation/1或当前部署推断后台能力，不用前端自动补POST实现后台能力。
 
 #### Scenario: 真实401与其他错误（D6/D8/D10）
 
@@ -64,13 +69,13 @@
 #### Scenario: 响应丢失或断流（A3/D8/D9）
 
 - WHEN 消息/继续/批准/取消响应丢失或SSE断开
-- THEN 读取原持久状态，不换键/Run重做；新profile执行不因断订阅撤销，legacy仍原断连取消语义，unknown不盲重写
+- THEN 读取原持久状态，不换键/Run重做；仅server-owned执行不因断订阅撤销，legacy及早期request-bound仍原连接策略，已接受效果不回滚，unknown不盲重写
 
 ## ADDED Requirements
 
 ### Requirement: 冻结profile界定旧交互策略
 
-系统 SHALL 按 [design/20 §1、§8–§9](../../../../../docs/design/20-goal-scoped-delegation.md) 以Run冻结profile而非当前页面版本裁决策略。既有“常用Agent流式聊天”的资料须手选、“统一资源导航”的离开断连、“常驻输入”的批准/继续交互，仅在legacy或真实新增影响授权时保留；新正常委托遵循目标入口/直接执行/订阅分离。通用布局、可达性、明确发送、真实流式增量、owner、只读历史和在途/unknown不可绕过不变。
+系统 SHALL 按 [design/20 §1、§8–§9](../../../../../docs/design/20-goal-scoped-delegation.md) 以Run冻结事实而非当前页面/部署版本裁决策略。资料入口和批准按授权作用域解释，连接按独立生命周期解释；早期delegation/1可显示request-bound，不能因正常步骤免批准就显示后台继续。通用布局、可达性、明确发送、真实流式增量、owner、只读历史和在途/unknown不可绕过不变。
 
 #### Scenario: 新旧并存只读展示（D2/D6/D8）
 
@@ -81,6 +86,11 @@
 
 - WHEN 用户展开工具菜单、选择收窄范围或浏览历史
 - THEN 仍零业务执行；只有明确发送接纳新委托，不因导航/重连新建Run或改变旧grant
+
+#### Scenario: 能力与连接限制真实可见（D6/D8/D10）
+
+- WHEN 新版Web同时读取早期request-bound委托和后台验收后新接纳的server-owned委托
+- THEN 前者如实显示断连取消限制，后者才显示离开继续；未交付elapsed/文件创建不能显示可用，部署升级不改变原Run，最终后台验收仍必需
 
 ### Requirement: 可信缺口接续与完整任务定位
 

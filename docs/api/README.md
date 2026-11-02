@@ -6,7 +6,7 @@
 >
 > 标记说明：节内以 [Required] / [Proposed] / [Deferred] 标注确定性。[Required] 为 v0 必须遵守；[Proposed] 为推荐写法，可评审调整；[Deferred] 为明确未定事项，不猜。
 
-> Proposed 演进：本人委托的新 profile、真实直接工具、v6/SSE v2 目标结果和旧恢复见 [design/20 §4–§9](../design/20-goal-scoped-delegation.md)。本表仍是现行路由，不因规范新增端点或启用权限；逐项按钮/先选单登记/断流取消只约束现行/legacy，旧读取与安全门不变。
+> Proposed演进：新授权、真实工具及v6/SSE v2见 [design/20 §1、§4–§9](../design/20-goal-scoped-delegation.md)。本表仍为现行路由；授权与冻结生命周期独立，早期request-bound仍断流取消，server-owned才承诺后台。未交付能力不可声明，旧读取/安全门不变，规范不新增端点或启用权限。
 
 ## 1. Base Path 与路由总数 [Required]
 

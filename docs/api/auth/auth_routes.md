@@ -4,7 +4,7 @@
 >
 > 蓝图引用：B03；B06（v0 Web 单端）。
 
-> Proposed 演进：本人时区窄工具用例、单次时区不保存、退出/到期不撤销新已接纳委托与disabled阻止新动作见 [design/20 §4.1、§6、§8](../../design/20-goal-scoped-delegation.md)。不开放通用账户patch或新增认证端点；本页固定会话/服务端撤销/CSRF/安全只读重登保持，本规范不启用新能力。
+> Proposed演进：本人时区窄用例及冻结生命周期见 [design/20 §1、§4.1、§6、§8](../../design/20-goal-scoped-delegation.md)。只有server-owned退出/到期不撤接纳执行，request-bound沿原连接策略；禁用阻止新动作。单次时区不保存，不新增通用账户patch/认证端点，本页固定会话/撤销/CSRF及只读重登保持，规范不启用能力。
 
 ## 1. 方案状态 [Required]
 

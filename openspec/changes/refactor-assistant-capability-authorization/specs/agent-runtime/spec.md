@@ -68,24 +68,43 @@ TS SHALL 原子保存真实资格、运行/attempt/消息及事件投影，仓�
 - WHEN 同Run批准恢复或迭代/usage预算已耗尽
 - THEN 累计不重置且停止后续动作，系统不得自建Run绕预算；不承诺跨目标总费用硬上限，未知usage不伪零
 
+### Requirement: 冻结阶段能力与执行生命周期
+
+系统 SHALL 按 [design/20 §1、§4、§8](../../../../../docs/design/20-goal-scoped-delegation.md) 独立冻结授权修订、真实阶段能力和两种具体执行生命周期；delegation/1不等于后台已交付。可信start与只读Run/Web使用同一事实，不建通用profile平台，最终订阅解耦验收不缩小。
+
+#### Scenario: 偏好先交付但后台未交付（D6/D8/D10）
+
+- WHEN 本人偏好保存已交付而后台、elapsed或文件创建尚未交付，新Run按delegation/1接纳
+- THEN 可自主真实保存偏好，冻结并显示request-bound及断连取消限制；不宣称离开/退出后继续，不编造elapsed修订、创建工具或输出资格，已接受偏好不回滚或自动重做
+
+#### Scenario: 后台完成后的新接纳（D6/D8/D9）
+
+- WHEN 服务端唯一执行占有及失联收尾已完成验收后接纳相应新Run
+- THEN 才冻结并显示server-owned，刷新/离开仅断订阅且执行在原预算/超时内继续；其他未交付能力仍不可用，不以授权修订暗示全部能力已上线
+
+#### Scenario: 先前运行不随部署改义（D2/D6/D8）
+
+- WHEN server-owned或其他能力部署后读取/批准恢复legacy或早期request-bound Run
+- THEN 保留各自冻结连接语义和能力，不依当前开关重新解释或回填历史，不将断连取消偷换成后台继续；重连只读，不重做既成效果
+
 ### Requirement: 新委托的服务端执行所有权
 
-delegation profile SHALL 按 [design/20 §8](../../../../../docs/design/20-goal-scoped-delegation.md#8-连接停止退出与服务端所有权) 由服务端同一Harness driver持有有界执行，PG session独占与attempt资格绑定；SSE只订阅。不能仅删abort回调就宣称后台继续，不承诺崩溃自动恢复。
+冻结server-owned的Run SHALL 按 [design/20 §8](../../../../../docs/design/20-goal-scoped-delegation.md#8-连接停止退出与服务端所有权) 由服务端同一Harness driver持有有界执行，PG session独占与attempt资格绑定；SSE只订阅。request-bound阶段不承诺后台继续，最终server-owned要求不能仅删abort回调交付，不承诺崩溃自动恢复。
 
 #### Scenario: 刷新离开断网（D6/D8/D9）
 
-- WHEN 新委托已接纳后页面离开/刷新/断网
-- THEN 执行在原预算/超时内继续，重连只GET持久状态，不补发消息/恢复/工具；legacy仍原连接合同
+- WHEN 已冻结server-owned的新Run接纳后页面离开/刷新/断网
+- THEN 执行在原预算/超时内继续，重连只GET持久状态，不补发消息/恢复/工具；legacy及早期request-bound仍原连接合同
 
 #### Scenario: 所有权失联或进程崩溃（A3/D8/D9）
 
-- WHEN 独占连接失联或执行宿主崩溃
+- WHEN server-owned的独占连接失联或执行宿主崩溃
 - THEN 失去资格后禁止新预约/许可/终结推进并abort，取得同锁的收尾者复验后只终结中断，不自动重放；在途效果如实已知/unknown，不永久假报running
 
 #### Scenario: 停止退出与禁用不同（D6/D8/D9）
 
-- WHEN 显式停止、退出登录/到期或账户禁用
-- THEN 停止持久撤销Run后续资格，退出只撤会话访问不撤新委托，禁用阻止新动作；都不谎称回滚任务或文件
+- WHEN server-owned Run显式停止、退出登录/到期或账户禁用
+- THEN 停止持久撤销Run后续资格，退出只撤会话访问不撤该委托，禁用阻止新动作；request-bound仍按冻结连接策略收尾，都不谎称回滚任务或文件
 
 ### Requirement: profile与协议前向迁移不扩历史权限
 

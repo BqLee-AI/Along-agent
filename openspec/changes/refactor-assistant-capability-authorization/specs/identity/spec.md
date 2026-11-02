@@ -2,7 +2,7 @@
 
 ### Requirement: 固定会话与可信退出
 
-系统 SHALL 保持固定七天会话及服务端确认撤销后清Cookie；新委托的执行资格与会话访问按 [design/20 §8](../../../../../docs/design/20-goal-scoped-delegation.md#8-连接停止退出与服务端所有权) 分开，退出/到期不取消已接纳delegation，但账户禁用/明确撤权阻止新动作。退出不是停止Run或取消task。
+系统 SHALL 保持固定七天会话及服务端确认撤销后清Cookie；按 [design/20 §1、§8](../../../../../docs/design/20-goal-scoped-delegation.md) 分开授权修订、会话访问和冻结生命周期。server-owned退出/到期不取消已接纳执行，request-bound不承诺退出后继续并按原连接策略收尾；账户禁用/明确撤权阻止新动作。退出不是取消task或回滚既成效果。
 
 #### Scenario: 七天过期与只读重登（D6/D8）
 
@@ -11,8 +11,8 @@
 
 #### Scenario: 正常退出与已接纳委托（D6/D8/D9）
 
-- WHEN 用户正确会话/Origin/CSRF提交退出，服务端确认PG撤销
-- THEN 清Cookie且旧Cookie访问/me为401，断订阅不撤销新profile已接纳委托；不宣称取消既成提醒或回滚文件
+- WHEN 用户正确会话/Origin/CSRF提交退出，服务端确认PG撤销，且读取到原Run的冻结生命周期
+- THEN 清Cookie且旧Cookie访问/me为401；server-owned只断订阅不撤委托，request-bound仍按原连接策略收尾，不因delegation/1宣称后台继续；都不取消既成提醒或回滚偏好/文件
 
 #### Scenario: 撤销依赖失败（D6/D8/D10）
 

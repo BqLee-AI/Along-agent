@@ -13,7 +13,7 @@ v0 范围一段：用户说清一件事和一个时间 → 服务端算出唯一
 ## Spec 入口
 
 - [文档中心](docs/README.md)：`docs/design/` 为真源，`docs/prd/` 跟随；[OpenSpec 行为契约](openspec/README.md)管 SHALL + Scenario。
-- [本人目标内委托与授权](docs/design/20-goal-scoped-delegation.md)（#104/#105，Proposed）：正常步骤自主执行，只问实质缺口或新增影响；现行逐项批准/单登记/断流策略保留于 legacy，规范不启用新权限或更改安装。
+- [本人目标内委托与授权](docs/design/20-goal-scoped-delegation.md)（#104/#105，Proposed）：正常步骤自主，只问实质缺口或新增影响；授权与冻结执行生命周期独立，早期可request-bound，最终须server-owned，规范不启用权限或更改安装。
 - 必读：[v0 垂直切片](docs/design/03-v0-vertical-slice.md)、[P0 开工与 CI 死规矩](docs/design/13-p0-bootstrap-and-ci-rules.md)、[验收与待决](docs/prd/04-acceptance-open-questions.md)、[Schema 索引](docs/schema/README.md)。
 
 ## 任务与进度

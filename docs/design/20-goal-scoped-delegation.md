@@ -13,6 +13,8 @@
 
 [Proposed] 新 Run 接纳时冻结 `authorization_revision=delegation/1` 和实际能力 profile。无该修订的旧 Run、business 提醒路径及旧 pending 均为 legacy：仍按原按钮、hash、有效期、单 grant、等待/恢复和连接合同执行。wire 版本不等于授权版本；不能让所有运行因换新 native 自动扩权。本文目标取代的仅是逐项批准策略、必选资料入口等明确列出的策略，不取消其他安全不变量。实施按完整用户切片逐步交付，未交付工具不得进入 profile；无能力时如实说明，不模拟执行。合并规范本身不接纳新 profile。
 
+授权修订、实际能力和执行生命周期是独立事实：`delegation/1` 只定义目标内自主策略，不证明后台执行已交付。每个新 Run 同时冻结 `execution_lifecycle:'request-bound'|'server-owned'`，由 conversations 持有，并经可信 start、Run 只读投影和 Web 如实呈现。早期设置等完整切片可以采用 request-bound，沿现行请求绑定的断连取消语义，不承诺离开/退出后继续；仅在 §8 所有权与故障验收完成后，新接纳的相应 Run 才可冻结 server-owned。已接纳 Run（包括早期 delegation/1）不随部署升级、当前开关或批准恢复改变生命周期；缺此字段的 legacy 仍沿原合同读取，不回填。这里只增加两种具体生命周期，不建立通用 profile/权限平台。最终重构必须完成 server-owned 订阅解耦及其真实验收，不能以 request-bound 阶段替代收口。
+
 ## 2. 规则的唯一所有者
 
 | 责任                                  | 所有者与约束                                                                          |
@@ -25,7 +27,7 @@
 | 创建/取消任务及事件/命令              | tasks 公共用例；approvals 只拥有 legacy 或新增影响的精确授权决议                      |
 | 目录资格、精确版本、文件字节和效果    | workspaces；部署登记与真实 MCP/文件边界，不让模型传宿主 root                          |
 | 每轮选择、预算、控制出口              | 仓颉；TS 验证资格与事实并持久化，不新增目标执行器/目标表                              |
-| 运行所有权、停止及中断收尾            | conversations 的服务端 driver；不依赖浏览器持有执行                                   |
+| 运行所有权、停止及中断收尾            | conversations 按冻结生命周期持有；server-owned 才由 §8 driver 独立于浏览器执行        |
 | 页面展示                              | Web 只消费共享合同及真实结果；不成为第二份领域状态机                                  |
 
 身份/引用 ID 或 hash 证明归属和内容绑定，不证明“这句话授权了这件事”。模型误解和资料诱导仍有残余风险；不以第二模型 yes、关键词权限表或自然语言权限 DSL 伪装确定性授权证明。
@@ -47,17 +49,24 @@
 
 用户明确要求固定目标位置且现有内容会被覆盖时：若已明确授权该对象的覆盖则直接执行；若覆盖的是未授权无关对象，询问该具体影响。无法提供跨文件/PG 全或无时，用户要求全或无必须在首个副作用前说明，不靠事后补偿假装事务。
 
+新 profile 对真实新增影响提供一次明确、范围精确的“授权并继续”用户动作：用户审阅被冻结的对象/影响（文件含完整目标、所见正文/hash）后，该动作可保存授权决议并显式请求继续原 Run 的对应有效等待点，不再机械要求第二个继续按钮。授权决议自身仍只授权，不执行领域写入、不证明文件保存；后续动作仍由同一 Harness 选择并通过当前 Run/attempt、原等待点、稳定调用、停止、预算及冻结生命周期门。可复用现有决议与显式继续请求，不预设 HTTP 请求数量、不新增自动恢复平台；legacy 仍保持原类型的精确审阅与显式继续合同，不将“显式继续”武断等同为既有界面必须两次点击。
+
+拒绝、停止/终结、unknown、预算耗尽、失去资格或等待点尚未有效时不得推进；迟到授权即使留下真实决议，也不能复活 Run、预约新动作或变成稍后自动恢复命令。GET、导航、刷新、重登均不能授权/继续；按钮不能扩张冻结资源资格或自动批准其他影响。以上对两种冻结生命周期均适用；若 request-bound 已因断连失去原执行资格，一次动作也不能绕过该门。
+
 ## 4. 可信执行上下文和时间
 
 [Proposed 接口] 使用 `harness/v6` 新 start 的 `TrustedExecutionContext`，由 TS 从认证和持久事实生成：
 
 - `version:1`、`authorization_revision:'delegation/1'`、`input_message_id`；
+- §1 的冻结 `execution_lifecycle`，不能从授权修订或当前部署推断；
 - `received_at_utc`、`request_anchor_utc`；可信澄清关系 `continuation`（原 Run 及可空调用引用）；
 - `timezone` 为可空的规范 ID、来源种类及可核对引用；
-- `time_capabilities` 包含真实 elapsed 计算修订及可空 `wall_rules`（ruleset/tzdb/alias 的实际身份）；
+- `time_capabilities` 的 `elapsed_revision` 为可空真实计算修订，未交付即 null；`wall_rules` 为可空的实际 ruleset/tzdb/alias 身份；
 - `workspaces` 为冻结登记资格的安全摘要集合，不包含秘密或宿主 root。
 
 同一可信上下文进入模型的 system 层；用户原话和 MCP 正文仍为资料，不伪装成 system。工具时间输入为 elapsed/calendar_relative/wall 判别联合，保留原时间表达、独立事项和源引用。`FactRef` 只可指本轮 user message 或已接受观察；跨 Run 事实须经 §5 核验后带入。不得接受模型直接给定 `fire_at_utc`。
+
+冻结事实只描述已交付且本 Run 可用的能力。只有偏好保存可用时，工具目录不暴露尚未交付的提醒/文件创建；已有工具也不能靠未实施的操作分支扩大能力。elapsed 未交付则无可用计算修订，有限创建未交付则无输出目录创建资格，缺省旧事实只表示不可用，不能编造版本或把未来工具/目录/后台承诺注入模型。能力随后上线也只进入新接纳的相应 Run；既有 Run 继续原冻结事实及当前撤权检查。
 
 ### 4.1 时区事实与优先级
 
@@ -130,7 +139,9 @@ wall_time/timezone_id/fold/offset 保持非空。仅有对应 elapsed 依据且 
 
 ## 8. 连接、停止、退出与服务端所有权
 
-| 动作                       | 新 delegation profile 的可观察语义                                                  |
+以下表格与 driver 要求仅适用于冻结 `server-owned` 的新 Run。`request-bound` 的早期新委托和 legacy 仍按各自原连接/等待合同收尾；断连可能取消执行，但不能回滚已接受偏好/任务/文件，也不能通过重连自动重做。UI 在接纳和历史读取中显示真实生命周期，不把“可自主保存偏好”显示为“后台执行已上线”。
+
+| 动作                       | server-owned 的可观察语义                                                           |
 | -------------------------- | ----------------------------------------------------------------------------------- |
 | 离开/刷新/断网             | SSE 断订阅，不撤销已接纳委托；同一执行在原预算/超时内继续                           |
 | 重连/历史 GET              | 只补读持久事实，不发消息/确认/恢复/取消或新建 attempt                               |
@@ -139,9 +150,9 @@ wall_time/timezone_id/fold/offset 保持非空。仅有对应 elapsed 依据且 
 | 退出登录/会话到期          | 服务端确认会话撤销或到期，断开访问；不撤销原已接纳委托，重登只读                    |
 | 账户 disabled/明确资源撤权 | 拒绝新动作；既成事实保留，返回时不披露已撤权内容                                    |
 
-[Proposed] 薄 run-driver 持有同一 executeHarness、AbortController 和执行生命周期，不编排业务目标。沿 Run/attempt gate 用专用 PG session advisory lock 取得同 Run 唯一占有，将锁连接身份与 attempt 绑定；在预约、非事务效果许可和终结核验占有仍有效，不能只等进程失联回调。失联立即 abort，资格丢失后禁止新动作；已获许可的在途非事务效果如实收尾为已知/unknown，不承诺把在途 IO 撤回。
+[Proposed · server-owned] 薄 run-driver 持有同一 executeHarness、AbortController 和执行生命周期，不编排业务目标。沿 Run/attempt gate 用专用 PG session advisory lock 取得同 Run 唯一占有，将锁连接身份与 attempt 绑定；在预约、非事务效果许可和终结核验占有仍有效，不能只等进程失联回调。失联立即 abort，资格丢失后禁止新动作；已获许可的在途非事务效果如实收尾为已知/unknown，不承诺把在途 IO 撤回。
 
-后继处理者只有取得同锁并复验后才将遗留 running 终结为中断，不重放工具/模型；不永久假报 running，不承诺崩溃自动恢复。锁连接与现有池/并发容量有界；保持每 Run 预算及供应商超时，不引入无限运行时长或通用租约平台。只删除 request abort 回调不足以交付本合同。legacy Run 在原连接合同中执行，不在恢复时悄悄改后台语义。
+后继处理者只有取得同锁并复验后才将遗留 running 终结为中断，不重放工具/模型；不永久假报 running，不承诺崩溃自动恢复。锁连接与现有池/并发容量有界；保持每 Run 预算及供应商超时，不引入无限运行时长或通用租约平台。只删除 request abort 回调不足以交付 server-owned。legacy 和先前 request-bound Run 不在升级或恢复时悄悄改后台语义。
 
 ## 9. 协议、历史与前向迁移
 
