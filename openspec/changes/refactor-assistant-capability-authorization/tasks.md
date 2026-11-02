@@ -7,7 +7,7 @@
 - [x] 1.3 起草 proposal/design 与六个 capability spec 增量，覆盖正反例；不修改主 spec 或 archive 来伪造已生效能力。
 - [x] 1.4 同步 PRD、Agent、适用 design/API/schema、AGENTS、CONTRIBUTING 与索引的 Proposed/legacy 作用域。
 - [x] 1.5 执行目标 change 和全量 OpenSpec strict、格式、引用/合同一致性检查；记录实际结果，不跑无关业务。
-- [ ] 1.6 检查暂存列表/diff/秘密，仅提交合同输入；push 并建 Draft 规范 PR，Refs #104/#105，向 #105 更新交付评论；不合并/关闭/自动建单。
+- [x] 1.6 检查暂存列表/diff/秘密，仅提交合同输入；push 并建 Draft 规范 PR，Refs #104/#105，向 #105 更新交付评论；不合并/关闭/自动建单。
 
 ## 2. 后续实施范围（仅路线，不授权本阶段执行）
 
@@ -42,3 +42,7 @@
 - 新增/变更行的98个本地文档链接及锚点存在；暂存范围仅文档，凭据模式扫描未命中。未纳入业务代码、迁移、配置、缓存、产物或本机调度台账。
 - 人工合同核对：接续复用conversations行接纳锁；入站幂等有效24小时，不冒称永久重放；task批准24小时不泛化到文档；新自然目标不要求TS入站语义分类，wall动作缺规则零该动作效果，legacy预检保持。
 - 未跑 `verify`、typecheck/unit/contracts/integration/scheduler、模型/数据库/Web/native/MCP或部署：本阶段只定合同且明确不运行业务，未实施能力保持未验收，五门由CI/后续实施按原门槛举证。
+
+### 外部交付（2026-11-02）
+
+合同提交 `512df82` 已推送 `docs/105-spec-assistant-delegation`；[Draft PR #106](https://github.com/BqLee-AI/Along-agent/pull/106) 关联 Refs #104/#105/#90，[#105 交付评论](https://github.com/BqLee-AI/Along-agent/issues/105#issuecomment-6576836156) 已发布。本节补记外部交付，不改变前述31条合同；后续实施/业务验收未执行，不归档、不合并、不关闭或自动建后续议题。
