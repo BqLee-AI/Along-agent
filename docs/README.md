@@ -76,7 +76,7 @@ R2-B 的完整目标及多轮自主查询边界见[design/19 §4、§6](design/1
 | 6    | [对话运行与预算](agent/05-chat-runtime-flow-and-budget.md)  | Run/attempt/调用边界、native 累计预算、同 Run 批准恢复与取消 |
 | 7    | [评测夹具](agent/06-eval-fixtures.md)                       | 50 条时间表达集、200 卡片集版本化、指标口径                  |
 
-## 六、Demo、收口规划与验收记录（14 篇）
+## 六、Demo、收口规划与验收记录（16 篇）
 
 | 序号 | 文档                                                                             | 作用                                                                                          |
 | ---- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
@@ -94,6 +94,8 @@ R2-B 的完整目标及多轮自主查询边界见[design/19 §4、§6](design/1
 | 12   | [2026-10-27 账户与本机登记验收](account-access-verification-2026-10-27.md)       | #68 库实验、真实 Web/PG、本机维护、固定会话与原身份两次重启保留                               |
 | 13   | [2026-10-28—30 Web 体验验证](web-task-experience-verification-2026-10-28.md)     | #70 生产页面矩阵、受控交互/分页/SSE、原安装及个人助理改版的分段证据                           |
 | 14   | [2026-10-31 R2-B 候选实验记录](demo/r2b-embedding-evidence-2026-10-31.md)        | 七版本离线CPU实测摘要、冻结材料与模型哈希、已知错误及独立性限制；不冒充正式服务或自然流量验收 |
+| 15   | [#91 对话内提醒确认收口计划](demo/inline-reminder-closeout-plan.md)              | 已有证据的版本边界、真实文档/后继补验、隔离范围与独立归档 PR 要求                             |
+| 16   | [2026-11-02 对话内提醒确认验收](inline-reminder-verification-2026-11-02.md)      | #91 分版本证据、正式文档独立授权/继续、真实并发后继与 15/19 表只读核对                        |
 
 ## 七、References（3 篇）
 
@@ -113,6 +115,7 @@ R2-B 的完整目标及多轮自主查询边界见[design/19 §4、§6](design/1
 - [R1 本地生命周期合同（#67）](design/15-r1-local-lifecycle.md) 的行为真源为 [local-lifecycle](../openspec/specs/local-lifecycle/spec.md)；[归档记录](../openspec/changes/archive/2026-10-27-close-r1-local-lifecycle/tasks.md)与[验证记录](local-lifecycle-verification-2026-10-27.md)分列生命周期、受控合同和真实模型证据。[本机使用指南](local-lifecycle.md)覆盖四入口、私有配置、原部署接入及停写维护，不将隔离身份验收冒充正式登录能力。
 - [R1 账户合同（#68）](design/16-r1-account-access.md) 的行为真源为 [identity](../openspec/specs/identity/spec.md)；[归档清单](../openspec/changes/archive/2026-10-27-close-r1-account-access/tasks.md)与[验证记录](account-access-verification-2026-10-27.md)分列库实验、行为覆盖、真实 Web/PG、本机登记和独立静态审阅。原身份保留、正式认证与本机收尾共同交付，不将账户验收扩大为 #66 全路径验收。
 - [R1 会话历史（#69）](design/17-r1-conversation-history.md) 的行为真源为 [conversations](../openspec/specs/conversations/spec.md)，覆盖服务端发现、可见原文/回复、全部批准和结果、旧深链与只读重登；[使用说明](local-lifecycle.md#找回会话run-和真实结果)、[验证记录](conversation-history-verification-2026-10-28.md)和[归档清单](../openspec/changes/archive/2026-10-28-close-r1-conversation-history/tasks.md)分别记录使用、版本化运行证据与六项验收。`0018` 四个非唯一查询索引含旧原话回退查找，新增索引和单次事件聚合有独立补证；不改变执行/工作区/身份主规格，不替代 #66 全路径验收。
+- [对话内提醒确认（#91）](design/17-r1-conversation-history.md#7-web路由与登录衔接) 的行为真源为 [conversations](../openspec/specs/conversations/spec.md)；[收口计划](demo/inline-reminder-closeout-plan.md)、[验收记录](inline-reminder-verification-2026-11-02.md)和[归档清单](../openspec/changes/archive/2026-11-02-confirm-reminders-inline/tasks.md)区分历史证据与当前隔离 Web/API/native/PG 补验。提醒确认只继续原等待点，文档与后继独立授权，business 保留独立批准页；不扩展免批准或 R2-B 接管。
 - [R1 个人助理](design/01-tech-stack-and-repo-structure.md#6-r1-web个人助理与职责边界) 与[页面 PRD](prd/02-core-loop-and-pages.md#r1-个人助理)记录分组顶部导航、对话首页、简洁登录、LumenUI/Base UI/Tailwind v4、React 职责、精确批准和原 Run 显式继续；[Web 使用说明](../apps/web/README.md)与[本机任务流程](local-lifecycle.md#开始任务与审阅文档)说明实际操作与原安装边界。[版本化验证记录](web-task-experience-verification-2026-10-28.md)区分各轮源码、生产页面、受控交互与原安装实际验收，不把旧 CI 或页面示例当作新增迁移已验证。
 - [R2-A 上下文合同（#83）](design/18-r2a-harness-context.md) 的行为真源为 [agent-runtime](../openspec/specs/agent-runtime/spec.md)、[tool-gateway](../openspec/specs/tool-gateway/spec.md) 与 [workspaces](../openspec/specs/workspaces/spec.md)，实施/分级验收记录见 [归档清单](../openspec/changes/archive/2026-10-30-manage-harness-context/tasks.md)。[schema](schema/conversation-and-runs-schema.md#r2-a-上下文策略83)、[API](api/conversations/conversations_routes.md#7-r2-a-上下文容量83)、[PRD](prd/04-acceptance-open-questions.md#r2-a-单-run-上下文83) 跟随。保留 accepted facts、snapshot2 全引用与精确批准，原事实回取不是新读取；纯合同校验不算正式 native/真实模型验收。
 - [R2-B 路由合同（#88）](design/19-r2b-readonly-intent-routing.md) 沿完整规则→BGE INT8→原模型的有限只读路径，保持仓颉唯一循环、原网关/取消/批准恢复，默认off并逐意图验证；行为增量见 [change](../openspec/changes/define-readonly-intent-routing/proposal.md) 与 [任务](../openspec/changes/define-readonly-intent-routing/tasks.md)，[PRD](prd/04-acceptance-open-questions.md#r2-b-有限只读路由88默认关闭) 跟随。[配置及实验入口](design/19-r2b-readonly-intent-routing.md#15-配置与受控实验)复用生产实现；默认off实施PR使用`Refs #88`，与自然shadow、受控接管和最终归档分阶段交付，暂停不等于通过，不自动重启观察、启用enforce或关闭issue。时间性验证与待决门槛见任务Verification；[历史离线证据](demo/r2b-embedding-evidence-2026-10-31.md)不能作为生产接管批准。
