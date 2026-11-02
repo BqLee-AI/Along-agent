@@ -88,6 +88,78 @@ maybe('persistent tool invocation identity and local results', () => {
     return counts;
   }
 
+  it('the production proposal entry asks for missing fields without creating commitments', async () => {
+    for (const [rawTime, timezone, note, reason, phraseKey] of [
+      ['15:20', 'Asia/Shanghai', '喝水', 'DATE_MISSING', 'ASK_DATE'],
+      ['下午三点二十分', 'Asia/Shanghai', '喝水', 'DATE_MISSING', 'ASK_DATE'],
+      ['2027年11月2日下午三点二十分', null, '喝水', 'TIMEZONE_MISSING', 'ASK_TIMEZONE'],
+      ['2027年11月2日3点20分', 'Asia/Shanghai', '喝水', 'DAYPART_MISSING', 'ASK_DAYPART'],
+      [
+        '2027年11月2日下午三点二十分',
+        'Asia/Shanghai',
+        '   ',
+        'CONTENT_MISSING',
+        'ASK_REMINDER_CONTENT',
+      ],
+    ] as const) {
+      const ctx = { ...(await fresh()), confirmedTimezone: timezone };
+      const input = await reserve(ctx, 'missing/1', 'propose_task', {
+        raw_time_text: rawTime,
+        note,
+        occurrence: 'once',
+      });
+      const outcome = await invokeTool(pool, ctx, input);
+      expect(outcome).toMatchObject({
+        status: 'ok',
+        result: { kind: 'clarify', reason, phrase_key: phraseKey },
+      });
+      if (
+        outcome.status === 'ok' &&
+        outcome.result.kind === 'clarify' &&
+        reason === 'DATE_MISSING'
+      ) {
+        expect(outcome.result.text).not.toContain('跨天');
+        expect(outcome.result.text).toBe('请给这条提醒的具体日期，或明确说今天、明天。');
+      }
+      expect(await invokeTool(pool, ctx, input)).toEqual({ ...outcome, replayed: true });
+      expect(await effects(ctx.ownerId)).toEqual({
+        approvals: 0,
+        tool_calls: 2,
+        tasks: 0,
+        task_events: 0,
+        outbox: 0,
+        notifications: 0,
+      });
+    }
+  });
+
+  it('accepts a complete Chinese clock with content supplied in the separate note field', async () => {
+    const ctx = await fresh();
+    const input = await reserve(ctx, 'chinese/1', 'propose_task', {
+      raw_time_text: '2027年11月2日下午三点二十分',
+      note: '买二十三瓶水',
+      occurrence: 'once',
+    });
+    const approval = approvalOf(await invokeTool(pool, ctx, input));
+    expect(approval.wallTime).toBe('2027-11-02 15:20');
+    expect(approval.fireAtUtc).toBe('2027-11-02T07:20:00Z');
+    expect(approval.originalText).toBe('买二十三瓶水');
+    expect(input.args).toEqual({
+      raw_time_text: '2027年11月2日下午三点二十分',
+      note: '买二十三瓶水',
+      occurrence: 'once',
+    });
+    expect(
+      (
+        await pool.query('SELECT original_text,wall_time FROM approvals WHERE id=$1', [
+          approval.approvalId,
+        ])
+      ).rows[0],
+    ).toEqual({ original_text: '买二十三瓶水', wall_time: '2027-11-02 15:20' });
+    expect((await effects(ctx.ownerId)).approvals).toBe(1);
+    expect((await effects(ctx.ownerId)).tasks).toBe(0);
+  });
+
   for (const target of ['audit', 'result'] as const) {
     it(`${target} persistence fault rolls back the approval and can retry the same reservation`, async () => {
       const ctx = await fresh();
@@ -408,7 +480,14 @@ maybe('persistent tool invocation identity and local results', () => {
 
   it('different cancellation calls retain the existing pending approval reuse rule', async () => {
     const ctx = await fresh();
-    const first = await invokeTool(pool, ctx, await reserve(ctx));
+    const first = await invokeTool(
+      pool,
+      ctx,
+      await reserve(ctx, 'action/1', 'propose_task', {
+        ...args,
+        raw_time_text: '2027-11-02 09:20',
+      }),
+    );
     if (first.status !== 'ok' || first.result.kind !== 'approval')
       throw new Error('expected proposal');
     const created = await confirmApproval({ pool }, ctx.ownerId, first.result.approval.approvalId, {

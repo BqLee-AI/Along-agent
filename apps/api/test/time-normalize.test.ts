@@ -60,6 +60,36 @@ describe('reminder text and calendar boundaries', () => {
       normalized: { fire_at_utc: '2027-02-28T16:00:00Z' },
     });
   });
+
+  it('checks complete reminder fields while keeping separate content out of the time text', () => {
+    const complete = {
+      ...input,
+      raw_text: '2027年11月2日下午三点二十分',
+      confirmedTimezone: 'Asia/Shanghai',
+      requireCompleteReminder: true,
+      reminderContent: '买二十三瓶水',
+    };
+    expect(normalizeTime(context, complete)).toMatchObject({
+      kind: 'ok',
+      wall_time: '2027-11-02T15:20:00',
+      normalized: { fire_at_utc: '2027-11-02T07:20:00Z' },
+    });
+    expect(normalizeTime(context, { ...complete, reminderContent: '✅' })).toMatchObject({
+      kind: 'ok',
+      normalized: { fire_at_utc: '2027-11-02T07:20:00Z' },
+    });
+    for (const [override, reason] of [
+      [{ raw_text: '下午三点二十分' }, 'DATE_MISSING'],
+      [{ reminderContent: '   ' }, 'CONTENT_MISSING'],
+      [{ confirmedTimezone: null }, 'TIMEZONE_MISSING'],
+      [{ raw_text: '2027年11月2日三点二十分' }, 'DAYPART_MISSING'],
+    ] as const) {
+      expect(normalizeTime(context, { ...complete, ...override })).toMatchObject({
+        kind: 'clarify',
+        classified: { reason },
+      });
+    }
+  });
 });
 
 describe('application normalization context', () => {

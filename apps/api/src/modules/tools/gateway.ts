@@ -139,6 +139,7 @@ const CLARIFY_TEXT: Record<string, string> = {
   ASK_DAYPART: '请给明确的时刻；如果用“几点”表达，请说明上午、下午或晚上。',
   ASK_DATE: '请给这条提醒的具体日期，或明确说今天、明天。',
   ASK_DATE_RECONFIRM: '跨天了，请重新给具体日期。',
+  ASK_REMINDER_CONTENT: '请给这条提醒的具体事项。',
   ASK_FOLD: '结构化选择与原文冲突，请明确第一次或第二次并重新选择。',
   RANGE_UNSUPPORTED: '范围无法唯一排触发点，请给准确时刻；v0 不支持范围提醒。',
   NO_CALENDAR: 'v0 不读日历不监测空闲，这次不保存；请给明确日期时间时区。',
@@ -193,6 +194,8 @@ async function runProposeTask(
     confirmedTimezone: input.timezone_hint ?? ctx.confirmedTimezone,
     receivedAtUtc: ctx.receivedAtUtc,
     foldChoice: ctx.foldChoice,
+    requireCompleteReminder: true,
+    reminderContent: input.note,
   });
   if (result.kind === 'error') {
     return {

@@ -98,7 +98,7 @@ maybe('tool invocation boundary on signed HTTP and persisted SSE', () => {
   it('runs a real proposal, freezes its button, replays POST/GET without tools, then confirms a cancellation', async () => {
     const { session, headers } = await actor();
     const body = {
-      raw_text: '2026-11-02 09:20 提醒我喝水',
+      raw_text: '2027-11-02 09:20 提醒我喝水',
       confirmed_timezone: 'Asia/Shanghai',
       idempotency_key: randomUUID(),
     };

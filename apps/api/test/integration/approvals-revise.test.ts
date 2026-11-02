@@ -20,7 +20,7 @@ import {
 const maybe = databaseUrl ? describe : describe.skip;
 const healthy = loadTimeContext('fixture-v1');
 const unavailable = createTimeContext('fixture-v1', null, null);
-const raw = '2026-11-02 09:20 喝水';
+const raw = '2027-11-02 09:20 喝水';
 function body(raw_text = raw) {
   return { raw_text, confirmed_timezone: 'Asia/Shanghai', idempotency_key: randomUUID() };
 }
@@ -190,7 +190,7 @@ maybe('approval revise durable PostgreSQL behavior', () => {
           first.successor_approval_id,
         ]);
       if (terminal === 'superseded')
-        await revise(old.ownerId, first.successor_approval_id, body('2026-11-03 10:20 喝水'));
+        await revise(old.ownerId, first.successor_approval_id, body('2027-11-03 10:20 喝水'));
       const before = await counts(pool, old.ownerId);
       expect(
         await reviseApproval({ pool, timeContext: unavailable }, old.ownerId, old.id, input),
@@ -319,7 +319,7 @@ maybe('approval revise durable PostgreSQL behavior', () => {
     const old = await seedApproval(pool, {});
     const results = await Promise.allSettled([
       revise(old.ownerId, old.id, body()),
-      revise(old.ownerId, old.id, body('2026-11-03 09:20 喝水')),
+      revise(old.ownerId, old.id, body('2027-11-03 09:20 喝水')),
     ]);
     const winner = results.find((r) => r.status === 'fulfilled');
     const loser = results.find((r) => r.status === 'rejected');
@@ -575,12 +575,12 @@ maybe('approval revise durable PostgreSQL behavior', () => {
       ownerId,
       conversationId: null,
       originalText: raw,
-      wallTime: '2026-11-02 09:20',
+      wallTime: '2027-11-02 09:20',
       timezoneId: 'Asia/Shanghai',
       fold: 0,
       foldChoice: 'none',
       offsetSeconds: 28800,
-      fireAtUtc: '2026-11-02T01:20:00Z',
+      fireAtUtc: '2027-11-02T01:20:00Z',
       tzdbVersion: 'fixture-v1',
     });
     const oldBody = await confirmBody(pool, ownerId, old.approvalId);

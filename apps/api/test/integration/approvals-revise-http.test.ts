@@ -15,7 +15,7 @@ import {
 } from './setup.js';
 
 const maybe = databaseUrl ? describe : describe.skip;
-const input = { raw_text: '2026-11-02 09:20 喝水', confirmed_timezone: 'Asia/Shanghai' };
+const input = { raw_text: '2027-11-02 09:20 喝水', confirmed_timezone: 'Asia/Shanghai' };
 
 async function readChildLine(stream: ReadableStream<Uint8Array>): Promise<string> {
   const reader = stream.getReader();
