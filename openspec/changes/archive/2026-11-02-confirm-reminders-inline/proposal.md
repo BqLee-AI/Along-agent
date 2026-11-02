@@ -13,9 +13,9 @@ Issue: #91
 
 ## Spec
 
-设计依据：[design/09](../../../docs/design/09-agent-runtime-and-checkpoint.md) §6、[design/17](../../../docs/design/17-r1-conversation-history.md) §5–§8。行为基线：[conversations](../../specs/conversations/spec.md) 的“精确批准与显式继续原运行”、[agent-runtime](../../specs/agent-runtime/spec.md) 的“批准等待与同一 Run 显式恢复”；增量见本 change 的 [conversations spec](specs/conversations/spec.md)。
+设计依据：[design/09](../../../../docs/design/09-agent-runtime-and-checkpoint.md) §6、[design/17](../../../../docs/design/17-r1-conversation-history.md) §5–§8。行为基线：[conversations](../../../specs/conversations/spec.md) 的“精确批准与显式继续原运行”、[agent-runtime](../../../specs/agent-runtime/spec.md) 的“批准等待与同一 Run 显式恢复”；增量见本 change 的 [conversations spec](specs/conversations/spec.md)。
 
-本提案为 Proposed。先独立 OpenSpec-only PR，再提交基于该规范分支的 draft 实现 PR；提案和现有工作树不代表规范已批准、实现已验收或可自动合并。
+行为合同先经独立 OpenSpec-only PR，再由独立实施 PR 交付。规范批准、实施合并与完整验收归档分别取证，不以其中一项替代其他项；分版本结果见[验收记录](../../../../docs/inline-reminder-verification-2026-11-02.md)。
 
 ## Impact
 
