@@ -23,7 +23,7 @@
 | 02   | [模块化单体与拆分触发](design/02-modular-monolith-and-split-triggers.md) | 模块所有权、确认/工具结果的限定原子事务、拆分判据与D1边界                                                                         |
 | 03   | [v0 垂直切片](design/03-v0-vertical-slice.md)                            | 简报→卡片→对话→按钮确认→调度→站内通知详情投影→活动账；真实取消回执与七步证据边界                                                  |
 | 04   | [五缝契约](design/04-five-seams-contract.md)                             | 稳定工具调用、原子接受结果、只追加审计与非事务未知边界；其余能力端口                                                              |
-| 05   | [time-core 时间层](design/05-time-core.md)                               | 纯函数 normalize、有限真实规则上下文、typed 时间失败、fold 候选与实际 readiness                                                   |
+| 05   | [time-core 时间层](design/05-time-core.md)                               | 中文时钟唯一映射、完整提醒与独立事项校验、纯函数 normalize、typed 时间失败与冻结锚                                                |
 | 06   | [approvals 确认门](design/06-approvals-confirmation-gate.md)             | 版本化冻结回显、显式修改、按钮确认及工具批准/结果原子边界                                                                         |
 | 07   | [task_events 事件账](design/07-task-events-ledger.md)                    | 只追加账本、取消优先、活动页读模型                                                                                                |
 | 08   | [调度与投递](design/08-scheduler-and-delivery.md)                        | 未排期过窗终结与遗留恢复、一次性调用许可、独立本地接收、未知不重发及取消栅栏                                                      |
@@ -62,15 +62,15 @@
 
 ## 五、Agent（7 篇）
 
-| 序号 | 文档                                                        | 作用                                                               |
-| ---- | ----------------------------------------------------------- | ------------------------------------------------------------------ |
-| 1    | [Agent 索引](agent/README.md)                               | 职责结论、LLM 只提议、白名单、确认门唯一入口                       |
-| 2    | [助理总览](agent/01-assistant-agent-overview.md)            | 职责/非职责、对话→提议→确认主链                                    |
-| 3    | [工具网关与 v0 工具](agent/02-tool-gateway-and-v0-tools.md) | 五工具schema、持久身份/重放、批准原子结果、当前权限与unknown不重发 |
-| 4    | [简报与卡片生成](agent/03-brief-and-card-generation.md)     | 每日调度触发、输出 schema、校验降级、预算                          |
-| 5    | [提议到承诺流](agent/04-proposal-to-commitment-flow.md)     | 分诊、澄清问法、time-core 错误到话术映射                           |
-| 6    | [对话运行与预算](agent/05-chat-runtime-flow-and-budget.md)  | Run/attempt/调用边界、native 累计预算、同 Run 批准恢复与取消       |
-| 7    | [评测夹具](agent/06-eval-fixtures.md)                       | 50 条时间表达集、200 卡片集版本化、指标口径                        |
+| 序号 | 文档                                                        | 作用                                                         |
+| ---- | ----------------------------------------------------------- | ------------------------------------------------------------ |
+| 1    | [Agent 索引](agent/README.md)                               | 职责结论、LLM 只提议、白名单、确认门唯一入口                 |
+| 2    | [助理总览](agent/01-assistant-agent-overview.md)            | 职责/非职责、对话→提议→确认主链                              |
+| 3    | [工具网关与 v0 工具](agent/02-tool-gateway-and-v0-tools.md) | 完整提醒/独立事项、持久身份/重放、批准原子结果与当前权限     |
+| 4    | [简报与卡片生成](agent/03-brief-and-card-generation.md)     | 每日调度触发、输出 schema、校验降级、预算                    |
+| 5    | [提议到承诺流](agent/04-proposal-to-commitment-flow.md)     | 分诊、澄清问法、time-core 错误到话术映射                     |
+| 6    | [对话运行与预算](agent/05-chat-runtime-flow-and-budget.md)  | Run/attempt/调用边界、native 累计预算、同 Run 批准恢复与取消 |
+| 7    | [评测夹具](agent/06-eval-fixtures.md)                       | 50 条时间表达集、200 卡片集版本化、指标口径                  |
 
 ## 六、Demo、收口规划与验收记录（14 篇）
 

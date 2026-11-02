@@ -49,6 +49,8 @@ assistant tool-loop -> ToolGateway.invoke({invocationId,toolId,args}, trusted ru
 | `note`          | string       | 是   | 事项原话，如"喝水"；`original_note` 接口不读语义，仅回显 |
 | `occurrence`    | enum(once)   | 是   | v0 只 once；重复提醒进 v1 盒子，直接拒并给话术           |
 
+[Required] `propose_task`必须按完整提醒校验日期、时刻、已确认时区及非空`note`，缺字段只澄清、不建批准。`raw_time_text`只保留原时间表达，`note`独立作为事项；不要求把事项重复写进时间字段，也不把两者拼写后再归一。仅有钟点不能按接收锚补成今天；缺日期和实际跨日分别使用问日期与日期重确认话术。
+
 输出：`{ approval_id, c_short_no, presentation_text, presentation_hash, presentation_version, expires_at }`。网关内：调 time-core 归一（成功才生成 C 草稿 pending_confirmation 行）→ 生成回显文本 → 返回。归一失败不建 C，直接返回结构化错误（见 04 映射）。
 
 [Required] `propose_task` 入参禁含 `fire_at_utc` / `fold` / `offset` / `user_id` / `conversation_id`；出现即 `extra=forbid` 拒绝+审计。
