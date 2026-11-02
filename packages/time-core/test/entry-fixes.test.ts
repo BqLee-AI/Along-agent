@@ -71,3 +71,107 @@ describe('entry alias table version (P2)', () => {
     expect(c.timezone_id).toBe('Asia/Shanghai');
   });
 });
+
+describe('entry Chinese numeral reminder clocks', () => {
+  const classifyReminder = (text: string) =>
+    classifyEntry({
+      aliases: ALIAS_TABLE_V1,
+      text,
+      anchorReceivedAtUtc: '2026-10-17T01:00:00Z',
+      receivedAtUtc: '2026-10-17T01:00:00Z',
+      confirmedTz: S,
+      ruleset: FIXTURE_V1,
+      requireCompleteReminder: true,
+    });
+
+  it.each([
+    ['今天下午三点二十提醒我喝水', '2026-10-17T15:20:00'],
+    ['今天下午三点二十分提醒我喝水', '2026-10-17T15:20:00'],
+    ['今天下午两点半提醒我喝水', '2026-10-17T14:30:00'],
+    ['今天下午十五点二十分提醒我喝水', '2026-10-17T15:20:00'],
+    ['今天上午十点零五分提醒我喝水', '2026-10-17T10:05:00'],
+    ['今天晚上十一点五十九分提醒我喝水', '2026-10-17T23:59:00'],
+    ['今天下午3点二十分提醒我喝水', '2026-10-17T15:20:00'],
+    ['今天下午三点20分提醒我喝水', '2026-10-17T15:20:00'],
+    ['2026年10月17日下午三点二十分提醒我喝水', '2026-10-17T15:20:00'],
+  ])('normalizes the actual clock in %s', (text, wallTime) => {
+    const result = classifyReminder(text);
+    expect(result.class).toBe('normalize_ok');
+    expect(result.wall_time).toBe(wallTime);
+    expect(result.timezone_id).toBe(S);
+  });
+
+  it.each([
+    '今天下午三点二十提醒我',
+    '今天下午三点二十分提醒我',
+    '今天下午两点半提醒我',
+    '2026年10月17日下午三点二十分提醒我',
+  ])('does not count the original time fragment as reminder content: %s', (text) => {
+    const result = classifyReminder(text);
+    expect(result.class).toBe('clarify');
+    expect(result.reason).toBe('CONTENT_MISSING');
+  });
+
+  it.each([
+    '今天三点提醒我喝水',
+    '今天三点二十分提醒我喝水',
+    '2026年10月17日三点二十分提醒我喝水',
+    '2026年10月17日3点20分提醒我喝水',
+  ])('still asks for a daypart in %s', (text) => {
+    const result = classifyReminder(text);
+    expect(result.class).toBe('clarify');
+    expect(result.reason).toBe('DAYPART_MISSING');
+  });
+
+  it('still requires a confirmed timezone for a Chinese clock', () => {
+    expect(
+      classifyEntry({
+        aliases: ALIAS_TABLE_V1,
+        text: '今天下午三点二十分提醒我喝水',
+        anchorReceivedAtUtc: '2026-10-17T01:00:00Z',
+        confirmedTz: '',
+        ruleset: FIXTURE_V1,
+        requireCompleteReminder: true,
+      }),
+    ).toMatchObject({ class: 'clarify', reason: 'TIMEZONE_MISSING', phrase_key: 'ASK_TIMEZONE' });
+  });
+
+  it('does not infer a date from the anchor for a Chinese reminder clock', () => {
+    expect(classifyReminder('下午三点二十分提醒我喝水')).toMatchObject({
+      class: 'clarify',
+      reason: 'DATE_MISSING',
+      phrase_key: 'ASK_DATE',
+    });
+  });
+
+  it.each([
+    '今天下午二十五点二十分提醒我喝水',
+    '今天午夜二十五点二十分提醒我喝水',
+    '今天下午三点六十分提醒我喝水',
+    '今天下午三点一百二十分提醒我喝水',
+    '今天下午一百三点二十分提醒我喝水',
+    '今天下午三三点二十分提醒我喝水',
+    '今天下午三点二三分提醒我喝水',
+  ])('does not accept a partial or out-of-range numeral in %s', (text) => {
+    const result = classifyReminder(text);
+    expect(result.class).toBe('clarify');
+    expect(result.reason).toBe('DAYPART_MISSING');
+  });
+
+  it('keeps rejecting fuzzy time qualifiers', () => {
+    const result = classifyReminder('今天下午三点二十左右提醒我喝水');
+    expect(result.class).toBe('reject');
+    expect(result.reason).toBe('FUZZY_RANGE');
+  });
+
+  it.each([
+    ['今天下午3点20分提醒我喝水', '2026-10-17T15:20:00'],
+    ['今天15:20提醒我喝水', '2026-10-17T15:20:00'],
+    ['2026-10-17 15:20提醒我喝水', '2026-10-17T15:20:00'],
+    ['今天下午三点二十分提醒我买二十三瓶水', '2026-10-17T15:20:00'],
+  ])('preserves existing formats and unrelated numeral content: %s', (text, wallTime) => {
+    const result = classifyReminder(text);
+    expect(result.class).toBe('normalize_ok');
+    expect(result.wall_time).toBe(wallTime);
+  });
+});

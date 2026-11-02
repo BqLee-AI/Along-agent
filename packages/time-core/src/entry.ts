@@ -32,6 +32,7 @@ export interface EntryInput {
   ruleset: TimeRuleset;
   aliases: AliasTable;
   requireCompleteReminder?: boolean;
+  reminderContent?: string;
 }
 
 export const ALIAS_TABLE_V1: AliasTable = freezeValue({
@@ -46,6 +47,31 @@ export const ALIAS_TABLE_V1: AliasTable = freezeValue({
 });
 
 const DAYPARTS = ['上午', '下午', '中午', '晚上', '凌晨', '早晨', '早上', '午夜', '半夜'];
+// Capture a whole clock numeral, including unsupported magnitudes, so an
+// invalid token cannot be accepted by parsing just its last one or two digits.
+const CLOCK_NUMERAL = String.raw`[\d零〇一二两三四五六七八九十百千万亿]+`;
+const DIAN_CLOCK = new RegExp(`(${CLOCK_NUMERAL})点(半|(${CLOCK_NUMERAL})分?)?`);
+const CN_DATE_CLOCK = new RegExp(
+  String.raw`(\d{4})年(\d{1,2})月(\d{1,2})[日号]\s*(?:上午|下午|中午|晚上|凌晨|早晨|早上|午夜|半夜)?\s*(${CLOCK_NUMERAL})(?:点(半|(${CLOCK_NUMERAL})分?)?|:(\d{1,2}))?`,
+);
+const CHINESE_DIGITS = '零一二三四五六七八九';
+
+// Only clock captures enter this function; dates and reminder content remain
+// untouched. A negative value denotes an unsupported numeral, not a fallback.
+function parseClockNumber(raw: string): number {
+  if (/^\d{1,2}$/.test(raw)) return Number(raw);
+  if (raw === '两') return 2;
+  if (raw === '〇') return 0;
+  if (raw === '十') return 10;
+  if (raw.length === 1) return CHINESE_DIGITS.indexOf(raw);
+  if (/^[零〇][一二三四五六七八九]$/.test(raw)) return CHINESE_DIGITS.indexOf(raw[1]);
+  const tens = /^([一二三四五六七八九])?十([一二三四五六七八九])?$/.exec(raw);
+  if (!tens) return -1;
+  return (
+    (tens[1] ? CHINESE_DIGITS.indexOf(tens[1]) : 1) * 10 +
+    (tens[2] ? CHINESE_DIGITS.indexOf(tens[2]) : 0)
+  );
+}
 
 function offsetAtUtc(ruleset: TimeRuleset, tz: string, epoch: number): number | null {
   const zone = ruleset.zones[tz];
@@ -112,8 +138,12 @@ function withCompleteReminder(
   hasDate: boolean,
 ): EntryClassifyResult {
   if (!input.requireCompleteReminder) return result;
-  if (!hasDate)
-    return { class: 'clarify', reason: 'DATE_MISSING', phrase_key: 'ASK_DATE_RECONFIRM' };
+  if (!hasDate) return { class: 'clarify', reason: 'DATE_MISSING', phrase_key: 'ASK_DATE' };
+  if (input.reminderContent !== undefined) {
+    return /\S/u.test(input.reminderContent)
+      ? result
+      : { class: 'clarify', reason: 'CONTENT_MISSING', phrase_key: 'ASK_REMINDER_CONTENT' };
+  }
   let content = input.text.replace(timeText, '').replace(RELATIVE_DATE, '');
   for (const alias in input.aliases.aliases) content = content.replaceAll(alias, '');
   for (const zone in input.ruleset.zones) content = content.replaceAll(zone, '');
@@ -203,16 +233,11 @@ function classifyEntryInner(input: EntryInput): EntryClassifyResult {
     );
   }
 
-  const hasClock = /(\d{1,2}):(\d{2})/.test(text) || /(\d{1,2})点/.test(text);
-  if (!hasClock) return { class: 'clarify', reason: 'DAYPART_MISSING', phrase_key: 'ASK_DAYPART' };
-  if (
-    /(\d{1,2})点/.test(text) &&
-    !/(\d{1,2}):(\d{2})/.test(text) &&
-    !DAYPARTS.some((w) => text.includes(w))
-  ) {
-    if (!/(\d{4})-(\d{2})-(\d{2})/.test(text) && !/\d{4}年/.test(text)) {
-      return { class: 'clarify', reason: 'DAYPART_MISSING', phrase_key: 'ASK_DAYPART' };
-    }
+  const hm = /(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(text);
+  const dian = DIAN_CLOCK.exec(text);
+  if (!hm && !dian)
+    return { class: 'clarify', reason: 'DAYPART_MISSING', phrase_key: 'ASK_DAYPART' };
+  if (dian && !hm && !DAYPARTS.some((w) => text.includes(w))) {
     return { class: 'clarify', reason: 'DAYPART_MISSING', phrase_key: 'ASK_DAYPART' };
   }
 
@@ -265,24 +290,15 @@ function classifyEntryInner(input: EntryInput): EntryClassifyResult {
     );
   }
 
-  const cn =
-    /(\d{4})年(\d{1,2})月(\d{1,2})[日号]\s*(?:上午|下午|中午|晚上|凌晨|早晨|早上|午夜|半夜)?\s*(\d{1,2})(?:点(半|(\d{1,2})分?)?|:(\d{1,2}))?/.exec(
-      text,
-    );
+  const cn = CN_DATE_CLOCK.exec(text);
   if (cn) {
     let y = Number(cn[1]);
     let mo = Number(cn[2]);
     let d = Number(cn[3]);
-    let h = Number(cn[4]);
-    const mi = cn[7]
-      ? Number(cn[7])
-      : cn[6]
-        ? Number(cn[6])
-        : cn[5] === '半'
-          ? 30
-          : cn[5]
-            ? Number(cn[5])
-            : 0;
+    let h = parseClockNumber(cn[4]);
+    const mi = cn[7] ? Number(cn[7]) : cn[6] ? parseClockNumber(cn[6]) : cn[5] === '半' ? 30 : 0;
+    if (h < 0 || h > 24 || mi < 0 || mi > 59 || (h === 24 && mi !== 0))
+      return { class: 'clarify', reason: 'DAYPART_MISSING', phrase_key: 'ASK_DAYPART' };
     if (h === 24) {
       const shifted = shiftDate(
         `${y}-${mo < 10 ? `0${mo}` : `${mo}`}-${d < 10 ? `0${d}` : `${d}`}`,
@@ -311,8 +327,6 @@ function classifyEntryInner(input: EntryInput): EntryClassifyResult {
     );
   }
 
-  const hm = /(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(text);
-  const dian = /(\d{1,2})点(半|(\d{1,2})分?)?/.exec(text);
   let h = -1;
   let mi = 0;
   let ss = 0;
@@ -321,11 +335,14 @@ function classifyEntryInner(input: EntryInput): EntryClassifyResult {
     mi = Number(hm[2]);
     ss = hm[3] ? Number(hm[3]) : 0;
   } else if (dian) {
-    h = mapHour(Number(dian[1]), text, false);
+    const rawHour = parseClockNumber(dian[1]);
+    if (rawHour < 0 || rawHour > 23)
+      return { class: 'clarify', reason: 'DAYPART_MISSING', phrase_key: 'ASK_DAYPART' };
+    h = mapHour(rawHour, text, false);
     if (dian[2] === '半') mi = 30;
-    else if (dian[3]) mi = Number(dian[3]);
+    else if (dian[3]) mi = parseClockNumber(dian[3]);
   }
-  if (h < 0 || h > 23 || mi > 59 || ss > 59) {
+  if (h < 0 || h > 23 || mi < 0 || mi > 59 || ss > 59) {
     return { class: 'clarify', reason: 'DAYPART_MISSING', phrase_key: 'ASK_DAYPART' };
   }
   return withCompleteReminder(
