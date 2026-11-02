@@ -1,6 +1,6 @@
 // Public model-facing tool descriptors. Runtime input validators stay private
 // to the gateway in schemas.ts; shared tool IDs and enums belong to contracts.ts.
-import { TASK_STATES } from './contracts.js';
+import { DELEGATION_TOOL_IDS, TASK_STATES } from './contracts.js';
 
 const workspaceParameters = (
   properties: Record<string, unknown>,
@@ -139,6 +139,21 @@ export const HARNESS_TOOL_DEFINITIONS = [
         limit: { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER },
       },
       ['source_invocation_id', 'field', 'offset', 'limit'],
+    ),
+  },
+];
+
+// A separate profile: the legacy catalog and its approval semantics stay intact.
+export const DELEGATION_TOOL_DEFINITIONS = [
+  ...HARNESS_TOOL_DEFINITIONS.filter((tool) => DELEGATION_TOOL_IDS.some((id) => id === tool.name)),
+  {
+    name: 'set_user_timezone',
+    description:
+      '在本人明确委托内直接保存默认时区；timezone_id 为 null 时清除。仅支持实际规则包中的规范时区或已登记别名，不修改历史提醒；单次时区不保存。只按 timezone_setting 接受回执报告已保存或已清除，不生成批准。',
+    risk: 'medium' as const,
+    parameters: workspaceParameters(
+      { timezone_id: { type: ['string', 'null'], minLength: 1, maxLength: 100 } },
+      ['timezone_id'],
     ),
   },
 ];

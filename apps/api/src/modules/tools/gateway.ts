@@ -13,7 +13,7 @@ import {
 } from '../approvals/presentation.js';
 import { readCancelTaskCandidate, readToolTaskList } from '../tasks/tool-query.js';
 import { readToolBriefCards } from '../brief/tool-query.js';
-import { readUserPreferences } from '../identity/preferences.js';
+import { readUserPreferences, setUserTimezoneWithinTransaction } from '../identity/preferences.js';
 import { TOOL_INPUT_SCHEMAS } from './schemas.js';
 import type { ToolContext, ToolOutcome, ToolPayload, ToolResult } from './contracts.js';
 import {
@@ -436,6 +436,31 @@ async function runGetUserPrefs(
   };
 }
 
+async function runSetUserTimezone(
+  client: PoolClient,
+  ctx: ToolContext,
+  args: unknown,
+): Promise<ToolResult> {
+  const parsed = TOOL_INPUT_SCHEMAS.set_user_timezone.safeParse(args);
+  if (!parsed.success || ctx.authorizationRevision !== 'delegation/1')
+    return {
+      status: 'denied',
+      error: { code: 'TOOL_FORBIDDEN', message: '时区设置参数或运行授权不合法。' },
+    };
+  try {
+    const setting = await setUserTimezoneWithinTransaction(
+      client,
+      ctx.ownerId,
+      parsed.data.timezone_id,
+      ctx.timeContext,
+    );
+    return { status: 'ok', result: { kind: 'timezone_setting', ...setting } };
+  } catch (error) {
+    if (!(error instanceof HttpError)) throw error;
+    return { status: 'denied', error: { code: error.errorCode, message: error.message } };
+  }
+}
+
 export function reserveToolInvocation(
   pool: Pool,
   ctx: ToolContext,
@@ -502,6 +527,8 @@ export function invokeTool(
   return executeLocalInvocation(pool, ctx, input, async (client, frozen) => {
     let executed: ToolExecution;
     switch (input.toolId) {
+      case 'set_user_timezone':
+        return runSetUserTimezone(client, frozen, input.args);
       case 'workspace_propose_replace':
         return runWorkspaceProposal(client, frozen, input.args);
       case 'propose_task':

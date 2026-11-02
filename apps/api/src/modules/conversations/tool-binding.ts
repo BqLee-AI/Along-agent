@@ -12,14 +12,23 @@ export interface ToolRunBinding {
   attemptId: string;
 }
 
-type ToolScope = { allowlist?: readonly string[]; workspaceGrant?: WorkspaceGrant | null };
+type ToolScope = {
+  allowlist?: readonly string[];
+  workspaceGrant?: WorkspaceGrant | null;
+  authorizationRevision?: 'delegation/1';
+};
 
 function validateFrozenWorkspace(
   ownerId: string,
-  frozenContext: { workspaceGrant?: unknown } | null,
+  frozenContext: { workspaceGrant?: unknown; authorization_revision?: unknown } | null,
   binding: ToolScope,
   acceptRevokedFact = false,
 ): boolean {
+  if (
+    'allowlist' in binding &&
+    binding.authorizationRevision !== frozenContext?.authorization_revision
+  )
+    throw forbidden('authorization revision differs from frozen Run');
   const frozen =
     frozenContext?.workspaceGrant == null
       ? null
@@ -51,7 +60,7 @@ export async function assertToolRunBinding(
     await client.query<{
       execution: string;
       tools_allowlist: string[];
-      frozen_context: { workspaceGrant?: unknown } | null;
+      frozen_context: { workspaceGrant?: unknown; authorization_revision?: unknown } | null;
     }>(
       `SELECT r.execution,r.tools_allowlist,r.frozen_context FROM agent_runs r JOIN conversations c ON c.id=r.conversation_id
       WHERE r.id=$1 AND r.owner_id=$2 AND c.owner_id=$2 AND r.conversation_id=$3`,
@@ -89,7 +98,7 @@ async function lockToolBinding(
     status: string;
     execution: string;
     tools_allowlist: string[];
-    frozen_context: { workspaceGrant?: unknown } | null;
+    frozen_context: { workspaceGrant?: unknown; authorization_revision?: unknown } | null;
   }>(
     `SELECT r.status,r.execution,r.tools_allowlist,r.frozen_context FROM agent_runs r
      WHERE r.id = $1 AND r.owner_id = $2 AND r.conversation_id = $3

@@ -48,8 +48,9 @@ async function nativeCase(options: {
   const requests: HarnessRequest[] = [];
   const send = (frame: unknown) => child.stdin.write(JSON.stringify(frame) + '\n');
   send({
-    protocol: 'harness/v5',
+    protocol: 'harness/v6',
     type: 'start',
+    trusted_context: null,
     routing_policy: { revision: 'r2b/1', mode: 'off' },
     eligible_phase: 'disabled',
     context_policy: policy,
@@ -77,7 +78,7 @@ async function nativeCase(options: {
         requests.push(request);
         if (options.cancel?.(request)) {
           send({
-            protocol: 'harness/v5',
+            protocol: 'harness/v6',
             type: 'cancel',
             reason: 'controlled accepted cancellation',
           });
@@ -86,7 +87,7 @@ async function nativeCase(options: {
         const rejected = options.reject?.(request);
         if (rejected) {
           send({
-            protocol: 'harness/v5',
+            protocol: 'harness/v6',
             type: 'reply',
             reply_to: request.request_ref,
             error: { code: rejected, message: 'controlled protocol boundary failure' },
@@ -122,7 +123,7 @@ async function nativeCase(options: {
         )
           value = options.handle?.(request);
         else value = { accepted: true };
-        send({ protocol: 'harness/v5', type: 'reply', reply_to: request.request_ref, value });
+        send({ protocol: 'harness/v6', type: 'reply', reply_to: request.request_ref, value });
       }
     }
     expect(await child.exited, await new Response(child.stderr).text()).toBe(

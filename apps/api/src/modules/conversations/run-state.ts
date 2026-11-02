@@ -1,5 +1,5 @@
 import type { PoolClient } from 'pg';
-import { HistoricalHarnessSnapshotSchema } from '@along/contracts';
+import { HistoricalHarnessSnapshotSchema, GoalResultSchema } from '@along/contracts';
 import type { HarnessApprovalDecision, HarnessSnapshot, RunView } from '@along/contracts';
 import {
   THREAD_PROTOCOL_VERSION,
@@ -19,6 +19,7 @@ import { readApprovalDecision, readDocumentApprovalDecision } from '../approvals
 import { readRunInvocationStates } from '../tools/invocations.js';
 import { BUSINESS_TOOL_IDS } from '../tools/contracts.js';
 import { validateWorkspaceGrant, WorkspaceDeniedError } from '../workspaces/service.js';
+import { interruptedGoalResult } from './goal-result.js';
 
 export async function appendEvent(
   client: PoolClient,
@@ -26,8 +27,22 @@ export async function appendEvent(
   type: ThreadEvent['type'],
   payload: unknown,
 ): Promise<ThreadEvent> {
+  const authority = (
+    await client.query<{ revision: string | null }>(
+      `SELECT frozen_context->>'authorization_revision' AS revision FROM agent_runs WHERE id=$1 AND owner_id=$2`,
+      [context.runId, context.ownerId],
+    )
+  ).rows[0];
+  const delegation = authority?.revision === 'delegation/1';
+  if (delegation && type === 'thread.started')
+    payload = {
+      ...(payload as Record<string, unknown>),
+      stream_protocol_version: 'v2',
+      authorization_revision: 'delegation/1',
+      execution_lifecycle: 'request-bound',
+    };
   const event = ThreadEventSchema.parse({
-    protocol_version: THREAD_PROTOCOL_VERSION,
+    protocol_version: delegation ? 'v2' : THREAD_PROTOCOL_VERSION,
     seq: 1,
     type,
     payload,
@@ -47,6 +62,7 @@ export async function appendEvent(
     type,
     payload,
     requestId: context.requestId,
+    streamProtocolVersion: event.protocol_version,
   });
   return event;
 }
@@ -59,6 +75,26 @@ export async function commitTerminal(
 ): Promise<ThreadEvent> {
   // The caller holds current attempt -> Run; the message and visible terminal
   // checkpoint are part of that same transaction, including persistence faults.
+  const run = (
+    await client.query<{ revision: string | null }>(
+      `SELECT frozen_context->>'authorization_revision' AS revision FROM agent_runs WHERE id=$1 AND owner_id=$2`,
+      [context.runId, context.ownerId],
+    )
+  ).rows[0];
+  let goal = null;
+  if (run?.revision === 'delegation/1') {
+    const supplied =
+      payload && typeof payload === 'object' && 'goal_result' in payload
+        ? payload.goal_result
+        : undefined;
+    if (supplied === undefined && status === 'done')
+      throw stateConflict('delegated terminal result is required');
+    goal =
+      supplied === undefined
+        ? await interruptedGoalResult(client, context, status as 'failed' | 'cancelled')
+        : GoalResultSchema.parse(supplied);
+    payload = { ...(payload as Record<string, unknown>), goal_result: goal };
+  }
   const deltas = await client.query<{ delta: string }>(
     `SELECT c.payload->'payload'->>'delta' AS delta FROM run_checkpoints c
       JOIN run_attempts a ON a.id=c.attempt_id WHERE a.run_id=$1 AND c.kind='message.delta'
@@ -67,7 +103,7 @@ export async function commitTerminal(
   );
   // Only accepted assistant deltas become a message. A structured failure
   // without assistant output is a terminal event, not a synthesized turn.
-  const text = deltas.rows.map((row) => row.delta).join('');
+  const text = goal?.answer ?? deltas.rows.map((row) => row.delta).join('');
   if (text)
     await insertMessage(client, {
       ownerId: context.ownerId,
@@ -86,8 +122,8 @@ export async function commitTerminal(
   await finishAttempt(client, context.attemptId, status === 'done' ? 'done' : 'failed');
   await client.query(
     `UPDATE agent_runs SET status=$2,ended_at=now(),waiting_checkpoint_id=NULL,
-      waiting_invocation_id=NULL,waiting_approval_id=NULL WHERE id=$1`,
-    [context.runId, status],
+      waiting_invocation_id=NULL,waiting_approval_id=NULL,goal_result=$3::jsonb WHERE id=$1`,
+    [context.runId, status, goal ? JSON.stringify(goal) : null],
   );
   return event;
 }
@@ -178,6 +214,13 @@ export async function viewOf(client: PoolClient, locked: LockedRun): Promise<Run
         ? { ...waiting, approval_kind: 'document' }
         : waiting,
     ...(workspace ? { workspace } : {}),
+    ...(run.frozen_context?.authorization_revision
+      ? {
+          authorization_revision: run.frozen_context.authorization_revision,
+          execution_lifecycle: run.frozen_context.execution_lifecycle,
+          goal_result: run.goal_result,
+        }
+      : {}),
     can_resume: canResume,
   };
 }

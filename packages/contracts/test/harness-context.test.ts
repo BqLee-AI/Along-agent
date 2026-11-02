@@ -3,7 +3,7 @@ import type { z } from 'zod';
 import { HarnessRequestSchema, HarnessStartSchema } from '../src/harness.js';
 
 const request = {
-  protocol: 'harness/v5',
+  protocol: 'harness/v6',
   request_ref: 'r1',
   type: 'measure_context',
   messages: [{ role: 'user', content: 'Full frozen input' }],
@@ -29,8 +29,9 @@ test('R2-A start retains all typed provenance and full immutable input', () => {
     content_total: 100000,
   } as const;
   const start = {
-    protocol: 'harness/v5',
+    protocol: 'harness/v6',
     type: 'start',
+    trusted_context: null,
     routing_policy: { revision: 'r2b/1', mode: 'off' },
     eligible_phase: 'disabled',
     context_policy: {

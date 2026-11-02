@@ -3,7 +3,7 @@
 // exclusively in Cangjie, while TS owns accepted authority and durable facts.
 import { createHash, randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
-import type { ExecutionKind } from '@along/contracts';
+import { TrustedExecutionContextSchema, type ExecutionKind } from '@along/contracts';
 import type { ConversationDeps, RunContext, StartResult, EventWriter } from './contracts.js';
 import {
   executeHarness,
@@ -12,7 +12,12 @@ import {
   resumeConversationRun,
 } from './harness-authority.js';
 import { appendEvent, commitTerminal } from './run-state.js';
-import { BUSINESS_TOOL_IDS, HARNESS_BASE_TOOL_IDS, TOOL_IDS } from '../tools/contracts.js';
+import {
+  BUSINESS_TOOL_IDS,
+  HARNESS_BASE_TOOL_IDS,
+  DELEGATION_TOOL_IDS,
+  TOOL_IDS,
+} from '../tools/contracts.js';
 import { getWorkspaceGrant, validateWorkspaceGrant } from '../workspaces/service.js';
 import { findReminderDirective } from '@along/time-core';
 import { requireTimeContext } from '../time/context.js';
@@ -55,6 +60,7 @@ import { ensureRunContextPolicy } from './context-policy.js';
 import { insertRoutingPolicy } from './routing-checkpoints.js';
 import { routingRuntimeOf } from './harness-config.js';
 import { acceptReminderDate } from './reminder-date.js';
+import { readUserPreferences } from '../identity/preferences.js';
 
 const AGENT_REVISION = 'assistant/r1';
 const BUSINESS_MAX_ITERATIONS = 10;
@@ -91,10 +97,12 @@ function requestHashOf(input: {
   execution: ExecutionKind;
   workspaceId?: string;
   clarificationOfRunId?: string;
+  authorizationRevision?: 'delegation/1';
 }): string {
   const material = [input.conversationId ?? null, input.text, input.timezone, input.fold];
   if (input.workspaceId !== undefined) material.push(input.workspaceId);
   if (input.clarificationOfRunId !== undefined) material.push(input.clarificationOfRunId);
+  if (input.authorizationRevision) material.push(input.authorizationRevision);
   const canonical = JSON.stringify(material);
   return createHash('sha256')
     .update(
@@ -135,6 +143,9 @@ export async function startConversationRun(
     timezone,
     fold: input.fold_choice,
     execution,
+    ...(input.authorization_revision
+      ? { authorizationRevision: input.authorization_revision }
+      : {}),
     ...(input.workspace_id !== undefined ? { workspaceId: input.workspace_id } : {}),
     ...(input.clarification_of_run_id
       ? { clarificationOfRunId: input.clarification_of_run_id }
@@ -169,11 +180,14 @@ export async function startConversationRun(
       const workspaceSummary = workspaceGrant
         ? validateWorkspaceGrant(ownerId, workspaceGrant)
         : null;
+      const delegation = input.authorization_revision === 'delegation/1';
       const allowlist =
         execution === 'harness'
           ? workspaceGrant
             ? TOOL_IDS
-            : HARNESS_BASE_TOOL_IDS
+            : delegation
+              ? DELEGATION_TOOL_IDS
+              : HARNESS_BASE_TOOL_IDS
           : BUSINESS_TOOL_IDS;
 
       let conversation: ConversationRow | null = null;
@@ -198,8 +212,11 @@ export async function startConversationRun(
       }
       await client.query('SELECT id FROM conversations WHERE id=$1 FOR UPDATE', [conversation.id]);
 
-      let confirmedTimezone = timezone ?? conversation.confirmed_timezone_id;
-      if (!conversation.confirmed_timezone_id && timezone) {
+      const preferences = delegation ? await readUserPreferences(client, ownerId) : null;
+      let confirmedTimezone = delegation
+        ? (timezone ?? preferences?.timezone_id ?? null)
+        : (timezone ?? conversation.confirmed_timezone_id);
+      if (!delegation && !conversation.confirmed_timezone_id && timezone) {
         await freezeConversationTimezone(client, conversation.id, timezone);
         confirmedTimezone = timezone;
       }
@@ -252,6 +269,41 @@ export async function startConversationRun(
               userMessageId,
             })
           : undefined;
+      const trustedExecutionContext = delegation
+        ? TrustedExecutionContextSchema.parse({
+            version: 1,
+            authorization_revision: 'delegation/1',
+            execution_lifecycle: 'request-bound',
+            input_message_id: userMessageId,
+            received_at_utc: receivedAtUtc,
+            request_anchor_utc: reminderDate.anchor,
+            continuation:
+              reminderDate.source.kind === 'clarification'
+                ? {
+                    run_id: reminderDate.source.sourceRunId,
+                    invocation_id: reminderDate.source.sourceInvocationId ?? null,
+                  }
+                : null,
+            timezone: confirmedTimezone
+              ? {
+                  timezone_id: confirmedTimezone,
+                  source: timezone ? 'explicit' : 'preference',
+                  reference: timezone ? userMessageId : ownerId,
+                }
+              : null,
+            time_capabilities: {
+              elapsed_revision: null,
+              wall_rules: deps.timeContext.available
+                ? {
+                    ruleset_id: deps.timeContext.ruleset_id,
+                    tzdb_version: deps.timeContext.tzdb_version,
+                    alias_version: deps.timeContext.aliases.version,
+                  }
+                : null,
+            },
+            workspaces: [],
+          })
+        : undefined;
       const frozenContext = {
         confirmedTimezone,
         anchorReceivedAtUtc: reminderDate.anchor,
@@ -263,6 +315,13 @@ export async function startConversationRun(
         reminderDateSource: reminderDate.source,
         ...(messageRefs ? { messageRefs } : {}),
         ...(workspaceGrant ? { workspaceGrant, workspaceSummary } : {}),
+        ...(trustedExecutionContext
+          ? {
+              authorization_revision: 'delegation/1' as const,
+              execution_lifecycle: 'request-bound' as const,
+              trustedExecutionContext,
+            }
+          : {}),
       };
       await insertRun(client, {
         runId,
@@ -327,6 +386,9 @@ export async function startConversationRun(
           ...(messageRefs ? { messageRefs } : {}),
           ...(contextPolicy ? { contextPolicy } : {}),
           ...(workspaceGrant ? { workspaceGrant } : {}),
+          ...(trustedExecutionContext
+            ? { authorizationRevision: 'delegation/1' as const, trustedExecutionContext }
+            : {}),
           timeContext: deps.timeContext,
         },
       };

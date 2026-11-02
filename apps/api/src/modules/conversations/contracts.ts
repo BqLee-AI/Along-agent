@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import type { ContextPolicy, ExecutionKind, HarnessStart, WorkspaceGrant } from '@along/contracts';
 import type { ThreadEvent } from '@along/stream-protocol';
+import type { TrustedExecutionContext } from '@along/contracts';
 import type { TimeContext } from '../time/context.js';
 import type { HarnessServices } from './harness-process.js';
 import type { RoutingRuntime } from './routing/index.js';
@@ -36,6 +37,8 @@ export interface RunContext {
   messageRefs?: readonly string[];
   messages?: HarnessStart['messages'];
   contextPolicy?: ContextPolicy;
+  authorizationRevision?: 'delegation/1';
+  trustedExecutionContext?: TrustedExecutionContext;
 }
 
 export interface StartResult {

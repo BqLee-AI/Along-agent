@@ -497,7 +497,8 @@ export class DeploymentDatabase {
               verify.version !== version ||
               !Array.isArray(verify.tables) ||
               !Array.isArray(verify.columns) ||
-              !Array.isArray(verify.constraints)
+              !Array.isArray(verify.constraints) ||
+              (verify.additional_checks !== undefined && !Array.isArray(verify.additional_checks))
             )
               fail('migration_inventory_invalid');
           } catch (error) {
@@ -843,6 +844,11 @@ export class DeploymentDatabase {
       for (const check of migration.verify.baseline_checks ?? []) {
         const key = `${check.table}.${check.name}`;
         if (!expectedChecks.has(key)) fail('migration_inventory_invalid');
+        expectedChecks.set(key, check);
+      }
+      for (const check of migration.verify.additional_checks ?? []) {
+        const key = `${check.table}.${check.name}`;
+        if (!TABLES[check.table] || expectedChecks.has(key)) fail('migration_inventory_invalid');
         expectedChecks.set(key, check);
       }
     }

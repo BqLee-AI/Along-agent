@@ -1,6 +1,6 @@
 # 仓颉原生 Harness
 
-生产源位于本目录，目标平台 Linux x86_64，仅使用继承的 stdin/stdout 交换 `harness/v5`，不执行或写出旧 wire 协议；snapshot 仅接受/输出 `version: 2`。不监听端口、不持有模型凭据、不包含 fixture 或网络 transport。准确 wire DTO 见 `packages/contracts/src/harness.ts` 与 `routing.ts`；身份、授权、调用预约、效果、批准与持久事实由 TypeScript 裁决。
+生产源位于本目录，目标平台 Linux x86_64，仅使用继承的 stdin/stdout 交换 `harness/v6`；`v5` 与未知版本硬拒绝，不执行或写出旧 wire 协议。snapshot 仅接受/输出 `version: 2`。不监听端口、不持有模型凭据、不包含模型 fixture 或网络 transport。准确 wire DTO 见 `packages/contracts/src/harness.ts`、`goals.ts` 与 `routing.ts`；身份、授权、调用预约、效果、批准与持久事实由 TypeScript 裁决。
 
 ## 可复现构建与安装
 
@@ -18,6 +18,8 @@ Linux x64 / WSL 执行根 `bun run test:contracts`。入口从当前树构建生
 
 unknown 与取消后迟到调用另验证真实非事务调用核心到 native 的停止/资格边界；内部文件探针不是产品工具。unknown 不生成 checkpoint，不能冒充生产可恢复快照。D8 的有限 enforced 和 remaining/partial 规则见 `docs/design/13-p0-bootstrap-and-ci-rules.md` §4.2，不代表真实 provider、所有连接器或完整 R1。
 
+原生目标合同的独立受控 pipe 用例位于 `apps/harness/test/contracts/trusted-goals.test.ts`；在同一 Linux 正式产物环境中设置上述 `HARNESS_BINARY` / `HARNESS_LIBRARY_PATH` 后执行 `bun test apps/harness/test/contracts/trusted-goals.test.ts`。它直接向真实二进制发送帧，覆盖 v5/畸形可信上下文硬拒绝、可信 system 层、保存/清除实际收据、显式 `finish_goal`、预算/取消/unknown 与 null profile 兼容；不替代 API/PG 原子性或真实模型验收。缺当前正式二进制时明确失败，不跳过。
+
 ## 模型传输配置
 
 安装 native 不会自动选供应商或启用 fixture。普通用户不配置 provider/BYOK；供应商、模型与预算由部署服务端固定。API 启动时读取：
@@ -34,6 +36,9 @@ unknown 与取消后迟到调用另验证真实非事务调用核心到 native �
 ## 执行与失败合同
 
 - 两端验证有界 UTF-8 NDJSON、版本、精确字段、唯一请求引用和对应回答。每次仅一个请求等待且立即 flush；帧上限1MiB。不完整帧、等待输入时 EOF、畸形/错配/超限失败并返回脱敏错误，不将 raw stderr/provider body 暴露给用户。
+- `start.trusted_context` 是 v6 必需判别字段。`null` 保留 legacy 原工具/批准/等待/快照/预算和原模型策略；非空仅接受 `version:1`、`delegation/1`、`request-bound` 与当前真实能力（elapsed null、workspaces 空）。完整嵌套字段严格校验，UTC 锚为秒精度 `...Z`；本轮 input_message_id 必须指向实际 user 消息。可信上下文单独进入 system 层，用户/资料/观察不会升级为可信指令。
+- 新 profile 只接受已交付的 `get_user_prefs/set_user_timezone/read_run_observation/list_tasks/read_brief_cards` 工具，不走 legacy direct routing 或批准。明确保存/清除本人默认时区可自主执行；只本次指定时区不意味着保存。时区优先级是本次明确值、适用的新接受设置收据、接纳时偏好；清除后不继续冒用旧默认值。资料正文不能扩大委托，工具和规则包未交付的能力不对模型承诺；request-bound 不承诺离开后继续。
+- `finish_goal` 是模型控制出口，不是领域工具，也不预约 invocation。native 验证有界 GoalResult、逐项/聚合状态、clarification 和已接受收据 UUID 后发送同名请求及累计 usage；TS 按真实归属与领域事实原子保存结果/最终 answer/终态。完成一个工具不会自动完成目标；普通最终正文必须在原预算内再经模型提交结构化出口，不偷换为成功。设置观察不投影丢弃，模型工具观察含实际 invocation_id（不是 provider call ID）。失败/预算仍走原 `finish(failed)`，由 TS 保留既成/unknown 事实；取消已在 TS 提交，native 不制造第二终态。
 - 模型 transport 请求真实 `stream:true`。native 逐次接收当前模型请求的增量或完整结果；每个正文增量先通过原 `answer` 请求取得 TS 持久接受回执，再以相关的 `model_next` 拉取后续，仍只有一个请求等待。最终完整结果只用于工具解析、模型历史及用量，不重复发送正文。工具参数必须完整并校验后才能执行；中断/畸形流明确失败，取消或 native exit 关闭 provider reader，不把完整 JSON 或打字动画作为流式回退。
 - 公开 `answer.delta` 非空且最多4000个 UTF-16 单位，传输只在真实 provider 增量过大时按 Unicode 标量边界细分；每帧对应一次接受。已出现的部分正文不表示成功，最终用量和工具决议仍独立核对。默认系统上下文指示简体中文回复，用户明确指定其他语言时遵从；此指令同样用于批准恢复，不由前端翻译。
 - 聚合 start 与最终 model/measure 帧、完整 HTTP body 均按实际 UTF-8 JSON 序列化核验1MiB，不提高门槛。完整冻结输入/系统规则、新返回全文至少一次真实模型请求可见机会、新的全文修改基线及不可省略执行事实受保护。压力下 native 才经 `context_source(projected)` 按接受顺序投影已被模型看到的旧观察；不会把可写授权误当成永久保留所有历史正文的理由。精确动作使用新呈现的全文/片段，原完整修改基线仍由 TS 账核对；无 `read_run_observation` 资格的旧 Run 不淘汰唯一正文。无合法缩减则 `HARNESS_CONTEXT_LIMIT`，不发下一模型或工具。64个已接受工具引用达到上限后不再预约，投影从不删除 snapshot2 引用。

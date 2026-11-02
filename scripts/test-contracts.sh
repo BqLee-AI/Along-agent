@@ -67,7 +67,7 @@ docker run --pull never --rm --name "$consumer" --network "$network" \
     mkdir /tmp/d8-contracts
     bun test --parallel=4 --timeout 30000 --reporter=junit \
       --reporter-outfile /tmp/d8-contracts/report.xml \
-      ./apps/api/test/contracts.test.ts ./apps/api/test/contracts \
+      ./apps/api/test/contracts.test.ts ./apps/api/test/contracts ./apps/harness/test/contracts \
       ./apps/api/test/integration/tool-invocations-nontransactional.test.ts \
       ./packages/contracts/test ./packages/stream-protocol/test
     bun scripts/check-gates-executable.mjs . /tmp/d8-contracts/report.xml

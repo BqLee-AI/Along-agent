@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://along.example/schemas/thread-stream.schema.json",
   "title": "thread-stream",
-  "description": "SSE thread-event envelope contract (issue #9). Envelope carries protocol_version v1, positive-int seq, one of seven frozen types, a strict payload, and request_id. Mirrors ThreadEventSchema in packages/stream-protocol/src/thread-events.ts (S0 #14 frozen vocabulary).",
+  "description": "Explicit strict v1 legacy and v2 delegation SSE envelopes, sharing seven frozen event types. v2 adds trusted start lifecycle and structurally validated terminal goal results; domain evidence and aggregate goal validity belong to the producer.",
   "type": "object",
   "oneOf": [
     { "$ref": "#/definitions/thread.started" },
@@ -11,7 +11,14 @@
     { "$ref": "#/definitions/approval_required" },
     { "$ref": "#/definitions/thread.completed" },
     { "$ref": "#/definitions/thread.failed" },
-    { "$ref": "#/definitions/thread.cancelled" }
+    { "$ref": "#/definitions/thread.cancelled" },
+    { "$ref": "#/definitions/v2.thread.started" },
+    { "$ref": "#/definitions/v2.message.delta" },
+    { "$ref": "#/definitions/v2.card.proposed" },
+    { "$ref": "#/definitions/v2.approval_required" },
+    { "$ref": "#/definitions/v2.thread.completed" },
+    { "$ref": "#/definitions/v2.thread.failed" },
+    { "$ref": "#/definitions/v2.thread.cancelled" }
   ],
   "definitions": {
     "envelope": {
@@ -224,7 +231,192 @@
               "additionalProperties": false,
               "properties": {
                 "conversation_id": { "$ref": "#/definitions/uuid" },
+                "run_id": { "$ref": "#/definitions/uuid" },
                 "reason": { "type": "string", "minLength": 1, "maxLength": 200 }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "envelope.v2": {
+      "type": "object",
+      "required": ["protocol_version", "seq", "type", "payload", "request_id"],
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": { "const": "v2" },
+        "seq": { "type": "integer", "minimum": 1 },
+        "type": {
+          "enum": [
+            "thread.started",
+            "message.delta",
+            "card.proposed",
+            "approval_required",
+            "thread.completed",
+            "thread.failed",
+            "thread.cancelled"
+          ]
+        },
+        "payload": { "type": "object" },
+        "request_id": { "type": "string", "minLength": 1, "maxLength": 200 }
+      }
+    },
+    "goalText": { "type": "string", "minLength": 1, "maxLength": 8192 },
+    "goalResult": {
+      "type": "object",
+      "required": ["status", "outcomes", "clarification", "answer"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "enum": ["completed", "partial", "blocked", "cancelled", "unknown"] },
+        "outcomes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "required": ["description", "status", "receipt_refs"],
+            "additionalProperties": false,
+            "properties": {
+              "description": { "$ref": "#/definitions/goalText" },
+              "status": { "enum": ["achieved", "not_done", "blocked", "unknown"] },
+              "receipt_refs": {
+                "type": "array",
+                "maxItems": 64,
+                "items": { "$ref": "#/definitions/uuid" }
+              }
+            }
+          }
+        },
+        "clarification": {
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["kind", "question"],
+              "additionalProperties": false,
+              "properties": {
+                "kind": { "enum": ["time", "timezone", "target_selection", "destination"] },
+                "question": { "$ref": "#/definitions/goalText" }
+              }
+            }
+          ]
+        },
+        "answer": { "$ref": "#/definitions/goalText" }
+      }
+    },
+    "v2.thread.started": {
+      "allOf": [
+        { "$ref": "#/definitions/envelope.v2" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "thread.started" },
+            "payload": {
+              "type": "object",
+              "required": [
+                "conversation_id",
+                "run_id",
+                "stream_protocol_version",
+                "ruleset_id",
+                "tzdb_version",
+                "authorization_revision",
+                "execution_lifecycle"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "conversation_id": { "$ref": "#/definitions/uuid" },
+                "run_id": { "$ref": "#/definitions/uuid" },
+                "stream_protocol_version": { "const": "v2" },
+                "ruleset_id": { "type": "string", "minLength": 1, "maxLength": 200 },
+                "tzdb_version": { "type": "string", "minLength": 1, "maxLength": 100 },
+                "authorization_revision": { "const": "delegation/1" },
+                "execution_lifecycle": { "const": "request-bound" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "v2.message.delta": {
+      "allOf": [
+        { "$ref": "#/definitions/envelope.v2" },
+        { "$ref": "#/definitions/message.delta/allOf/1" }
+      ]
+    },
+    "v2.card.proposed": {
+      "allOf": [
+        { "$ref": "#/definitions/envelope.v2" },
+        { "$ref": "#/definitions/card.proposed/allOf/1" }
+      ]
+    },
+    "v2.approval_required": {
+      "allOf": [
+        { "$ref": "#/definitions/envelope.v2" },
+        { "$ref": "#/definitions/approval_required/allOf/1" }
+      ]
+    },
+    "v2.thread.completed": {
+      "allOf": [
+        { "$ref": "#/definitions/envelope.v2" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "thread.completed" },
+            "payload": {
+              "type": "object",
+              "required": ["conversation_id", "run_id", "approval_id", "goal_result"],
+              "additionalProperties": false,
+              "properties": {
+                "conversation_id": { "$ref": "#/definitions/uuid" },
+                "run_id": { "$ref": "#/definitions/uuid" },
+                "approval_id": { "anyOf": [{ "$ref": "#/definitions/uuid" }, { "type": "null" }] },
+                "goal_result": { "$ref": "#/definitions/goalResult" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "v2.thread.failed": {
+      "allOf": [
+        { "$ref": "#/definitions/envelope.v2" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "thread.failed" },
+            "payload": {
+              "type": "object",
+              "required": ["conversation_id", "run_id", "error", "goal_result"],
+              "additionalProperties": false,
+              "properties": {
+                "conversation_id": { "$ref": "#/definitions/uuid" },
+                "run_id": { "$ref": "#/definitions/uuid" },
+                "error": {
+                  "$ref": "#/definitions/thread.failed/allOf/1/properties/payload/properties/error"
+                },
+                "goal_result": { "$ref": "#/definitions/goalResult" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "v2.thread.cancelled": {
+      "allOf": [
+        { "$ref": "#/definitions/envelope.v2" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "thread.cancelled" },
+            "payload": {
+              "type": "object",
+              "required": ["conversation_id", "run_id", "goal_result"],
+              "additionalProperties": false,
+              "properties": {
+                "conversation_id": { "$ref": "#/definitions/uuid" },
+                "run_id": { "$ref": "#/definitions/uuid" },
+                "reason": { "type": "string", "minLength": 1, "maxLength": 200 },
+                "goal_result": { "$ref": "#/definitions/goalResult" }
               }
             }
           }

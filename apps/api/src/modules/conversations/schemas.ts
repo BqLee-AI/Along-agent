@@ -6,6 +6,7 @@ export const SendMessageBodySchema = z
   .object({
     conversation_id: z.string().uuid().optional(),
     execution: z.enum(['business', 'harness']).optional(),
+    authorization_revision: z.literal('delegation/1').optional(),
     workspace_id: workspaceSummarySchema.shape.workspace_id.optional(),
     raw_text: z.string().min(1).max(20000),
     card_ref: z.string().min(1).max(200).optional(),
@@ -20,7 +21,16 @@ export const SendMessageBodySchema = z
   .refine((input) => input.workspace_id === undefined || input.execution === 'harness', {
     message: 'workspace_id requires harness execution',
     path: ['workspace_id'],
-  });
+  })
+  .refine(
+    (input) =>
+      input.authorization_revision === undefined ||
+      (input.execution === 'harness' && input.workspace_id === undefined),
+    {
+      message: 'delegation/1 currently requires non-workspace harness execution',
+      path: ['authorization_revision'],
+    },
+  );
 
 export type SendMessageBody = z.infer<typeof SendMessageBodySchema>;
 

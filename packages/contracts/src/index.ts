@@ -52,3 +52,4 @@ export * from './auth.js';
 export * from './conversations.js';
 export * from './approvals.js';
 export * from './routing.js';
+export * from './goals.js';

@@ -38,6 +38,7 @@ const frozenSchema = z
     available: z.boolean(),
     workspaceGrant: workspaceGrantSchema.nullable().optional(),
     documentApprovalId: z.string().uuid().optional(),
+    authorizationRevision: z.literal('delegation/1').optional(),
   })
   .strict();
 const invocationSchema = z.object({
@@ -119,6 +120,7 @@ function freezeContext(ctx: ToolContext): z.infer<typeof frozenSchema> {
     aliasVersion: ctx.timeContext.available ? ctx.timeContext.aliases.version : 'unavailable',
     available: ctx.timeContext.available,
     workspaceGrant: ctx.workspaceGrant ?? null,
+    ...(ctx.authorizationRevision ? { authorizationRevision: ctx.authorizationRevision } : {}),
   };
 }
 function workspaceAuthorized(ctx: ToolContext, row: Invocation): boolean {
@@ -135,6 +137,8 @@ function workspaceAuthorized(ctx: ToolContext, row: Invocation): boolean {
 
 function executionContext(ctx: ToolContext, row: Invocation): ToolContext {
   const frozen = row.frozen_context;
+  if (ctx.authorizationRevision !== frozen.authorizationRevision)
+    throw forbidden('authorization revision differs from frozen invocation');
   if (canonicalJson(frozen.workspaceGrant ?? null) !== canonicalJson(ctx.workspaceGrant ?? null))
     throw forbidden('workspace grant differs from frozen invocation');
   if (frozen.workspaceGrant) validateWorkspaceGrant(ctx.ownerId, frozen.workspaceGrant);
@@ -484,6 +488,15 @@ async function gate(
     if (row.state === 'reserved') await accept(client, ctx, row, permissionDenied, 'denied');
     else await audit(client, ctx, row, 'denied', permissionDenied);
     return { ...permissionDenied, invocationId: row.invocation_id, replayed: false };
+  }
+  if (
+    row.tool_id === 'set_user_timezone' &&
+    (ctx.authorizationRevision !== 'delegation/1' ||
+      row.frozen_context.authorizationRevision !== 'delegation/1')
+  ) {
+    if (row.state === 'reserved') await accept(client, ctx, row, denied, 'denied');
+    else await audit(client, ctx, row, 'denied', denied);
+    return { ...denied, invocationId: row.invocation_id, replayed: false };
   }
   if (row.tool_id === 'read_run_observation') {
     if (!canExecute || ctx.signal?.aborted) {

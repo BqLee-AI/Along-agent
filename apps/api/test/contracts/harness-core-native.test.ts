@@ -92,6 +92,7 @@ test('D8.unknown-core-native', async () => {
   const start = HarnessStartSchema.parse({
     protocol: HARNESS_PROTOCOL_VERSION,
     type: 'start',
+    trusted_context: null,
     routing_policy: { revision: 'r2b/1', mode: 'off' },
     eligible_phase: 'disabled',
     context_policy: contextPolicy,
@@ -307,6 +308,7 @@ test('D8.cancelled-core-native', async () => {
     start: HarnessStartSchema.parse({
       protocol: HARNESS_PROTOCOL_VERSION,
       type: 'start',
+      trusted_context: null,
       routing_policy: { revision: 'r2b/1', mode: 'off' },
       eligible_phase: 'disabled',
       context_policy: contextPolicy,
@@ -528,6 +530,7 @@ test('native terminates boundedly when valid bootstrap observations cannot fit s
   const start = HarnessStartSchema.parse({
     protocol: HARNESS_PROTOCOL_VERSION,
     type: 'start',
+    trusted_context: null,
     routing_policy: { revision: 'r2b/1', mode: 'off' },
     eligible_phase: 'disabled',
     context_policy: contextPolicy,

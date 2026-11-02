@@ -164,11 +164,13 @@ export async function runDatabaseSmoke({
     if (!/^\d{4}_[a-z0-9_]+\.sql$/.test(name)) continue;
     const sql = await readFile(path.join(sourceMigrationsDirectory, name));
     const lfSql = sql.toString('utf8').replaceAll('\r\n', '\n');
-    await writeFile(path.join(contextLfMigrationsDirectory, name), lfSql);
-    await writeFile(
-      path.join(contextCrlfMigrationsDirectory, name),
-      lfSql.replaceAll('\n', '\r\n'),
-    );
+    if (name.slice(0, 4) <= '0019') {
+      await writeFile(path.join(contextLfMigrationsDirectory, name), lfSql);
+      await writeFile(
+        path.join(contextCrlfMigrationsDirectory, name),
+        lfSql.replaceAll('\n', '\r\n'),
+      );
+    }
     if (name.slice(0, 4) <= '0016') {
       await writeFile(path.join(migrationsDirectory, name), sql);
       const lfSql = sql.toString('utf8').replaceAll('\r\n', '\n');
@@ -706,7 +708,7 @@ export async function runDatabaseSmoke({
       const before = await withClient(url, signature);
       await withDeployment(
         url,
-        { migrationsDirectory: sourceMigrationsDirectory },
+        { migrationsDirectory: contextLfMigrationsDirectory },
         async (database) => {
           assert.equal(database.targetVersion, '0019');
           assert.deepEqual(await database.classify(), {
@@ -736,7 +738,7 @@ export async function runDatabaseSmoke({
         for (let restart = 0; restart < 2; restart++)
           await withDeployment(
             url,
-            { migrationsDirectory: sourceMigrationsDirectory },
+            { migrationsDirectory: contextLfMigrationsDirectory },
             async (database) => {
               assert.deepEqual(await database.classify(), {
                 kind: 'supported',
@@ -842,15 +844,17 @@ export async function runDatabaseSmoke({
       ['future_policy_version', "INSERT INTO schema_migrations(version) VALUES('0020')"],
     ]) {
       await fresh(`context0019_${name}`, async (url) => {
-        await withDeployment(url, { migrationsDirectory: sourceMigrationsDirectory }, (database) =>
-          database.initialize(),
+        await withDeployment(
+          url,
+          { migrationsDirectory: contextLfMigrationsDirectory },
+          (database) => database.initialize(),
         );
         await withClient(url, (client) => client.query(CANARIES + HISTORY_CANARIES));
         await withClient(url, (client) => client.query(mutation));
         const before = await withClient(url, signature);
         await withDeployment(
           url,
-          { migrationsDirectory: sourceMigrationsDirectory },
+          { migrationsDirectory: contextLfMigrationsDirectory },
           async (database) => {
             assert.equal((await database.classify()).kind, 'unknown');
             await rejectsCode(() => database.initialize(), 'unknown_database_refused');
@@ -870,7 +874,7 @@ export async function runDatabaseSmoke({
       );
       await withDeployment(
         url,
-        { migrationsDirectory: sourceMigrationsDirectory },
+        { migrationsDirectory: contextLfMigrationsDirectory },
         async (database) => {
           assert.equal((await database.classify()).kind, 'unknown');
           await rejectsCode(() => database.upgrade(), 'unsupported_upgrade_source');
