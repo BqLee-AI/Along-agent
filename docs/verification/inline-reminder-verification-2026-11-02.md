@@ -7,7 +7,7 @@
 
 ## 对象与证据层级
 
-- 代码基线：实施合并提交 `32411ce84c784abce0242d916d7569761a032448`。对应 [#91](https://github.com/BqLee-AI/Along-agent/issues/91)、[实施 PR #99](https://github.com/BqLee-AI/Along-agent/pull/99) 与[收口计划](demo/inline-reminder-closeout-plan.md)。
+- 代码基线：实施合并提交 `32411ce84c784abce0242d916d7569761a032448`。对应 [#91](https://github.com/BqLee-AI/Along-agent/issues/91)、[实施 PR #99](https://github.com/BqLee-AI/Along-agent/pull/99) 与[收口计划](../plans/inline-reminder-closeout-plan.md)。
 - 历史结果来自 #99 及本机仓库外原始验收记录；下面明确标为历史，不冒充本次新运行。原始记录含源码指纹、API 镜像、Next BUILD_ID 与截图定位。
 - 本次只使用专用隔离安装、测试账户、合成资料和授权模型连接；不修改原安装、不操作真实用户任务或资料，不改变 R2-B 默认 off。
 

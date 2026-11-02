@@ -40,4 +40,4 @@
 - [x] 4.2 已完成原子性/交互源码与A2运行证据独立review，first-v2另有定向review；最终head五门SUCCESS/CLEAN仍是合并前外部硬门。未决A1不标完整v0。
 - [x] 4.3 已由OpenSpec1.3.1实际archive为2026-10-22-close-v0-approval-revision，delta并入主spec并同步索引；仅本领域收口PR `Closes #31`，其精确最终head五门SUCCESS/CLEAN仍为合并前硬门。
 
-运行记录：[A2 修改与重新确认](../../../../docs/demo/v0-approval-revision-evidence-2026-10-21.md)。源码Atomic .94/Surface .97、原运行证据 .96、first-v2定向 .97；只读AI审查不是独立执行或人工批准。原子性由事务/并发/回滚回归与源码审查证明，终态SQL不冒充原子性；空DOM日志不冒充原生双击。旧镜像证据不改标为新镜像。完整v0仍受独立A1自然验收阻塞。
+运行记录：[A2 修改与重新确认](../../../../docs/verification/v0-approval-revision-evidence-2026-10-21.md)。源码Atomic .94/Surface .97、原运行证据 .96、first-v2定向 .97；只读AI审查不是独立执行或人工批准。原子性由事务/并发/回滚回归与源码审查证明，终态SQL不冒充原子性；空DOM日志不冒充原生双击。旧镜像证据不改标为新镜像。完整v0仍受独立A1自然验收阻塞。

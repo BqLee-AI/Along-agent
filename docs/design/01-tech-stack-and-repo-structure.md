@@ -151,7 +151,7 @@ URL 拥有选中资源身份；controller 清理所属 GET/SSE，隔离迟到响
 
 真实受保护 HTTP 401 引导安全站内返回的正式重登，返回只 GET；403 保留权限/CSRF 含义，不跳登录掩盖；404 不假报空集合；网络/503 不擅自命名为模型缺配置，仅有明确领域 code 才解释具体依赖原因。局部失败保留成功内容和诊断，不自动重放副作用。
 
-账户复用原认证、Cookie/CSRF 与原 owner；只有核验的 `setup_required` 才开放初始化。建号/转正后的 `pending_local_configuration` 不代表工作区或模型就绪；本机登记与重载经原安装 `local:account` 完成，不重建身份、root 或秘密，退出以服务端撤销为准。使用步骤见 [Web 使用说明](../../apps/web/README.md) 与[本机指南](../local-lifecycle.md)。
+账户复用原认证、Cookie/CSRF 与原 owner；只有核验的 `setup_required` 才开放初始化。建号/转正后的 `pending_local_configuration` 不代表工作区或模型就绪；本机登记与重载经原安装 `local:account` 完成，不重建身份、root 或秘密，退出以服务端撤销为准。使用步骤见 [Web 使用说明](../../apps/web/README.md) 与[本机指南](../guides/local-lifecycle.md)。
 
 上述为源码职责和使用合同，不是验收结论。受控 HTTP 页面证据不能证明正式安装、真实模型、唯一文件写入或新全文回读闭环；这些须在同一受支持原安装单独取证，不用临时配置或夹具代替。
 

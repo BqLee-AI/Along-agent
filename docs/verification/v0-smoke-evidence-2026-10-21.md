@@ -2,7 +2,7 @@
 
 ## 结论与适用范围
 
-**代表性七步通过；不等于完整 v0 验收通过。** 本记录对应 [#26](https://github.com/BqLee-AI/Along-agent/issues/26)、[PR #28](https://github.com/BqLee-AI/Along-agent/pull/28) 与运行源码 `914cca971f03e7a0a813a7aff8890aa36c82951a`。独立契约 [PR #27](https://github.com/BqLee-AI/Along-agent/pull/27) 先合入，再实施与运行。操作方法见[七步手册](v0-slice-smoke.md)；原始脱敏请求、SSE、SQL、调用记录和逐次采样见[关联 JSON](v0-smoke-evidence-2026-10-21.json)。
+**代表性七步通过；不等于完整 v0 验收通过。** 本记录对应 [#26](https://github.com/BqLee-AI/Along-agent/issues/26)、[PR #28](https://github.com/BqLee-AI/Along-agent/pull/28) 与运行源码 `914cca971f03e7a0a813a7aff8890aa36c82951a`。独立契约 [PR #27](https://github.com/BqLee-AI/Along-agent/pull/27) 先合入，再实施与运行。操作方法见[七步手册](../demo/v0-slice-smoke.md)；原始脱敏请求、SSE、SQL、调用记录和逐次采样见[关联 JSON](v0-smoke-evidence-2026-10-21.json)。
 
 执行者：OMP 主线程，负责真实浏览器、进程、DB、测试与 CI；独立源码审查为 ReviewSmokeImpl26（approve 0.88，fixture 修正补审 0.97），独立运行证据审查 ReviewSmokeEvidence26 approve 0.90、无 findings。不将源码审查冒充运行验收，也不将 AI 审查称为人工或平台强制批准。
 

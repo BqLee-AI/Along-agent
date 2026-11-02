@@ -41,7 +41,7 @@
 
 ## R1 本地生命周期（#67）
 
-- [Required] 用户通过固定初始化、启动、停止、显式升级入口运行同一安装；复用 Bun/Compose/正式 Linux x64 native/MCP 和 Windows Web，不把根 dev 当完整正式环境。合同见 [design/15 §2–§7](../design/15-r1-local-lifecycle.md)，步骤见[本机使用指南](../local-lifecycle.md)。
+- [Required] 用户通过固定初始化、启动、停止、显式升级入口运行同一安装；复用 Bun/Compose/正式 Linux x64 native/MCP 和 Windows Web，不把根 dev 当完整正式环境。合同见 [design/15 §2–§7](../design/15-r1-local-lifecycle.md)，步骤见[本机使用指南](../guides/local-lifecycle.md)。
 - [Required] 两次启停后原认证/模型配置、PG/资料卷、用户历史、原 owner 登记和 root 身份保持；原配置缺失明确停下，不生成替代密钥、换卷、清库或复制新根目录。只停止本入口拥有的进程，重启不自动恢复 Agent 或重做未知写入。
 - [Required] 新库完整初始化，已核实的 0016 基线重复启动不重放 DDL，未知/部分旧库拒绝自动迁移；账本从 0012 建立，旧迁移冻结，不猜版本或自动 stamp。升级单一部署写者，停旧写者后迁移，失败不开新写者；修复后已提交步骤不重复，接纳新事实后停写前滚。
 - [Required] 既有受管登记重启后按原 owner/root 加载，缺登记与无效登记有不同诊断；新安装可明确处于账户/工作区未配置或账户状态未核验，不冒充完整任务可用。#67 不选择管理员；#68 使用稳定配置与重载入口完成开户/转正后的绑定，不形成循环关闭前置。
@@ -58,7 +58,7 @@
 - [Required] 账户页面可用键盘、粘贴和密码管理器；401 保留安全原站内位置，重登后只读原状态，不重发消息、确认、取消、继续或其他 POST。403/503 不一律跳登录，错误可操作。
 - [Required] 账户提交、登记/配置保存与 #67 重载分层完成，失败不重开户。正式本机入口自动取绑定管理员 ID，保留原 root/登记/有限授权，不让浏览器/模型决定 owner 或直接写宿主配置。真实本机和 PG 的完整路径不得依赖助手、seed、临时服务或手工 Cookie。
 - [Required · 验收边界] 隔离确认锁定库字段/事务/token/退出/proxy 后完整实施 API、数据库、页面与本机收尾；只新增下一序号迁移并配套版本核验和扫描规则。合同不等于已运行，规划不冒充缺陷复现。七项验收齐备后独立归档只关闭 #68，不进入 #69/#70/R2、不提前关闭 #66。
-- [验收依据] [2026-10-27 账户与本机登记验证记录](../account-access-verification-2026-10-27.md)分别记录库实验、行为覆盖、真实生产构建、本机使用路径及独立静态审阅；[归档清单](../../openspec/changes/archive/2026-10-27-close-r1-account-access/tasks.md)对应七项验收，不以其中一种证据替代其余边界。
+- [验收依据] [2026-10-27 账户与本机登记验证记录](../verification/account-access-verification-2026-10-27.md)分别记录库实验、行为覆盖、真实生产构建、本机使用路径及独立静态审阅；[归档清单](../../openspec/changes/archive/2026-10-27-close-r1-account-access/tasks.md)对应七项验收，不以其中一种证据替代其余边界。
 
 ## R1 会话历史与只读恢复（#69）
 
@@ -66,7 +66,7 @@
 - [Required] conversations 提供本人会话、可见消息与 Run 的有界集合；列表按不变的建立时间排序，活动时间只读展示。分页保留微秒与 ID tie-break、首屏上界及明确刷新语义，不承诺跨 HTTP 数据库快照。字段和 API 见 [design/17 §3](../design/17-r1-conversation-history.md#3-列表排序与cursor)。
 - [Required] 原话只沿可信已存引用读取，旧数据缺关联时如实说明；可见回复沿全部外部事件分页，所有批准均可达。任务批准详情提供真实 task 结果引用，文档继续区分授权、写入和新回读，不另建资料任务事实表。
 - [Required · 保护] owner 隔离、内部记录过滤、空/不存在/无权/依赖/部分失败准确区分；列表、打开、刷新、回退和重登恢复不调用模型/MCP，不新增 Run/attempt/决议/工具调用或文件写入，不自动重放业务 POST。工作区撤权不借历史展示恢复动作资格。
-- [验收依据] 六项 #69 验收以真实浏览器与隔离 PG16 对照原始事实，复用 #67 生命周期与 #68 正式账户路径，记录读取前后执行账及文件证据不变。行为真源为 [conversations](../../openspec/specs/conversations/spec.md)，完整步骤见[归档清单](../../openspec/changes/archive/2026-10-28-close-r1-conversation-history/tasks.md)，版本化结果与未覆盖项见[验证记录](../conversation-history-verification-2026-10-28.md)，不以合同校验代替运行。
+- [验收依据] 六项 #69 验收以真实浏览器与隔离 PG16 对照原始事实，复用 #67 生命周期与 #68 正式账户路径，记录读取前后执行账及文件证据不变。行为真源为 [conversations](../../openspec/specs/conversations/spec.md)，完整步骤见[归档清单](../../openspec/changes/archive/2026-10-28-close-r1-conversation-history/tasks.md)，版本化结果与未覆盖项见[验证记录](../verification/conversation-history-verification-2026-10-28.md)，不以合同校验代替运行。
 - [验证边界] `0018` 四个非唯一索引的设计与核验见 [design/17 §9](../design/17-r1-conversation-history.md#9-数据索引与兼容发布)；新增 `conversation_idempotency(run_id)` 仅支撑旧原话回退查找，保留 scope/歧义检测与上述用户合同。原三索引与四索引查询计划/生命周期证据分别记录，不将后者扩大为重跑完整模型验收。
 - [非目标] 不做 #70 全站视觉/目标导航、搜索、导入导出、跨 owner 合并、账户机制修改、自动恢复或 R2；实现与验收后独立 archive，只关闭 #69，不提前关闭 #66。
 

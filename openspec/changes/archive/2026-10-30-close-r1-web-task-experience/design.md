@@ -7,7 +7,7 @@
 
 ## 1. 已确认的基线与前置条件
 
-Observed：本地基线 `e3f121b`；#67、#68、#69 均已关闭。复用 [生命周期指南](../../../../docs/local-lifecycle.md)、[账户验证](../../../../docs/account-access-verification-2026-10-27.md)、[历史验证](../../../../docs/conversation-history-verification-2026-10-28.md)及各自 OpenSpec 归档，不重跑无新增价值的模块验收。Issue/父跟踪的旧勾选或“只规划”措辞不能代替合并产物和版本化证据。
+Observed：本地基线 `e3f121b`；#67、#68、#69 均已关闭。复用 [生命周期指南](../../../../docs/guides/local-lifecycle.md)、[账户验证](../../../../docs/verification/account-access-verification-2026-10-27.md)、[历史验证](../../../../docs/verification/conversation-history-verification-2026-10-28.md)及各自 OpenSpec 归档，不重跑无新增价值的模块验收。Issue/父跟踪的旧勾选或“只规划”措辞不能代替合并产物和版本化证据。
 
 Required（用户明确方向）：以自有 LumenUI（shadcn/Base UI）与 Tailwind CSS 完整重构 Web，而非在原 Demo 上优化或换皮。旧页面布局、配色、控件和组件目录没有必须沿用的约束；后端能力、数据身份、公开业务合同及安全边界继续有效。以下现状仅作迁移依据，不作为视觉目标或重构范围上限。
 
@@ -388,6 +388,6 @@ token、材质与控件焦点均由官方 theme.css 和组件提供，应用不�
 
 ### 7.3 证据与合同边界
 
-§2.3 线框是布局说明，不是运行截图。生产构建、桌面/窄屏与键盘操作、原安装登录、真实模型和资料批准/保存各自取证；受控 UI 仅证明对应呈现与交互，不证明真实模型或文件效果。实际版本、检查结果和限制记录在 [Web 验证记录](../../../../docs/web-task-experience-verification-2026-10-28.md)，不把设计值或旧版 CI 作为交付证明。
+§2.3 线框是布局说明，不是运行截图。生产构建、桌面/窄屏与键盘操作、原安装登录、真实模型和资料批准/保存各自取证；受控 UI 仅证明对应呈现与交互，不证明真实模型或文件效果。实际版本、检查结果和限制记录在 [Web 验证记录](../../../../docs/verification/web-task-experience-verification-2026-10-28.md)，不把设计值或旧版 CI 作为交付证明。
 
 既有 DTO 支持本方案，不新增表、写接口、通用审计平台或前端执行状态机。字段/路由以 API/schema 为准，行为以 spec 为准；长期页面 PRD 与使用指南保持同一导航、精确批准和只读恢复边界。

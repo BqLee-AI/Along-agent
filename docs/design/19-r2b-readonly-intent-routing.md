@@ -21,7 +21,7 @@
 
 [Observed，规范编写时的基线] HTTP 接纳冻结输入、execution、allowlist 和预算；基线 native 在首轮构造/计量上下文后请求模型，内部 wire 为 `harness/v4`、快照为 version 2。R2-B 的后继 v5 与路由分支见 §7。TS 的模型 transport 不决定下一工具；三个现成只读工具是 `list_tasks`、`get_user_prefs`、`read_brief_cards`。源码入口见 §14；历史静态核对不充当运行验收。
 
-[Observed，离线实验] [2026-10-31 实验记录](../demo/r2b-embedding-evidence-2026-10-31.md)保留模型版本、材料哈希、成绩和错误。BGE INT8 新材料正确接管 66/72、旧回归 62/72，旧回归仍有一次时区→提醒误接；E5 为 61/72、55/72，两主集及控制组未见误接。BGE 的离线 batch1 p95 为 2.21ms、进程峰值 145.72MiB，E5 为 15.49ms、676.61MiB。这是 Windows CPU 短输入实验，不含 HTTP、队列、工具、仓颉或自然流量。
+[Observed，离线实验] [2026-10-31 实验记录](../verification/r2b-embedding-evidence-2026-10-31.md)保留模型版本、材料哈希、成绩和错误。BGE INT8 新材料正确接管 66/72、旧回归 62/72，旧回归仍有一次时区→提醒误接；E5 为 61/72、55/72，两主集及控制组未见误接。BGE 的离线 batch1 p95 为 2.21ms、进程峰值 145.72MiB，E5 为 15.49ms、676.61MiB。这是 Windows CPU 短输入实验，不含 HTTP、队列、工具、仓颉或自然流量。
 
 因此选择 BGE 是资源与候选覆盖的取舍，不是质量全面领先的结论。已有规则误挡与跨意图误接说明只换编码器不够。正式 Linux 服务、部署资源、完整请求延迟、自然正确率和净收益必须另证。
 

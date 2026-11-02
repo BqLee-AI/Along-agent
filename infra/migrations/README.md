@@ -35,7 +35,7 @@
 - 不新增表、原话关联或历史副本，不修改 owner、消息、Run 或旧 baseline 对象。四个索引与 `0018` 版本账同事务提交；要求已存在 `0017`，已记账的迁移不重复应用。`0001`–`0017` 保持不变。
 - 使用原显式 `bun --no-env-file run local:upgrade` 停旧写者、备份并升级至 `0018`，同批部署 API/Web/contracts。普通启动只核验，不从 `0017` 自动迁移；失败保持停写，按原版本分类与显式修复流程处理，不删卷/账本或降版。
 - `scripts/check-migrations.mjs` 仅放行 `0018_conversation_history.sql`，不扩大 conversation 领域编号范围。`scripts/local/baselines/0018.sql` 使用现有 SQL verifier 扩展，在只读事务内验证版本账和 `pg_catalog` 中四个实际索引的表/列顺序、非唯一性、方向与 NULL 排序、普通 B-tree 属性、谓词、有效/就绪/存活状态、默认 operator class 与 collation；保留原 `0016`、`0017` 核验。
-- 确定性扫描回归位于 `scripts/test/scripts.test.ts`；真实 PG16 升级烟测沿用 `scripts/local/database-smoke.mjs`，通过 stdin JSON 的 `connectionString` 显式注入一次性管理连接，不放入 argv、环境或仓库。该入口保留原 `0016`/`0017` 场景，覆盖 `0017→0018`、事实保留、重复升级、两次零 DDL 重启、缺失/错序/错误谓词/无效索引及伪版本拒绝，并保留连接失败不当空库；新增 run_id 索引缺失、错键、错误唯一性、错表、无效和未就绪拒绝，比较索引 catalog/定义及非空历史事实不变，不只确认返回拒绝。无效索引夹具仅在本次新建随机数据库内修改 `pg_index`，管理账号需具备相应 catalog 更新权限。三索引与四索引状态的运行结果分别取证，四索引 EXPLAIN 与生命周期验证见[2026-10-28 验证记录](../../docs/conversation-history-verification-2026-10-28.md)。
+- 确定性扫描回归位于 `scripts/test/scripts.test.ts`；真实 PG16 升级烟测沿用 `scripts/local/database-smoke.mjs`，通过 stdin JSON 的 `connectionString` 显式注入一次性管理连接，不放入 argv、环境或仓库。该入口保留原 `0016`/`0017` 场景，覆盖 `0017→0018`、事实保留、重复升级、两次零 DDL 重启、缺失/错序/错误谓词/无效索引及伪版本拒绝，并保留连接失败不当空库；新增 run_id 索引缺失、错键、错误唯一性、错表、无效和未就绪拒绝，比较索引 catalog/定义及非空历史事实不变，不只确认返回拒绝。无效索引夹具仅在本次新建随机数据库内修改 `pg_index`，管理账号需具备相应 catalog 更新权限。三索引与四索引状态的运行结果分别取证，四索引 EXPLAIN 与生命周期验证见[2026-10-28 验证记录](../../docs/verification/conversation-history-verification-2026-10-28.md)。
 
 ## 0019：R2-A 不可变 Run 上下文策略
 
@@ -44,3 +44,10 @@
 - `policy_hash` 为 `SHA-256(UTF8("harness/context-policy/v1\\0" + canonical_json))` 的64位小写十六进制；域末尾为实际 NUL。规范 JSON 对所有 policy 字段及嵌套 `model_binding` 使用字典序键、无格式空格，字符串不做 Unicode/空白归一化。应用 strict 解析并核验摘要，DB 固定摘要格式与行不可变性；不能用部署新值覆盖原策略。
 - 停旧写者、备份后通过原显式 `local:upgrade` 升级至0019，再同批发布 harness/v4 TS/native 消费者。事务失败保持0018原事实，修复后重试；接纳新事实后停写并前滚，不删策略或接受结果兼容旧二进制。
 - `scripts/local/baselines/0019-checks.json` 延续原增量只读核验，检查真实列、PK/FK/check、函数原文/属性、owner与禁改trigger；无版本对象、伪版本、禁用/缺失trigger、弱化validator或错误FK均拒绝，不自动修复。扫描只放行精确文件名 `0019_conversation_context_policies.sql`。生命周期烟测保留0016/0017/0018固定目录，新增0018→0019事实保留、零策略回填、两次零DDL重启及损坏拒绝场景；集成测试覆盖并发唯一、回滚、只读零写与63＋1完整冻结。新增检查尚须主线程统一执行，不将测试存在视为已通过。
+
+## 0021/0022：可信委托目标结果
+
+- 0021 在 `agent_runs` 增加可空 `goal_result`，不回填历史 Run、消息、批准或接受结果。非空结果只属于冻结 `delegation/1` 的终态 Run；目标内容、成功回执归属与完整性由 conversations 验证，不以 Run 终态替代目标结果。
+- 0022 前向替换结果 CHECK，要求条件 `IS TRUE`，避免缺少授权修订或目标状态时 SQL NULL 被 CHECK 放过；0021 已应用也不回改旧迁移。缺字段、JSON null、非终态和错误修订均不能取得非空结果资格。
+- 原显式 `local:upgrade` 支持已核实0016–0021升级至0022；原目录/账本与只读 baseline 核验保留，历史事实不迁写，漂移仍拒绝。版本账、DDL与新约束同事务提交，失败停写，不删除既成结果或降版。
+- API/native/shared/Web 配套使用 `harness/v6`、snapshot2和新委托 SSE v2，legacy保持冻结范围与严格v1历史。真实 PG 生命周期覆盖逐版本升级、零回填、重启及NULL边界；偏好领域写入、接受结果与审计原子性由工具集成覆盖。
