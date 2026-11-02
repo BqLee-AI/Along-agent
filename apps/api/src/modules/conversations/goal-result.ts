@@ -47,8 +47,7 @@ export async function interruptedGoalResult(
   binding: Binding,
   status: 'failed' | 'cancelled',
 ): Promise<GoalResult> {
-  const { settings, states } = await readRunInterruptionEvidence(client, binding);
-  const unknown = states.some((row) => row.state === 'unknown');
+  const { settings, hasUnknown: unknown } = await readRunInterruptionEvidence(client, binding);
   const outcomes: GoalResult['outcomes'] = settings.map((setting) => ({
     description:
       setting.timezone_id === null

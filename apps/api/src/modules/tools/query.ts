@@ -5,12 +5,14 @@ import {
   type HarnessObservation,
 } from '@along/contracts';
 import { readDocumentApprovalReceipt } from '../approvals/decision.js';
-import { assertToolRunBinding } from '../conversations/tool-binding.js';
+import {
+  assertToolRunBinding,
+  assertToolRunInterruptionBinding,
+} from '../conversations/tool-binding.js';
 import type { DocumentRunEvidence } from '../approvals/document-evidence.js';
 import type { ToolContext, TimezoneSettingPayload } from './contracts.js';
 import { parseResult, resultKind } from './result-schema.js';
 import { readAcceptedInvocationResult } from './accepted-result.js';
-import { readRunTerminalInvocationStates } from './invocations.js';
 import {
   authorizeSliceOrigin,
   authorizeContextSource,
@@ -35,9 +37,16 @@ export async function readRunTimezoneSettings(
 // Binding is checked before reading any receipts; hydration retains the same
 // accepted-result version, outcome, payload and frozen-profile integrity checks.
 export async function readRunInterruptionEvidence(client: PoolClient, binding: RunBinding) {
-  const states = await readRunTerminalInvocationStates(client, binding);
+  await assertToolRunInterruptionBinding(client, binding);
+  const { rows } = await client.query<{ has_unknown: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM tool_invocations
+       WHERE owner_id=$1 AND conversation_id=$2 AND run_id=$3 AND state='unknown'
+     ) AS has_unknown`,
+    [binding.ownerId, binding.conversationId, binding.runId],
+  );
   const settings = await readTimezoneSettings(client, binding);
-  return { states, settings };
+  return { hasUnknown: rows[0]!.has_unknown, settings };
 }
 
 async function readTimezoneSettings(

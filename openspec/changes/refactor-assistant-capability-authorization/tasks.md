@@ -78,6 +78,7 @@
 - R2 实际 Red：正式旧 native、直接 PG 网关及进程内/HTTP native→TS→PG 共0通过/10失败/84断言；硬拒绝后 native 仍发第二次设置，PG 真实从上海改成纽约。最小修复只区分 `TOOL_FORBIDDEN` / `TOOL_DENIED`：native 不再 reserve/invoke 业务动作；tools 自有接受账在原 Run 锁下同时阻止新预约和已预约调用的执行，不在 conversations 复制 tools 私有 SQL。真实拒绝观察和 `finish_goal` 保留，预算不重置，输入/规则拒绝不被一概停止。
 - Green：从本轮生产源重建正式 Linux native/API 镜像后，完整执行 `trusted-goals.test.ts`、`hard-denied-stop.test.ts`、`timezone-delegation.test.ts`，36通过/0失败/997断言。覆盖撤权唯一 Run/attempt 终态、原连接不披露/GET拒绝、既成回执保留/历史重放零效果，硬拒绝零后续设置、blocked/partial 唯一终结，以及 `UNKNOWN_TIMEZONE` / `TZDB_UNAVAILABLE`、legacy、unknown-effect 和预算对照。未新增 malformed-receipt 故障注入；原接受结果版本/类型/归属完整性解析继续复用。
 - 工作区 typecheck 通过；Lint 通过（24条既有警告，不在修复文件）；格式问题按既有命令修复后 format:check 通过；目标 OpenSpec strict 通过。之后将撤权绑定 SQL 原样移回 conversations 公共内部边界，tools 只调用该投影；最终两条撤权真实 PG/native 回归再次2通过/0失败/143断言，API typecheck通过。测试与 Markdown 只作格式规范化。镜像构建、真实 PG 与正式 native 是本轮修复证明，不冒称已重装原产品；原安装仍绑定9c71277。没有重跑全部真实 provider 样本或不受影响的产品旅程。
+- 首次修复提交 `1f60628` 的 [CI](https://github.com/BqLee-AI/Along-agent/actions/runs/41473379492) 在 static 的 no-circular 门失败：新增 query→invocations 导入经 approvals 形成环，后续门未因此视为通过。移除该中转和闲置导出，中断投影仅返回既成设置与本 Run 的未知状态存在性，保留专用 owner/profile 核验及收据完整性。重建最终 API 产物后 depcruise 为零违规；两个完整 PG/native 接缝文件再次22通过/0失败/701断言，API typecheck通过；未变 native 的14条独立合同复用前述通过结果。旧镜像 dist 首次仍含原环，未刷新产物的失败不计行为 Red。
 - 新 head、远端 required checks 与本轮交付见 [同一 Draft PR #111](https://github.com/BqLee-AI/Along-agent/pull/111)；9c71277 的五项 SUCCESS 只属于旧 head。R1/R2技术修复不补造独立人工 gold，2.1保持未勾，七项预期继续待用户审定。
 
 ### G1：待用户独立审定的七项脱敏预期
