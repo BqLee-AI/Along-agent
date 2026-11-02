@@ -434,6 +434,7 @@ maybe('A4 real HTTP and database boundaries', () => {
       const original = await post(base, proposal, key);
       const failed = frames(await original.text());
       const conversationId = failed[0].payload.conversation_id;
+      let sourceRunId = failed[0].payload.run_id;
       const { rows: before } = await pool.query(
         'SELECT anchor_received_at_utc FROM conversations WHERE id = $1',
         [conversationId],
@@ -442,7 +443,18 @@ maybe('A4 real HTTP and database boundaries', () => {
         ['first', '2026-11-01T05:30:00.000Z', -14400, 0],
         ['second', '2026-11-01T06:30:00.000Z', -18000, 1],
       ] as const) {
-        const body = { ...proposal, conversation_id: conversationId, fold_choice };
+        if (fold_choice === 'second') {
+          const next = frames(
+            await (await post(base, { ...proposal, conversation_id: conversationId })).text(),
+          );
+          sourceRunId = next[0].payload.run_id;
+        }
+        const body = {
+          ...proposal,
+          conversation_id: conversationId,
+          fold_choice,
+          clarification_of_run_id: sourceRunId,
+        };
         expect((await post(base, body, key)).status).toBe(409);
         const response = await post(base, body);
         expect(response.status).toBe(200);

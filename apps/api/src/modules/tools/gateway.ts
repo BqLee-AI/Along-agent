@@ -2,6 +2,8 @@
 // Approved results, local approval inserts and audit rows commit together.
 import type { Pool, PoolClient } from 'pg';
 import { normalizeTime } from '../time/normalize.js';
+import { reminderDateExpression } from '@along/time-core';
+import { readReminderDateInput } from '../conversations/reminder-date.js';
 import { createCancelTaskApproval, createTaskApproval } from '../approvals/create.js';
 import {
   renderEchoCancelV1,
@@ -215,6 +217,32 @@ async function runProposeTask(
       },
       errorCode: null,
     };
+  }
+  const authority = await readReminderDateInput(client, ctx);
+  if (authority) {
+    const originalDate = reminderDateExpression(authority.originalText);
+    const proposedDate = reminderDateExpression(input.raw_time_text);
+    const unresolved = authority.source.kind === 'unresolved';
+    if (
+      unresolved ||
+      !originalDate ||
+      originalDate !== proposedDate ||
+      !authority.originalText.includes(input.raw_time_text) ||
+      (authority.source.kind === 'clarification' && !authority.originalText.includes(input.note))
+    ) {
+      return {
+        payload: {
+          kind: 'clarify',
+          reason: !unresolved && !originalDate ? 'DATE_MISSING' : 'DATE_SOURCE_UNCLEAR',
+          phrase_key: !unresolved && !originalDate ? 'ASK_DATE' : 'ASK_EXACT_TIME',
+          text:
+            !unresolved && !originalDate
+              ? CLARIFY_TEXT.ASK_DATE
+              : '请完整重述这条提醒的具体日期、时间、时区和事项；不能确定它与原请求的关系。',
+        },
+        errorCode: null,
+      };
+    }
   }
   const normalized = result.normalized;
   const wallTime = `${result.wall_time.slice(0, 10)} ${result.wall_time.slice(11, 16)}`;

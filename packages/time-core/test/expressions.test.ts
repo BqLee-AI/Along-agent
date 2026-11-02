@@ -76,7 +76,7 @@ describe('M1 50 expressions', () => {
         expect(c.reason, row.expr_id).toBe(row.expect_detail.reason);
       }
     }
-    expect(okTotal).toBe(21);
-    expect(okFire).toBe(18);
+    expect(okTotal).toBe(22);
+    expect(okFire).toBe(19);
   });
 });

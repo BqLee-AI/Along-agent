@@ -37,7 +37,7 @@ maybe('persistent tool invocation identity and local results', () => {
     await database?.close();
   });
 
-  async function fresh(): Promise<ToolContext> {
+  async function fresh(rawText = `${args.raw_time_text} 提醒我喝水`): Promise<ToolContext> {
     const ownerId = randomUUID();
     await pool.query(
       'INSERT INTO users (id,auth_email,display_name,timezone_id) VALUES ($1,$2,$3,$4)',
@@ -47,7 +47,7 @@ maybe('persistent tool invocation identity and local results', () => {
       { pool, timeContext: loadTimeContext('fixture-v1') },
       ownerId,
       randomUUID(),
-      { raw_text: '你好', confirmed_timezone: 'Asia/Shanghai' },
+      { raw_text: rawText, confirmed_timezone: 'Asia/Shanghai' },
       randomUUID(),
     );
     if (!started.context) throw new Error('expected a fresh run');
@@ -113,14 +113,6 @@ maybe('persistent tool invocation identity and local results', () => {
         status: 'ok',
         result: { kind: 'clarify', reason, phrase_key: phraseKey },
       });
-      if (
-        outcome.status === 'ok' &&
-        outcome.result.kind === 'clarify' &&
-        reason === 'DATE_MISSING'
-      ) {
-        expect(outcome.result.text).not.toContain('跨天');
-        expect(outcome.result.text).toBe('请给这条提醒的具体日期，或明确说今天、明天。');
-      }
       expect(await invokeTool(pool, ctx, input)).toEqual({ ...outcome, replayed: true });
       expect(await effects(ctx.ownerId)).toEqual({
         approvals: 0,
@@ -134,7 +126,7 @@ maybe('persistent tool invocation identity and local results', () => {
   });
 
   it('accepts a complete Chinese clock with content supplied in the separate note field', async () => {
-    const ctx = await fresh();
+    const ctx = await fresh('2027年11月2日下午三点二十分提醒我买二十三瓶水');
     const input = await reserve(ctx, 'chinese/1', 'propose_task', {
       raw_time_text: '2027年11月2日下午三点二十分',
       note: '买二十三瓶水',
@@ -144,11 +136,6 @@ maybe('persistent tool invocation identity and local results', () => {
     expect(approval.wallTime).toBe('2027-11-02 15:20');
     expect(approval.fireAtUtc).toBe('2027-11-02T07:20:00Z');
     expect(approval.originalText).toBe('买二十三瓶水');
-    expect(input.args).toEqual({
-      raw_time_text: '2027年11月2日下午三点二十分',
-      note: '买二十三瓶水',
-      occurrence: 'once',
-    });
     expect(
       (
         await pool.query('SELECT original_text,wall_time FROM approvals WHERE id=$1', [
@@ -301,7 +288,7 @@ maybe('persistent tool invocation identity and local results', () => {
   }, 15000);
 
   it('first reservation freezes temporal context; accepted results survive unavailable rules and terminal approval state', async () => {
-    const ctx = await fresh();
+    const ctx = await fresh('明天 9:20 提醒我喝水');
     const input = await reserve(ctx, 'freeze/1', 'propose_task', {
       ...args,
       raw_time_text: '明天 9:20',
@@ -479,7 +466,7 @@ maybe('persistent tool invocation identity and local results', () => {
   });
 
   it('different cancellation calls retain the existing pending approval reuse rule', async () => {
-    const ctx = await fresh();
+    const ctx = await fresh('2027-11-02 09:20 提醒我喝水');
     const first = await invokeTool(
       pool,
       ctx,

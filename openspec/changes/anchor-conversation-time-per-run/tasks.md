@@ -4,21 +4,32 @@
 
 - [x] 1.1 对照既有spec/design、相关代码与交接中的历史Red，区分中文时钟/缺字段修复与新的Run锚/延迟行为；记录会话锚和原延迟约束冲突。
 - [x] 1.2 编写proposal、设计取舍、conversations增量及完整MODIFIED安全Requirement；明确可信关系、关系不明、同日延迟、真实午夜与旧冻结边界，不把当前草稿实现记为完成。
-- [ ] 1.3 主Agent独立审阅；以spec-only PR交付并决定是否采纳，不在本PR带业务实现。文档strict/format校验结果见本次独立证据，不代替合同批准。
-- [ ] 1.4 合同采用后的实施交付同步design/05与Agent/黄金/PRD/索引，消除会话锚/延迟语义冲突；本spec-only不改主spec或archive。
+- [x] 1.3 独立 spec-only [PR #98](https://github.com/BqLee-AI/Along-agent/pull/98) 已合并，#92 已授权采纳并实施；该 PR 不带业务实现，文档/既有运行时校验不等于新锚验收。
+- [x] 1.4 采纳后同步 design/05、Agent、黄金第14条、PRD、索引及 API/schema，明确最小来源引用和不可变 JSON，消除会话锚/延迟冲突；不改主 spec、proposal 或 spec 增量，不 archive。
 
 ## 2. 既有合同缺陷修复（独立实现PR）
 
-- [ ] 2.1 中文钟数唯一格式解析、缺日期准确话术、缺时段不替选；生产propose_task完整校验时间字段及独立note，不拼改时间原话、不猜日期。
-- [ ] 2.2 一次专项运行time-core与API/隔离PG行为，证明完整中文日期+单独note成功，缺日期/时区/时段/事项无批准/承诺写；保留原50条覆盖/计数和只读/反时钟回归。
+- [x] 2.1 中文钟数唯一格式解析、缺日期准确话术、缺时段不替选及独立 note 完整校验，已由 [PR #97](https://github.com/BqLee-AI/Along-agent/pull/97) 合并。仅记历史完成，不含新日期锚。
+- [x] 2.2 #97 已交付 time-core、API/隔离 PG、完整字段零承诺、50条覆盖/计数及只读/反时钟回归证据。历史专项为分段覆盖（不是单次全套 Green），最终 CI 五门通过；不是本次修改的当前验证。
 
-## 3. 获准日期锚实施（后续draft，未就绪）
+## 3. 获准日期锚实施与验收
 
-- [ ] 3.1 依采纳合同调查并核实原输入、真实澄清/候选失败、未完成状态及原锚的持久关系；来源足够才实现继承，否则澄清。完成新明确日期接纳锚，不使用最新任意Run或缺来源fallback，不扩展为通用会话状态机，不预设新字段/schema。
-- [ ] 3.2 覆盖旧会话新今天/明天、可信补时区、关系不明/多个候选/无关消息/旧缺来源、同日超60秒及真实本地午夜；只断言context不计工具提议验收。
-- [ ] 3.3 主Agent负责正式native消费与精确实施快照验收，证明同Run工具、重放、批准恢复和只读历史不换锚、不读当前钟重算、不创建真实用户提醒；日期锚实现未完成不合并进独立缺陷fix。
-- [ ] 3.4 合同、实现与证据分别审阅后再决定收口和archive，不以spec-only或历史混合Green关闭#92。
+- [x] 3.1 完成新明确日期接纳锚、实际来源/未完成状态/紧邻关系验证；复用 frozen_context 的 reminderDateSource 和最小 clarification_of_run_id，不新表/迁移或旧数据回填，不用最新任意 Run 或缺来源 fallback。
+- [x] 3.2 覆盖旧会话新今天/明天、可信整条时区补充、精确 fold 引用/原文/候选、关系不明/多个候选/无关消息/旧缺来源、同日120秒及真实午夜20秒；通过真实 HTTP/隔离 PG 工具提议与批准冻结取证。
+- [x] 3.3 主Agent完成正式 native 消费与实施工作树验收：同 Run 工具、重放、批准恢复和只读历史不换锚、不读当前钟重算；全部数据位于本任务隔离 PG，不创建真实用户提醒。
+- [x] 3.4 对照合同审阅实现与运行证据；本次交付实施工作树和本地验收，不执行远端关闭或archive，不改主spec。真实provider自然语言质量不由受控模型fixture证明。
 
 ## Verification
 
-本change只交付Proposed合同与设计，文档校验由本worktree交付者在编辑完成后执行，精确命令、版本与真实结果记录于独立证据。文档校验不等于正式native、新锚端到端或自然多轮验收，日期锚实施仍未就绪；专项缺陷修复的运行结果另报，不能替代第3节。第2、3节实施与验收不得因spec-only校验通过而勾选完成。
+历史证据：#98 已合并采纳合同，其 `a051bac` CI [41401990381](https://github.com/BqLee-AI/Along-agent/actions/runs/41401990381) 及 strict/格式结果只证明该 spec-only 快照与既有运行时，不证明新锚端到端。#97 已合并既有缺陷修复，其 `0fe8aec` CI [41401991253](https://github.com/BqLee-AI/Along-agent/actions/runs/41401991253) 五门通过；本地专项为186个不同用例的分段覆盖，初次174 pass/12 fail、原12项重跑通过，随后符号事项独立 Red/Green，不冒称单次全套通过。
+
+### 2026-11-02 实施工作树验收
+
+- 状态：`fix/92-backend-worktree` 未提交工作树；正式契约 runner 从该工作树构建镜像 `sha256:834a305ae1da0d33098dc2366acab0616f939d0a8cf808b8438f317d2b901d31`，容器使用 Bun 1.4.2、正式 native 二进制和独立 PostgreSQL 16。WSL 的 Bun 仅启动 shell runner，不作为契约运行时。
+- 策略：先实现后补行为覆盖，不宣称 TDD/Red。初次契约失败来自夹具误判拒绝恢复流程、混用实时工具结果和恢复快照的数据形状；修正夹具后执行完整契约，不以过滤后的专项结果代替全套。
+- `bun run verify`：10步全部通过；lint保留既有warning，typecheck/依赖边界/门禁/冻结词/口径扫描通过；单元645 pass、7 skip、0 fail；OpenSpec strict 11/11；格式检查通过。
+- `bun run test:contracts`：正式镜像149 pass、0 fail，含新增日期锚local/HTTP十个native用例；同日120秒、真实午夜20秒、缺日期禁止模型补造、批准恢复及跨午夜重放均通过。
+- `bun run test:integration`：Linux/Bun 1.4.2及本任务独立PG，351 pass、0 fail。初次漏传测试专用认证变量的失败不计通过；补齐后修复新来源校验暴露的旧夹具与完整新请求边界，再执行全套通过。
+- `bun run build`：全部包、API、生产Web构建通过。
+- 实际表面：启动生产Web构建及API正式入口，浏览器进入创建提醒，提交纽约重复时刻，选择第一次后重新提交；隔离PG确认后继Run引用原失败Run且锚不变，生成一项pending批准（America/New_York、fold=0），tasks=0。未点击确认过期历史目标；该冒烟不是真实provider质量验收。
+- 证据边界：模型步骤受控，但调用正式native、实际工具、HTTP/SSE及真实PG；未调用真实LLM供应商，未执行远端CI、commit/push、关闭Issue或规范归档。历史#97/#98结果不计入以上当前运行。

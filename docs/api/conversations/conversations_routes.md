@@ -38,11 +38,13 @@
 - `execution`：可选 `business | harness`，省略为兼容的确定性业务。harness 明确进入正式仓颉，`mode=chat` 不作隐式分派；缺实际依赖在任何新写入/SSE 前503 `HARNESS_UNAVAILABLE`，不自动改走 TS/fixture。
 - Web 的默认 Agent 对话显式传 `execution=harness`，不带 `workspace_id` 也可交流；提醒快捷入口仍显式传 `business`。这不改变 HTTP 省略 execution 的默认值，也不新增执行种类。
 - 新 Harness Run 在接纳事务内冻结同 owner、同 conversation 最新63条可见 user/assistant 消息引用并按 `created_at/id` 排序，随后追加本轮完整用户输入一次，总计最多64条。执行和批准恢复按冻结引用读原文，不混入后来消息、其他会话或 system 消息，不把旧 tool_calls 作为待执行动作。该窗口不是永久记忆；完整窗口、工具定义与观察超1MiB时明确失败 `HARNESS_CONTEXT_LIMIT`，不截断当前输入。缺跨轮引用的旧 Run 保持仅原输入的上下文。
-- 入站幂等仍为同 owner/key：business 沿历史 hash 材料；无 workspace 的 harness 保持 `harness/v1\0` 域，带 workspace 则用 `harness/workspace/v2\0`，将 `workspace_id` 追加到原规范数组后计算 SHA-256。这是请求 hash 域，不是执行协议版本（执行为 `harness/v5`）。同键换 execution、workspace 或其他绑定输入为409，不重复创建另一 Run；冻结输入/权限不从 body 的 owner、allowlist 等额外字段取得。
+- 入站幂等仍为同 owner/key：business 沿历史 hash 材料；无 workspace 的 harness 保持 `harness/v1\0` 域，带 workspace 则用 `harness/workspace/v2\0`，将 `workspace_id` 追加到原规范数组后计算 SHA-256。提供 `clarification_of_run_id` 时，再将该来源 Run 引用追加到材料；省略不追加，保留无引用旧请求的 hash。这是请求 hash 域，不是执行协议版本（执行为 `harness/v5`）。同键换 execution、workspace、来源引用或其他绑定输入为409，不重复创建另一 Run；冻结输入/权限不从 body 的 owner、allowlist 等额外字段取得。
 - `workspace_id`：可选非空字符串，仅允许显式 `execution=harness`，business/省略 execution 时携带为400。新 Run 从当前本人有效部署登记取得精确授权，并冻结安全摘要；省略不授 workspace 工具。选择与新动作授权、历史展示的区别见 §5。
 - `confirmed_timezone` / `confirmed_timezone_id`：schema 均已有、可空，取 `confirmed_timezone_id ?? confirmed_timezone`；未给本轮值可使用会话先前明确冻结值，仍缺失则澄清，不猜。原文单个明确已知别名/规范 ID 优先于本轮确认值，本轮确认值优先于会话默认值；未知显式别名即使已有 Shanghai 也失败，多个不同已知时区则澄清，完整优先级见 design/05 §9.2。
 - `fold_choice`：`first | second | none`，默认 `none`；只有结构化字段决定选择，原话“第一次/第二次”不自动覆盖。歧义未选为 `AMBIGUOUS_LOCAL_TIME`；候选字段仍是 fold_choice，成功的现有归一结果与快照 `fold` 为 `0 | 1`，不混为字符串列。
-- “明天”锚定：本轮明确相对日期的消息以服务端接收时刻和已确认时区解析并冻结；只补充澄清沿用前一Run锚，旧Run/重放/批准恢复不重算。同一本地日期不设60秒重问线，真正跨午夜追问具体日期，见design/05 §3。
+- `clarification_of_run_id`：可选 UUID，精确 fold 候选重提议必填，指向原 `AMBIGUOUS_LOCAL_TIME` 失败 Run。必须同 owner/conversation、全会话唯一尚未完成候选、紧邻上一 user 消息且有实际已接受失败及冻结来源；原文完全相同、请求所选时区等于实际候选并带结构化 first/second 才可继承原锚。它不是批准、resume、任意 Run 复制或客户端时钟授权；无效/关系不明只要求完整重述，不任挑锚。
+- 只补时区支持整条明确别名/规范 ID 回复；仅可接续上述同归属、唯一、紧邻、终态 done/failed 且实际 `TIMEZONE_MISSING` 的原请求。多个候选、无关中间 user 目标、旧数据缺来源及其他不明补充要求完整重述日期、时刻、时区和事项；不能只按“前一 Run”或模型历史猜关系。
+- “明天”锚定：新明确日期请求用本轮 DB `clock_timestamp()` 接纳时刻；可信澄清保留原 anchor，本轮 received 仍单独冻结。同日本地 120 秒不报跨日，真正本地午夜 20 秒仍问具体日期。新 Run 在既有不可变 `frozen_context` 写 `reminderDateSource`，旧 Run/工具重放/批准恢复/历史不回填或重算；字段与归属见 schema，时间纯层及未来时间/有效期规则见 design/05 §3。
 
 响应：`Content-Type: text/event-stream`，`200` 建连；新消息首事件 `thread.started` 含 conversation/Run。终结事件为 completed/failed/cancelled；harness 在批准等待时只结束该段流，不发 completed。显式 resume 不重放旧 started/delta。每行 `data: {protocol_version,seq,type,payload,request_id}`，`seq` 是不透明全局游标；内部 snapshot 产生间隙合法，不能要求连续。具体七词 schema 以 `packages/stream-protocol` 为准：
 
@@ -104,7 +106,7 @@ Web 批准链接保留原 conversation/Run，并明确打开新标签页；在�
 - [Required] 已建流仍为HTTP200；`NONEXISTENT_LOCAL_TIME / AMBIGUOUS_LOCAL_TIME / UNKNOWN_TIMEZONE` 按冻结安全spec为 `thread.failed`，`payload.error.http_status=422`，`error.code` 为对应符号名；不是 delta+completed。缺年份/时区/时段、模糊范围等普通澄清仍可completed且不建approval。
 - [Required · #30] 已建流之后发现 `TZDB_UNAVAILABLE`（包括支持zone但所需目标/锚点范围外），以 `thread.failed`、`http_status=503` 终结；不改外层200，不写JSON envelope到SSE。时间失败run恰好一个终结，解释delta可有，不能再completed/cancelled或发新approval。GET恢复重放相同帧；失败审计允许保留conversation/message/run/checkpoint/tool_calls，但approval/task/task_events/outbox/notification及发送调用为零；预检拒绝则连新审计run都没有。
 - [Required · #30] AMBIGUOUS必须带 `error.details={wall_time,timezone_id,ruleset_id,candidates}`，候选恰好两个，按UTC早晚给 `fold_choice=first|second`、`offset_seconds`、`fire_at_utc`，唯一形状见design/05 §9.1。2026-11-01 01:30纽约分别为05:30Z/-14400、06:30Z/-18000；不得只拼中文文本或让客户端造候选。
-- [Required · #30] Web保留原输入与服务端wall_time/timezone_id，展示两候选+数值偏移；点击first/second只以新幂等键、新请求和相应fold_choice重提议，保留纽约不能回退/me上海，日期/时区修改须清除旧候选。服务端重归一并沿既有锚点/跨午夜规则，不接受客户端UTC作为权威；成功pending后仍须按钮三件套确认，选择候选不等于建task。
+- [Required · #30/#92] Web保留原输入、原失败 Run ID 与服务端 wall_time/timezone_id，展示两候选+数值偏移；点击 first/second 只以新幂等键、新请求、`clarification_of_run_id=原失败Run` 和相应 fold_choice 重提议。原文须完全一致、请求时区须等于实际候选，保留纽约不能回退 `/me` 上海；输入/日期/时区修改须清除旧候选及来源引用。服务端核验唯一未完成来源和紧邻关系后沿原锚/本地午夜规则重归一，缺来源只要求完整重述，不接受客户端 UTC 作为权威；成功 pending 后仍须按钮三件套确认，选择候选不等于建 task。
 - 时间归一由服务端 time-core 纯函数执行，LLM 不算时间，展示层不换算 [Required]。真实三zone/2026–2027有限覆盖、未知用户时区与缺规则区分、readyz/DB及D7兼容见design/05 §5；真实回归/部署缺失取证见§10，不把mock故障当部署演练。
 
 ## 5. R1 工作区选择与文档等待 [Required]

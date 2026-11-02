@@ -19,3 +19,4 @@ export type { EntryClass, EntryClassifyResult } from './entry.js';
 export type { EntryInput } from './entry.js';
 export { isSupportedRuleset, utcInCoverage } from './profile.js';
 export { freezeValue, sameValue } from './immutable.js';
+export { reminderDateExpression, reminderTimezoneReply } from './reminder-source.js';

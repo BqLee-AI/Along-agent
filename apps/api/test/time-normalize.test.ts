@@ -257,17 +257,17 @@ describe('application normalization context', () => {
       raw_text: '明天 01:30',
       anchorReceivedAtUtc: '2026-10-31T12:00:00Z',
     };
+    for (const receivedAtUtc of ['2026-10-31T12:00:30Z', '2026-10-31T12:02:00Z']) {
+      expect(
+        normalizeTime(context, { ...anchored, receivedAtUtc, foldChoice: 'second' }),
+      ).toMatchObject({ kind: 'ok', normalized: { fire_at_utc: '2026-11-01T06:30:00Z' } });
+    }
     expect(
       normalizeTime(context, {
         ...anchored,
-        receivedAtUtc: '2026-10-31T12:00:30Z',
+        receivedAtUtc: '2026-11-01T05:00:00Z',
         foldChoice: 'second',
       }),
-    ).toMatchObject({ kind: 'ok', normalized: { fire_at_utc: '2026-11-01T06:30:00Z' } });
-    for (const receivedAtUtc of ['2026-10-31T12:01:01Z', '2026-11-01T05:00:00Z']) {
-      expect(
-        normalizeTime(context, { ...anchored, receivedAtUtc, foldChoice: 'second' }),
-      ).toMatchObject({ kind: 'clarify', classified: { reason: 'DATE_CHANGED' } });
-    }
+    ).toMatchObject({ kind: 'clarify', classified: { reason: 'DATE_CHANGED' } });
   });
 });

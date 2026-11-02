@@ -23,7 +23,7 @@
 | 02   | [模块化单体与拆分触发](design/02-modular-monolith-and-split-triggers.md) | 模块所有权、确认/工具结果的限定原子事务、拆分判据与D1边界                                                                         |
 | 03   | [v0 垂直切片](design/03-v0-vertical-slice.md)                            | 简报→卡片→对话→按钮确认→调度→站内通知详情投影→活动账；真实取消回执与七步证据边界                                                  |
 | 04   | [五缝契约](design/04-five-seams-contract.md)                             | 稳定工具调用、原子接受结果、只追加审计与非事务未知边界；其余能力端口                                                              |
-| 05   | [time-core 时间层](design/05-time-core.md)                               | 中文时钟唯一映射、完整提醒与独立事项校验、纯函数 normalize、typed 时间失败与冻结锚                                                |
+| 05   | [time-core 时间层](design/05-time-core.md)                               | 请求接纳日期锚/可信澄清来源、本地午夜边界、完整提醒与中文时钟映射、纯函数 normalize 和 typed 时间失败                             |
 | 06   | [approvals 确认门](design/06-approvals-confirmation-gate.md)             | 版本化冻结回显、显式修改、按钮确认及工具批准/结果原子边界                                                                         |
 | 07   | [task_events 事件账](design/07-task-events-ledger.md)                    | 只追加账本、取消优先、活动页读模型                                                                                                |
 | 08   | [调度与投递](design/08-scheduler-and-delivery.md)                        | 未排期过窗终结与遗留恢复、一次性调用许可、独立本地接收、未知不重发及取消栅栏                                                      |
@@ -50,38 +50,38 @@ R2-B 的完整目标及多轮自主查询边界见[design/19 §4、§6](design/1
 | 1    | [API 索引与约定](api/README.md)                         | 28 业务端点合同 + 2 探针、认证匿名例外、workspace/文档批准、Web 消费边界与错误码 |
 | 2    | [auth 与 me](api/auth/auth_routes.md)                   | Better Auth credential、GET /me、#68 窄账户 API、固定会话与来源/CSRF             |
 | 3    | [brief 简报与卡片](api/brief/brief_routes.md)           | GET /brief、card schema_version                                                  |
-| 4    | [对话与 SSE](api/conversations/conversations_routes.md) | execution 分派、Run 读/取消/有限批准恢复、SSE 与补读隔离                         |
+| 4    | [对话与 SSE](api/conversations/conversations_routes.md) | execution 分派、日期来源引用/幂等绑定、Run 读/取消/有限批准恢复、SSE 与补读隔离  |
 | 5    | [确认门](api/approvals/approvals_routes.md)             | 列表/详情/confirm\|reject\|revise、持久修改重放、重新确认                        |
 | 6    | [任务与事件](api/tasks/tasks_routes.md)                 | 列表/详情/cancel 幂等/events 只读按 recorded_at                                  |
 
 ## 四、Schema（5 篇）
 
-| 序号 | 文档                                                 | 作用                                                                              |
-| ---- | ---------------------------------------------------- | --------------------------------------------------------------------------------- |
-| 1    | [Schema 索引](schema/README.md)                      | 落地顺序、enum text+check、append-only、owner_id、敏感约定                        |
-| 2    | [身份与租户](schema/identity-schema.md)              | users、sessions、auth_accounts 与 #68 installation_admin 合同                     |
-| 3    | [对话与运行](schema/conversation-and-runs-schema.md) | conversations/messages、agent_runs/run_attempts/run_checkpoints、revisions 不可变 |
-| 4    | [承诺与账本](schema/commitments-schema.md)           | approvals/修改预约/tasks/task_events/outbox/notifications 全字段                  |
-| 5    | [简报与卡片](schema/content-schema.md)               | briefs/cards 含 schema_version                                                    |
+| 序号 | 文档                                                 | 作用                                                                                 |
+| ---- | ---------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| 1    | [Schema 索引](schema/README.md)                      | 落地顺序、enum text+check、append-only、owner_id、敏感约定                           |
+| 2    | [身份与租户](schema/identity-schema.md)              | users、sessions、auth_accounts 与 #68 installation_admin 合同                        |
+| 3    | [对话与运行](schema/conversation-and-runs-schema.md) | conversations/messages、Run/attempt/checkpoint、提醒日期来源不可变 JSON 与旧数据边界 |
+| 4    | [承诺与账本](schema/commitments-schema.md)           | approvals/修改预约/tasks/task_events/outbox/notifications 全字段                     |
+| 5    | [简报与卡片](schema/content-schema.md)               | briefs/cards 含 schema_version                                                       |
 
 ## 五、Agent（7 篇）
 
-| 序号 | 文档                                                        | 作用                                                         |
-| ---- | ----------------------------------------------------------- | ------------------------------------------------------------ |
-| 1    | [Agent 索引](agent/README.md)                               | 职责结论、LLM 只提议、白名单、确认门唯一入口                 |
-| 2    | [助理总览](agent/01-assistant-agent-overview.md)            | 职责/非职责、对话→提议→确认主链                              |
-| 3    | [工具网关与 v0 工具](agent/02-tool-gateway-and-v0-tools.md) | 完整提醒/独立事项、持久身份/重放、批准原子结果与当前权限     |
-| 4    | [简报与卡片生成](agent/03-brief-and-card-generation.md)     | 每日调度触发、输出 schema、校验降级、预算                    |
-| 5    | [提议到承诺流](agent/04-proposal-to-commitment-flow.md)     | 分诊、澄清问法、time-core 错误到话术映射                     |
-| 6    | [对话运行与预算](agent/05-chat-runtime-flow-and-budget.md)  | Run/attempt/调用边界、native 累计预算、同 Run 批准恢复与取消 |
-| 7    | [评测夹具](agent/06-eval-fixtures.md)                       | 50 条时间表达集、200 卡片集版本化、指标口径                  |
+| 序号 | 文档                                                        | 作用                                                               |
+| ---- | ----------------------------------------------------------- | ------------------------------------------------------------------ |
+| 1    | [Agent 索引](agent/README.md)                               | 职责结论、LLM 只提议、白名单、确认门唯一入口                       |
+| 2    | [助理总览](agent/01-assistant-agent-overview.md)            | 职责/非职责、对话→提议→确认主链                                    |
+| 3    | [工具网关与 v0 工具](agent/02-tool-gateway-and-v0-tools.md) | 完整提醒/独立事项、持久身份/重放、批准原子结果与当前权限           |
+| 4    | [简报与卡片生成](agent/03-brief-and-card-generation.md)     | 每日调度触发、输出 schema、校验降级、预算                          |
+| 5    | [提议到承诺流](agent/04-proposal-to-commitment-flow.md)     | 分诊、可信时区补充/精确 fold 重提议、澄清问法与 time-core 错误映射 |
+| 6    | [对话运行与预算](agent/05-chat-runtime-flow-and-budget.md)  | Run/attempt/调用边界、native 累计预算、同 Run 批准恢复与取消       |
+| 7    | [评测夹具](agent/06-eval-fixtures.md)                       | 50 条时间表达集、200 卡片集版本化、指标口径                        |
 
 ## 六、Demo、收口规划与验收记录（14 篇）
 
 | 序号 | 文档                                                                             | 作用                                                                                          |
 | ---- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | 1    | [v0 全链路 smoke](demo/v0-slice-smoke.md)                                        | 7 步复现、断言取消后触发数=0                                                                  |
-| 2    | [time-core 黄金用例](demo/time-core-golden-cases.md)                             | 4 基准+DST+50 表达，fixture 可被测试消费                                                      |
+| 2    | [time-core 黄金用例](demo/time-core-golden-cases.md)                             | 4 基准+DST+50 表达；第14条区分新请求/可信澄清锚、同日等待与真实午夜，纯函数不代替消费者验收   |
 | 3    | [故障注入 smoke](demo/fault-injection-smoke.md)                                  | 真实强杀、取消竞争及规则故障；分别计数实际调用与持久结果                                      |
 | 4    | [v0 七步 smoke 收口计划](demo/v0-smoke-closeout-plan.md)                         | 真实链路缺口、最小实施顺序、七步证据与完整 v0 验收边界                                        |
 | 5    | [2026-10-21 七步真实验收记录](demo/v0-smoke-evidence-2026-10-21.md)              | 浏览器/通知/取消真实时窗、调用正控制与零调用、脱敏原始证据及未覆盖边界                        |
@@ -116,6 +116,7 @@ R2-B 的完整目标及多轮自主查询边界见[design/19 §4、§6](design/1
 - [R1 个人助理](design/01-tech-stack-and-repo-structure.md#6-r1-web个人助理与职责边界) 与[页面 PRD](prd/02-core-loop-and-pages.md#r1-个人助理)记录分组顶部导航、对话首页、简洁登录、LumenUI/Base UI/Tailwind v4、React 职责、精确批准和原 Run 显式继续；[Web 使用说明](../apps/web/README.md)与[本机任务流程](local-lifecycle.md#开始任务与审阅文档)说明实际操作与原安装边界。[版本化验证记录](web-task-experience-verification-2026-10-28.md)区分各轮源码、生产页面、受控交互与原安装实际验收，不把旧 CI 或页面示例当作新增迁移已验证。
 - [R2-A 上下文合同（#83）](design/18-r2a-harness-context.md) 的行为真源为 [agent-runtime](../openspec/specs/agent-runtime/spec.md)、[tool-gateway](../openspec/specs/tool-gateway/spec.md) 与 [workspaces](../openspec/specs/workspaces/spec.md)，实施/分级验收记录见 [归档清单](../openspec/changes/archive/2026-10-30-manage-harness-context/tasks.md)。[schema](schema/conversation-and-runs-schema.md#r2-a-上下文策略83)、[API](api/conversations/conversations_routes.md#7-r2-a-上下文容量83)、[PRD](prd/04-acceptance-open-questions.md#r2-a-单-run-上下文83) 跟随。保留 accepted facts、snapshot2 全引用与精确批准，原事实回取不是新读取；纯合同校验不算正式 native/真实模型验收。
 - [R2-B 路由合同（#88）](design/19-r2b-readonly-intent-routing.md) 沿完整规则→BGE INT8→原模型的有限只读路径，保持仓颉唯一循环、原网关/取消/批准恢复，默认off并逐意图验证；行为增量见 [change](../openspec/changes/define-readonly-intent-routing/proposal.md) 与 [任务](../openspec/changes/define-readonly-intent-routing/tasks.md)，[PRD](prd/04-acceptance-open-questions.md#r2-b-有限只读路由88默认关闭) 跟随。[配置及实验入口](design/19-r2b-readonly-intent-routing.md#15-配置与受控实验)复用生产实现；默认off实施PR使用`Refs #88`，与自然shadow、受控接管和最终归档分阶段交付，暂停不等于通过，不自动重启观察、启用enforce或关闭issue。时间性验证与待决门槛见任务Verification；[历史离线证据](demo/r2b-embedding-evidence-2026-10-31.md)不能作为生产接管批准。
+- [提醒请求日期锚（#92）](design/05-time-core.md#3-锚点冻结-required)按本轮服务端接纳事实建立新锚，可信且唯一/紧邻的原提醒澄清才继承；整条明确时区补充与带 `clarification_of_run_id` 的精确 fold 重提议之外，不明补充要求完整重述。同日等待不冒称跨日、真实午夜仍问具体日期，旧 Run/重放/恢复/历史保持冻结。采纳的 [change 设计](../openspec/changes/anchor-conversation-time-per-run/design.md)具体化最小请求引用与既有不可变 JSON，无新表/迁移或旧数据回填；[API](api/conversations/conversations_routes.md#2-post-conversationsmessages-required)、[schema](schema/conversation-and-runs-schema.md#提醒请求日期来源92)、[Agent](agent/04-proposal-to-commitment-flow.md#澄清问法问一次问准)、[黄金第14条](demo/time-core-golden-cases.md#50-表达adaptation入口归一到秒的覆盖表节选写法)及[PRD](prd/04-acceptance-open-questions.md#v0-验收四条全部按自家可测指标)跟随，分层交付证据仅记入 [tasks](../openspec/changes/anchor-conversation-time-per-run/tasks.md)，不以规范采纳代替运行验收。
 - [BGE INT8 第三方声明](../apps/embedding/third-party/bge-small-zh-v1.5/NOTICE.md)与同目录`LICENSE`、`provenance.json`覆盖模型使用依据及量化声明边界；编码镜像携带声明，不包含权重。模型声明与完整镜像/依赖分发清算分别交付，不互相替代，也不构成自动接管批准；完成状态见任务Verification。
 - 冲突矩阵：行为/验收以 spec 为准，字段/路由以 design/api/schema 为准，why 以 ADR 为准。
 

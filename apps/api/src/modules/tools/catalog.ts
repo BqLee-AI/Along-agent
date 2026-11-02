@@ -72,7 +72,7 @@ export const HARNESS_TOOL_DEFINITIONS = [
   {
     name: 'propose_task',
     description:
-      '提出提醒批准；只有用户审阅冻结预览并点击确认按钮后才能创建任务。对话内可确认并继续原运行，不必跳转其他页面。',
+      '提出提醒批准；raw_time_text必须逐字引用本轮用户原话（可信澄清时引用原提醒），不得补猜日期、时刻或换算中文钟数/相对日期。缺字段先澄清。只有用户审阅冻结预览并点击确认按钮后才能创建任务，对话内可确认并继续原运行。',
     risk: 'medium' as const,
     parameters: workspaceParameters(
       {

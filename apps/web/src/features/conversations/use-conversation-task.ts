@@ -40,7 +40,10 @@ import type { RunTranscript } from '@/lib/conversation-run';
 import { isSameReadingPage, watchHistoryNavigation } from '@/lib/stream-navigation';
 import { confirmInlineReminder, inlineReminderWaiting } from './inline-reminder';
 
-type AmbiguousProposal = z.infer<typeof AmbiguousTimeDetailsSchema> & { raw_text: string };
+type AmbiguousProposal = z.infer<typeof AmbiguousTimeDetailsSchema> & {
+  raw_text: string;
+  source_run_id: string;
+};
 type Identity = { conversationId: string; runId: string };
 const PendingSendSchema = z.object({ text: z.string(), body: z.record(z.unknown()) }).strict();
 
@@ -219,7 +222,7 @@ export function useConversationTask({
       if (text !== undefined && detail.code === 'AMBIGUOUS_LOCAL_TIME' && detail.details) {
         const parsed = AmbiguousTimeDetailsSchema.safeParse(detail.details);
         if (parsed.success) {
-          setAmbiguousProposal({ ...parsed.data, raw_text: text });
+          setAmbiguousProposal({ ...parsed.data, raw_text: text, source_run_id: rid });
           setFoldChoice('');
         }
       }
@@ -476,6 +479,7 @@ export function useConversationTask({
             conversation_id: conversationRef.current ?? undefined,
             confirmed_timezone: proposal?.timezone_id ?? me.confirmed_timezone,
             fold_choice: proposal ? foldChoice : undefined,
+            clarification_of_run_id: proposal?.source_run_id,
             execution: taskExecution(intent),
             ...(intent === 'document' ? { workspace_id: workspaceId } : {}),
             idempotency_key: crypto.randomUUID(),
