@@ -88,7 +88,7 @@ Windows Bun 1.4.2 的 PG 并行测试曾发生运行时 segmentation fault；它
 
 - 同一 Chromium context 对 `127.0.0.1` 的不同端口共享 Cookie；三安装验收按顺序登录并核对 HMAC 归属，未把跨安装 Cookie 覆盖造成的 401 当作重启失败。
 - 本记录是本地、隔离生产构建及受控实验结果，不冒充部署到用户原安装或 PR CI。PR 的 CI 结果单列在 PR Verification。
-- 不更换用户原模型/provider/路由，不进入 #69/#70/R2，不关闭 #66。本记录仅证明 #68 账户切片；[独立归档清单](../openspec/changes/archive/2026-10-27-close-r1-account-access/tasks.md)对应其七项验收，不代替 #66 全路径验收。
+- 不更换用户原模型/provider/路由，不进入 #69/#70/R2，不关闭 #66。本记录仅证明 #68 账户切片；[独立归档清单](../../openspec/changes/archive/2026-10-27-close-r1-account-access/tasks.md)对应其七项验收，不代替 #66 全路径验收。
 
 ## CI 与独立审阅（2026-10-27）
 

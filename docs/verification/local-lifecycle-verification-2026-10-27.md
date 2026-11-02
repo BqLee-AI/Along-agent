@@ -2,7 +2,7 @@
 
 ## 对象与边界
 
-- 对象：`feat/67-local-lifecycle` 的本次实现，基于 `bb9e04b`；对应 [design/15](design/15-r1-local-lifecycle.md) 和 [OpenSpec 归档 tasks](../openspec/changes/archive/2026-10-27-close-r1-local-lifecycle/tasks.md)。
+- 对象：`feat/67-local-lifecycle` 的本次实现，基于 `bb9e04b`；对应 [design/15](../design/15-r1-local-lifecycle.md) 和 [OpenSpec 归档 tasks](../../openspec/changes/archive/2026-10-27-close-r1-local-lifecycle/tasks.md)。
 - 环境：Windows、Bun 1.4.2、Docker Desktop Linux x64、Compose 2.35.1、PostgreSQL 16；正式 API/native/MCP 镜像与 Windows 生产 Web 成套准备。
 - 材料：checkout 外的隔离新安装及模拟原部署；历史、owner、登记、资料文件、卷及密钥都是本轮测试材料。没有接入用户原部署。故障迁移只存在于隔离发布副本，不进入本仓库迁移目录。
 - 证据层级：进程与生命周期、受控合同、真实模型分开记录。本轮补验覆盖 #67 正式链路，不是 #68 正式开户验收，也不重复 #62 全部任务变体。

@@ -2,7 +2,7 @@
 
 ## 对象与边界
 
-- 对象：以 `b25985e8654b95c1ce2610e4e71619756d6da228` 为基线的 #69 实现，对应 [design/17](design/17-r1-conversation-history.md) 和 [OpenSpec 归档任务清单](../openspec/changes/archive/2026-10-28-close-r1-conversation-history/tasks.md)。实现交付与独立归档、Issue 收口分开；本记录不代替 #66 全路径验收。
+- 对象：以 `b25985e8654b95c1ce2610e4e71619756d6da228` 为基线的 #69 实现，对应 [design/17](../design/17-r1-conversation-history.md) 和 [OpenSpec 归档任务清单](../../openspec/changes/archive/2026-10-28-close-r1-conversation-history/tasks.md)。实现交付与独立归档、Issue 收口分开；本记录不代替 #66 全路径验收。
 - 环境：Windows、Bun 1.4.2、Next.js production Web、正式 Linux x64 API/worker/native/MCP、PostgreSQL 16。原生合同使用正式仓颉构建；PG 集成在隔离 Linux 容器执行。
 - 首次六项真实浏览器验收的构建摘要：`aed96381181508454c9de952eb38b5f36e3380a55cc9cb72c6f12d362e7fdba3`。该构建对应质量修正前的运行代码；后续索引和聚合修正的独立证据见本文末节，不将旧构建冒充修正后的完整验收。
 - 仅操作专用验收安装和测试数据库，未对用户原安装做实验。沿用获准的 `deepseek-v4.1-flash` 及原模型配置，不更换 provider、模型、认证密钥、owner、root 或原资料。

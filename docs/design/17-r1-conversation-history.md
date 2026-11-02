@@ -170,4 +170,4 @@ last_activity为已有有界owner会话事实的派生查询，不预建搜索�
 | AC5 旧深链与撤权边界           | §4、§6–§7：旧事件、Run 和冻结批准可读；当前撤权不恢复新动作资格，不从新登记补造旧摘要                     |
 | AC6 真实浏览器与 PG16          | §9–§10：覆盖升级与真实历史路径，复用确定性 native/授权/unknown 证据，保留五门并如实记录未覆盖项           |
 
-行为真源见 [conversations 规格](../../openspec/specs/conversations/spec.md)，完整交付清单见[会话历史归档](../../openspec/changes/archive/2026-10-28-close-r1-conversation-history/tasks.md)。[2026-10-28 验证记录](../conversation-history-verification-2026-10-28.md)分列六项真实验收、四索引与单次聚合补证、静态审阅及适用版本，不将历史切片扩大为 #66 全路径验收。
+行为真源见 [conversations 规格](../../openspec/specs/conversations/spec.md)，完整交付清单见[会话历史归档](../../openspec/changes/archive/2026-10-28-close-r1-conversation-history/tasks.md)。[2026-10-28 验证记录](../verification/conversation-history-verification-2026-10-28.md)分列六项真实验收、四索引与单次聚合补证、静态审阅及适用版本，不将历史切片扩大为 #66 全路径验收。

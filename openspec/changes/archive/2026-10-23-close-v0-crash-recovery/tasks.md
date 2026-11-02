@@ -24,4 +24,4 @@
 
 收口合并门：精确收口 head 的五项 required checks 必须全部 SUCCESS、合并状态 CLEAN 后才允许 squash 合并，并在收口 PR 中 Closes #29 / Closes #38。归档及本清单不替代该门。
 
-运行记录：[2026-10-21 A3 证据](../../../../docs/demo/v0-crash-recovery-evidence-2026-10-21.md)、[A1 失败与部署恢复](../../../../docs/demo/v0-a1-recovery-evidence-2026-10-22.md) 和 [2026-10-23 完整验收记录](../../../../docs/demo/v0-closeout-evidence-2026-10-23.md)。原始 A1 保持失败/missed；独立新字面任务自然次日到点，实际调用/通知/fired 各 1，宽限后两个成功轮次及后置只读样本成立，真实任务详情与活动页一致。不用新任务覆盖旧失败，不将旧镜像强杀证据重标为本轮镜像实跑。
+运行记录：[2026-10-21 A3 证据](../../../../docs/verification/v0-crash-recovery-evidence-2026-10-21.md)、[A1 失败与部署恢复](../../../../docs/verification/v0-a1-recovery-evidence-2026-10-22.md) 和 [2026-10-23 完整验收记录](../../../../docs/verification/v0-closeout-evidence-2026-10-23.md)。原始 A1 保持失败/missed；独立新字面任务自然次日到点，实际调用/通知/fired 各 1，宽限后两个成功轮次及后置只读样本成立，真实任务详情与活动页一致。不用新任务覆盖旧失败，不将旧镜像强杀证据重标为本轮镜像实跑。

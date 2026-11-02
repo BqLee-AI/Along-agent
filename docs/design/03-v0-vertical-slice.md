@@ -126,7 +126,7 @@
 
 ### 3.2 七步 smoke 与既有安全合同的关系
 
-#26 先独立合并通知契约，再实现并按 `docs/demo/v0-slice-smoke.md` 在同一受控环境执行七步；证据与收口边界见 `docs/demo/v0-smoke-closeout-plan.md`。取消计时点、回执门与竞争终局继续以 `openspec/specs/v0-safety-contract/spec.md` Requirement 5 及 design/07 §3 为准，不新增或放宽取消行为：实际完成本地排队撤销与 fencing 核对后持久化撤销回执，才可进入 `cancelled`；不能用内存 Set、测试手注回执或直接改终态冒充生产闭环。
+#26 先独立合并通知契约，再实现并按 `docs/demo/v0-slice-smoke.md` 在同一受控环境执行七步；证据与收口边界见 `docs/plans/v0-smoke-closeout-plan.md`。取消计时点、回执门与竞争终局继续以 `openspec/specs/v0-safety-contract/spec.md` Requirement 5 及 design/07 §3 为准，不新增或放宽取消行为：实际完成本地排队撤销与 fencing 核对后持久化撤销回执，才可进入 `cancelled`；不能用内存 Set、测试手注回执或直接改终态冒充生产闭环。
 
 取消已提交后的 provider 实际调用数必须单独取证，通知行数与 `fired` 数为零仅为辅助证据；优先使用受控、非暂停 debug logpoint，必要时仅增加无内容的最小调用证据，不建设遥测框架。七步不得代替 A2 的完整替代确认、A3 的真实 kill/resume 或 A4 时间错误/规则缺失合同验收；本次不修这些额外缺口，不宣称完整 v0 通过。D1–D10、五门、按钮确认和冻结展示保持原义。
 

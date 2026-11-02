@@ -6,7 +6,7 @@
 
 ## 2. 锁定库的隔离真实实验
 
-使用隔离 PG、原迁移和测试身份，不用用户库、secret 或模型。实验及实现结果见 [2026-10-27 验证记录](../../../../docs/account-access-verification-2026-10-27.md)；合同、实验、行为覆盖和真实路径分别取证。
+使用隔离 PG、原迁移和测试身份，不用用户库、secret 或模型。实验及实现结果见 [2026-10-27 验证记录](../../../../docs/verification/account-access-verification-2026-10-27.md)；合同、实验、行为覆盖和真实路径分别取证。
 
 - [x] 2.1 E1：验证库 factory 标准字段、UUID、真实同一 PoolClient 事务；中途失败后独立连接证明无提交孤儿。
 - [x] 2.2 E2：原 seed 与授权原地转正样本走真实库登录，credential account_id/password 兼容且 user ID 不变。
