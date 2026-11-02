@@ -319,6 +319,7 @@ export class HarnessConsumer {
         pool: this.database.pool,
         tzdbVersion: 'fixture-v1',
         harness: this.deps.harness,
+        routing: this.deps.routing,
       }).catch(() => res.destroy());
     });
     this.base = await listen(this.server);

@@ -19,12 +19,12 @@
 
 - HTTP 消息省略 `execution` 仍为 `business`：确定性提醒、取消和查询，无模型循环。Web 普通对话显式发送 `execution=harness`，不要求用户理解执行器或先选工具；提醒快捷入口保持 `business`，资料入口使用显式工作区的 `harness`。缺配置503，不接管/回退同一 Run。
 - 仓颉构造本次上下文、模型请求，解析提议并纳入工具观察，决定继续/等待/停止；TS model transport 只负责部署固定配置的 HTTP/协议转换，普通用户不配置 provider/BYOK。每响应只接受零或一个工具调用，native 明确逐次选择、等待真实结果再继续，独立读取也不并行。transport 发送 `parallel_tool_calls:false` 但不保证供应商遵守，provider/共享回复 schema 与 native 均严格拒绝多个调用。
-- 模型请求使用真实 `stream:true`；TS 有界解析 provider SSE，仓颉逐个接受增量并通过 `answer` 取得 TS 持久回执后再 `model_next` 拉取下一步。最终完整响应用于工具/历史/用量，不重发正文；工具参数组装完成并校验后才可执行。部分已接受正文可先于 provider 结束呈现，但不是成功或工具效果。取消/断连中止在途 provider，不以完整 JSON 或前端打字效果回退。
+- 模型请求使用真实 `stream:true`；TS 有界解析 provider SSE，仓颉逐个接受增量并通过 `answer` 取得 TS 持久回执后再 `model_next` 拉取下一步。authority 只接受与当前 pending provider delta 逐字相等的 `answer`；direct 零模型 run 的正文只由 TS renderer 生成，native 不能自写答案。最终完整响应用于工具/历史/用量，不重发正文；工具参数组装完成并校验后才可执行。部分已接受正文可先于 provider 结束呈现，但不是成功或工具效果。取消/断连中止在途 provider，不以完整 JSON 或前端打字效果回退。
 - 默认系统上下文要求简体中文，用户明确要求其他语言时遵从；代码、标识符和专有名称不强制翻译。语言规则归原生上下文，普通交流和批准恢复一致，不给前端增加翻译或替代回答。
 - 新接受调用保留标准函数历史：`assistant.tool_calls` 与 `role=tool` 原 `tool_call_id` 成对。容量压力下仅仓颉按旧到新整体替换已向模型呈现过的调用对，以不可信普通资料保留来源；不伪造函数参数或留下孤立结果。恢复先发送可信有界视图，snapshot 保留全部事实引用，TS 只原样传输。
 - TS 冻结输入、revision、工具范围和时间规则；每个动作根据真实 owner/当前权限/最新 attempt/取消裁决执行资格，不信帧自报权限。workspace grant 还须符合当前登记；历史冻结事实可读不代表新动作持续获权。
 - 新 Harness Run 接纳事务内冻结同 owner、同 conversation 的最新 63 条已存 user/assistant 消息引用，按 PostgreSQL `created_at/id` 确定顺序，再追加本轮完整用户输入一次；总计最多64条。消息仅提供可见上下文，不重放此前工具调用，也不把文本当授权。恢复按同一冻结引用及 snapshot 顺序读取，不纳入后来消息；没有跨轮引用的旧 Run 保持原来仅本轮输入的语义。窗口是有界会话上下文而非永久记忆，超1MiB聚合帧仍以 `HARNESS_CONTEXT_LIMIT` 明确失败，不按字节截断输入。
-- Run/checkpoint/接受结果及审计留 TS；正式 pipe 仅 `harness/v4`，snapshot2 只存安全引用/usage/逻辑进度，不存完整推理链或原始工具参数副本。历史 snapshot1 限定读取规则不变：无 workspace、已完成旧业务/task 引用、不含 document 批准；构造 snapshot2 不改写历史、不执行旧 wire。字段见 [design/18](../design/18-r2a-harness-context.md) 和共享 schema。
+- Run/checkpoint/接受结果及审计留 TS；正式 pipe 为 `harness/v5`（含只读路由帧，路由默认 off，内部记录不进入外部七词），snapshot2 只存安全引用/usage/逻辑进度，不存完整推理链或原始工具参数副本。历史 snapshot1 限定读取规则不变：无 workspace、已完成旧业务/task 引用、不含 document 批准；构造 snapshot2 不改写历史、不执行旧 wire。字段见 [design/18](../design/18-r2a-harness-context.md) 和共享 schema。
 - finish 的消息/终态/attempt/Run 同事务；cancel 先提交资格撤销和唯一事件，再终止 native/模型请求。已接受工具与按钮确认任务不被假撤销。
 - 有限 workspace 仅提供 `workspace_list/workspace_grep/workspace_read/workspace_propose_replace/workspace_apply_replace` 五工具；前三个经 TS 薄只读 MCP，提案绑定本 Run 的真实全文 read。工具顺序由仓颉决定，TS 不隐藏另一套 Agent 或固定代跑链。
 

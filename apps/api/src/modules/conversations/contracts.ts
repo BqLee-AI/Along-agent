@@ -3,11 +3,13 @@ import type { ContextPolicy, ExecutionKind, HarnessStart, WorkspaceGrant } from 
 import type { ThreadEvent } from '@along/stream-protocol';
 import type { TimeContext } from '../time/context.js';
 import type { HarnessServices } from './harness-process.js';
+import type { RoutingRuntime } from './routing/index.js';
 
 export interface ConversationDeps {
   pool: Pool | null;
   timeContext: TimeContext;
   harness?: HarnessServices | null;
+  routing?: RoutingRuntime;
 }
 
 export interface RunContext {

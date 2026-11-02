@@ -32,7 +32,7 @@
 
 ## 2. AgentRuntime（正式 native 与 TS 可信边界）
 
-[Required] 用户 API 见 conversations 路由，内部 `harness/v4` strict NDJSON 见共享 contracts/harness.ts，新快照仅version=2。历史task snapshot1仅经限定读取迁移，不混跑旧writer。每有效 attempt 一个固定原生进程；model/model_next/measure_context/context_source/reserve/invoke/snapshot/suspend/answer/finish 仅请求动作，TS 恢复可信 owner/Run/权限，不发布可自报授权的同进程 ctx。模型正文逐次经原生与TS接受后投影，拉取增量不创建第二份循环或状态机（design/09 §2–§4、14、18）。
+[Required] 用户 API 见 conversations 路由，内部 `harness/v5` strict NDJSON（含只读路由帧，路由默认 off）见共享 contracts/harness.ts，新快照仅version=2。历史task snapshot1仅经限定读取迁移，不混跑旧writer。每有效 attempt 一个固定原生进程；model/model_next/measure_context/context_source/reserve/invoke/snapshot/suspend/answer/finish 仅请求动作，TS 恢复可信 owner/Run/权限，不发布可自报授权的同进程 ctx。模型正文逐次经原生与TS接受后投影，拉取增量不创建第二份循环或状态机（design/09 §2–§4、14、18）。
 
 - [Required] 仓颉组织本次上下文和执行转移，经 TS 接口保存/读取运行快照与已接受结果；TS 存储不独立选择下一模型/工具步骤，仓颉不另建可独立裁决的事实库。
 - [Required] 仓颉强制累计迭代/可得 usage，缺 usage 保留未知；TS 冻结预算和执行资格，不复制循环、不字符估算。时间/费用 SLA 随真实 provider/负载单独验收。

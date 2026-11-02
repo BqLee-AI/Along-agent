@@ -20,6 +20,7 @@ import { handleTaskRoute } from '../modules/tasks/routes.js';
 import { handleBriefRoute } from '../modules/brief/routes.js';
 import { loadTimeContext, type TimeContext } from '../modules/time/context.js';
 import type { HarnessServices } from '../modules/conversations/harness-process.js';
+import type { RoutingRuntime } from '../modules/conversations/routing/index.js';
 import { createAccountService, type AccountService } from '../modules/identity/account-service.js';
 import { handleAccountRoute } from '../modules/identity/routes.js';
 import { notReady } from './errors.js';
@@ -30,6 +31,7 @@ export interface AppDeps {
   tzdbVersion?: string;
   timeContext?: TimeContext;
   harness?: HarnessServices | null;
+  routing?: RoutingRuntime;
   accountService?: AccountService;
 }
 
@@ -315,6 +317,7 @@ async function dispatchRequest(
         body,
         timeContext,
         harness: deps.harness,
+        routing: deps.routing,
       });
       if (handled) return;
     }

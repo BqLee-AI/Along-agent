@@ -22,8 +22,10 @@ const snapshot = {
   waiting: { invocation_id: invocationId, approval_id: approvalId },
 };
 const start = {
-  protocol: 'harness/v4',
+  protocol: 'harness/v5',
   type: 'start',
+  routing_policy: { revision: 'r2b/1', mode: 'off' },
+  eligible_phase: 'disabled',
   messages: [{ message_id: messageId, role: 'user', content: 'Read the registered workspace.' }],
   tools: [],
   budget: { max_iterations: 8, max_tokens: 8000 },
@@ -59,7 +61,7 @@ function rejectsDecision(decision: unknown) {
   expect(HarnessStartSchema.safeParse({ ...start, approval: decision }).success).toBe(false);
 }
 
-describe('harness/v4 executable contract', () => {
+describe('harness/v5 executable contract', () => {
   it('retains all five typed task decision states and their real references', () => {
     for (const status of ['pending', 'consumed', 'rejected', 'expired', 'superseded'] as const) {
       acceptsDecision({
@@ -155,7 +157,7 @@ describe('harness/v4 executable contract', () => {
     expect<unknown>(HarnessStartSchema.parse({ ...start, snapshot }).snapshot).toEqual(snapshot);
     expect(
       HarnessRequestSchema.parse({
-        protocol: 'harness/v4',
+        protocol: 'harness/v5',
         type: 'snapshot',
         request_ref: 'snapshot-1',
         context: snapshot,
@@ -169,7 +171,7 @@ describe('harness/v4 executable contract', () => {
     ).toBe(false);
     expect(
       HarnessRequestSchema.safeParse({
-        protocol: 'harness/v4',
+        protocol: 'harness/v5',
         type: 'suspend',
         request_ref: 'suspend-1',
         checkpoint_ref: messageId,
@@ -183,7 +185,7 @@ describe('harness/v4 executable contract', () => {
   it('accepts correlated model pulls and bounded delta-or-complete-or-failed replies only', () => {
     expect(
       HarnessRequestSchema.parse({
-        protocol: 'harness/v4',
+        protocol: 'harness/v5',
         type: 'model_next',
         request_ref: 'next-1',
         model_ref: 'model-1',
@@ -191,7 +193,7 @@ describe('harness/v4 executable contract', () => {
     ).toMatchObject({ model_ref: 'model-1' });
     expect(
       HarnessRequestSchema.safeParse({
-        protocol: 'harness/v4',
+        protocol: 'harness/v5',
         type: 'model_next',
         request_ref: 'next-1',
       }).success,
@@ -204,7 +206,7 @@ describe('harness/v4 executable contract', () => {
       expect(HarnessModelStepSchema.safeParse({ type: 'delta', delta }).success).toBe(false);
       expect(
         HarnessRequestSchema.safeParse({
-          protocol: 'harness/v4',
+          protocol: 'harness/v5',
           type: 'answer',
           request_ref: 'answer-1',
           delta,
@@ -230,7 +232,7 @@ describe('harness/v4 executable contract', () => {
         usage: null,
       }).success,
     ).toBe(false);
-    for (const protocol of ['harness/v2', 'harness/v3']) {
+    for (const protocol of ['harness/v2', 'harness/v3', 'harness/v4']) {
       expect(HarnessStartSchema.safeParse({ ...start, protocol }).success).toBe(false);
     }
   });
@@ -242,7 +244,7 @@ describe('harness/v4 executable contract', () => {
     expect(HarnessStartSchema.safeParse({ ...start, snapshot: legacy }).success).toBe(false);
     expect(
       HarnessRequestSchema.safeParse({
-        protocol: 'harness/v4',
+        protocol: 'harness/v5',
         type: 'snapshot',
         request_ref: 'snapshot-1',
         context: legacy,

@@ -28,6 +28,7 @@ import {
 import type { StartResult } from './contracts.js';
 import type { HarnessServices } from './harness-process.js';
 import type { TimeContext } from '../time/context.js';
+import type { RoutingRuntime } from './routing/index.js';
 import {
   getConversationList,
   getConversationMessages,
@@ -40,6 +41,7 @@ export interface RouteDeps {
   body?: unknown;
   timeContext: TimeContext;
   harness?: HarnessServices | null;
+  routing?: RoutingRuntime;
 }
 
 function queryOf(url: URL): Record<string, string | string[] | undefined> {

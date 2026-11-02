@@ -74,9 +74,9 @@ source 的按 kind 字段：read 保留 path/version/byte_length/content 标量�
 
 TS 只为仓颉指定候选计量/转换，不替其选择相关性、循环删消息或再调模型。native 可缓存不可变单元的序列化长度，最终封装仍精确校验，不能只把分项长度相加当 HTTP bytes。
 
-## 6. harness/v4 内部协议
+## 6. harness/v5 内部协议（R2-B 后继）
 
-[Required] TS/native/shared contracts/本地与签名 HTTP 消费者及镜像同批切换 harness/v4；snapshot 保持 version=2。请求严格禁止 owner/allowlist/root/自选身份等额外字段，沿原 request_ref/reply_to 顺序 ack。
+[Required] TS/native/shared contracts/本地与签名 HTTP 消费者及镜像同批切换 harness/v5；R2-B 增加冻结 routing policy、阶段资格与 probe/decide/render 帧（默认 off，见 design/19 §7），R2-A 的度量/来源/容量帧与字段不变；snapshot 保持 version=2。请求严格禁止 owner/allowlist/root/自选身份等额外字段，沿原 request_ref/reply_to 顺序 ack。
 
 | 帧/回复         | 必须的合同                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -85,13 +85,13 @@ TS 只为仓颉指定候选计量/转换，不替其选择相关性、循环删�
 | model           | 同一候选 messages/余额，新增正整数 max_output_tokens；TS 从真实累计状态校验余额，使用与 measure 相同构造函数和当前冻结 tools，provider max_tokens 只取显式 O；不让帧自报余额成为预算权威                                                                                                                                                                                                                                                                                |
 | context_source  | 输入 accepted invocation_id 与 view='full' 或 'projected'；回复 §4 单个 observation。仅当前有效 attempt、snapshot/本 attempt 已接受引用；复用 tools 公共查询与当前权限；不得接受任意路径或 field/offset 来替模型分页                                                                                                                                                                                                                                                    |
 
-v4 保留 #70 的 `model_next{model_ref}` 与 `delta|complete` 拉取/ack 语义，流活跃期间不插入 measure/context_source，不变更在途候选；complete 或失败收尾后才装配下一轮。remaining_tokens 在已知累计时为非负安全整数、未知为 null（不再把最后已知差额冒充可信 R）；model/measure 的值必须与本 Run 累计事实一致。provider finish_reason 由 transport 严格分类，length/明确窗口错误返回容量失败并携带可得 usage，TS/native 同步接受计数，不执行部分函数；无 usage 仍 unknown，不因失败丢掉本次实际模型请求的 iteration。流式已接受 delta 保留，不能用失败伪撤销。
+v5 保留 #70 的 `model_next{model_ref}` 与 `delta|complete` 拉取/ack 语义，流活跃期间不插入 measure/context_source，不变更在途候选；complete 或失败收尾后才装配下一轮。remaining_tokens 在已知累计时为非负安全整数、未知为 null（不再把最后已知差额冒充可信 R）；model/measure 的值必须与本 Run 累计事实一致。provider finish_reason 由 transport 严格分类，length/明确窗口错误返回容量失败并携带可得 usage，TS/native 同步接受计数，不执行部分函数；无 usage 仍 unknown，不因失败丢掉本次实际模型请求的 iteration。流式已接受 delta 保留，不能用失败伪撤销。
 
 模型 step 增加显式失败分支 `{type:'failed',error:{code,message},usage:{total_tokens:number}|null}`，可由初始 model 或后续 model_next 返回；length/窗口拒绝及网络/协议中断均不伪造 complete。native 接受 failed 时本次实际请求的 iteration 计一次，usage 不可得则累计 unknown，保留已接受 delta 后以真实错误终结；既有 snapshot2 usage 单调规则不变。`measure_context` 的失败不是此分支、不计 iteration。无 provider 请求就拒绝的候选也不增加模型 iteration。
 
 context_source 只重呈现仓颉已合法得到的来源，不创建新 invocation、不调用 MCP、不扩展信息范围。full 用于必须完整呈现的新观察/旧 Run 原观察及恢复首轮装配；模型已看到省略后主动索取精确片段必须走网关工具，不能经内部帧免费代查或后台自动补文。内部帧/measure 也须校验当前 attempt/取消，不接受旧 pipe，返回前重验披露资格。
 
-内部查询经 tools/query.ts 的 `readRunContextObservations`/`readRunContextSource` 公共边界；与 invocation 重放共用只读 accepted-result 水合，不反向导入执行层或文档动作服务。在调用者已持锁时传同一个事务 client，不另开连接重新取 Run 锁，不持锁等待模型/MCP。快照校验先读完整 invocation 状态/引用元数据，不每次水合全部正文再检查 start；`validateSnapshot` 的 start 容量预检同样使用 bounded views。`run_checkpoints.stream_protocol_version` 对内部 snapshot 仅为来源审计标签，不作 snapshot2 读取版本判据；不把内部 v4 标签交给外部 SSE parser。
+内部查询经 tools/query.ts 的 `readRunContextObservations`/`readRunContextSource` 公共边界；与 invocation 重放共用只读 accepted-result 水合，不反向导入执行层或文档动作服务。在调用者已持锁时传同一个事务 client，不另开连接重新取 Run 锁，不持锁等待模型/MCP。快照校验先读完整 invocation 状态/引用元数据，不每次水合全部正文再检查 start；`validateSnapshot` 的 start 容量预检同样使用 bounded views。`run_checkpoints.stream_protocol_version` 对内部 snapshot 仅为来源审计标签，不作 snapshot2 读取版本判据；不把内部 v5 标签交给外部 SSE parser。
 
 bootstrap 在 TS 中先取全部引用的安全元数据并核权，直接生成 bounded views，不能先拼全量 results 再缩减。新 Run/恢复 start 初始为最小投影；无回取能力和小的不可省略结果保留 full。恢复首轮由仓颉按引用逆序逐个尝试完整原观察，每次本地字节门及完整请求计量通过才保留，否则还原该来源投影；不聚合全量再缩减，不增加模型轮次或重做原读取。恢复不保证逐字复原上 attempt 函数历史。全部引用及等待身份必须完整，保护集自身超限在启动前 HARNESS_CONTEXT_LIMIT，不偷偷少发。
 
@@ -137,7 +137,7 @@ content 按 Unicode 标量分页，不拆代理对/UTF-8；BOM 和 CR/LF 都是�
 
 1. 合同与可比基线：对齐 #70 最终接口与 streaming；保持完整 63＋1、取消、usage、函数历史及文档效果守卫。OpenSpec-only 不等于运行验收。
 2. 额度/计量：策略新迁移、独立 C、schema 去重、共享请求构造与无网络 measure；不据此宣布长 Run 完成。
-3. 回取/投影/恢复一起交付：tools 公共源查询与新工具、native 装配、v4/bounded start、旧 Run 兼容；没有合法回取时绝不淘汰唯一原文。
+3. 回取/投影/恢复一起交付：tools 公共源查询与新工具、native 装配、v5/bounded start、旧 Run 兼容；没有合法回取时绝不淘汰唯一原文。
 4. 正式消费者、真实模型任务和归档：按 change tasks 推进，五门有效后收口；运行任务须另获授权。
 
 | 验收                                                 | 唯一验证负责人 | 必须的证据                                                                                   |

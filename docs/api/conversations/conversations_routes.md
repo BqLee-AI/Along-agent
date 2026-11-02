@@ -38,11 +38,11 @@
 - `execution`：可选 `business | harness`，省略为兼容的确定性业务。harness 明确进入正式仓颉，`mode=chat` 不作隐式分派；缺实际依赖在任何新写入/SSE 前503 `HARNESS_UNAVAILABLE`，不自动改走 TS/fixture。
 - Web 的默认 Agent 对话显式传 `execution=harness`，不带 `workspace_id` 也可交流；提醒快捷入口仍显式传 `business`。这不改变 HTTP 省略 execution 的默认值，也不新增执行种类。
 - 新 Harness Run 在接纳事务内冻结同 owner、同 conversation 最新63条可见 user/assistant 消息引用并按 `created_at/id` 排序，随后追加本轮完整用户输入一次，总计最多64条。执行和批准恢复按冻结引用读原文，不混入后来消息、其他会话或 system 消息，不把旧 tool_calls 作为待执行动作。该窗口不是永久记忆；完整窗口、工具定义与观察超1MiB时明确失败 `HARNESS_CONTEXT_LIMIT`，不截断当前输入。缺跨轮引用的旧 Run 保持仅原输入的上下文。
-- 入站幂等仍为同 owner/key：business 沿历史 hash 材料；无 workspace 的 harness 保持 `harness/v1\0` 域，带 workspace 则用 `harness/workspace/v2\0`，将 `workspace_id` 追加到原规范数组后计算 SHA-256。这是请求 hash 域，不是执行协议版本（执行为 `harness/v4`）。同键换 execution、workspace 或其他绑定输入为409，不重复创建另一 Run；冻结输入/权限不从 body 的 owner、allowlist 等额外字段取得。
+- 入站幂等仍为同 owner/key：business 沿历史 hash 材料；无 workspace 的 harness 保持 `harness/v1\0` 域，带 workspace 则用 `harness/workspace/v2\0`，将 `workspace_id` 追加到原规范数组后计算 SHA-256。这是请求 hash 域，不是执行协议版本（执行为 `harness/v5`）。同键换 execution、workspace 或其他绑定输入为409，不重复创建另一 Run；冻结输入/权限不从 body 的 owner、allowlist 等额外字段取得。
 - `workspace_id`：可选非空字符串，仅允许显式 `execution=harness`，business/省略 execution 时携带为400。新 Run 从当前本人有效部署登记取得精确授权，并冻结安全摘要；省略不授 workspace 工具。选择与新动作授权、历史展示的区别见 §5。
 - `confirmed_timezone` / `confirmed_timezone_id`：schema 均已有、可空，取 `confirmed_timezone_id ?? confirmed_timezone`；未给本轮值可使用会话先前明确冻结值，仍缺失则澄清，不猜。原文单个明确已知别名/规范 ID 优先于本轮确认值，本轮确认值优先于会话默认值；未知显式别名即使已有 Shanghai 也失败，多个不同已知时区则澄清，完整优先级见 design/05 §9.2。
 - `fold_choice`：`first | second | none`，默认 `none`；只有结构化字段决定选择，原话“第一次/第二次”不自动覆盖。歧义未选为 `AMBIGUOUS_LOCAL_TIME`；候选字段仍是 fold_choice，成功的现有归一结果与快照 `fold` 为 `0 | 1`，不混为字符串列。
-- “明天”锚定：服务端首次接收时刻 + 已确认时区解析一次并冻结，后续不再重算（跨午夜追问具体日期；延迟线 1min/15min 语义见 design time-core）。
+- “明天”锚定：本轮明确相对日期的消息以服务端接收时刻和已确认时区解析并冻结；只补充澄清沿用前一Run锚，旧Run/重放/批准恢复不重算。同一本地日期不设60秒重问线，真正跨午夜追问具体日期，见design/05 §3。
 
 响应：`Content-Type: text/event-stream`，`200` 建连；新消息首事件 `thread.started` 含 conversation/Run。终结事件为 completed/failed/cancelled；harness 在批准等待时只结束该段流，不发 completed。显式 resume 不重放旧 started/delta。每行 `data: {protocol_version,seq,type,payload,request_id}`，`seq` 是不透明全局游标；内部 snapshot 产生间隙合法，不能要求连续。具体七词 schema 以 `packages/stream-protocol` 为准：
 
@@ -147,13 +147,13 @@ Web 批准链接保留原 conversation/Run，并明确打开新标签页；在�
 - 新工具 read_run_observation 经既有 ToolGateway，不新增公开“按 UUID 任意取结果”端点；当前授权及新 invocation/预算照常。context_slice 不是新 workspace_read，不足以 verified。
 - 继续仍是显式有效批准等待点、同 Run 唯一新 attempt；完整冻结输入/快照引用不丢弃。GET/刷新/重登/同入站补读不创建策略、调用模型/工具或自动继续。公开查询/错误不泄漏原正文、provider body 或计量配置秘密。
 
-## 8. R2-B 只读路由的公开边界（Proposed，#88）
+## 8. R2-B 只读路由的公开边界（已实现，默认 off，#88）
 
-本节只跟随 [design/19](../../design/19-r2b-readonly-intent-routing.md) §7（内部 v5）、§8（冻结策略与记录）、§9（工具与确定性展示）、§10（失败/取消/重放），不替换 §1–§7 的当前 Required 合同。当前执行仍是 `harness/v4`，没有下述 direct 渲染来源。
+本节只跟随 [design/19](../../design/19-r2b-readonly-intent-routing.md) §7（内部 v5）、§8（冻结策略与记录）、§9（工具与确定性展示）、§10（失败/取消/重放），不替换 §1–§7 的当前 Required 合同。当前执行协议为 `harness/v5`；路由默认 off、未启用接管，direct 渲染来源已实现但只在 Run 冻结策略为 enforce 且命中时使用。
 
 - 不新增 HTTP 路由、公开 execution 值/请求策略字段、RunView 字段或 SSE 词；business/省略 execution 仍原业务，显式 harness 仍正式 native，不新增 auto，不用路由掩盖 `HARNESS_UNAVAILABLE`。内部 v5 帧和 routing checkpoint 不传给浏览器。
 - 新接纳 harness Run 冻结路由策略（默认 off），仅 fresh 首 attempt 首模型前可分类一次。off、缺策略旧 Run、所有 GET/历史补读、同入站键重放及批准 resume 零分类、不补路由策略；R2-A 上下文策略的独立恢复规则不受此限制替换。shadow 只记潜在候选，不调用候选旁路业务工具，最终仍原模型回答。
 - enforce direct 仅对已启用白名单且来源/参数/当前资格满足的请求生效；目标/参数由本轮原话或明确默认绑定，owner 从认证事实注入，工具仍通过原 ToolGateway。模型 fallback 继续处理完整其他目标，不把多目标或筛选请求缩水为一次有限查询。
-- direct 回答将是既有 provider 正文之外的明确受控来源：唯一真实只读成功 accepted_result、已接受 snapshot 和 TS 固定 renderer，不接受 native 自写正文，不伪造 provider 调用/usage。delta 与内部 render 回执同事务保存后才投影原 `message.delta`，成功终结须真实结果、回执及零模型；GET/重放只读这些原已存事实，不重新查工具或生成答案。
+- direct 回答是既有 provider 正文之外的明确受控来源：唯一真实只读成功 accepted_result、已接受 snapshot 和 TS 固定 renderer，不接受 native 自写正文，不伪造 provider 调用/usage。delta 与内部 render 回执同事务保存后才投影原 `message.delta`，成功终结须真实结果、回执及零模型；GET/重放只读这些原已存事实，不重新查工具或生成答案。
 - 展示不扩大工具结果含义：提醒仅当前有界活动集合，不宣称查全/筛选/已核实；时区仅本人记录的 timezone_id 或未设置，不声称写入；简报仅明确合法单日且最多50张，不将截页说成全量。精确模板及来源约束归 design/19 §9。
 - direct 前可拒识/可选编码失败回原 LLM，事实、协议、权限或 DB 错误不伪作正常拒识；direct 接纳后 reserve/invoke/render 任一失败不切 LLM、不新 slot 重做。原入站 hash/同键冲突、取消动作幂等和当前权限不变；取消先提交仍禁止迟到候选、工具动作或正文，编码等待可 abort。原 SSE 断连、终态和显式批准恢复语义保持。

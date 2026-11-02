@@ -208,6 +208,15 @@ maybe('harness authority signed HTTP boundary', () => {
       null,
     );
     const path = `/api/v1/conversations/${started.conversationId}/runs/${started.runId}`;
+    const sideEffectsQuery = `
+      SELECT 'cancellation' AS source, to_jsonb(t) AS value
+        FROM harness_cancellations t WHERE owner_id=$1
+      UNION ALL SELECT 'checkpoint', to_jsonb(t)
+        FROM run_checkpoints t WHERE owner_id=$1
+      UNION ALL SELECT 'invocation', to_jsonb(t)
+        FROM tool_invocations t WHERE owner_id=$1
+      ORDER BY source, value`;
+    const beforeInvalid = (await database.pool.query(sideEffectsQuery, [session.userId])).rows;
     const oversized = await post(
       `${path}/actions/cancel`,
       { idempotency_key: randomUUID(), reason: 'r'.repeat(201) },
@@ -219,15 +228,9 @@ maybe('harness authority signed HTTP boundary', () => {
       (await database.pool.query('SELECT status FROM agent_runs WHERE id=$1', [started.runId]))
         .rows,
     ).toEqual([{ status: 'running' }]);
-    for (const table of ['harness_cancellations', 'run_checkpoints', 'tool_invocations']) {
-      expect(
-        (
-          await database.pool.query(`SELECT count(*)::int n FROM ${table} WHERE owner_id=$1`, [
-            session.userId,
-          ])
-        ).rows[0]?.n,
-      ).toBe(0);
-    }
+    expect((await database.pool.query(sideEffectsQuery, [session.userId])).rows).toEqual(
+      beforeInvalid,
+    );
     const body = { idempotency_key: randomUUID(), reason: '理'.repeat(198) + '😀' };
     for (let n = 0; n < 2; n += 1) {
       const response = await post(`${path}/actions/cancel`, body, headers);

@@ -127,7 +127,22 @@ maybe('harness durable authority against PostgreSQL', () => {
     await database?.close();
   });
 
-  async function fresh(legacyWithoutMessageRefs = false): Promise<Fixture> {
+  function modelDeps(answer: string): ConversationDeps {
+    return {
+      ...deps,
+      harness: {
+        ...deps.harness!,
+        model: async function* () {
+          yield { type: 'delta', delta: answer };
+          yield {
+            type: 'complete',
+            reply: { message: { content: answer, tool_calls: [] }, usage: null },
+          };
+        },
+      },
+    };
+  }
+  async function fresh(legacyWithoutMessageRefs = false, modelAnswer = 'answer'): Promise<Fixture> {
     const actor = await seedSession(database.pool, {});
     const started = await startConversationRun(
       deps,
@@ -168,7 +183,7 @@ maybe('harness durable authority against PostgreSQL', () => {
     }
     const events: ThreadEvent[] = [];
     const session = await createHarnessSession(
-      deps,
+      modelDeps(modelAnswer),
       context,
       async (event) => {
         events.push(event);
@@ -191,6 +206,31 @@ maybe('harness durable authority against PostgreSQL', () => {
       type,
       ...value,
     } as Extract<HarnessRequest, { type: T }>;
+  }
+  async function beginModelAnswer(
+    session: HarnessSession,
+    context: RunContext,
+    delta: string,
+  ): Promise<string> {
+    const previousTokens = session.start.snapshot?.usage.tokens;
+    const model = request('model', {
+      messages: session.start.messages.map(({ role, content }) => ({ role, content })),
+      remaining_tokens: previousTokens === null ? null : context.maxTokens - (previousTokens ?? 0),
+      max_output_tokens: context.contextPolicy!.completion_cap,
+    });
+    expect(await session.handleRequest(model)).toEqual({ type: 'delta', delta });
+    return model.request_ref;
+  }
+  async function acceptModelAnswer(
+    fixture: Pick<Fixture, 'session' | 'context' | 'frame'>,
+    delta: string,
+  ): Promise<void> {
+    const modelRef = await beginModelAnswer(fixture.session, fixture.context, delta);
+    await fixture.frame(request('answer', { delta }));
+    expect(await fixture.frame(request('model_next', { model_ref: modelRef }))).toMatchObject({
+      type: 'complete',
+      reply: { message: { content: delta, tool_calls: [] }, usage: null },
+    });
   }
   async function invoke(
     fixture: Fixture,
@@ -578,8 +618,8 @@ maybe('harness durable authority against PostgreSQL', () => {
   });
 
   it('freezes visible message references when a new Run is accepted, before execution or later backdated messages', async () => {
-    const first = await fresh();
-    await first.frame(request('answer', { delta: 'accepted first answer' }));
+    const first = await fresh(false, 'accepted first answer');
+    await acceptModelAnswer(first, 'accepted first answer');
     await first.frame(
       request('finish', {
         outcome: 'done',
@@ -701,8 +741,8 @@ maybe('harness durable authority against PostgreSQL', () => {
       errorCode: 'STATE_CONFLICT',
       message: 'Run has unresolved approval',
     });
-    const clean = await fresh();
-    await clean.frame(request('answer', { delta: 'accepted visible delta' }));
+    const clean = await fresh(false, 'accepted visible delta');
+    await acceptModelAnswer(clean, 'accepted visible delta');
     const name = `terminal_fault_${clean.context.runId.replaceAll('-', '')}`;
     await database.pool.query(`CREATE FUNCTION ${name}() RETURNS trigger LANGUAGE plpgsql AS $$
       BEGIN RAISE EXCEPTION 'terminal fixture fault'; END $$;
@@ -739,7 +779,7 @@ maybe('harness durable authority against PostgreSQL', () => {
   });
 
   it('validates actual snapshot references/counters/monotone usage and filters internal snapshots from both event consumers', async () => {
-    const fixture = await fresh();
+    const fixture = await fresh(false, 'read result accepted');
     const invocation = await invoke(fixture);
     const snapshot: HarnessSnapshot = {
       version: 2,
@@ -764,7 +804,7 @@ maybe('harness durable authority against PostgreSQL', () => {
       await expect(fixture.frame(request('snapshot', { context: bad }))).rejects.toBeInstanceOf(
         HttpError,
       );
-    await fixture.frame(request('answer', { delta: 'read result accepted' }));
+    await acceptModelAnswer(fixture, 'read result accepted');
     expect(
       (await listRunEvents(database.pool, fixture.actor.userId, fixture.context.runId)).map(
         (event) => event.type,
@@ -1051,10 +1091,23 @@ maybe('harness durable authority against PostgreSQL', () => {
             }),
           ),
         ).rejects.toBeInstanceOf(HttpError);
-      await session.handleRequest(request('answer', { delta: `decision: ${status}` }));
-      await session.handleRequest(
-        request('finish', { outcome: 'done', usage: { iterations: 2, tokens: null } }),
-      );
+      if (status === 'consumed') {
+        await acceptModelAnswer(
+          { session, context: resumed.context, frame: (frame) => session.handleRequest(frame) },
+          'answer',
+        );
+        await session.handleRequest(
+          request('finish', { outcome: 'done', usage: { iterations: 2, tokens: null } }),
+        );
+      } else {
+        await session.handleRequest(
+          request('finish', {
+            outcome: 'failed',
+            usage: { iterations: 1, tokens: null },
+            error: { code: `APPROVAL_${status}`, message: 'Original approval refused execution' },
+          }),
+        );
+      }
       const replay = await resume(fixture, key);
       expect(replay.context).toBeNull();
       expect(replay.replay).toEqual(resumedEvents);
@@ -1268,7 +1321,7 @@ maybe('harness durable authority against PostgreSQL', () => {
   });
 
   it('two terminal writers finish after both assistant inserts hold conversation foreign-key locks', async () => {
-    const first = await fresh();
+    const first = await fresh(false, 'first assistant');
     const second = await startConversationRun(
       deps,
       first.actor.userId,
@@ -1283,13 +1336,20 @@ maybe('harness durable authority against PostgreSQL', () => {
     );
     if (!second.context) throw new Error('second context missing');
     const secondSession = await createHarnessSession(
-      deps,
+      modelDeps('second assistant'),
       second.context,
       async () => true,
       new AbortController().signal,
     );
-    await first.frame(request('answer', { delta: 'first assistant' }));
-    await secondSession.handleRequest(request('answer', { delta: 'second assistant' }));
+    await acceptModelAnswer(first, 'first assistant');
+    await acceptModelAnswer(
+      {
+        session: secondSession,
+        context: second.context,
+        frame: (frame) => secondSession.handleRequest(frame),
+      },
+      'second assistant',
+    );
     const blocker = await database.pool.connect();
     const pid = (await blocker.query<{ pid: number }>('SELECT pg_backend_pid() pid')).rows[0]!.pid;
     const key = Math.floor(Math.random() * 1_000_000_000);
@@ -1340,7 +1400,7 @@ maybe('harness durable authority against PostgreSQL', () => {
   it('cancel between native answer deltas persists only accepted output and prevents all later effects', async () => {
     const fixture = await fresh();
     const session = await createHarnessSession(
-      deps,
+      modelDeps('a'.repeat(4000)),
       fixture.context,
       async (event) => {
         if (event.type === 'message.delta')
@@ -1356,6 +1416,7 @@ maybe('harness durable authority against PostgreSQL', () => {
       },
       new AbortController().signal,
     );
+    await beginModelAnswer(session, fixture.context, 'a'.repeat(4000));
     expect(await session.handleRequest(request('answer', { delta: 'a'.repeat(4000) }))).toEqual({
       accepted: true,
     });
@@ -1408,11 +1469,12 @@ maybe('harness durable authority against PostgreSQL', () => {
     );
     if (!second.context) throw new Error('second context missing');
     const session = await createHarnessSession(
-      deps,
+      modelDeps('second'),
       second.context,
       async () => true,
       new AbortController().signal,
     );
+    const modelRef = await beginModelAnswer(session, second.context, 'second');
     const client = await database.pool.connect();
     const pid = (await client.query<{ pid: number }>('SELECT pg_backend_pid() pid')).rows[0]!.pid;
     await client.query('BEGIN');
@@ -1434,6 +1496,9 @@ maybe('harness durable authority against PostgreSQL', () => {
       expect(before).toEqual([]);
       await client.query('COMMIT');
       await later;
+      expect(
+        await session.handleRequest(request('model_next', { model_ref: modelRef })),
+      ).toMatchObject({ type: 'complete' });
       const after = await listConversationEvents(database.pool, {
         ownerId: first.actor.userId,
         conversationId: first.context.conversationId,
@@ -2334,6 +2399,15 @@ maybe('harness durable authority against PostgreSQL', () => {
 
   it('backfills a legacy policy only on legal explicit resume without changing frozen authority or granting new tools', async () => {
     const fixture = await legacyWaiting();
+    async function assertNoRoutingPolicy(): Promise<void> {
+      const recorded = await database.pool.query(
+        `SELECT count(*)::int n FROM run_checkpoints c JOIN run_attempts a ON a.id=c.attempt_id
+         WHERE a.run_id=$1 AND c.kind='harness_routing_policy'`,
+        [fixture.context.runId],
+      );
+      expect(recorded.rows[0]?.n).toBe(0);
+    }
+    await assertNoRoutingPolicy();
     await withTransaction(database.pool, (client) =>
       appendEvent(client, fixture.context, 'message.delta', {
         conversation_id: fixture.context.conversationId,
@@ -2380,6 +2454,7 @@ maybe('harness durable authority against PostgreSQL', () => {
     expect(
       await readRunContextPolicy(database.pool, fixture.actor.userId, fixture.context.runId),
     ).toBeNull();
+    await assertNoRoutingPolicy();
     const detail = await getApprovalDetail(
       { pool: database.pool },
       fixture.actor.userId,
@@ -2422,6 +2497,9 @@ maybe('harness durable authority against PostgreSQL', () => {
       async () => true,
       new AbortController().signal,
     );
+    expect(session.start.routing_policy).toBeNull();
+    expect(session.start.eligible_phase).toBe('disabled');
+    await assertNoRoutingPolicy();
     expect(session.start.tools.map((tool) => tool.name)).toEqual([...BUSINESS_TOOL_IDS]);
     expect(session.start.snapshot).toEqual(fixture.snapshot);
     expect(session.start.observations[0]).toMatchObject({

@@ -56,6 +56,8 @@ jobs:
       - run: sh scripts/db/apply.sh
       - run: bun scripts/check-migrations.mjs
       - run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/db/verify-constraints.sql
+      - name: Verify readonly routing upgrade and schema drift refusal
+        run: bun --no-env-file test scripts/test/local-routing-database.test.ts
       - run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/db/verify-conversation.sql
       - run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/db/d3-d5.test.sql
       - run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/db/conversation.test.sql

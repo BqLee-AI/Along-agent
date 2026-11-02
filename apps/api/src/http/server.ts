@@ -4,12 +4,14 @@ import { handleRequest, type AppDeps } from './app.js';
 import { createActorResolver } from './auth.js';
 import { loadTimeContext } from '../modules/time/context.js';
 import type { HarnessServices } from '../modules/conversations/harness-process.js';
+import type { RoutingRuntime } from '../modules/conversations/routing/index.js';
 
 export interface ServeOptions {
   port?: number;
   tzdbVersion?: string;
   pool?: Pool | null;
   harness?: HarnessServices | null;
+  routing?: RoutingRuntime;
 }
 
 export function serve(options: ServeOptions = {}): Server {
@@ -23,6 +25,7 @@ export function serve(options: ServeOptions = {}): Server {
     tzdbVersion,
     timeContext: loadTimeContext(tzdbVersion),
     harness: options.harness ?? null,
+    routing: options.routing,
   };
   const server = createServer((req, res) => {
     void handleRequest(req, res, deps).catch(() => {
