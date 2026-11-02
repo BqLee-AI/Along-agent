@@ -36,4 +36,4 @@
 - 发现行为缺陷先保留可复现证据，按既有合同修复并补对应覆盖；没有发现则不改运行代码。
 - 验收记录写实际结果与未覆盖项，未执行不勾选。全部适用验收完成后才更新 tasks 3.2/3.3、执行 `openspec archive confirm-reminders-inline`，同步文档索引和使用说明，提交独立收口 PR。
 
-实际补验、版本绑定与边界见[2026-11-02 验收记录](../inline-reminder-verification-2026-11-02.md)；归档任务见[收口清单](../../openspec/changes/archive/2026-11-02-confirm-reminders-inline/tasks.md)。本计划描述执行方法，不代替实际结果。
+实际补验、版本绑定与边界见[2026-11-02 验收记录](../verification/inline-reminder-verification-2026-11-02.md)；归档任务见[收口清单](../../openspec/changes/archive/2026-11-02-confirm-reminders-inline/tasks.md)。本计划描述执行方法，不代替实际结果。

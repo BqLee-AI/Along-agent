@@ -29,7 +29,7 @@ identity 增加单实例管理员绑定 `installation_admin`，字段与约束�
 
 已有密码不得被转正覆盖。重复/不一致 credential、登录名冲突、绑定冲突、disabled/deleted_requested 或找不到 users 的历史 owner，均停止并给维护说明，不默选、不激活、不批量修复或合并。已有合法 credential 的原用户必须先通过库验证原口令，再经明确本地授权绑定原人；这不是密码找回。
 
-无有效会话时，正式部署者入口为 `bun --no-env-file run local:account --config <私有配置>`。它通过原配置及 identity 公共维护用例展示有限候选摘要，由部署者明确选择并再次确认；内部使用原 ID，不让用户复制或手填 owner ID，不根据“唯一/最新 seed”自动认领。口令隐藏输入，不放 argv、普通输出或日志。该入口也负责检查及完成工作区登记收尾，不运行常驻宿主服务；具体操作见[本机使用指南](../local-lifecycle.md)。
+无有效会话时，正式部署者入口为 `bun --no-env-file run local:account --config <私有配置>`。它通过原配置及 identity 公共维护用例展示有限候选摘要，由部署者明确选择并再次确认；内部使用原 ID，不让用户复制或手填 owner ID，不根据“唯一/最新 seed”自动认领。口令隐藏输入，不放 argv、普通输出或日志。该入口也负责检查及完成工作区登记收尾，不运行常驻宿主服务；具体操作见[本机使用指南](../guides/local-lifecycle.md)。
 
 ## 4. 库适配、固定会话与可信退出
 
@@ -92,4 +92,4 @@ PG 账户提交、Windows 私有登记/配置发布和 API 重载不是一个事
 
 行为确定处先观察目标缺失的 Red 再实现 Green，外部库未知先实验。纯合同校验、受控测试与真实用户路径分别取证。#68 不以调用真实模型代替认证验收，不重复 #62/#67 已适用的证据，不进入 #69/#70/R2，不提前关闭 #66。
 
-行为真源见 [identity 规格](../../openspec/specs/identity/spec.md)，完整交付清单见[账户合同归档](../../openspec/changes/archive/2026-10-27-close-r1-account-access/tasks.md)。实施与验收依据见[账户与本机登记验证记录（2026-10-27）](../account-access-verification-2026-10-27.md)，分别标明库实验、自动化覆盖、真实用户路径和独立静态审阅，不将账户切片扩大为 #66 的跨模块验收。
+行为真源见 [identity 规格](../../openspec/specs/identity/spec.md)，完整交付清单见[账户合同归档](../../openspec/changes/archive/2026-10-27-close-r1-account-access/tasks.md)。实施与验收依据见[账户与本机登记验证记录（2026-10-27）](../verification/account-access-verification-2026-10-27.md)，分别标明库实验、自动化覆盖、真实用户路径和独立静态审阅，不将账户切片扩大为 #66 的跨模块验收。

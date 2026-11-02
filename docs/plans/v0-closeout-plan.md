@@ -5,7 +5,7 @@
 > 不包含：本轮实施、运行验证、创建 issue/PR、commit/push、读取或修改 .env/凭据、优化 CI、重开 brief、提前解冻 Deferred。
 > 阶段标签：v0 完整收口规划；后续实施及对外操作需用户授权。
 
-本计划的实施与验收结果见 [2026-10-23 完整验收记录](v0-closeout-evidence-2026-10-23.md)。以下保留规划时的现状和取舍，不用后续实现改写规划历史。
+本计划的实施与验收结果见 [2026-10-23 完整验收记录](../verification/v0-closeout-evidence-2026-10-23.md)。以下保留规划时的现状和取舍，不用后续实现改写规划历史。
 
 ## 1. 何时可以宣布 v0 收口
 
@@ -33,7 +33,7 @@
 
 ### 2.1 已完成的 #26 不是本轮待办
 
-已存记录：`docs/demo/v0-smoke-evidence-2026-10-21.md` 与同名 JSON；归档：`openspec/changes/archive/2026-10-21-complete-v0-seven-step-smoke/tasks.md`。运行源码为 `914cca971f03e7a0a813a7aff8890aa36c82951a`，源码 CI 为 run `39567342047`。交接上下文另已确认最终 head `3b2006c8cd8524dcf0d045f6ec71be277cfa3a75` 的 run `39570660987` 五门 SUCCESS、CLEAN，PR28 精确合并为 main `317842f669f606409f5f728e68ecc77b0c58dc3b`。本次没有访问 GitHub 重新核验这些交接事实。
+已存记录：`docs/verification/v0-smoke-evidence-2026-10-21.md` 与 `docs/verification/v0-smoke-evidence-2026-10-21.json`；归档：`openspec/changes/archive/2026-10-21-complete-v0-seven-step-smoke/tasks.md`。运行源码为 `914cca971f03e7a0a813a7aff8890aa36c82951a`，源码 CI 为 run `39567342047`。交接上下文另已确认最终 head `3b2006c8cd8524dcf0d045f6ec71be277cfa3a75` 的 run `39570660987` 五门 SUCCESS、CLEAN，PR28 精确合并为 main `317842f669f606409f5f728e68ecc77b0c58dc3b`。本次没有访问 GitHub 重新核验这些交接事实。
 
 JSON 的 `stages.confirmation`、`stages.fired_notice`、`stages.cancel`、`provider_observer`、`verification_limit` 和 `independent_evidence_review` 是后续复核入口。既有独立代码与运行证据审查均已存在，不要求主线程为了本计划重新执行同一 agent 验证。旧专属服务、浏览器和 PG 容器卷已清理，不能假定仍有服务可复用。
 
@@ -306,4 +306,4 @@ Deferred仍按PRD04原阻塞阶段：目标市场阻塞P5计费/组织，不阻�
 
 以下仅描述本文起草依据形成时的 Planner 研究阶段：未编辑仓库或暂存文档；未运行build、lint、tests、formatters、OpenSpec命令、安装或服务；未强杀进程、连接PG或做浏览器验收；未操作Git/GitHub、创建issue/PR、commit/push；未读取.env或凭据。研究结论仅来自静态代码/合同/测试及仓库已存证据，不声称已实施或已验收。
 
-主线程随后负责核对关键依据、将正式规划保存为 `docs/demo/v0-closeout-plan.md`、同步索引，并可按本次文档交付要求进行定向格式校验。这些后续保存/校验不属于上述 Planner 阶段的“未执行”声明；实际执行及结果由主线程在交付记录中如实报告，不在文稿中预写为通过。
+主线程随后负责核对关键依据、将正式规划保存为 `docs/plans/v0-closeout-plan.md`、同步索引，并可按本次文档交付要求进行定向格式校验。这些后续保存/校验不属于上述 Planner 阶段的“未执行”声明；实际执行及结果由主线程在交付记录中如实报告，不在文稿中预写为通过。

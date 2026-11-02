@@ -8,7 +8,7 @@
 
 推荐 migration 落地顺序（v0）[Required]：
 
-1. Identity 表（`users`、`sessions`、`auth_accounts`；Better Auth 自建 credential）。R1 `installation_admin` 与标准字段适配对应迁移 `0017_identity_account_access.sql`，字段和约束见 [identity-schema 的 R1 章节](identity-schema.md#r1-账户与安装绑定68)，升级与原身份保留证据见[账户验证记录](../account-access-verification-2026-10-27.md)。
+1. Identity 表（`users`、`sessions`、`auth_accounts`；Better Auth 自建 credential）。R1 `installation_admin` 与标准字段适配对应迁移 `0017_identity_account_access.sql`，字段和约束见 [identity-schema 的 R1 章节](identity-schema.md#r1-账户与安装绑定68)，升级与原身份保留证据见[账户验证记录](../verification/account-access-verification-2026-10-27.md)。
 2. Conversation / Runs 表（`conversations`、`messages`、`agent_runs`、`run_attempts`、`run_checkpoints`、`conversation_idempotency`、`harness_resumes`、`harness_cancellations`、`tool_invocations`、`tool_calls`、`agent_revisions`、`prompt_versions`）；工具身份/结果归 tools，审计只追加。历史读取复用这些事实，`0018_conversation_history.sql` 仅增加四个非唯一查询索引，含旧原话回退路径的 `conversation_idempotency(run_id)`，结构核验见 `scripts/local/baselines/0018.sql`，投影边界见 [conversation schema](conversation-and-runs-schema.md#r1-历史读取投影与查询索引69)。
 3. Commitments 表（`approvals`、`approval_revision_requests`、`tasks`、`task_events`、`outbox`、`notifications`、`task_leases`、`security_events`；统一 `outbox` 名，修改预约归 approvals）。
 

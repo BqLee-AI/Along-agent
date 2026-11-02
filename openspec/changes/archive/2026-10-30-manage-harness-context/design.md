@@ -31,7 +31,7 @@
 
 原草案保存的离线合成实验：十工具目录 3782 bytes，provider mapping 3952 bytes，转义目录约 4242 bytes；5/6 次 200000-byte 读取的简化合成 HTTP 为 1011016/1211501 bytes；schema 接受的合成恢复 start 为 1206057 bytes；投影原型 6849 bytes。没有运行新 wire 或模型，不把这些值充当性能/token/成功率。正式设计沿用问题证据，不重复实验为新成果。
 
-历史只读对照中的 `listHarnessMessageRefs` 的 63＋1 与输入冻结来自 #70 并行实现；对应能力随 `96ca073` 合入。#70 的[Web验证记录](../../../../docs/web-task-experience-verification-2026-10-28.md)保存其三轮 refs 为 1/3/5、工具调用0及五轮流式 refs 为 1/3/5/7/9、工具调用0的补验，并分列原安装资料闭环。该记录不证明 #83 六份大资料的投影、恢复、回取、精确修改和新回读；本 change 按实际集成状态独立取证。
+历史只读对照中的 `listHarnessMessageRefs` 的 63＋1 与输入冻结来自 #70 并行实现；对应能力随 `96ca073` 合入。#70 的[Web验证记录](../../../../docs/verification/web-task-experience-verification-2026-10-28.md)保存其三轮 refs 为 1/3/5、工具调用0及五轮流式 refs 为 1/3/5/7/9、工具调用0的补验，并分列原安装资料闭环。该记录不证明 #83 六份大资料的投影、恢复、回取、精确修改和新回读；本 change 按实际集成状态独立取证。
 
 ## 4. 影响、迁移及验收
 

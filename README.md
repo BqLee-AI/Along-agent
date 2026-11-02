@@ -34,7 +34,7 @@ issue → Spec 章节 → OpenSpec change（如需）→ 分支 → PR → CI �
 
 ## 仓库布局
 
-`apps/api`（服务端：api|worker|all 三角色入口）、`apps/web`（Next.js App Router）；`packages/time-core|scheduler-core|notifier-core|stream-protocol|contracts`；详见 [design/01 §2](docs/design/01-tech-stack-and-repo-structure.md#2-monorepo-布局required)。
+`apps/api`（服务端：api|worker|all 三角色入口）、`apps/web`（Next.js App Router）；`packages/time-core|scheduler-core|notifier-core|stream-protocol|contracts`；详见 [design/01 §2](docs/design/01-tech-stack-and-repo-structure.md#2-monorepo-布局observedv0-关键目录)。
 
 ## 本地运行
 
@@ -45,7 +45,7 @@ issue → Spec 章节 → OpenSpec change（如需）→ 分支 → PR → CI �
 - 测试：`bun run test:unit`（非数据库与非 native 合同）、`bun run test:contracts`（Linux x64/WSL + Docker，当前生产 native 构建、自带隔离 PG、本地/签名 HTTP 消费者、原 healthz/契约包）、`bun run test:integration`（全部真实数据库文件）、`bun run test:scheduler`（D9 指定集）。契约入口不使用已有数据库或个人模型配置；其余数据库测试需 PostgreSQL 16 与明确测试环境，详见 [贡献指南](CONTRIBUTING.md)。
 - 契约校验：`openspec validate <name> --strict`（如 `openspec validate v0-safety-contract --strict`）
 - 环境变量：`DATABASE_URL`、`TZDB_VERSION`（缺失则 `/readyz` 503 `TZDB_UNAVAILABLE`，属预期行为）。
-- 正式本机安装：按[本机生命周期指南](docs/local-lifecycle.md)在交互终端执行 `bun --no-env-file run local:init --new`（原部署用 `--adopt`），随后用 `local:start`、`local:stop` 和显式 `local:upgrade`。四入口共用 checkout 外私有配置；不依赖仓库 `.env`，不自动开户。合同与验收边界见[本地生命周期设计](docs/design/15-r1-local-lifecycle.md)。
+- 正式本机安装：按[本机生命周期指南](docs/guides/local-lifecycle.md)在交互终端执行 `bun --no-env-file run local:init --new`（原部署用 `--adopt`），随后用 `local:start`、`local:stop` 和显式 `local:upgrade`。四入口共用 checkout 外私有配置；不依赖仓库 `.env`，不自动开户。合同与验收边界见[本地生命周期设计](docs/design/15-r1-local-lifecycle.md)。
 
 ## 受管项目资料与文档批准
 

@@ -286,7 +286,7 @@
 
 ### 分发与集成
 
-- 固定上游 `lorelum/lumen-ui` commit `337d6c4c5fddc55a0ac5736d500c3cb9d398cace`，运行官方 theme/UI 构建与打包入口；不修改上游源码或分发产物。归档928,990字节，SHA-256 `3e231e1208b2107652cc52dfab6274b5c9c7c228e624437358c66807e70b105b`，随 Web vendor 与单一 bun.lock 保留，来源和升级方法见 [Web README](../apps/web/README.md#组件库与主题)。Windows 冻结安装通过；正式容器也按相同锁文件安装，不依赖私有 GitHub 登录或 npm 发布。
+- 固定上游 `lorelum/lumen-ui` commit `337d6c4c5fddc55a0ac5736d500c3cb9d398cace`，运行官方 theme/UI 构建与打包入口；不修改上游源码或分发产物。归档928,990字节，SHA-256 `3e231e1208b2107652cc52dfab6274b5c9c7c228e624437358c66807e70b105b`，随 Web vendor 与单一 bun.lock 保留，来源和升级方法见 [Web README](../../apps/web/README.md#组件库与主题)。Windows 冻结安装通过；正式容器也按相同锁文件安装，不依赖私有 GitHub 登录或 npm 发布。
 - 应用直接使用官方组件、Markdown/Table、Base UI 与 Linen；删除旧本地基础组件、Radix直接依赖及旧CLI配置。服务端身份/读取与客户端展示边界保留，未迁移业务数据、认证合同或流式控制器。包与主题切片的分发校验由 PackageTheme 执行，其余集成、行为与正式浏览器验证由主会话负责。
 - 初次成套升级已通过生产 Web 编译和类型检查，但容器冷安装依赖超时；独立构建重现卡在冻结安装。90秒 verbose 实验确认本地分发包33.6ms完成解包，后续仍在下载公共 registry 包，不把它解释为归档损坏或 SDK 故障。增加独立 BuildKit Bun 下载缓存，并从原 Linux 镜像的依赖缓存填充已有包；不复用旧 API 写者或拼接旧 API/新 Web。随后原 `local:upgrade` 138.63秒完成，主题修正版格式化与升级56.85秒完成。
 - 最终格式化、完整根 verify 与原安装升级合计93.03秒完成。源码、已安装记录和产物的摘要均为 `368d8b0f9b0a243415a6aaacdbadaa7d5de5cccc7164db7575cc9cb1fcd4336b`，实际 Docker 镜像身份与两份记录一致；正式3100服务已切换，原配置、凭据和数据保留。API `/healthz`、`/readyz` 与登录后的 `/api/v1/me` 均为200。

@@ -20,7 +20,7 @@ Next.js App Router Web，统一采用自有 LumenUI（shadcn/Base UI）、官方
 
 ## Run
 
-正式安装请先按 [本机使用指南](../../docs/local-lifecycle.md) 使用原安装的初始化/启动/停止/升级入口。以下分进程命令仅用于开发，不等于受支持安装或真实模型/文件闭环验收。原安装缺私有配置时应定位原配置并由部署者处理，不生成替代秘密、owner、资料根目录或临时安装绕过。
+正式安装请先按 [本机使用指南](../../docs/guides/local-lifecycle.md) 使用原安装的初始化/启动/停止/升级入口。以下分进程命令仅用于开发，不等于受支持安装或真实模型/文件闭环验收。原安装缺私有配置时应定位原配置并由部署者处理，不生成替代秘密、owner、资料根目录或临时安装绕过。
 
 ```bash
 # API (repo root; DATABASE_URL + TZDB_VERSION required)

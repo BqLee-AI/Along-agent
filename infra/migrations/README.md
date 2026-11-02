@@ -35,7 +35,7 @@
 - 不新增表、原话关联或历史副本，不修改 owner、消息、Run 或旧 baseline 对象。四个索引与 `0018` 版本账同事务提交；要求已存在 `0017`，已记账的迁移不重复应用。`0001`–`0017` 保持不变。
 - 使用原显式 `bun --no-env-file run local:upgrade` 停旧写者、备份并升级至 `0018`，同批部署 API/Web/contracts。普通启动只核验，不从 `0017` 自动迁移；失败保持停写，按原版本分类与显式修复流程处理，不删卷/账本或降版。
 - `scripts/check-migrations.mjs` 仅放行 `0018_conversation_history.sql`，不扩大 conversation 领域编号范围。`scripts/local/baselines/0018.sql` 使用现有 SQL verifier 扩展，在只读事务内验证版本账和 `pg_catalog` 中四个实际索引的表/列顺序、非唯一性、方向与 NULL 排序、普通 B-tree 属性、谓词、有效/就绪/存活状态、默认 operator class 与 collation；保留原 `0016`、`0017` 核验。
-- 确定性扫描回归位于 `scripts/test/scripts.test.ts`；真实 PG16 升级烟测沿用 `scripts/local/database-smoke.mjs`，通过 stdin JSON 的 `connectionString` 显式注入一次性管理连接，不放入 argv、环境或仓库。该入口保留原 `0016`/`0017` 场景，覆盖 `0017→0018`、事实保留、重复升级、两次零 DDL 重启、缺失/错序/错误谓词/无效索引及伪版本拒绝，并保留连接失败不当空库；新增 run_id 索引缺失、错键、错误唯一性、错表、无效和未就绪拒绝，比较索引 catalog/定义及非空历史事实不变，不只确认返回拒绝。无效索引夹具仅在本次新建随机数据库内修改 `pg_index`，管理账号需具备相应 catalog 更新权限。三索引与四索引状态的运行结果分别取证，四索引 EXPLAIN 与生命周期验证见[2026-10-28 验证记录](../../docs/conversation-history-verification-2026-10-28.md)。
+- 确定性扫描回归位于 `scripts/test/scripts.test.ts`；真实 PG16 升级烟测沿用 `scripts/local/database-smoke.mjs`，通过 stdin JSON 的 `connectionString` 显式注入一次性管理连接，不放入 argv、环境或仓库。该入口保留原 `0016`/`0017` 场景，覆盖 `0017→0018`、事实保留、重复升级、两次零 DDL 重启、缺失/错序/错误谓词/无效索引及伪版本拒绝，并保留连接失败不当空库；新增 run_id 索引缺失、错键、错误唯一性、错表、无效和未就绪拒绝，比较索引 catalog/定义及非空历史事实不变，不只确认返回拒绝。无效索引夹具仅在本次新建随机数据库内修改 `pg_index`，管理账号需具备相应 catalog 更新权限。三索引与四索引状态的运行结果分别取证，四索引 EXPLAIN 与生命周期验证见[2026-10-28 验证记录](../../docs/verification/conversation-history-verification-2026-10-28.md)。
 
 ## 0019：R2-A 不可变 Run 上下文策略
 
