@@ -76,7 +76,7 @@ attempt: running → done | failed | fenced_out
 - native 取得真实批准提议后先存有限快照，再 suspend；TS 核对同 Run 接受调用/批准，原子保存等待引用并 ack。该段流没有 completed；正常挂起结束流不触发取消。
 - 用户确认可早于 suspend。恢复按真实接受结果判别批准种类，不信 native 自报 kind：task 的 pending 拒绝继续，consumed 交付真实 task ID；rejected/expired/superseded 立即停止原动作，不跟 successor 或同义绕拒绝。document 的 pending 拒绝继续、rejected 停止，approved 仅作为授权观察继续原 bootstrap，后续 apply/新 read 由仓颉选择。两者均沿原预算/计数，已接受提案不重 invoke；document 不伪造 task ID 或 task 卡片。
 - 只允许最后有效批准等待 checkpoint 的显式恢复。同键丢回答可定位原新 attempt，同点换键不多启动；不重放旧 started/delta，不重做原 invocation。
-- 浏览器运行中真实断连请求持久取消，Next 代理转发实际 abort；Web 的显式停止更可靠。刷新仅查询/补读，批准处理后回原 Run 明确继续，不重新提交确认来重试恢复。
+- 浏览器运行中真实断连请求持久取消，Next 代理转发实际 abort；Web 的显式停止更可靠。刷新仅查询/补读。当前 Harness 提醒等待点可在对话内完整审阅后明确点击“确认创建并继续”或“确认取消并继续”，同一次点击依次执行原确认和原Run继续；只有核验consumed回执后才继续，绑定原批准与checkpoint，不扩展到business快捷入口、文档批准或后继提议。继续失败只恢复原继续请求，不重新提交确认。
 - [Deferred] 自动重启、任意 checkpoint、无人值守崩溃恢复仍需独立工具/授权/并发证据；lease 字段、checkpoint 与取消 fencing 都不保证通用 external exactly-once。design/08 的通知专属一次许可/回执证据不泛化到仓颉/文件/MCP。
 
 ## 7. 不可变 revision（Required，对标 a13n）

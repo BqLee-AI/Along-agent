@@ -111,7 +111,7 @@ export function RunStatusPanel({ task }: { task: ConversationTask }) {
             {run?.can_resume ? '已可继续原运行' : '此运行正在等待审阅或继续'}
           </p>
           <p className="text-muted-foreground">
-            请核对下方批准与结果。批准不会自动继续，也不表示文件已保存。
+            请核对下方批准与结果。提醒可就地确认并继续；文档批准不会自动继续，也不表示文件已保存。
           </p>
           <div className="flex flex-wrap gap-2">
             <Button

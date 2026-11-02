@@ -9,6 +9,10 @@ import {
 } from '@along/contracts';
 import { Badge } from '@lorelum/lumen-ui/components/badge';
 import { Alert } from '@lorelum/lumen-ui/components/alert';
+import { Button } from '@lorelum/lumen-ui/components/button';
+import { approvalStatusLabels } from '../../features/approvals/model';
+import { inlineReminderWaiting } from '../../features/conversations/inline-reminder';
+import type { ConversationTask } from '../../features/conversations/use-conversation-task';
 import { readEnvelope, type HistoryApprovalReference } from '../../lib/conversation-run';
 import { TaskDetailSchema, type TaskDetail } from '../../lib/types';
 import { documentEffectLabel } from '../../lib/document-loop';
@@ -59,11 +63,13 @@ export default function ApprovalHistory({
   conversationId,
   runId,
   onUnknownEffect,
+  task,
 }: {
   reference: HistoryApprovalReference;
   conversationId: string;
   runId: string;
   onUnknownEffect?: (approvalId: string, unknown: boolean) => void;
+  task?: ConversationTask;
 }) {
   const { kind, approvalId } = reference;
   const path = `/${kind === 'document' ? 'document-approvals' : 'approvals'}/${encodeURIComponent(approvalId)}`;
@@ -86,7 +92,18 @@ export default function ApprovalHistory({
     [path, kind, approvalId, conversationId, runId],
   );
   const { state, read } = useHistoryPage<ApprovalHistoryDetail>(`${kind}:${approvalId}`, loader);
-  const item = state.items[0];
+  const loaded = state.items[0];
+  const confirmed = task?.reminderResults[approvalId];
+  const item =
+    loaded?.kind === 'task' && confirmed ? { kind: 'task' as const, detail: confirmed } : loaded;
+  const currentReminder = Boolean(
+    task &&
+    task.selected?.conversationId === conversationId &&
+    task.selected.runId === runId &&
+    inlineReminderWaiting(task.run, approvalId),
+  );
+  const confirmationError =
+    task?.reminderError?.approvalId === approvalId ? task.reminderError.message : null;
   useEffect(() => {
     if (item?.kind === 'document')
       onUnknownEffect?.(approvalId, item.detail.effect.status === 'unknown');
@@ -109,20 +126,73 @@ export default function ApprovalHistory({
         完整预览与批准结果 ↗ 新标签页
       </a>
       <p className="text-sm text-muted-foreground">
-        本处只读。
+        {currentReminder
+          ? '本次确认仅授权这条冻结提醒，并继续同一运行；文档修改与后继提议仍需单独批准。'
+          : '本处只读。'}
         {state.error
           ? '最新结果读取失败；下方仅保留上次获取的事实，当前效果尚未确认。'
           : '决议、工具效果与运行终态分别读取，不是原子快照。'}
       </p>
       {item?.kind === 'task' ? (
         <div className="space-y-4">
-          <p>提醒决议：{item.detail.status}</p>
+          <p>提醒决议：{approvalStatusLabels[item.detail.status]}</p>
+          <dl className="grid gap-3 text-sm sm:grid-cols-2">
+            <div>
+              <dt className="text-muted-foreground">你的原话</dt>
+              <dd className="whitespace-pre-wrap">
+                {item.detail.original_text ?? '此旧提议未保留原话。'}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">冻结本地时间与已确认时区</dt>
+              <dd>
+                {item.detail.fire_at_local} · {item.detail.snapshot.timezone_id}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">提议有效期</dt>
+              <dd>{item.detail.expires_at}</dd>
+            </div>
+          </dl>
+          <h4 className="font-medium">本次完整冻结确认正文</h4>
           <pre className="whitespace-pre-wrap font-sans text-base leading-7 [overflow-wrap:anywhere]">
             {item.detail.echo_text}
           </pre>
+          <p className="text-sm text-muted-foreground">
+            到点在调度器运行时尝试通知，不保证准时响；取消不代表已送通知可以撤回。
+          </p>
+          {currentReminder && item.detail.status === 'pending' && task ? (
+            <Button
+              disabled={
+                task.busy ||
+                task.reading ||
+                task.stopping ||
+                task.streaming ||
+                task.effectsUnknown ||
+                Boolean(task.readError) ||
+                state.reading ||
+                Boolean(state.error)
+              }
+              data-testid="confirm-reminder-inline"
+              onClick={() => void task.confirmReminder(item.detail)}
+            >
+              {task.busy
+                ? '正在确认并继续…'
+                : confirmationError
+                  ? '核对原确认并继续（同键）'
+                  : item.detail.kind === 'cancel_task'
+                    ? '确认取消并继续'
+                    : '确认创建并继续'}
+            </Button>
+          ) : null}
+          {confirmationError ? (
+            <p role="alert" className="text-sm">
+              {confirmationError}
+            </p>
+          ) : null}
           {item.detail.result.task_id ? (
             <TaskHistoryResult
-              key={item.detail.result.task_id}
+              key={`${item.detail.result.task_id}:${task?.run?.run_id === runId ? task.run.status : 'history'}`}
               taskId={item.detail.result.task_id}
             />
           ) : (
@@ -242,6 +312,25 @@ export default function ApprovalHistory({
       <details className="text-sm text-muted-foreground">
         <summary className="cursor-pointer py-2">批准技术信息</summary>
         <p className="font-mono">{approvalId}</p>
+        {item?.kind === 'task' ? (
+          <dl className="mt-3 space-y-2">
+            <div>
+              <dt>展示模板</dt>
+              <dd>{item.detail.presentation_version}</dd>
+            </div>
+            <div>
+              <dt>展示校验值</dt>
+              <dd className="font-mono">{item.detail.presentation_hash}</dd>
+            </div>
+            <div>
+              <dt>服务端冻结偏移与重复时刻</dt>
+              <dd>
+                offset_seconds={item.detail.snapshot.offset_seconds} · fold=
+                {item.detail.snapshot.fold}
+              </dd>
+            </div>
+          </dl>
+        ) : null}
         <p>
           {reference.seq
             ? `首次批准事件 seq ${reference.seq}`

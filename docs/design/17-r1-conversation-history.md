@@ -107,7 +107,7 @@ document继续GET原document-approvals详情，使用既有DocumentApprovalDetai
 
 mount、列表选择、Run选择、刷新、back、读取更多及登录返回仅GET。只有明确点击发送/确认/拒绝/取消/继续才使用既有POST；不能在effect、read finally或网络恢复回调中调用动作。刷新目标变化时取消旧GET或按请求身份丢弃迟到响应，各资源拥有独立cursor，避免原会话尾游标带入新目标。
 
-批准链接保持新标签页，避免仅为查看冻结预览中断当前主动SSE。恢复历史自身不建立SSE、不自动resume；离开用户正在主动发送的现有流仍沿原断连取消合同，不借本issue改变执行生命周期。
+独立批准详情链接仍以新标签打开，避免查看预览中断主动SSE。当前选中的 Harness 提醒等待点也可在对话中完整审阅并点击“确认创建并继续”或“确认取消并继续”；这是一次明确授权的动作链，不是历史读取或批准后后台自动执行。确认成功立即显示真实任务引用，不再显示待确认动作；继续失败沿原同键恢复。business 提醒快捷入口没有可恢复等待点，仍使用独立批准页；文档批准仍独立审阅与显式继续。恢复历史自身不建立SSE、不自动resume；离开主动流仍沿原断连取消合同。
 
 #68的safeReturnTo/pageReturnTo/protectedLoginHref/requireClientSession原样复用。仅HTTP401引导登录，返回原站内历史query后重新GET；403/503/流内业务401不当会话过期。不新增登录字段或auth handler。显式退出仍只发原sign-out，成功后必须清除本应用历史内存/动作重试状态再导航；不存历史或请求body作为重登前提。现有401已清run-resume/run-cancel/document-decision重试键，退出成功也应做同样应用键清理，保留无关storage。登录成功不能复活旧动作key或自动POST。
 

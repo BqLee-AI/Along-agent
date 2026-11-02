@@ -5,6 +5,7 @@ import {
   ConversationMessagePageSchema,
   ConversationRunPageSchema,
   DocumentApprovalDetailSchema,
+  type ApprovalDetail,
   type ConversationRunHistoryItem,
   type MessageHistoryItem,
   RunViewSchema,
@@ -37,6 +38,7 @@ import {
 } from './task-model';
 import type { RunTranscript } from '@/lib/conversation-run';
 import { isSameReadingPage, watchHistoryNavigation } from '@/lib/stream-navigation';
+import { confirmInlineReminder, inlineReminderWaiting } from './inline-reminder';
 
 type AmbiguousProposal = z.infer<typeof AmbiguousTimeDetailsSchema> & { raw_text: string };
 type Identity = { conversationId: string; runId: string };
@@ -77,6 +79,9 @@ export interface ConversationTask {
   observeEffect: (approvalId: string, unknown: boolean) => void;
   transcript: Map<string, RunTranscript>;
   send: (retry?: boolean) => Promise<void>;
+  reminderResults: Record<string, ApprovalDetail>;
+  reminderError: { approvalId: string; message: string } | null;
+  confirmReminder: (detail: ApprovalDetail) => Promise<void>;
   resume: () => Promise<void>;
   stop: () => Promise<void>;
   refresh: (clearError?: boolean) => Promise<void>;
@@ -121,6 +126,8 @@ export function useConversationTask({
   const [ambiguousProposal, setAmbiguousProposal] = useState<AmbiguousProposal | null>(null);
   const [foldChoice, setFoldChoice] = useState<'first' | 'second' | ''>('');
   const [leaving, setLeaving] = useState(false);
+  const [reminderResults, setReminderResults] = useState<Record<string, ApprovalDetail>>({});
+  const [reminderError, setReminderError] = useState<ConversationTask['reminderError']>(null);
   const leaveAction = useRef<(() => void) | null>(null);
   const selectedRef = useRef(selected);
   const conversationRef = useRef(conversationId);
@@ -133,6 +140,7 @@ export function useConversationTask({
   const workspaceRef = useRef<AbortController | null>(null);
   const cancelRef = useRef<AbortController | null>(null);
   const sendRef = useRef<AbortController | null>(null);
+  const reminderController = useRef<AbortController | null>(null);
   const pendingSend = useRef<z.infer<typeof PendingSendSchema> | null>(null);
   const pendingStorage = useRef<string | null>(null);
   const cursors = useRef(new Map<string, number>());
@@ -500,9 +508,15 @@ export function useConversationTask({
     }
   }
 
-  async function resume() {
+  async function resume(expected?: { target: Identity; checkpointId: string; approvalId: string }) {
     const target = selectedRef.current;
     if (!target || busyRef.current || stopRef.current || unknownRef.current) return;
+    if (
+      expected &&
+      (target.conversationId !== expected.target.conversationId ||
+        target.runId !== expected.target.runId)
+    )
+      return;
     const version = selectionVersion.current;
     busyRef.current = true;
     setBusy(true);
@@ -521,6 +535,14 @@ export function useConversationTask({
       if (current.conversation_id !== target.conversationId || current.run_id !== target.runId)
         throw new Error('运行身份不匹配。');
       setRun(current);
+      if (
+        expected &&
+        (!inlineReminderWaiting(current, expected.approvalId) ||
+          current.waiting?.checkpoint_id !== expected.checkpointId)
+      ) {
+        await refresh();
+        return;
+      }
       let request = retryResume;
       if (current.can_resume && current.waiting) {
         if (request?.checkpoint_id !== current.waiting.checkpoint_id)
@@ -550,6 +572,73 @@ export function useConversationTask({
       busyRef.current = false;
       if (mounted.current && version === selectionVersion.current) setBusy(false);
     }
+  }
+
+  async function confirmReminder(detail: ApprovalDetail) {
+    const target = selectedRef.current;
+    const waiting = run?.waiting;
+    if (
+      !target ||
+      !waiting ||
+      !inlineReminderWaiting(run, detail.approval_id) ||
+      busyRef.current ||
+      stopRef.current ||
+      unknownRef.current ||
+      streamRef.current
+    )
+      return;
+    const version = selectionVersion.current;
+    const controller = new AbortController();
+    reminderController.current = controller;
+    busyRef.current = true;
+    setBusy(true);
+    setReminderError(null);
+    let confirmed = false;
+    const valid = () =>
+      mounted.current &&
+      !controller.signal.aborted &&
+      version === selectionVersion.current &&
+      !stopRef.current;
+    try {
+      const current = await readRun(target.conversationId, target.runId, controller.signal);
+      if (!valid()) return;
+      if (
+        current.conversation_id !== target.conversationId ||
+        current.run_id !== target.runId ||
+        !inlineReminderWaiting(current, detail.approval_id) ||
+        current.waiting?.checkpoint_id !== waiting.checkpoint_id
+      )
+        throw new Error('原提醒等待点已改变；未提交确认，请读取最新状态。');
+      const me = await loadMe(controller.signal);
+      if (!valid()) return;
+      const approved = await confirmInlineReminder({
+        initial: detail,
+        run: current,
+        csrf: me.csrf_token,
+        signal: controller.signal,
+      });
+      if (!valid()) return;
+      setReminderResults((previous) => ({ ...previous, [detail.approval_id]: approved }));
+      confirmed = true;
+    } catch (failure) {
+      if (valid())
+        setReminderError({
+          approvalId: detail.approval_id,
+          message: `${failure instanceof Error ? failure.message : '确认结果尚未核验。'} 先读取原提议；重试只核对原请求，不换键、不重新创建。`,
+        });
+    } finally {
+      if (reminderController.current === controller) reminderController.current = null;
+      busyRef.current = false;
+      if (mounted.current && version === selectionVersion.current) setBusy(false);
+    }
+    // Only this still-active click can continue this exact reminder checkpoint.
+    // The existing resume path persists/reuses its own idempotency key.
+    if (confirmed && valid())
+      await resume({
+        target,
+        checkpointId: waiting.checkpoint_id,
+        approvalId: detail.approval_id,
+      });
   }
 
   async function stop() {
@@ -587,6 +676,7 @@ export function useConversationTask({
         throw new Error('停止回执身份不匹配。');
       setRun(cancelled);
       // Abort only after the server accepts cancellation, never as a fake receipt.
+      reminderController.current?.abort();
       streamRef.current?.abort();
       await refresh();
     } catch (failure) {
@@ -628,6 +718,7 @@ export function useConversationTask({
       workspaceRef.current?.abort();
       cancelRef.current?.abort();
       sendRef.current?.abort();
+      reminderController.current?.abort();
       meRef.current = null;
     };
     // Each mounted instance owns one URL identity; route parents key it accordingly.
@@ -723,6 +814,9 @@ export function useConversationTask({
     observeEffect,
     transcript,
     send,
+    reminderResults,
+    reminderError,
+    confirmReminder,
     resume,
     stop,
     refresh,

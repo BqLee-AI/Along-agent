@@ -71,7 +71,8 @@ export const WORKSPACE_TOOL_DEFINITIONS = [
 export const HARNESS_TOOL_DEFINITIONS = [
   {
     name: 'propose_task',
-    description: '提出提醒批准；只有用户在冻结确认页确认后才能创建任务。',
+    description:
+      '提出提醒批准；只有用户审阅冻结预览并点击确认按钮后才能创建任务。对话内可确认并继续原运行，不必跳转其他页面。',
     risk: 'medium' as const,
     parameters: workspaceParameters(
       {
