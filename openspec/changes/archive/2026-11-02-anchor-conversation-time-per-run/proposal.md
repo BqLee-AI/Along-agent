@@ -13,7 +13,7 @@ Issue: #92
 
 ## Spec 路径与设计章节
 
-详细取舍与证据边界见[本change设计](design.md)；既有设计真源为[design/05](../../../docs/design/05-time-core.md) §2、§3、§5.2、§9.2，采用本增量时须同步消除旧会话锚/延迟语义冲突。
+详细取舍与证据边界见[本change设计](design.md)；既有设计真源为[design/05](../../../../docs/design/05-time-core.md) §2、§3、§5.2、§9.2，采用本增量时须同步消除旧会话锚/延迟语义冲突。
 
 - `conversations`：[新增Run日期锚与澄清来源合同](specs/conversations/spec.md)。
 - `v0-safety-contract`：[完整修改显式时区与候选重提议Requirement](specs/v0-safety-contract/spec.md)，保留原first/second、未知时区、冻结展示及确认边界。

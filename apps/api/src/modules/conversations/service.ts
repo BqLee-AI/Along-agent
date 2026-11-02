@@ -188,10 +188,6 @@ export async function startConversationRun(
         .rows[0]?.now;
       if (!acceptedClock) throw new Error('database clock unavailable');
       const receivedAtUtc = utcSecondIso(acceptedClock);
-      // Only new proposal turns need rules. Reads, cancellation and stored
-      // idempotent results keep their own existing boundaries.
-      if (execution === 'business' && findReminderDirective(text) >= 0 && !CANCEL_INTENT.test(text))
-        requireTimeContext(deps.timeContext);
       if (!conversation) {
         const anchorIso = acceptedClock;
         conversation = await createConversation(client, {
@@ -227,6 +223,15 @@ export async function startConversationRun(
           ? { clarificationOfRunId: input.clarification_of_run_id }
           : {}),
       });
+      // Resolve inherited reminders before the rules gate; a failure rolls back
+      // admission without consuming the source or reserving the retry key.
+      const reminderText = reminderDate.originalText ?? text;
+      if (
+        execution === 'business' &&
+        findReminderDirective(reminderText) >= 0 &&
+        !CANCEL_INTENT.test(reminderText)
+      )
+        requireTimeContext(deps.timeContext);
       confirmedTimezone = reminderDate.timezone ?? confirmedTimezone;
       const runId = randomUUID();
       const attemptId = randomUUID();

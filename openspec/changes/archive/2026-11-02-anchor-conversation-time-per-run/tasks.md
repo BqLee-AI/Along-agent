@@ -17,7 +17,7 @@
 - [x] 3.1 完成新明确日期接纳锚、实际来源/未完成状态/紧邻关系验证；复用 frozen_context 的 reminderDateSource 和最小 clarification_of_run_id，不新表/迁移或旧数据回填，不用最新任意 Run 或缺来源 fallback。
 - [x] 3.2 覆盖旧会话新今天/明天、可信整条时区补充、精确 fold 引用/原文/候选、关系不明/多个候选/无关消息/旧缺来源、同日120秒及真实午夜20秒；通过真实 HTTP/隔离 PG 工具提议与批准冻结取证。
 - [x] 3.3 主Agent完成正式 native 消费与实施工作树验收：同 Run 工具、重放、批准恢复和只读历史不换锚、不读当前钟重算；全部数据位于本任务隔离 PG，不创建真实用户提醒。
-- [x] 3.4 对照合同审阅实现与运行证据；本次交付实施工作树和本地验收，不执行远端关闭或archive，不改主spec。真实provider自然语言质量不由受控模型fixture证明。
+- [x] 3.4 独立reviewer审阅合同、实现与证据；修复坏规则下可信时区补充绕过接纳预检的问题并复核关闭，归并主spec及归档。真实provider自然语言质量不由受控模型fixture证明。
 
 ## Verification
 
@@ -33,3 +33,10 @@
 - `bun run build`：全部包、API、生产Web构建通过。
 - 实际表面：启动生产Web构建及API正式入口，浏览器进入创建提醒，提交纽约重复时刻，选择第一次后重新提交；隔离PG确认后继Run引用原失败Run且锚不变，生成一项pending批准（America/New_York、fold=0），tasks=0。未点击确认过期历史目标；该冒烟不是真实provider质量验收。
 - 证据边界：模型步骤受控，但调用正式native、实际工具、HTTP/SSE及真实PG；未调用真实LLM供应商，未执行远端CI、commit/push、关闭Issue或规范归档。历史#97/#98结果不计入以上当前运行。
+
+### 2026-11-02 独立审查与收口
+
+- 独立reviewer审查`b179192`完整PR差异，发现一项P2：可信时区补充绕过坏规则预检，错误接纳并消耗原来源。修复后reviewer定点复核，blocking findings清零；未把主Agent自审称为独立审查。
+- 回归先行：新增`time-errors.test.ts`的坏规则继承补充场景，实际Red为期望HTTP503却得到200；修复为按继承后的有效提醒输入执行事务内规则门。相同回归与日期锚集成专项Green：27 pass、0 fail。
+- 正式入口冒烟：启动`apps/api/src/main.ts`，健康规则得到缺时区澄清，重启为坏规则后补“北京时间”返回HTTP503且零新增事实，再恢复规则以同键重试得到批准并保持原来源，tasks=0。全部使用本任务隔离PG与测试身份，不触碰用户安装。
+- 实施提交`b179192`的[CI 41423806283](https://github.com/BqLee-AI/Along-agent/actions/runs/41423806283)五门全部通过；这不是后续修复/归档提交的CI证据。收口提交的五门以[PR #103](https://github.com/BqLee-AI/Along-agent/pull/103)对应head结果为准，未完成检查不记为通过。
