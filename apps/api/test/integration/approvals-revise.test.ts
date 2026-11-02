@@ -20,7 +20,7 @@ import {
 const maybe = databaseUrl ? describe : describe.skip;
 const healthy = loadTimeContext('fixture-v1');
 const unavailable = createTimeContext('fixture-v1', null, null);
-const raw = '2026-11-02 09:20 喝水';
+const raw = '2027-11-02 09:20 喝水';
 function body(raw_text = raw) {
   return { raw_text, confirmed_timezone: 'Asia/Shanghai', idempotency_key: randomUUID() };
 }
@@ -190,7 +190,7 @@ maybe('approval revise durable PostgreSQL behavior', () => {
           first.successor_approval_id,
         ]);
       if (terminal === 'superseded')
-        await revise(old.ownerId, first.successor_approval_id, body('2026-11-03 10:20 喝水'));
+        await revise(old.ownerId, first.successor_approval_id, body('2027-11-03 10:20 喝水'));
       const before = await counts(pool, old.ownerId);
       expect(
         await reviseApproval({ pool, timeContext: unavailable }, old.ownerId, old.id, input),
@@ -319,7 +319,7 @@ maybe('approval revise durable PostgreSQL behavior', () => {
     const old = await seedApproval(pool, {});
     const results = await Promise.allSettled([
       revise(old.ownerId, old.id, body()),
-      revise(old.ownerId, old.id, body('2026-11-03 09:20 喝水')),
+      revise(old.ownerId, old.id, body('2027-11-03 09:20 喝水')),
     ]);
     const winner = results.find((r) => r.status === 'fulfilled');
     const loser = results.find((r) => r.status === 'rejected');
@@ -432,7 +432,7 @@ maybe('approval revise durable PostgreSQL behavior', () => {
   it('ambiguous choice uses a new key and confirms only the selected occurrence and frozen offset', async () => {
     for (const fold of ['first', 'second'] as const) {
       const old = await seedApproval(pool, {});
-      const input = { ...body('2026-11-01 01:30 喝水'), confirmed_timezone: 'America/New_York' };
+      const input = { ...body('2027-11-07 01:30 喝水'), confirmed_timezone: 'America/New_York' };
       await expect(revise(old.ownerId, old.id, input)).rejects.toMatchObject({
         errorCode: 'AMBIGUOUS_LOCAL_TIME',
       });
@@ -448,7 +448,7 @@ maybe('approval revise durable PostgreSQL behavior', () => {
       expect(row.fold).toBe(fold === 'first' ? 0 : 1);
       expect(row.resolved_utc_offset_seconds).toBe(fold === 'first' ? -14400 : -18000);
       expect(row.fire_at_utc.toISOString()).toBe(
-        fold === 'first' ? '2026-11-01T05:30:00.000Z' : '2026-11-01T06:30:00.000Z',
+        fold === 'first' ? '2027-11-07T05:30:00.000Z' : '2027-11-07T06:30:00.000Z',
       );
       const { detail } = await getApprovalDetail({ pool }, old.ownerId, next.successor_approval_id);
       expect(detail.echo_text).toContain(fold === 'first' ? '第一次出现' : '第二次出现');
@@ -575,12 +575,12 @@ maybe('approval revise durable PostgreSQL behavior', () => {
       ownerId,
       conversationId: null,
       originalText: raw,
-      wallTime: '2026-11-02 09:20',
+      wallTime: '2027-11-02 09:20',
       timezoneId: 'Asia/Shanghai',
       fold: 0,
       foldChoice: 'none',
       offsetSeconds: 28800,
-      fireAtUtc: '2026-11-02T01:20:00Z',
+      fireAtUtc: '2027-11-02T01:20:00Z',
       tzdbVersion: 'fixture-v1',
     });
     const oldBody = await confirmBody(pool, ownerId, old.approvalId);

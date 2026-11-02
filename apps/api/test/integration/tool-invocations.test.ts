@@ -379,7 +379,14 @@ maybe('persistent tool invocation identity and local results', () => {
 
   it('different cancellation calls retain the existing pending approval reuse rule', async () => {
     const ctx = await fresh();
-    const first = await invokeTool(pool, ctx, await reserve(ctx));
+    const first = await invokeTool(
+      pool,
+      ctx,
+      await reserve(ctx, 'action/1', 'propose_task', {
+        ...args,
+        raw_time_text: '2027-11-02 09:20',
+      }),
+    );
     if (first.status !== 'ok' || first.result.kind !== 'approval')
       throw new Error('expected proposal');
     const created = await confirmApproval({ pool }, ctx.ownerId, first.result.approval.approvalId, {
