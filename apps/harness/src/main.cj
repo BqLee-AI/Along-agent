@@ -358,6 +358,7 @@ class Harness {
     var routingEligible: Bool = false
     var delegated: Bool = false
     var hardDenied: String = ""
+    var closingGoal: Bool = false
     let acceptedReceipts = HashSet<String>()
 
     init(pipe: Pipe) { this.pipe = pipe }
@@ -514,7 +515,7 @@ class Harness {
         if (code != "") { p.put("error", obj([("code", text(code)), ("message", text("Harness stopped: ${code}"))])) }
         pipe.ack("finish", p, "accepted")
     }
-    func finishGoal(goal: JsonObject): Unit {
+    func goalCheck(goal: JsonObject): Unit {
         require(delegated)
         keys(goal, ["status", "outcomes", "clarification", "answer"])
         let status = ref(field(goal, "status"))
@@ -548,7 +549,17 @@ class Harness {
             require(kind == "time" || kind == "timezone" || kind == "target_selection" || kind == "destination")
             nonempty(field(c, "question"), 8192)
         }
-        pipe.ack("finish_goal", obj([("goal_result", goal), ("usage", usage())]), "accepted")
+    }
+    // Model function arguments are untrusted control input, not pipe framing.
+    // Only parse/schema/receipt checks are caught; transport failures remain fatal.
+    func goalArguments(arguments: String): Option<JsonObject> {
+        try {
+            let goal = JsonValue.fromStr(arguments).asObject()
+            goalCheck(goal)
+            return Some(goal)
+        } catch (_: Exception) {
+            return None
+        }
     }
     func policyCheck(v: JsonValue): Unit {
         let p = v.asObject()
@@ -1035,15 +1046,30 @@ class Harness {
             let function = field(call, "function").asObject()
             keys(function, ["name", "arguments"])
             let name = ref(field(function, "name"))
-            let args = JsonValue.fromStr(str(field(function, "arguments"), FRAME_LIMIT)).asObject()
+            let arguments = str(field(function, "arguments"), FRAME_LIMIT)
             if (delegated && name == "finish_goal") {
-                finishGoal(args)
-                return
+                match (goalArguments(arguments)) {
+                    case Some(goal) =>
+                        pipe.ack("finish_goal", obj([("goal_result", goal), ("usage", usage())]), "accepted")
+                        return
+                    case None =>
+                        closingGoal = true
+                        let historyContent: JsonValue = if (isNull(content)) { text("") } else { content }
+                        modelMessage(obj([("role", text("assistant")), ("content", historyContent), ("tool_calls", calls)]))
+                        modelMessage(obj([("role", text("tool")), ("tool_call_id", field(call, "id")), ("content", text(obj([
+                            ("accepted", JsonBool(false)), ("code", text("INVALID_GOAL_RESULT")),
+                            ("message", text("Goal result was not accepted. Follow the finish_goal schema: include status, nonempty outcomes, clarification (null or a valid question), and answer. Match aggregate and outcome statuses; receipt_refs must be unique accepted successful invocation UUIDs, never denied/failed/provider IDs. Correct only the structured result; no further business actions are allowed. The original iteration/token budget still applies."))
+                        ]).toString()))]))
+                        continue
+                }
             }
-            if (hardDenied != "") {
-                // Reject only the proposal locally: no reservation, invocation,
-                // or invented accepted receipt. Keep the original model budget.
-                message("system", "This Run stopped business actions after ${hardDenied}. The proposed tool call was not executed. Call finish_goal with truthful blocked/partial outcomes and preserve already accepted receipts.")
+            let args = JsonValue.fromStr(arguments).asObject()
+            if (hardDenied != "" || closingGoal) {
+                // Rejected control arguments never reopen business execution.
+                // No reservation, invocation, invented receipt, or reset budget.
+                let reason = if (closingGoal) { "Goal completion is awaiting a valid structured result. The proposed business call was not executed. Call finish_goal only; preserve actual accepted receipts." }
+                    else { "This Run stopped business actions after ${hardDenied}. The proposed tool call was not executed. Call finish_goal with truthful blocked/partial outcomes and preserve already accepted receipts." }
+                message("system", reason)
                 continue
             }
             if (!tools.contains(name)) { finish("failed", "TOOL_DENIED"); return }

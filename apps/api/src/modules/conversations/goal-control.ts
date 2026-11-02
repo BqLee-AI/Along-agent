@@ -10,7 +10,7 @@ export const GOAL_CONTROL_TOOL: HarnessTool = {
   name: 'finish_goal',
   risk: 'low',
   description:
-    '结束本轮目标并报告真实结果，不是领域写入。每个目标列出状态和实际接受 invocation_id 收据。保存/清除必须引用真实设置回执；不要把工具成功或执行结束等同目标完成。纯回答也列出 achieved 项，可无收据。',
+    '结束本轮目标并报告真实结果，不是领域写入。每个目标列出状态和实际接受 invocation_id 收据。保存/清除必须引用真实设置回执；拒绝或失败的调用不是成功收据。不要把工具成功或执行结束等同目标完成。纯回答也列出 achieved 项，可无收据。无效参数会返回 accepted:false 控制反馈；只修正结构化结果，不再调用业务工具，继续使用原预算。',
   parameters: object(
     {
       status: { type: 'string', enum: ['completed', 'partial', 'blocked', 'cancelled', 'unknown'] },

@@ -302,6 +302,94 @@ test('plain prose cannot silently mark delegation complete; original budget boun
   });
 });
 
+test('a rejected setting is not a receipt; invalid finish_goal stays in bounded control-only correction', async () => {
+  let deniedRef = '';
+  const blocked = {
+    status: 'blocked',
+    outcomes: [
+      {
+        description: 'Unsupported setting was not saved',
+        status: 'blocked',
+        receipt_refs: [] as string[],
+      },
+    ],
+    clarification: null,
+    answer: '规则不支持所请求的值，未保存，原默认未变。',
+  };
+  const requests = await nativeCase({
+    start: {
+      messages: [
+        {
+          message_id: inputId,
+          role: 'user',
+          content: '请保存我指定的默认时区，不支持就如实说明。',
+        },
+      ],
+      tools: [timezoneTool, { ...timezoneTool, name: 'get_user_prefs' }],
+    },
+    invoke: (request) => {
+      if (request.tool_id === 'get_user_prefs') {
+        return {
+          status: 'ok',
+          invocationId: request.invocation_id,
+          replayed: false,
+          result: { kind: 'prefs', timezone_id: null },
+        };
+      }
+      deniedRef = request.invocation_id as string;
+      return {
+        status: 'denied',
+        invocationId: deniedRef,
+        replayed: false,
+        error: { code: 'UNKNOWN_TIMEZONE', message: 'Unsupported timezone; unchanged.' },
+      };
+    },
+    model: (request, index) => {
+      if (index === 0) return call('get_user_prefs', {});
+      if (index === 1) return call('set_user_timezone', { timezone_id: 'Unsupported/Zone' });
+      if (index === 2) {
+        return call('finish_goal', {
+          ...blocked,
+          outcomes: [{ ...blocked.outcomes[0], receipt_refs: [deniedRef] }],
+        });
+      }
+      const messages = request.messages as {
+        role: string;
+        content: string;
+        tool_call_id?: string;
+        tool_calls?: { id: string }[];
+      }[];
+      const rejected = messages.findLast(
+        (message) => message.role === 'tool' && message.content.includes('INVALID_GOAL_RESULT'),
+      );
+      expect(rejected).toBeDefined();
+      expect(JSON.parse(rejected!.content)).toMatchObject({
+        accepted: false,
+        code: 'INVALID_GOAL_RESULT',
+      });
+      expect(
+        messages.some(
+          (message) =>
+            message.role === 'assistant' &&
+            message.tool_calls?.some((call) => call.id === rejected!.tool_call_id),
+        ),
+      ).toBe(true);
+      if (index === 3) return call('set_user_timezone', { timezone_id: 'Asia/Shanghai' });
+      return call('finish_goal', blocked);
+    },
+  });
+  expect(
+    requests.filter((request) => request.type === 'reserve').map((request) => request.tool_id),
+  ).toEqual(['get_user_prefs', 'set_user_timezone']);
+  expect(requests.filter((request) => request.type === 'invoke')).toHaveLength(2);
+  expect(requests.filter((request) => request.type === 'finish_goal')).toHaveLength(1);
+  expect(requests.at(-1)).toMatchObject({
+    type: 'finish_goal',
+    goal_result: blocked,
+    usage: { iterations: 5, tokens: 25 },
+  });
+});
+
 test('native rejects invalid goals, unaccepted/provider receipt IDs, and contradictory aggregate statuses', async () => {
   for (const result of [
     { ...goal(), outcomes: [] },
@@ -322,12 +410,18 @@ test('native rejects invalid goals, unaccepted/provider receipt IDs, and contrad
     },
   ]) {
     const requests = await nativeCase({
+      start: { budget: { max_iterations: 1, max_tokens: 1000 } },
       model: () => call('finish_goal', result),
-      expectedExit: 2,
     });
     expect(
       requests.some((request) => request.type === 'reserve' || request.type === 'finish_goal'),
     ).toBe(false);
+    expect(requests.at(-1)).toMatchObject({
+      type: 'finish',
+      outcome: 'failed',
+      error: { code: 'BUDGET_EXCEEDED' },
+      usage: { iterations: 1, tokens: 5 },
+    });
   }
 }, 120_000);
 
@@ -454,9 +548,12 @@ test('accepted setting bootstrap retains receipt refs and partial/blocked/unknow
     completed.some((request) => request.type === 'reserve' || request.type === 'context_source'),
   ).toBe(false);
   const duplicate = await nativeCase({
-    start: { snapshot, observations: [observation] },
+    start: {
+      snapshot,
+      observations: [observation],
+      budget: { max_iterations: 2, max_tokens: 1000 },
+    },
     model: () => call('finish_goal', goal([receipt, receipt])),
-    expectedExit: 2,
   });
   expect(duplicate.some((request) => request.type === 'finish_goal')).toBe(false);
   for (const status of ['partial', 'blocked', 'unknown', 'cancelled']) {

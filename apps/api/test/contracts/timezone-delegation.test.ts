@@ -62,7 +62,9 @@ type Kind =
   | 'interrupt'
   | 'revoke'
   | 'legacy'
-  | 'unsupported';
+  | 'unsupported'
+  | 'control-correction'
+  | 'control-exhausted';
 const ModelBodySchema = z.object({
   stream: z.literal(true),
   stream_options: z.object({ include_usage: z.literal(true) }),
@@ -171,6 +173,63 @@ async function serveModel(res: ServerResponse, body: ModelBody): Promise<void> {
         'finish_goal',
         goal('仅本次使用纽约时间，不保存偏好', '本次按纽约时间理解；没有更改默认时区。'),
       ),
+    );
+    return;
+  }
+  if (value.kind === 'control-correction' || value.kind === 'control-exhausted') {
+    if (index === 0) {
+      sendModelSse(res, reply('get_user_prefs', {}));
+      return;
+    }
+    if (index === 1) {
+      sendModelSse(res, reply('set_user_timezone', { timezone_id: 'Unsupported/Zone' }));
+      return;
+    }
+    const denied = findModelObservation(
+      body.messages,
+      ObservationSchema.refine((item) => item.result.status === 'denied'),
+    );
+    if (
+      !denied ||
+      denied.result.status !== 'denied' ||
+      denied.result.error.code !== 'UNKNOWN_TIMEZONE'
+    )
+      throw new Error('expected the real accepted rule denial');
+    const blocked = {
+      status: 'blocked',
+      outcomes: [
+        {
+          description: 'Unsupported value was not saved',
+          status: 'blocked',
+          receipt_refs: [] as string[],
+        },
+      ],
+      clarification: null,
+      answer: '规则不支持所请求的值，未保存，原默认未变。',
+    };
+    if (index === 2 || value.kind === 'control-exhausted') {
+      sendModelSse(
+        res,
+        reply('finish_goal', {
+          ...blocked,
+          outcomes: [{ ...blocked.outcomes[0], receipt_refs: [denied.invocation_id] }],
+        }),
+      );
+      return;
+    }
+    const rejected = body.messages.findLast(
+      (message) => message.role === 'tool' && message.content.includes('INVALID_GOAL_RESULT'),
+    );
+    expect(rejected).toBeDefined();
+    expect(JSON.parse(rejected!.content)).toMatchObject({
+      accepted: false,
+      code: 'INVALID_GOAL_RESULT',
+    });
+    sendModelSse(
+      res,
+      index === 3
+        ? reply('set_user_timezone', { timezone_id: 'Asia/Shanghai' })
+        : reply('finish_goal', blocked),
     );
     return;
   }
@@ -349,6 +408,8 @@ function input(value: Scenario, overrides: Record<string, unknown> = {}) {
     revoke: '先保存纽约默认时区，然后再改为上海时间。',
     legacy: '请仅回答，不修改任何默认时区。',
     unsupported: '请保存 Atlantis/Mars 默认时区；不支持则保留原值并如实报告。',
+    'control-correction': '请保存我指定的默认时区，不支持就保留原值并如实说明。',
+    'control-exhausted': '请保存我指定的默认时区，不支持就保留原值并如实说明。',
   };
   return {
     execution: 'harness',
@@ -556,6 +617,43 @@ async function noUnrelatedEffects(who: Actor) {
 }
 
 for (const mode of ['local', 'http'] as const) {
+  for (const kind of ['control-correction', 'control-exhausted'] as const) {
+    test(`D8.timezone-${mode}-${kind}`, async () => {
+      const who = await actor(mode);
+      const before = await preferences(who);
+      const value = scenario(kind);
+      const events = await (await message(who, input(value))).events;
+      const completed = await final(who, events, kind === 'control-correction' ? 'done' : 'failed');
+      const rows = await invocations(completed.run.run_id);
+      expect(rows.map((row) => row.tool_id)).toEqual(['get_user_prefs', 'set_user_timezone']);
+      expect(rows[1]).toMatchObject({
+        state: 'completed',
+        accepted_result: { status: 'denied', error: { code: 'UNKNOWN_TIMEZONE' } },
+      });
+      expect(await preferences(who)).toEqual(before);
+      expect(completed.result.status).toBe('blocked');
+      expect(completed.result.outcomes.flatMap((outcome) => outcome.receipt_refs)).toEqual([]);
+      expect(
+        events.filter((event) =>
+          ['thread.completed', 'thread.failed', 'thread.cancelled'].includes(event.type),
+        ),
+      ).toHaveLength(1);
+      if (kind === 'control-correction') {
+        expect(completed.result.answer).toBe('规则不支持所请求的值，未保存，原默认未变。');
+        expect(value.transcript).toHaveLength(5);
+      } else {
+        expect(events.find((event) => event.type === 'thread.failed')).toMatchObject({
+          payload: { error: { code: 'BUDGET_EXCEEDED' } },
+        });
+        expect(value.transcript).toHaveLength(8);
+      }
+      const frozen = await facts(who);
+      expect(await history(who, completed.run.conversation_id)).toEqual(events);
+      expect(await facts(who)).toEqual(frozen);
+      await noUnrelatedEffects(who);
+    }, 30_000);
+  }
+
   test(`D8.timezone-${mode}-unsupported`, async () => {
     const who = await actor(mode);
     const before = await preferences(who);

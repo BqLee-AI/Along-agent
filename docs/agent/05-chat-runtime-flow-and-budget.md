@@ -29,6 +29,7 @@
 - Run/checkpoint/接受结果及审计留 TS；正式 pipe 为 `harness/v6`，legacy 明确 `trusted_context:null`，新委托使用接纳事务产生的可信 system 事实。v5 wire 硬拒绝新 shape；只读路由仅保留原 profile。snapshot2 仍只存安全引用/usage/逻辑进度；内部路由 checkpoint 的 `harness/v5` 是冻结存储 schema，不是可执行旧 wire。历史 snapshot1 限定读取规则不变：无 workspace、已完成旧业务/task 引用、不含 document 批准；不回写历史。
 - finish 的消息/终态/attempt/Run 同事务；cancel 先提交资格撤销和唯一事件，再终止 native/模型请求。已接受工具与按钮确认任务不被假撤销。
 - delegation/1 使用 `finish_goal` 提交目标结果，SSE v2 和 RunView 保存逐项目标事实；最终答复、GoalResult、terminal 事件、attempt 与 Run 同事务，异常/取消按同一终结事务保留既成效果。纯正文或工具 completed 不代替目标完成。输入/规则拒绝可交同一模型反馈；`TOOL_FORBIDDEN` / `TOOL_DENIED` 只允许结果说明与 `finish_goal`，native 和 TS 均停止该 Run 后续业务动作；failed/unknown 不继续。请求断开按取消收尾，不回滚已接受偏好；导航、刷新、重登和 GET 只读，不启动新 attempt 或重做设置。
+- `finish_goal` 的模型参数与 pipe 帧错误分开处理：JSON、字段、状态聚合或收据资格不合法时，native 返回配对的 `accepted:false / INVALID_GOAL_RESULT` 控制观察，不接纳目标、不伪造成功；此后只允许提交修正后的目标结果，不再预约或执行业务工具。修正使用原模型迭代/token预算，耗尽按原预算错误终结；既成领域结果与收据保留。pipe/传输故障仍按原协议失败，不捕获为可继续的业务观察。普通用户无需知道或输入控制工具名。
 - owner 在途 disabled 时拒绝后续动作；内部失败追账只核验 owner/conversation/run、冻结 profile 与既成接受结果完整性，不重新索取已撤销的执行资格，因此仍能原子保存唯一终态。该内部投影不是公开读取或执行入口；普通工具/GET仍要求有效身份，撤权后的原连接也不披露包含目标结果或收据的终结内容。恢复有效身份后只读原持久事实，不自动重做。
 - 有限 workspace 仅提供 `workspace_list/workspace_grep/workspace_read/workspace_propose_replace/workspace_apply_replace` 五工具；前三个经 TS 薄只读 MCP，提案绑定本 Run 的真实全文 read。工具顺序由仓颉决定，TS 不隐藏另一套 Agent 或固定代跑链。
 
