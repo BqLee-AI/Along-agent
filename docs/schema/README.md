@@ -4,6 +4,8 @@
 
 > Proposed 演进：新 profile/可信上下文/GoalResult/接续/执行占有归 conversations，新任务来源/time_basis归 tasks，真实偏好归 identity，登记集合/输出目录归 workspaces，接受结果仍归 tools；唯一详细合同见 [design/20 §4–§9](../design/20-goal-scoped-delegation.md)。只新增前向迁移，不改既有 migration 或回填旧授权；本规范不实施 DDL，不新增目标表、语义去重表或 briefs/cards 表。
 
+> Proposed 受邀账户：准入、加密联系人、一次凭证代次、邀请、邮件投递与持久限流归 identity，详见 [identity schema](identity-schema.md) 与 [design/21](../design/21-invited-account-access.md)。它们不是已存在表或已分配迁移；旧 ID/auth_email/credential/secret/owner 保留，生产只经后续获准的前向迁移生效。
+
 ## 落地顺序
 
 推荐 migration 落地顺序（v0）[Required]：
