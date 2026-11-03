@@ -105,6 +105,128 @@ integration('identity persistent atomic quota (real isolated PG)', () => {
       await db.close();
     }
   });
+  it('commits an exhausted IP charge without creating further controllable subjects', async () => {
+    const db = await createIntegrationDatabase();
+    const keys = identityKeysFixture();
+    const cases = [
+      {
+        action: 'sign_in' as const,
+        scope: 'sign_in',
+        limit: 60,
+        dimensions: ['identifier'],
+        subjects: (i: number) => ({ ip: '192.0.2.1', identifier: `account-${i}` }),
+      },
+      {
+        action: 'forgot' as const,
+        scope: 'forgot',
+        limit: 20,
+        dimensions: ['address'],
+        subjects: (i: number) => ({ ip: '192.0.2.2', address: `address-${i}@example.com` }),
+      },
+      {
+        action: 'accept' as const,
+        scope: 'accept',
+        limit: 60,
+        dimensions: ['token'],
+        subjects: (i: number) => ({ ip: '192.0.2.3', token: `token-${i}` }),
+      },
+      {
+        action: 'contact_request' as const,
+        scope: 'contact_request',
+        limit: 30,
+        dimensions: ['actor', 'address'],
+        subjects: (i: number) => ({
+          ip: '192.0.2.4',
+          actor: `actor-${i}`,
+          address: `contact-${i}@example.com`,
+        }),
+      },
+    ];
+    try {
+      for (const test of cases) {
+        for (let i = 0; i < test.limit; i++)
+          await consumeIdentityQuota(db.pool, keys, test.action, test.subjects(i));
+
+        const before = (
+          await db.pool.query(
+            `SELECT dimension,count(*)::int AS rows,sum(count)::int AS charges
+             FROM identity_rate_limits WHERE action=$1 AND dimension<>'ip'
+             GROUP BY dimension ORDER BY dimension`,
+            [test.scope],
+          )
+        ).rows;
+        expect(before).toEqual(
+          test.dimensions.map((dimension) => ({
+            dimension,
+            rows: test.limit,
+            charges: test.limit,
+          })),
+        );
+        for (let i = test.limit; i < test.limit + 5; i++)
+          await expect(
+            consumeIdentityQuota(db.pool, keys, test.action, test.subjects(i)),
+          ).rejects.toMatchObject({ httpStatus: 429, errorCode: 'RATE_LIMITED' });
+
+        const after = (
+          await db.pool.query(
+            `SELECT dimension,count(*)::int AS rows,sum(count)::int AS charges
+             FROM identity_rate_limits WHERE action=$1 AND dimension<>'ip'
+             GROUP BY dimension ORDER BY dimension`,
+            [test.scope],
+          )
+        ).rows;
+        expect(after).toEqual(before);
+        const ip = (
+          await db.pool.query(
+            `SELECT count FROM identity_rate_limits WHERE action=$1 AND dimension='ip'`,
+            [test.scope],
+          )
+        ).rows;
+        expect(ip).toEqual([{ count: test.limit + 1 }]);
+      }
+    } finally {
+      await db.close();
+    }
+  });
+  it('serializes concurrent IP boundary requests before charging distinct identifiers', async () => {
+    const db = await createIntegrationDatabase();
+    const otherPool = db.connect();
+    const keys = identityKeysFixture();
+    try {
+      for (let i = 0; i < 58; i++)
+        await consumeIdentityQuota(db.pool, keys, 'sign_in', {
+          ip: '192.0.2.5',
+          identifier: `before-${i}`,
+        });
+      const results = await Promise.allSettled(
+        Array.from({ length: 8 }, (_, i) =>
+          consumeIdentityQuota(i % 2 ? otherPool : db.pool, keys, 'sign_in', {
+            ip: '192.0.2.5',
+            identifier: `concurrent-${i}`,
+          }),
+        ),
+      );
+      expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(2);
+      const rejected = results.filter((result) => result.status === 'rejected');
+      expect(rejected).toHaveLength(6);
+      for (const result of rejected)
+        if (result.status === 'rejected')
+          expect(result.reason).toMatchObject({ httpStatus: 429, errorCode: 'RATE_LIMITED' });
+      const rows = (
+        await db.pool.query(
+          `SELECT dimension,count(*)::int AS rows,sum(count)::int AS charges
+           FROM identity_rate_limits GROUP BY dimension ORDER BY dimension`,
+        )
+      ).rows;
+      expect(rows).toEqual([
+        { dimension: 'identifier', rows: 60, charges: 60 },
+        { dimension: 'ip', rows: 1, charges: 61 },
+      ]);
+    } finally {
+      await otherPool.end();
+      await db.close();
+    }
+  });
   it('does not permit switching invite actions to bypass shared address and actor budgets', async () => {
     const db = await createIntegrationDatabase();
     const keys = identityKeysFixture();
@@ -137,7 +259,7 @@ integration('identity persistent atomic quota (real isolated PG)', () => {
     const keys = identityKeysFixture();
     try {
       await db.pool.query(
-        `CREATE FUNCTION identity_quota_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.dimension='ip' THEN RAISE EXCEPTION 'isolated fault'; END IF; RETURN NEW; END $$; CREATE TRIGGER identity_quota_fault BEFORE INSERT OR UPDATE ON identity_rate_limits FOR EACH ROW EXECUTE FUNCTION identity_quota_fail()`,
+        `CREATE FUNCTION identity_quota_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.dimension='address' THEN RAISE EXCEPTION 'isolated fault'; END IF; RETURN NEW; END $$; CREATE TRIGGER identity_quota_fault BEFORE INSERT OR UPDATE ON identity_rate_limits FOR EACH ROW EXECUTE FUNCTION identity_quota_fail()`,
       );
       await expect(
         consumeIdentityQuota(db.pool, keys, 'forgot', {

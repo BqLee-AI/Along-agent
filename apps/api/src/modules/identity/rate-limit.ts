@@ -98,7 +98,13 @@ export async function consumeIdentityQuota(
     default:
       throw notReady('identity quota action unavailable');
   }
-  quotas.sort((a, b) => `${a.action}:${a.dimension}`.localeCompare(`${b.action}:${b.dimension}`));
+  // Every action locks its IP first; the remaining shared dimensions retain a
+  // consistent order across actions (notably contact and invite operations).
+  quotas.sort(
+    (a, b) =>
+      Number(b.dimension === 'ip') - Number(a.dimension === 'ip') ||
+      `${a.action}:${a.dimension}`.localeCompare(`${b.action}:${b.dimension}`),
+  );
   const client = await pool.connect().catch(() => {
     throw notReady('identity quota unavailable');
   });
@@ -126,11 +132,15 @@ export async function consumeIdentityQuota(
           quota.limit + 1,
         ],
       );
-      if (rows[0]!.count > quota.limit)
+      if (rows[0]!.count > quota.limit) {
         retryAfter = Math.max(
           retryAfter,
           Math.max(1, Math.ceil((start + quota.seconds * 1000 - now) / 1000)),
         );
+        // Commit the rejected IP charge, but do not create attacker-chosen
+        // subject rows once this source has exhausted its quota.
+        if (quota.dimension === 'ip') break;
+      }
     }
     await client.query('COMMIT');
   } catch {

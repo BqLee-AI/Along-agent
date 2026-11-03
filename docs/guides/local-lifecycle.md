@@ -195,7 +195,7 @@ launcher 退出不代表 PG 中的语句或事务已经结束。若仍提示部�
 
 原私有JSON允许可选 `identityKeyringFile`（checkout外私有JSON的绝对路径）及 `identityMail: { provider: "resend", from: string, apiKey: string }`。不配置时保持缺依赖503，不从环境、原BETTER_AUTH_SECRET或数据库密码派生新密钥，也不自动生成生产keyfile。配置的keyfile启动写者前必须私有可读且通过严格keyring解析，只读单文件挂载到 `/run/along-identity-keyring-source.json`，不挂载整个私有目录；容器用私有权限复制为 `/run/along-identity-keyring.json`（0600）后启动 API。这样兼容 Windows ACL 私有文件的 Linux bind 权限呈现，不放宽 loader 校验；每次容器启动重新复制，轮换后须正式 reload。
 
-keyfile形状为 `{ version: 1, lookup: { id, key }, challenge: { active, keys }, encryption: { active, keys }, rateLimit: { id, key } }`；各key是独立32字节密钥的标准base64，keys是有限key-id到密钥的对象，active必须存在。由获授权部署者在独立私有存储准备，勿粘贴真实内容到文档、日志或仓库。lookup轮换需停相关写入、全量唯一核验后切换，不把不同key-id当地址唯一性的分区。
+keyfile形状为 `{ version: 1, lookup: { id, key }, challenge: { active, keys }, encryption: { active, keys }, rateLimit: { id, key } }`；各key是独立32字节密钥的标准base64，keys是有限key-id到密钥的对象，active必须存在。由获授权部署者在独立私有存储准备，勿粘贴真实内容到文档、日志或仓库。lookup轮换需停相关写入、全量唯一核验后切换，不把不同key-id当地址唯一性的分区；密钥材料变化必须使用新key-id，不得用相同ID替换密钥。当前地址、待处理邀请或未终结有效凭证的lookup版本与配置不一致时，相关邮箱操作返回503，恢复原密钥或按已批准流程完成迁写后再试；不会自动生成替代密钥。
 
 生命周期只从私有配置映射 `IDENTITY_KEYRING_FILE`、`IDENTITY_MAIL_PROVIDER`、`IDENTITY_MAIL_FROM`、`IDENTITY_MAIL_API_KEY`，`APP_ORIGIN`沿用config.origin；ambient同名环境不透传，API key不进argv/诊断。`provider: "resend"` 只是已实现transport的显式选择能力，不代表已批准外部供应商、发信/DNS/采购或生产开关。配置保存、私有文件发布、PG提交及reload相互独立；本命令不外发邮件测试、探测模型或创建 `.env`。
 

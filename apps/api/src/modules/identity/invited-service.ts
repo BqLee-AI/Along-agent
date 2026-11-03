@@ -47,6 +47,7 @@ import {
   type Purpose,
 } from './email-security.js';
 import { enqueueIdentityMail, requireIdentityMailReady, type IdentityMailConfig } from './mail.js';
+import { requireLookupKey } from './lookup-key.js';
 import {
   consumeIdentityQuota,
   type IdentityQuotaAction,
@@ -700,6 +701,7 @@ export function createInvitedAccountService(
       await quota('contact_request', ip, { actor: actor.ownerId, address: address.normalized });
       const digest = lookupDigest(k, address.normalized);
       return tx(async (client) => {
+        await requireLookupKey(client, k);
         await addressLock(client, digest);
         await lockUsers(client, [actor.ownerId]);
         await actorUser(client, actor);
@@ -739,6 +741,7 @@ export function createInvitedAccountService(
       await quota('contact_verify', ip, { actor: actor.ownerId, token: quotaToken(input) });
       const data = parse(schemas.verify, input);
       return tx(async (client) => {
+        await requireLookupKey(client, k);
         const candidate = await findChallenge(client, k, 'verify_contact', data.token);
         if (candidate.user_id !== actor.ownerId) throw forbidden();
         await addressLock(client, candidate.lookup_digest);
@@ -826,6 +829,7 @@ export function createInvitedAccountService(
       const digest = lookupDigest(k, address.normalized),
         request = `action:invite_create:${address.normalized}`;
       return tx(async (client) => {
+        await requireLookupKey(client, k);
         await addressLock(client, digest);
         await lockUsers(client, [actor.ownerId]);
         await actorUser(client, actor, true);
@@ -900,6 +904,7 @@ export function createInvitedAccountService(
       mailReady();
       // Read only the encrypted target for quota; mutation always rechecks after address/user locks.
       const initial = await tx(async (client) => {
+        await requireLookupKey(client, k);
         await actorUser(client, actor, true);
         return (
           await client.query<Invitation>(
@@ -917,9 +922,11 @@ export function createInvitedAccountService(
         ...(address ? { address: address.normalized } : {}),
       });
       if (!initial) throw notFound();
+      const digest = address ? lookupDigest(k, address.normalized) : initial.lookup_digest;
       const request = `action:invite_resend:${invitationId}`;
       return tx(async (client) => {
-        await addressLock(client, initial.lookup_digest);
+        await requireLookupKey(client, k);
+        await addressLock(client, digest);
         await lockUsers(client, [actor.ownerId]);
         await actorUser(client, actor, true);
         await verifyPassword(client, actor.ownerId, data.current_password);
@@ -941,12 +948,12 @@ export function createInvitedAccountService(
         if (!row) throw notFound();
         if (row.state !== 'pending' && row.state !== 'expired') conflict('INVITATION_CLOSED');
         if (!address) conflict('INVITATION_CLOSED');
-        await closePending(client, row.lookup_digest);
+        await closePending(client, digest);
         if (
           (
             await client.query(
               "SELECT 1 FROM identity_contacts WHERE lookup_digest=$1 UNION ALL SELECT 1 FROM identity_invitations WHERE lookup_digest=$1 AND state='pending' AND id<>$2",
-              [row.lookup_digest, row.id],
+              [digest, row.id],
             )
           ).rowCount
         )
@@ -957,14 +964,14 @@ export function createInvitedAccountService(
           expiresAt = new Date(at.getTime() + 48 * 3600000);
         const updated = (
           await client.query<Invitation>(
-            "UPDATE identity_invitations SET state='pending',generation=$2,expires_at=$3,updated_at=$4 WHERE id=$1 RETURNING *",
-            [row.id, generation, expiresAt, at],
+            "UPDATE identity_invitations SET state='pending',lookup_digest=$5,lookup_key_id=$6,generation=$2,expires_at=$3,updated_at=$4 WHERE id=$1 RETURNING *",
+            [row.id, generation, expiresAt, at, digest, k.lookup.id],
           )
         ).rows[0]!;
         await issueChallenge(client, k, {
           purpose: 'invitation',
           invitationId: row.id,
-          digest: row.lookup_digest,
+          digest,
           generation,
           address: invitationAddress(k, row),
           at,
@@ -1024,6 +1031,7 @@ export function createInvitedAccountService(
       const data = parse(schemas.accept, input);
       if (existingActor?.sessionId) conflict('SIGN_OUT_REQUIRED');
       return tx(async (client) => {
+        await requireLookupKey(client, k);
         const candidate = await findChallenge(client, k, 'invitation', data.token);
         await addressLock(client, candidate.lookup_digest);
         const invitation = (
@@ -1107,6 +1115,7 @@ export function createInvitedAccountService(
       await quota('forgot', ip, { address: address.normalized });
       const digest = lookupDigest(k, address.normalized);
       return tx(async (client) => {
+        await requireLookupKey(client, k);
         // Configuration failure is global: an anonymous address must not select
         // whether a missing historical contact key becomes visible as 503.
         if (
@@ -1160,6 +1169,7 @@ export function createInvitedAccountService(
       await quota('reset', ip, { token: quotaToken(input) });
       const data = parse(schemas.reset, input);
       return tx(async (client) => {
+        await requireLookupKey(client, k);
         const candidate = await findChallenge(client, k, 'reset_password', data.token);
         await addressLock(client, candidate.lookup_digest);
         await lockUsers(client, [candidate.user_id!]);

@@ -886,8 +886,16 @@ maybe('invited identity core actual PostgreSQL behavior', () => {
     it(`serializes invitation ${first}-first versus ${second} on independent connections`, async () => {
       const invitation = await invite();
       const other = db.connect();
-      const firstPool = gatedPool(pool, /SELECT pg_advisory_xact_lock/, true);
-      const secondPool = gatedPool(other, /SELECT pg_advisory_xact_lock/, false);
+      const addressLock = /SELECT pg_advisory_xact_lock\(\$1::bigint\)/;
+      const lookupLock = /SELECT pg_advisory_xact_lock\(680068, 2\)/;
+      const firstPool = gatedPool(pool, addressLock, true);
+      // Two digest-dependent operations contend at the lookup guard before the
+      // follower can reach the address lock; revoke does not take that guard.
+      const secondPool = gatedPool(
+        other,
+        first !== 'revoke' && second !== 'revoke' ? lookupLock : addressLock,
+        false,
+      );
       const input = {
         token: invitation.token,
         login_name: 'racing_member',

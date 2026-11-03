@@ -810,14 +810,24 @@ export async function executeRun(
     await executeBusinessTurn(pool, session, write);
   } catch {
     if (session.terminal) return;
-    // Post-open failures must still end the stream; if even the terminal
-    // checkpoint cannot be written, close without corrupting the JSON path.
+    // Accounting for an already accepted attempt must survive revocation,
+    // but the committed failure is not itself authority to disclose it.
     try {
-      await failWith(pool, session, write, {
-        code: 'INTERNAL_ERROR',
-        message: '内部错误，请稍后重试。',
-        http_status: 500,
+      const failed = await withTransaction(pool, async (client) => {
+        await lockRun(client, context, true, false);
+        return commitTerminal(client, context, 'failed', {
+          conversation_id: context.conversationId,
+          run_id: context.runId,
+          error: {
+            code: 'INTERNAL_ERROR',
+            message: '内部错误，请稍后重试。',
+            http_status: 500,
+          },
+        });
       });
+      session.terminal = true;
+      await withTransaction(pool, (client) => lockRun(client, context, false));
+      await write(failed);
     } catch {
       if (session.terminal) return;
     }

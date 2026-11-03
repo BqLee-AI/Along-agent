@@ -25,6 +25,7 @@ import {
   type IdentityKeyring,
 } from './email-security.js';
 import { consumeIdentityQuota } from './rate-limit.js';
+import { requireLookupKey } from './lookup-key.js';
 
 export interface AccountWorkspaceStatus {
   state: 'unconfigured' | 'loaded' | 'invalid' | 'unreadable';
@@ -367,6 +368,7 @@ export function createAccountService(
         identifier: address ? `email:${address.normalized}` : `username:${data.login_name}`,
       });
       return transaction(async (client) => {
+        if (address) await requireLookupKey(client, keys);
         const user = address
           ? (
               await client.query<UserRow>(
