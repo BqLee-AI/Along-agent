@@ -5,6 +5,7 @@
 import { z } from 'zod';
 
 export const THREAD_PROTOCOL_VERSION = 'v1' as const;
+export const DELEGATION_THREAD_PROTOCOL_VERSION = 'v2' as const;
 
 // Frozen SSE vocabulary: exactly these seven words, no more.
 export const THREAD_EVENT_TYPES = [
@@ -167,7 +168,7 @@ function envelopeOf<TType extends ThreadEventType, TPayload extends z.ZodTypeAny
     .strict();
 }
 
-export const ThreadEventSchema = z.discriminatedUnion('type', [
+export const LegacyThreadEventSchema = z.discriminatedUnion('type', [
   envelopeOf('thread.started', ThreadStartedPayloadSchema),
   envelopeOf('message.delta', MessageDeltaPayloadSchema),
   envelopeOf('card.proposed', CardProposedPayloadSchema),
@@ -176,6 +177,75 @@ export const ThreadEventSchema = z.discriminatedUnion('type', [
   envelopeOf('thread.failed', ThreadFailedPayloadSchema),
   envelopeOf('thread.cancelled', ThreadCancelledPayloadSchema),
 ]);
+
+// Independent SSE consumer validates the goal wire shape without importing
+// application/domain code. Domain evidence is verified before publication.
+const goalText = z.string().min(1).max(8192);
+const goalResult = z
+  .object({
+    status: z.enum(['completed', 'partial', 'blocked', 'cancelled', 'unknown']),
+    outcomes: z
+      .array(
+        z
+          .object({
+            description: goalText,
+            status: z.enum(['achieved', 'not_done', 'blocked', 'unknown']),
+            receipt_refs: z.array(uuidSchema).max(64),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(64),
+    clarification: z
+      .object({
+        kind: z.enum(['time', 'timezone', 'target_selection', 'destination']),
+        question: goalText,
+      })
+      .strict()
+      .nullable(),
+    answer: goalText,
+  })
+  .strict();
+function delegationEnvelope<T extends ThreadEventType, P extends z.ZodTypeAny>(
+  type: z.ZodLiteral<T>,
+  payload: P,
+) {
+  return z
+    .object({
+      protocol_version: z.literal(DELEGATION_THREAD_PROTOCOL_VERSION),
+      seq: z.number().int().positive(),
+      type,
+      payload,
+      request_id: requestIdSchema,
+    })
+    .strict();
+}
+export const DelegationThreadEventSchema = z.discriminatedUnion('type', [
+  delegationEnvelope(
+    z.literal('thread.started'),
+    ThreadStartedPayloadSchema.extend({
+      stream_protocol_version: z.literal('v2'),
+      authorization_revision: z.literal('delegation/1'),
+      execution_lifecycle: z.literal('request-bound'),
+    }),
+  ),
+  delegationEnvelope(z.literal('message.delta'), MessageDeltaPayloadSchema),
+  delegationEnvelope(z.literal('card.proposed'), CardProposedPayloadSchema),
+  delegationEnvelope(z.literal('approval_required'), ApprovalRequiredPayloadSchema),
+  delegationEnvelope(
+    z.literal('thread.completed'),
+    ThreadCompletedPayloadSchema.extend({ goal_result: goalResult }),
+  ),
+  delegationEnvelope(
+    z.literal('thread.failed'),
+    ThreadFailedPayloadSchema.extend({ goal_result: goalResult }),
+  ),
+  delegationEnvelope(
+    z.literal('thread.cancelled'),
+    ThreadCancelledPayloadSchema.extend({ goal_result: goalResult }),
+  ),
+]);
+export const ThreadEventSchema = z.union([LegacyThreadEventSchema, DelegationThreadEventSchema]);
 
 export type ThreadEvent = z.infer<typeof ThreadEventSchema>;
 export type ThreadStartedEvent = Extract<ThreadEvent, { type: 'thread.started' }>;

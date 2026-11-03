@@ -4,7 +4,7 @@
 
 节内标记：Observed = 沿用业界既定做法；Required = v0 必须；Proposed = 推荐；Deferred = 延后。
 
-> Proposed 演进：本人默认时区保存/清除复用 identity 真实字段与公共用例，与工具接受结果原子提交，见 [design/20 §4.1、§6.1、§8](../design/20-goal-scoped-delegation.md)。单次时区不保存；普通退出/会话到期与账户禁用的执行资格分开，不新增任意账户patch，本规范不改当前表或会话实现。
+> 本人默认时区切片（#107）：复用 `users.timezone_id` 及 identity 公共窄用例保存/清除，与工具接受结果和审计原子提交，见 [design/20 §4.1、§6.1、§8](../design/20-goal-scoped-delegation.md)。不新增偏好表、任意账户 patch 或批准记录。单次时区提示不保存；request-bound 断连/退出不回滚已接受设置，也不承诺后台继续。会话表及固定撤销合同保持。
 
 ## 设计依据
 
@@ -40,7 +40,7 @@ users 1 ── 0..n <全业务表 via owner_id 逻辑引用>
 | `email_verified`     | `boolean`     | not null, default `false`    | 邮箱已验证（v0 自建 seed 为 false）                                                                     |
 | `auth_subject`       | `text`        | nullable                     | 内部身份标识（自建 credential）；格式随 Better Auth 落地补齐                                            |
 | `auth_provider`      | `text`        | nullable                     | 约束为 `local`（v0 仅自建；OIDC 不在 v0 范围）                                                          |
-| `timezone_id`        | `text`        | nullable                     | 已确认时区（IANA 文本）；“明天”解析锚 + time-core 输入，未确认则 NULL                                   |
+| `timezone_id`        | `text`        | nullable                     | 本人默认时区规范 ID，仅限实际规则包支持范围；未设置/明确清除为 NULL，不承诺完整 IANA                    |
 | `status`             | `text`        | not null, default `'active'` | 按 `active/disabled/deleted_requested` 约束                                                             |
 | `created_at`         | `timestamptz` | not null, default `now()`    | 创建时间                                                                                                |
 | `updated_at`         | `timestamptz` | not null, default `now()`    | 更新时间                                                                                                |
@@ -57,7 +57,9 @@ users 1 ── 0..n <全业务表 via owner_id 逻辑引用>
 - [Required] 禁止物理删除 `users` 行；注销走 `status` 标记 + 清理流程（Deferred）。
 - [Required] 不存密码明文、token 明文、邮箱明文（哈希可）；确实必须入库的敏感值先加密，优先 `secret://` 引用。
 - [Required] `id` 由服务端生成（`gen_random_uuid()`），不信任客户端传入。
-- `timezone_id` 写入必须校验 IANA 合法性；非法报 `UNKNOWN_TIMEZONE`（错误码见 API 篇），不写脏值。
+- 本人偏好读用例 `readUserPreferences` 与写用例 `setUserTimezoneWithinTransaction` 归 identity，使用调用者事务和受信 owner。写入锁定 active 本人行，仅更新 timezone_id/updated_at；不接受任意 users patch。
+- 非 null 保存只认当前真实别名表和规则包中的 zone；先转规范 ID，未知/不支持报 `UNKNOWN_TIMEZONE`，规则不可用报 `TZDB_UNAVAILABLE`，零偏好写入。`null` 是清除，不依赖可用规则；接受结果保留真实 `previous_timezone_id`、`timezone_id` 和 `alias_version`，规则不可用时清除的版本明示 `unavailable`，不伪造版本。
+- 新 delegation 的工具网关将该更新、稳定 invocation 的 accepted result 及只追加审计放在同一事务；重放同调用返回原结果，不改写旧回执。直接保存/清除不制造 pending/consumed 批准；legacy 工具范围不因此扩权。
 
 ## `sessions`
 

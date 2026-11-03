@@ -4,7 +4,7 @@ import {
   conversationSendBlocked,
   messageRunReference,
   isNearChatBottom,
-  taskExecution,
+  taskAdmission,
   taskIntentFromQuery,
   taskSendEligibility,
   shouldSubmitMessage,
@@ -28,10 +28,13 @@ const documentDraft = {
 };
 
 describe('explicit conversation task entry', () => {
-  it('maps user intent to the existing execution contract without fallback', () => {
-    expect(taskExecution('reminder')).toBe('business');
-    expect(taskExecution('document')).toBe('harness');
-    expect(taskExecution('chat')).toBe('harness');
+  it('opts plain Agent into delegation while preserving legacy shortcut admission without fallback', () => {
+    expect(taskAdmission('reminder')).toEqual({ execution: 'business' });
+    expect(taskAdmission('document')).toEqual({ execution: 'harness' });
+    expect(taskAdmission('chat')).toEqual({
+      execution: 'harness',
+      authorization_revision: 'delegation/1',
+    });
     expect(taskIntentFromQuery({ intent: 'reminder' })).toBe('reminder');
     expect(taskIntentFromQuery({ intent: 'document' })).toBe('document');
     expect(taskIntentFromQuery({ intent: 'harness' })).toBe('chat');

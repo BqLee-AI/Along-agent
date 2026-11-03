@@ -95,9 +95,13 @@
 - [Required · 暂停边界] 自然质量或保守净收益未获证实时，可暂停专项、保持off并停止专用编码服务，应用和历史事实继续保留；暂停不是自然shadow或受控接管验收通过。恢复shadow或开启enforce需对应授权，模型声明交付不代替完整镜像/依赖分发清算。时间性运行状态与结果仅记入任务Verification。
 - [非目标] 不借优化裁决提醒改期次序、多目标同/拆Run、同名对象选择或批准流程中的独立请求策略，不进入R3/R4、工作区写入、在线学习或provider/市场/推送/计费决定。超出本白名单的请求沿原路径，不暗中改变原产品行为。
 
-## 本人目标内委托（#105，Proposed）
+## 本人目标内委托（#105 目标合同；#107 本人时区切片）
 
-合同真源为 [design/20 §1–§10](../design/20-goal-scoped-delegation.md) 及 [OpenSpec 增量](../../openspec/changes/refactor-assistant-capability-authorization/proposal.md)，总范围为 #104，明确提醒复用 #90。本阶段只交合同与 Draft 规范 PR，不业务实现/部署/真实任务，不自动建后续议题；整体 change 随实施与真实验收收口 archive。
+合同真源为 [design/20 §1–§10](../design/20-goal-scoped-delegation.md) 及 [OpenSpec 增量](../../openspec/changes/refactor-assistant-capability-authorization/proposal.md)，总范围为 #104，明确提醒复用 #90。#107 实现本人默认时区保存/NULL清除及配套可信执行/结果切片；下列直接提醒、elapsed、文件自主能力、通用缺口接续和 server-owned 仍是后续目标，不因偏好切片而宣称交付。实现、受控消费者与真实用户路径分别取证，整体 change 随适用实施与真实验收收口。
+
+- 当前实施边界：Web 普通 Agent 明确发送 `authorization_revision:'delegation/1'`，服务端仅允许无 workspace 的 harness；省略修订和提醒/资料快捷入口保持 legacy，不从部署或 wire 自动升级权限。本人时区写入经 identity 窄用例，与工具接受结果/审计原子提交，不生成批准，不开放任意账户 patch；仅支持实际有限别名/规则，单次提示不保存，清除不保留旧偏好。
+- 配套合同：v6 start 的真实 trusted context 进入 system 层，legacy 显式 null；新委托 SSE v2 与旧 v1 历史严格分读。RunView 展示冻结 request-bound 与持久 GoalResult；0021 只新增根 `agent_runs.goal_result`，旧数据 NULL 不回填。最终 answer、目标结果和 Run/attempt/事件终结原子保存，收据须符合真实接受结果/设置事实，Run done 不能代替目标完成。
+- 本切片的连接验收：初次发送和历史恢复均说明绑定连接、无后台继续；断连/停止后已接受时区仍可见，未完成或未知项不掩盖。GET、刷新、重连、重登只有只读恢复，不自动发消息/批准/继续/取消或重做已接受设置。新 profile 不暴露 elapsed 修订、直接提醒或文件动作；legacy 按原批准/等待合同验收。
 
 - 正常自主：真实保存/清除本人时区，明确提醒直接创建/唯一取消，受管资料正常编辑/有限创建，多步混合目标零机械批准；明确重写/覆盖/取消不问相同授权。
 - 必要打断：实质歧义只补缺口，新增目标/影响只授新增部分。新profile允许一次精确“授权并继续”，不机械要求第二按钮；决议自身不是写入/保存，拒绝/停止/unknown/迟到或无效等待点不推进，GET/重登不授权/继续。legacy保持原显式继续合同，HTTP次数不预设；跨owner、登记外/链接、缺能力不能按钮突破，零写冲突可自主新读修正。

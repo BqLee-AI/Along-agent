@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import {
-  HARNESS_PROTOCOL_VERSION,
   RoutingPolicySchema,
   type RoutingPolicy,
   type RoutingFacts,
@@ -135,7 +134,7 @@ async function appendRoutingRecord<T>(
       binding.attemptId,
       kind,
       JSON.stringify(payload),
-      HARNESS_PROTOCOL_VERSION,
+      'harness/v5', // r2b/1 checkpoint storage schema; independent of native wire.
     ],
   );
   if (inserted.rowCount !== 1) throw new Error('routing checkpoint was not persisted');

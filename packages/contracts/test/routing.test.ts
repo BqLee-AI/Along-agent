@@ -56,6 +56,7 @@ test('v5 has no old wire shim and requires both routing start fields', () => {
   const start: HarnessStart = {
     protocol: HARNESS_PROTOCOL_VERSION,
     type: 'start',
+    trusted_context: null,
     messages: [{ message_id: id, role: 'user', content: '时区' }],
     tools: [],
     budget: { max_iterations: 1, max_tokens: 100 },
@@ -74,7 +75,7 @@ test('v5 has no old wire shim and requires both routing start fields', () => {
     routing_policy: null,
     eligible_phase: 'disabled',
   };
-  expect(HARNESS_PROTOCOL_VERSION).toBe('harness/v5');
+  expect(HARNESS_PROTOCOL_VERSION).toBe('harness/v6');
   expect(HarnessStartSchema.parse(start)).toEqual(start);
   expect(HarnessStartSchema.safeParse({ ...start, protocol: 'harness/v4' }).success).toBe(false);
   const missingPolicy: Partial<typeof start> = { ...start };

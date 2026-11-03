@@ -2,7 +2,7 @@
 
 > 状态：业务与正式 Harness 存储合同。范围：对话/Run/attempt、只追加事件/有限快照、冻结执行权威与调用接受结果。不包含：任意崩溃自动恢复或通用 exactly-once。TS 长期持有 PostgreSQL 与事实，仓颉组织循环和本次上下文（design/09/11）。
 
-> Proposed演进：Run独立冻结授权修订、实际能力及execution_lifecycle，持久事实供可信start和只读投影；早期request-bound不因部署变server-owned，见 [design/20 §1、§4–§9](../design/20-goal-scoped-delegation.md)。旧Run/pending/快照/模板/accepted result不迁写或扩权，保持snapshot2，不增输入长等待/目标表/模型去重层；新SSE结果显式v2，本规范不实施迁移或后台。
+> 本人时区委托切片（#107）：Run 在 `frozen_context` 独立冻结授权修订、实际能力和 request-bound 生命周期，供 v6 trusted start 与只读投影；`0021_trusted_execution_goals.sql` 增加根列 `agent_runs.goal_result`。旧 Run/pending/快照/模板/hash/accepted result 不迁写或扩权，历史结果保持 NULL；snapshot 仍为2，不增输入长等待/目标表/模型去重层。新委托 SSE 为 v2，legacy/v1 历史保持。后续 server-owned、直接提醒、elapsed、文件自主能力仍见 [design/20](../design/20-goal-scoped-delegation.md)，不由本迁移交付。
 
 ## 设计依据
 
@@ -51,7 +51,7 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 ### 写入规则
 
 - [Required] 新消息接纳时由 conversations 在事务内读取 DB `clock_timestamp()`，将提醒请求 anchor 与本轮 received 分别冻结到 Run，不从客户端时刻、会话建立锚或模型生成值取锚；会话历史 `anchor_received_at_utc` 保持原事实，不回写或迁移。
-- [Required] 时区未确认先澄清，不猜设备/位置。先前明确时区可作新请求默认，但日期归属按 `design/05 §3` 的新请求/可信澄清合同判断，不因同会话永久复用日期。
+- [Required] 时区未确认不猜设备/位置。legacy 可使用会话先前明确时区；新 delegation 只使用本轮明确提示或接纳时实际 identity 偏好，不回退该会话旧值。日期归属仍按 `design/05 §3` 的新请求/可信澄清合同判断，不因同会话永久复用日期。
 
 ## `messages`
 
@@ -90,25 +90,26 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 
 ### 字段
 
-| 字段                    | 类型          | 约束                                                        | 说明                                                                                    |
-| ----------------------- | ------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `id`                    | `uuid`        | primary key                                                 | run ID                                                                                  |
-| `owner_id`              | `uuid`        | not null                                                    | 所属用户，查询必带                                                                      |
-| `conversation_id`       | `uuid`        | not null, references `conversations(id)` on delete restrict | 所属会话                                                                                |
-| `agent_revision`        | `text`        | not null                                                    | 不可变 agent 版本号（逻辑引用 `agent_revisions.revision`）                              |
-| `mode`                  | `text`        | not null                                                    | 按 `chat/task` 约束（v0 提醒路多为 `task`，纯问为 `chat`）                              |
-| `status`                | `text`        | not null, default `'running'`                               | 按 `running/suspended_approval/done/failed/cancelled` 约束                              |
-| `budget_max_iterations` | `integer`     | not null                                                    | 接受时冻结；harness 的累计模型迭代上限                                                  |
-| `budget_max_tokens`     | `integer`     | not null                                                    | 可得 usage 的起步上限；缺 usage 不冒充可证明费用                                        |
-| `execution`             | `text`        | not null, default business                                  | business/harness，禁止执行中切换                                                        |
-| `tools_allowlist`       | `jsonb`       | not null, array                                             | 冻结服务端工具范围；历史 business 为[]，不伪造授权                                      |
-| `frozen_context`        | `jsonb`       | harness 必须 object                                         | 接受时输入时间/规则；新 Run 冻 reminderDateSource，工作区另冻 grant/summary，不是推理链 |
-| `input_message_id`      | `uuid`        | nullable FK messages；harness 必填                          | 该 Run 实际接受的用户消息                                                               |
-| `waiting_checkpoint_id` | `uuid`        | nullable FK run_checkpoints                                 | 最后有效批准等待点                                                                      |
-| `waiting_invocation_id` | `uuid`        | nullable                                                    | 同 Run 已接受批准提议调用                                                               |
-| `waiting_approval_id`   | `uuid`        | nullable                                                    | 原冻结批准；当前决议另从公共读取获取                                                    |
-| `created_at`            | `timestamptz` | not null, default `now()`                                   | 创建时间                                                                                |
-| `ended_at`              | `timestamptz` | nullable                                                    | 结束时间                                                                                |
+| 字段                    | 类型          | 约束                                                        | 说明                                                                                                                |
+| ----------------------- | ------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `id`                    | `uuid`        | primary key                                                 | run ID                                                                                                              |
+| `owner_id`              | `uuid`        | not null                                                    | 所属用户，查询必带                                                                                                  |
+| `conversation_id`       | `uuid`        | not null, references `conversations(id)` on delete restrict | 所属会话                                                                                                            |
+| `agent_revision`        | `text`        | not null                                                    | 不可变 agent 版本号（逻辑引用 `agent_revisions.revision`）                                                          |
+| `mode`                  | `text`        | not null                                                    | 按 `chat/task` 约束（v0 提醒路多为 `task`，纯问为 `chat`）                                                          |
+| `status`                | `text`        | not null, default `'running'`                               | 按 `running/suspended_approval/done/failed/cancelled` 约束                                                          |
+| `budget_max_iterations` | `integer`     | not null                                                    | 接受时冻结；harness 的累计模型迭代上限                                                                              |
+| `budget_max_tokens`     | `integer`     | not null                                                    | 可得 usage 的起步上限；缺 usage 不冒充可证明费用                                                                    |
+| `execution`             | `text`        | not null, default business                                  | business/harness，禁止执行中切换                                                                                    |
+| `tools_allowlist`       | `jsonb`       | not null, array                                             | 冻结服务端工具范围；历史 business 为[]，不伪造授权                                                                  |
+| `frozen_context`        | `jsonb`       | harness 必须 object                                         | 冻结时间/规则/来源和可选 workspace grant/summary；新委托另冻授权修订、生命周期、trustedExecutionContext，不是推理链 |
+| `input_message_id`      | `uuid`        | nullable FK messages；harness 必填                          | 该 Run 实际接受的用户消息                                                                                           |
+| `waiting_checkpoint_id` | `uuid`        | nullable FK run_checkpoints                                 | 最后有效批准等待点                                                                                                  |
+| `waiting_invocation_id` | `uuid`        | nullable                                                    | 同 Run 已接受批准提议调用                                                                                           |
+| `waiting_approval_id`   | `uuid`        | nullable                                                    | 原冻结批准；当前决议另从公共读取获取                                                                                |
+| `goal_result`           | `jsonb`       | nullable；0021 新增                                         | 根列持久 GoalResult；仅 delegation/1 终态可非空，legacy/历史不回填                                                  |
+| `created_at`            | `timestamptz` | not null, default `now()`                                   | 创建时间                                                                                                            |
+| `ended_at`              | `timestamptz` | nullable                                                    | 结束时间                                                                                                            |
 
 ### 约束与索引
 
@@ -119,7 +120,9 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 
 - [Required] 创建时冻结 execution、owner/conversation、revision、mode、预算、工具范围、上下文与输入引用；0015 trigger 禁止事后改变，终态 Run 不可改写。
 - [Required] harness suspended_approval 时三个 waiting 引用必须齐备；其他 harness 状态必须为空。TS 锁内进一步验证实际 owner/Run/已接受调用/批准对应关系，引用本身不作授权。
-- [Required] 已接受助手 delta 合并的消息、终态 checkpoint、attempt/Run 同事务；无助手输出的结构化失败不合成助手消息。取消不能覆盖已提交事实或伪撤销既成效果。预算失败保留已产出。
+- [Required] legacy 已接受助手 delta 合并的消息、终态 checkpoint、attempt/Run 同事务；无助手输出的结构化失败不合成助手消息。新 delegation 将真实 GoalResult、其 `answer` 最终消息、终结事件和 Run/attempt 终态同事务提交，不把中间 delta 当最终 answer。取消不能覆盖已提交事实或伪撤销既成效果，失败/断连仍保留真实已接受设置收据及未完成或未知项。
+- 新委托在接纳事务冻结 `frozen_context.authorization_revision='delegation/1'`、`execution_lifecycle='request-bound'` 及 `trustedExecutionContext`；HTTP 必须显式请求该修订且为无 workspace 的 harness。可信上下文含版本1、输入消息引用、UTC received/anchor、可空 continuation/时区来源、实际可空 wall_rules；当前 `elapsed_revision:null,workspaces:[]`。它进入 v6 start 的 system 权威层，legacy `trusted_context:null` 保留原能力；不从模型或当前部署补写旧事实。
+- `0021` 在0020之后新增根 `goal_result jsonb NULL`；`0022` 将非空结果约束收紧为明确为真，不能以缺失 legacy 字段产生的 SQL NULL 通过 CHECK。非空值必须是 object、Run 冻结 delegation/1、status 为 done/failed/cancelled，目标状态属于 completed/partial/blocked/cancelled/unknown。strict 逐项 shape、收据归属/成功状态和真实偏好事实由 TS 校验；DB 列本身不证明目标达成。RunView 投影冻结授权/生命周期与根结果，不泄漏完整 trusted context。
 
 ### 提醒请求日期来源（#92）
 
@@ -153,7 +156,7 @@ gateway 读取当前 Run 的持久来源，约束日期表达等于权威原输�
 
 PK 已支持恢复点查，不新增无查询依据的索引。DB 禁 UPDATE/DELETE；应用及约束验证 policy 正安全整数、枚举/null 语义与 owner/Run 一致性。新 Run 与原接纳事务插入；旧 Run 仅在有效显式批准恢复同事务补录，并发唯一，失败全回滚；GET/历史补读不补录。工具权限仍只由原冻结 allowlist 与当前授权决定。
 
-snapshot2 原字段/集合不变，typed views/context_slice 不写入快照正文，accepted_result 不被投影覆写。wire 已随 R2-B 切换为 `harness/v5`，容量/回取合同不变；旧 Run 行为见 design/18 §6、§8；原文其他 v2 记载保留 R1 适用范围，不作为 wire 版本实现证明。后续只新增迁移并同步生命周期基线/扫描规则，不修改已合并迁移，不预占编号。
+snapshot2 原字段/集合不变，typed views/context_slice 不写入快照正文，accepted_result 不被投影覆写。wire 使用配套 `harness/v6`，legacy 显式 trusted_context:null，容量/回取及 design/18 的旧 Run 恢复合同不变；旧版本记载保留其历史适用范围，不作为当前 wire 证明。迁移只前向新增并同步生命周期基线/扫描规则，不修改已合并迁移。
 
 ## `run_attempts`
 

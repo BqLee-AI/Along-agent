@@ -32,7 +32,7 @@ import {
 } from '@/lib/conversation-run';
 import {
   conversationSendBlocked,
-  taskExecution,
+  taskAdmission,
   taskSendEligibility,
   type TaskIntent,
 } from './task-model';
@@ -211,6 +211,16 @@ export function useConversationTask({
     cursors.current.set(rid, Math.max(cursors.current.get(rid) ?? 0, event.seq));
     eventsRef.current = mergeThreadEvents(eventsRef.current, [event]);
     setEvents(eventsRef.current);
+    if (
+      event.protocol_version === 'v2' &&
+      (event.type === 'thread.completed' ||
+        event.type === 'thread.failed' ||
+        event.type === 'thread.cancelled') &&
+      event.payload.goal_result?.status === 'unknown'
+    ) {
+      unknownRef.current = true;
+      setEffectsUnknown(true);
+    }
     if (event.type === 'thread.failed') {
       const detail = event.payload.error;
       if (detail.code === 'TOOL_EFFECT_UNKNOWN') {
@@ -318,6 +328,10 @@ export function useConversationTask({
         if (current.conversation_id !== cid || current.run_id !== target.runId)
           throw new Error('运行身份不匹配，未接纳状态。');
         setRun(current);
+        if (current.goal_result?.status === 'unknown') {
+          unknownRef.current = true;
+          setEffectsUnknown(true);
+        }
         replyPending = current.status === 'running' || current.status === 'suspended_approval';
         const indexed = history.find((item) => item.run_id === current.run_id);
         if (indexed) indexed.status = current.status;
@@ -477,10 +491,11 @@ export function useConversationTask({
           body: {
             raw_text: text,
             conversation_id: conversationRef.current ?? undefined,
-            confirmed_timezone: proposal?.timezone_id ?? me.confirmed_timezone,
+            confirmed_timezone:
+              proposal?.timezone_id ?? (intent === 'chat' ? undefined : me.confirmed_timezone),
             fold_choice: proposal ? foldChoice : undefined,
             clarification_of_run_id: proposal?.source_run_id,
-            execution: taskExecution(intent),
+            ...taskAdmission(intent),
             ...(intent === 'document' ? { workspace_id: workspaceId } : {}),
             idempotency_key: crypto.randomUUID(),
           },

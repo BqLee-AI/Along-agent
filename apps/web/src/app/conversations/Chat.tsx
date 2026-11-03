@@ -8,7 +8,12 @@ import { Button } from '@lorelum/lumen-ui/components/button';
 import { Card } from '@lorelum/lumen-ui/components/card';
 import { useConversationTask } from '@/features/conversations/use-conversation-task';
 import { AssistantMarkdown } from '@/features/conversations/assistant-markdown';
-import { LeaveRunDialog, RunStatusPanel, TaskComposer } from '@/features/conversations/task-views';
+import {
+  GoalResultPanel,
+  LeaveRunDialog,
+  RunStatusPanel,
+  TaskComposer,
+} from '@/features/conversations/task-views';
 import {
   isNearChatBottom,
   messageRunReference,
@@ -29,6 +34,8 @@ export default function Chat({
   const task = useConversationTask({ conversationId, runId, initialIntent });
   const selected = task.selected;
   const transcript = selected ? task.transcript.get(selected.runId) : null;
+  const goalResult = task.run?.goal_result ?? transcript?.goal_result;
+  const replyText = goalResult ? goalResult.answer : transcript?.text;
   const viewport = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const following = useRef(true);
@@ -52,7 +59,7 @@ export default function Chat({
   useLayoutEffect(() => {
     const scroll = viewport.current;
     if (scroll && following.current) scroll.scrollTop = scroll.scrollHeight;
-  }, [task.messages, task.liveOriginal, transcript?.text, task.streaming, task.reading, task.run]);
+  }, [task.messages, task.liveOriginal, replyText, task.streaming, task.reading, task.run]);
   useLayoutEffect(() => {
     const scroll = viewport.current;
     const body = content.current;
@@ -154,8 +161,11 @@ export default function Chat({
                     </div>
                   ) : null}
                   <div className="min-w-0" data-message-role="assistant" aria-busy={task.streaming}>
-                    {transcript?.text ? (
-                      <AssistantMarkdown text={transcript.text} streaming={task.streaming} />
+                    {replyText ? (
+                      <AssistantMarkdown
+                        text={replyText}
+                        streaming={task.streaming && !goalResult}
+                      />
                     ) : null}
                     {task.streaming ? (
                       <p
@@ -166,7 +176,7 @@ export default function Chat({
                         <span className="size-2 rounded-full bg-current" aria-hidden="true" />
                         {transcript?.text ? '正在回复…' : '正在思考…'}
                       </p>
-                    ) : !transcript?.text ? (
+                    ) : !replyText ? (
                       <p className="text-sm text-muted-foreground">
                         尚未收到回复，请核对运行状态。
                       </p>
@@ -238,6 +248,9 @@ export default function Chat({
                           {isSelected ? ' · 当前所选' : ''}
                         </summary>
                         <div className="space-y-4 pt-3">
+                          {!isSelected && reply?.goal_result ? (
+                            <GoalResultPanel result={reply.goal_result} />
+                          ) : null}
                           <Link
                             className="inline-flex min-h-11 items-center text-sm text-primary underline"
                             href={conversationHref(selected.conversationId, entry.runId)}

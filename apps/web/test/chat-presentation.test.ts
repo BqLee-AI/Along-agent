@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { RunViewSchema, type GoalResult } from '@along/contracts';
+import { ThreadEventSchema } from '@along/stream-protocol';
+import { collectRunTranscripts } from '../src/lib/conversation-run';
 import { AssistantMarkdown } from '../src/features/conversations/assistant-markdown';
 import { RunStatusPanel, TaskComposer } from '../src/features/conversations/task-views';
 import type { ConversationTask } from '../src/features/conversations/use-conversation-task';
@@ -98,6 +101,117 @@ describe('assistant Markdown consumer', () => {
     expect(markup).not.toContain('javascript:');
     expect(markup).not.toContain('<img');
     expect(markup).toContain('href="https://example.com/pixel.png"');
+  });
+});
+
+describe('durable goal result consumer', () => {
+  const cid = '11111111-1111-4111-8111-111111111111';
+  const rid = '22222222-2222-4222-8222-222222222222';
+  const receipt = '33333333-3333-4333-8333-333333333333';
+  const result: GoalResult = {
+    status: 'partial',
+    outcomes: [
+      { description: 'Saved Asia/Shanghai', status: 'achieved', receipt_refs: [receipt] },
+      { description: 'Destination unresolved', status: 'blocked', receipt_refs: [] },
+    ],
+    clarification: { kind: 'destination', question: 'Which destination?' },
+    answer: '**Accepted setting remains saved.**',
+  };
+  const run = RunViewSchema.parse({
+    run_id: rid,
+    conversation_id: cid,
+    execution: 'harness',
+    status: 'done',
+    attempt_id: cid,
+    attempt_no: 1,
+    waiting: null,
+    can_resume: false,
+    authorization_revision: 'delegation/1',
+    execution_lifecycle: 'request-bound',
+    goal_result: result,
+  });
+
+  it('renders the admitted lifecycle immediately from a started event before a RunView read', () => {
+    const started = ThreadEventSchema.parse({
+      protocol_version: 'v2',
+      seq: 1,
+      type: 'thread.started',
+      payload: {
+        conversation_id: cid,
+        run_id: rid,
+        stream_protocol_version: 'v2',
+        ruleset_id: 'rules-v1',
+        tzdb_version: '2026a',
+        authorization_revision: 'delegation/1',
+        execution_lifecycle: 'request-bound',
+      },
+      request_id: 'lifecycle-render',
+    });
+    const markup = renderToStaticMarkup(
+      createElement(RunStatusPanel, {
+        task: composerTask({
+          selected: { conversationId: cid, runId: rid },
+          streaming: true,
+          transcript: collectRunTranscripts([started]),
+        }),
+      }),
+    );
+    expect(openingTag(markup, 'request-bound-lifecycle')).not.toContain('<details');
+    expect(markup).not.toContain('data-testid="goal-result"');
+  });
+
+  it('keeps each durable goal status independent of Run done and preserves answer, outcomes, clarification and receipts without executing actions', () => {
+    let actions = 0;
+    for (const status of ['completed', 'partial', 'blocked', 'cancelled', 'unknown'] as const) {
+      const markup = renderToStaticMarkup(
+        createElement(RunStatusPanel, {
+          task: composerTask({
+            selected: { conversationId: cid, runId: rid },
+            run: { ...run, goal_result: { ...result, status } },
+            async send() {
+              actions++;
+            },
+            async resume() {
+              actions++;
+            },
+            async stop() {
+              actions++;
+            },
+            async refresh() {
+              actions++;
+            },
+          }),
+        }),
+      );
+      expect(openingTag(markup, 'goal-result')).toContain(`data-goal-status="${status}"`);
+      expect(openingTag(markup, 'request-bound-lifecycle')).not.toContain('<details');
+      expect(markup).toContain('data-outcome-status="achieved"');
+      expect(markup).toContain('data-outcome-status="blocked"');
+      expect(markup).toContain(result.outcomes[0]!.description);
+      expect(markup).toContain(result.outcomes[1]!.description);
+      expect(markup).toContain(receipt);
+      expect(markup).toContain(result.clarification!.question);
+      expect(markup).toContain('<strong>Accepted setting remains saved.</strong>');
+    }
+    expect(actions).toBe(0);
+  });
+
+  it('does not infer a lifecycle or goal result for a completed legacy Run', () => {
+    const markup = renderToStaticMarkup(
+      createElement(RunStatusPanel, {
+        task: composerTask({
+          selected: { conversationId: cid, runId: rid },
+          run: {
+            ...run,
+            authorization_revision: undefined,
+            execution_lifecycle: undefined,
+            goal_result: undefined,
+          },
+        }),
+      }),
+    );
+    expect(markup).not.toContain('data-testid="request-bound-lifecycle"');
+    expect(markup).not.toContain('data-testid="goal-result"');
   });
 });
 

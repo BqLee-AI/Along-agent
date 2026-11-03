@@ -4,7 +4,7 @@
 >
 > 蓝图引用：B03；B06（v0 Web 单端）。
 
-> Proposed演进：本人时区窄用例及冻结生命周期见 [design/20 §1、§4.1、§6、§8](../../design/20-goal-scoped-delegation.md)。只有server-owned退出/到期不撤接纳执行，request-bound沿原连接策略；禁用阻止新动作。单次时区不保存，不新增通用账户patch/认证端点，本页固定会话/撤销/CSRF及只读重登保持，规范不启用能力。
+> 本人时区委托（#107）：identity 的窄用例已支持保存/清除本人默认时区，与工具接受结果及审计原子提交，见 [design/20 §4.1、§6.1、§8](../../design/20-goal-scoped-delegation.md)。当前仅显式新 delegation profile 可直接调用，不新增通用账户 patch、偏好 HTTP 写端点或批准按钮。新 Run 为 request-bound，退出/到期不承诺后台继续；已接受设置不回滚。后续 server-owned 目标不改变本页固定会话、撤销、CSRF 及只读重登合同。
 
 ## 1. 方案状态 [Required]
 
@@ -39,8 +39,9 @@
 
 - `user.id`：多租户隔离键，后续所有资源按此过滤 [Required]。
 - `csrf_token`：签名会话下发字符串，后续 POST 在 `X-CSRF-Token` 头回传。显式受控开发桥接可返回 `null`；客户端仍按完整 `Me` 合同判断身份有效，仅在 token 非 `null` 时添加该头，不把合法 `null` 当作登录失败，也不能借此绕过签名会话的 CSRF 校验 [Required]。
-- `confirmed_timezone`：用户已确认时区（缺失则为 `null`，前端引导确认；“明天”解析依赖此值冻结，见 conversations 文档）[Required]。
+- `confirmed_timezone`：identity 当前保存的本人默认时区，未设置或已清除为 `null`。GET 只读取、不保存偏好；Web 普通 Agent 不把缓存值当作新的明确时区提示，而由接纳事务读取实际偏好。legacy 提醒入口仍沿既有冻结/澄清合同 [Required]。
 - [Deferred] 不返回：session 过期时间、provider 信息、权限列表（v0 无 RBAC，owner 即全权）。
+- 本人目标内的 `set_user_timezone` 使用 strict `{timezone_id:string|null}`：非 null 值只经应用实际已有别名表和有限规则包校验、转为规范 ID，不承诺完整 IANA；未知/不支持值报 `UNKNOWN_TIMEZONE`，保存所需规则不可用报 `TZDB_UNAVAILABLE`，均不写入。`null` 为真实清除，可在规则不可用时清除。identity 锁定并校验 active 本人行后更新，工具同事务保存 `{kind:'timezone_setting',timezone_id,previous_timezone_id,alias_version}` 接受结果与审计；owner 来自受信 Run，不由模型指定，不以单次时区提示自动保存。
 
 失败：
 

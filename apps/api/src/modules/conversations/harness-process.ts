@@ -153,7 +153,19 @@ export async function runNativeHarness(options: NativeHarnessOptions): Promise<v
         }
         frameBytes = 0;
         const parsed = HarnessRequestSchema.safeParse(value);
-        if (!parsed.success || seenReferences.has(parsed.data.request_ref)) throw protocolError();
+        if (!parsed.success) {
+          const fields = parsed.error.issues
+            .slice(0, 4)
+            .map((issue) => `${issue.path.join('.')}:${issue.code}`)
+            .join(', ');
+          throw new HttpError(
+            502,
+            502,
+            'HARNESS_PROTOCOL_ERROR',
+            `harness frame schema rejected (${fields})`,
+          );
+        }
+        if (seenReferences.has(parsed.data.request_ref)) throw protocolError();
         const request = parsed.data;
         seenReferences.add(request.request_ref);
         let reply: unknown;
@@ -166,7 +178,10 @@ export async function runNativeHarness(options: NativeHarnessOptions): Promise<v
             reply_to: request.request_ref,
             value: result,
           };
-          terminal = request.type === 'suspend' || request.type === 'finish';
+          terminal =
+            request.type === 'suspend' ||
+            request.type === 'finish' ||
+            request.type === 'finish_goal';
         } catch (error) {
           if (!(error instanceof HttpError)) throw error;
           reply = {
@@ -183,7 +198,20 @@ export async function runNativeHarness(options: NativeHarnessOptions): Promise<v
       if (signal.aborted) break;
     }
     if (signal.aborted) return;
-    if (frameBytes !== 0 || !terminal) throw protocolError();
+    if (frameBytes !== 0)
+      throw new HttpError(
+        502,
+        502,
+        'HARNESS_PROTOCOL_ERROR',
+        'harness ended with an incomplete frame',
+      );
+    if (!terminal)
+      throw new HttpError(
+        502,
+        502,
+        'HARNESS_PROTOCOL_ERROR',
+        'harness ended without terminal control',
+      );
     const exit = await completion;
     if (spawnFailed) throw new HttpError(503, 503, 'HARNESS_UNAVAILABLE', 'harness unavailable');
     if (transportFailed || exit.code !== 0 || exit.signal !== null) {

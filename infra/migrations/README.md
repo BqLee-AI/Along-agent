@@ -44,3 +44,10 @@
 - `policy_hash` 为 `SHA-256(UTF8("harness/context-policy/v1\\0" + canonical_json))` 的64位小写十六进制；域末尾为实际 NUL。规范 JSON 对所有 policy 字段及嵌套 `model_binding` 使用字典序键、无格式空格，字符串不做 Unicode/空白归一化。应用 strict 解析并核验摘要，DB 固定摘要格式与行不可变性；不能用部署新值覆盖原策略。
 - 停旧写者、备份后通过原显式 `local:upgrade` 升级至0019，再同批发布 harness/v4 TS/native 消费者。事务失败保持0018原事实，修复后重试；接纳新事实后停写并前滚，不删策略或接受结果兼容旧二进制。
 - `scripts/local/baselines/0019-checks.json` 延续原增量只读核验，检查真实列、PK/FK/check、函数原文/属性、owner与禁改trigger；无版本对象、伪版本、禁用/缺失trigger、弱化validator或错误FK均拒绝，不自动修复。扫描只放行精确文件名 `0019_conversation_context_policies.sql`。生命周期烟测保留0016/0017/0018固定目录，新增0018→0019事实保留、零策略回填、两次零DDL重启及损坏拒绝场景；集成测试覆盖并发唯一、回滚、只读零写与63＋1完整冻结。新增检查尚须主线程统一执行，不将测试存在视为已通过。
+
+## 0021/0022：可信委托目标结果
+
+- 0021 在 `agent_runs` 增加可空 `goal_result`，不回填历史 Run、消息、批准或接受结果。非空结果只属于冻结 `delegation/1` 的终态 Run；目标内容、成功回执归属与完整性由 conversations 验证，不以 Run 终态替代目标结果。
+- 0022 前向替换结果 CHECK，要求条件 `IS TRUE`，避免缺少授权修订或目标状态时 SQL NULL 被 CHECK 放过；0021 已应用也不回改旧迁移。缺字段、JSON null、非终态和错误修订均不能取得非空结果资格。
+- 原显式 `local:upgrade` 支持已核实0016–0021升级至0022；原目录/账本与只读 baseline 核验保留，历史事实不迁写，漂移仍拒绝。版本账、DDL与新约束同事务提交，失败停写，不删除既成结果或降版。
+- API/native/shared/Web 配套使用 `harness/v6`、snapshot2和新委托 SSE v2，legacy保持冻结范围与严格v1历史。真实 PG 生命周期覆盖逐版本升级、零回填、重启及NULL边界；偏好领域写入、接受结果与审计原子性由工具集成覆盖。
