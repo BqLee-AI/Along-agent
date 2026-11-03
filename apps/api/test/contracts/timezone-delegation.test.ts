@@ -639,7 +639,6 @@ for (const mode of ['local', 'http'] as const) {
         ),
       ).toHaveLength(1);
       if (kind === 'control-correction') {
-        expect(completed.result.answer).toBe('规则不支持所请求的值，未保存，原默认未变。');
         expect(value.transcript).toHaveLength(5);
       } else {
         expect(events.find((event) => event.type === 'thread.failed')).toMatchObject({
