@@ -61,14 +61,32 @@ maybe('business Run terminal accounting after account deactivation', () => {
     it(`records failure without disclosing further events when disabled ${order}`, async () => {
       const { deps, ownerId, context } = await accept();
       const events: ThreadEvent[] = [];
+      let deactivation: Promise<unknown> | undefined;
+      const gatedPool = new Proxy(pool, {
+        get(target, property) {
+          if (property === 'connect')
+            return async () => {
+              // The first event's transaction must release its authorization
+              // lock before deactivation can commit. Gate the next transaction,
+              // rather than waiting inside the writer that holds that lock.
+              await deactivation;
+              return target.connect();
+            };
+          const value = Reflect.get(target, property);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
       if (order === 'before-execution')
         await pool.query("UPDATE users SET status = 'disabled' WHERE id = $1", [ownerId]);
-      await executeRun(deps, context, async (event) => {
+      await executeRun({ ...deps, pool: gatedPool }, context, async (event) => {
         events.push(event);
         if (order === 'after-started' && event.type === 'thread.started')
-          await pool.query("UPDATE users SET status = 'disabled' WHERE id = $1", [ownerId]);
+          deactivation = pool.query("UPDATE users SET status = 'disabled' WHERE id = $1", [
+            ownerId,
+          ]);
         return true;
       });
+      await deactivation;
 
       expect(events.map((event) => event.type)).toEqual(
         order === 'before-execution' ? [] : ['thread.started'],
@@ -81,6 +99,163 @@ maybe('business Run terminal accounting after account deactivation', () => {
       expect(stored.map((event) => event.type)).toEqual(
         order === 'before-execution' ? ['thread.failed'] : ['thread.started', 'thread.failed'],
       );
+      expect(stored.at(-1)?.payload).toMatchObject({
+        conversation_id: context.conversationId,
+        run_id: context.runId,
+        error: { code: 'INTERNAL_ERROR' },
+      });
+    });
+  }
+
+  it('finishes an in-flight write before deactivation commits and suppresses later content', async () => {
+    const { deps, ownerId, context } = await accept();
+    const disabler = await pool.connect();
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const events: ThreadEvent[] = [];
+    let disabling: Promise<void> | undefined;
+    let execution: Promise<void> | undefined;
+    let disableCommitted = false;
+    const gatedPool = new Proxy(pool, {
+      get(target, property) {
+        if (property === 'connect')
+          return async () => {
+            await disabling;
+            return target.connect();
+          };
+        const value = Reflect.get(target, property);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+
+    try {
+      const pid = (await disabler.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]!
+        .pid;
+      await disabler.query('BEGIN');
+      execution = executeRun({ ...deps, pool: gatedPool }, context, async (event) => {
+        events.push(event);
+        if (event.type === 'thread.started') {
+          entered.resolve();
+          await release.promise;
+        }
+        return true;
+      });
+      await Promise.race([
+        entered.promise,
+        execution.then(() => {
+          throw new Error('Run ended before the first write');
+        }),
+      ]);
+      disabling = (async () => {
+        await disabler.query("UPDATE users SET status = 'disabled' WHERE id = $1", [ownerId]);
+        await disabler.query('COMMIT');
+        disableCommitted = true;
+      })();
+
+      const deadline = Date.now() + 5000;
+      let blocked = false;
+      while (Date.now() < deadline) {
+        const result = await pool.query<{ blocked: boolean }>(
+          'SELECT cardinality(pg_blocking_pids($1)) > 0 AS blocked',
+          [pid],
+        );
+        if (result.rows[0]?.blocked) {
+          blocked = true;
+          break;
+        }
+        if (disableCommitted) break;
+      }
+      expect(blocked).toBe(true);
+      expect(events.map((event) => event.type)).toEqual(['thread.started']);
+
+      release.resolve();
+      await disabling;
+      await execution;
+      expect(events.map((event) => event.type)).toEqual(['thread.started']);
+      expect(await statuses(context.runId, context.attemptId)).toEqual({
+        run_status: 'failed',
+        attempt_status: 'failed',
+      });
+      expect(
+        (await listRunEvents(pool, ownerId, context.runId)).map((event) => event.type),
+      ).toEqual(['thread.started', 'thread.failed']);
+    } finally {
+      release.resolve();
+      await disabling?.catch(() => {});
+      await execution?.catch(() => {});
+      await disabler.query('ROLLBACK');
+      disabler.release();
+    }
+  });
+
+  for (const target of ['thread.started', 'thread.failed'] as const) {
+    it(`does not disclose ${target} after deactivation commits during delivery`, async () => {
+      const { deps, ownerId, context } = await accept();
+      const delivered: Array<{ type: ThreadEvent['type']; disabled: boolean }> = [];
+      let disabled = false;
+      let intercepted = false;
+
+      // Decorate only checked-out connections; all queries and commits still run
+      // against PostgreSQL. A successful eligibility result and the target
+      // checkpoint identify the relevant transaction, not a query count.
+      const guardedPool = new Proxy(pool, {
+        get(targetPool, property) {
+          if (property === 'connect')
+            return async () => {
+              const client = await targetPool.connect();
+              let authorized = false;
+              return new Proxy(client, {
+                get(connection, key) {
+                  if (key === 'query')
+                    return async (text: string, values?: unknown[]) => {
+                      if (text === 'BEGIN') authorized = false;
+                      if (text === 'COMMIT' && authorized && !intercepted) {
+                        const checkpoints = await listRunEvents(connection, ownerId, context.runId);
+                        if (checkpoints.some((event) => event.type === target)) {
+                          intercepted = true;
+                          const result = await connection.query(text, values);
+                          // A separate transaction must commit before the
+                          // application receives this commit acknowledgement.
+                          await pool.query("UPDATE users SET status = 'disabled' WHERE id = $1", [
+                            ownerId,
+                          ]);
+                          disabled = true;
+                          return result;
+                        }
+                      }
+                      const result = await connection.query(text, values);
+                      if (
+                        result.rows.some((row) => row.status === 'active' && row.admitted === true)
+                      )
+                        authorized = true;
+                      return result;
+                    };
+                  const value = Reflect.get(connection, key);
+                  return typeof value === 'function' ? value.bind(connection) : value;
+                },
+              });
+            };
+          const value = Reflect.get(targetPool, property);
+          return typeof value === 'function' ? value.bind(targetPool) : value;
+        },
+      });
+
+      await executeRun({ ...deps, pool: guardedPool }, context, async (event) => {
+        if (target === 'thread.failed' && event.type === 'thread.started')
+          throw new Error('writer failure');
+        delivered.push({ type: event.type, disabled });
+        return true;
+      });
+
+      expect(intercepted).toBe(true);
+      expect(disabled).toBe(true);
+      expect(delivered.filter((event) => event.disabled)).toEqual([]);
+      expect(await statuses(context.runId, context.attemptId)).toEqual({
+        run_status: 'failed',
+        attempt_status: 'failed',
+      });
+      const stored = await listRunEvents(pool, ownerId, context.runId);
+      expect(stored.at(-1)?.type).toBe('thread.failed');
       expect(stored.at(-1)?.payload).toMatchObject({
         conversation_id: context.conversationId,
         run_id: context.runId,

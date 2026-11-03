@@ -41,7 +41,7 @@
 | 18   | [R2-A 单 Run 有界上下文](design/18-r2a-harness-context.md)               | #83 四种额度、可信计量与未知输入的后验超额边界、不可变策略、来源投影/分页回取及有界批准恢复；实现、受控消费者、真实模型分级取证         |
 | 19   | [R2-B 有限只读意图路由](design/19-r2b-readonly-intent-routing.md)        | #88：BGE INT8、三类只读、仓颉首轮决议、默认关闭、来源/资产/落盘原子性与逐意图验证；当前配套 v6 保留 legacy 路由合同，不自动接管         |
 | 20   | [本人目标内委托与授权](design/20-goal-scoped-delegation.md)              | 本人时区保存/清除与明确墙上提醒直接创建、冻结实际能力、v6 可信上下文、SSE v2/GoalResult 与 request-bound；elapsed/文件/后台仍为目标合同 |
-| 21   | [受邀账户准入与恢复](design/21-invited-account-access.md)                | #112 显式准入/有限管理、加密联系人、邀请/恢复/会话与前向升级；隔离实现证据与真实外部放行分列                                            |
+| 21   | [受邀账户准入与恢复](design/21-invited-account-access.md)                | #112 显式准入/有限管理、停用后的流式披露边界、邀请/恢复/会话与前向升级；隔离实现证据与真实外部放行分列                                  |
 
 活动列表为空与历史创建事实、批量请求部分完成及标题序号的证据边界见[design/09 §5](design/09-agent-runtime-and-checkpoint.md#5-toolgateway-交互required)。
 

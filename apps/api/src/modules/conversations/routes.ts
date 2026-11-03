@@ -29,6 +29,7 @@ import type { StartResult } from './contracts.js';
 import type { HarnessServices } from './harness-process.js';
 import type { TimeContext } from '../time/context.js';
 import type { RoutingRuntime } from './routing/index.js';
+import { writeAuthorizedEvent } from './stream-authorization.js';
 import {
   getConversationList,
   getConversationMessages,
@@ -75,6 +76,7 @@ async function streamRun(
   res: ServerResponse,
   deps: RouteDeps,
   started: StartResult,
+  ownerId: string,
   requestId: string,
 ): Promise<void> {
   res.writeHead(200, {
@@ -85,7 +87,17 @@ async function streamRun(
   });
   res.flushHeaders?.();
   if (started.replay) {
-    for (const event of started.replay) if (!writeEvent(res, event)) break;
+    if (!deps.pool) throw new Error('database unavailable');
+    for (const event of started.replay)
+      if (
+        !(await writeAuthorizedEvent(
+          deps.pool,
+          ownerId,
+          async (item) => writeEvent(res, item),
+          event,
+        ))
+      )
+        break;
     res.end();
     return;
   }
@@ -138,7 +150,7 @@ export async function handleConversationRoute(
         deps.body,
         idempotencyKeyOf(req),
       );
-      await streamRun(req, res, deps, started, requestId);
+      await streamRun(req, res, deps, started, actor.ownerId, requestId);
       return true;
     }
 
@@ -193,7 +205,7 @@ export async function handleConversationRoute(
             requestId,
             deps.body,
           );
-          await streamRun(req, res, deps, started, requestId);
+          await streamRun(req, res, deps, started, actor.ownerId, requestId);
         }
         return true;
       }

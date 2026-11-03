@@ -61,6 +61,7 @@ import { insertRoutingPolicy } from './routing-checkpoints.js';
 import { routingRuntimeOf } from './harness-config.js';
 import { acceptReminderDate } from './reminder-date.js';
 import { isActiveOwner, readUserPreferences } from '../identity/preferences.js';
+import { writeAuthorizedEvent } from './stream-authorization.js';
 
 const AGENT_REVISION = 'assistant/r1';
 const BUSINESS_MAX_ITERATIONS = 10;
@@ -794,12 +795,14 @@ export async function executeRun(
   signal?: AbortSignal,
 ): Promise<void> {
   const pool = requirePool(deps);
+  const authorizedWrite: EventWriter = (event) =>
+    writeAuthorizedEvent(pool, context.ownerId, write, event);
   const execution = await withTransaction(
     pool,
     async (client) => (await lockRun(client, context, true, false)).run.execution,
   );
   if (execution === 'harness') {
-    await executeHarness(deps, context, write, signal);
+    await executeHarness(deps, context, authorizedWrite, signal);
     return;
   }
   const session: RunSession = {
@@ -807,7 +810,7 @@ export async function executeRun(
     terminal: false,
   };
   try {
-    await executeBusinessTurn(pool, session, write);
+    await executeBusinessTurn(pool, session, authorizedWrite);
   } catch {
     if (session.terminal) return;
     // Accounting for an already accepted attempt must survive revocation,
@@ -827,7 +830,7 @@ export async function executeRun(
       });
       session.terminal = true;
       await withTransaction(pool, (client) => lockRun(client, context, false));
-      await write(failed);
+      await authorizedWrite(failed);
     } catch {
       if (session.terminal) return;
     }
