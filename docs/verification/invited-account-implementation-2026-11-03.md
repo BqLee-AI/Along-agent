@@ -9,6 +9,10 @@
 
 > 迁移序号整合说明：以下执行记录保留当时账户分支的 `0022→0023` 与93列实况。合入主线时，主线 `0023` 已用于直接创建提醒，账户迁移改为 `0024_invited_accounts.sql`，以主线0023结构事实加账户事实形成0024基线；本次重排不将旧记录视为新序号或合并基线已验证的证据。
 
+实现提交 `ea742e3c9047aead0ed28f3eb284d2fcfecdca10` 的 [PR #115](https://github.com/BqLee-AI/Along-agent/pull/115) / [CI run41588956058](https://github.com/BqLee-AI/Along-agent/actions/runs/41588956058)：`static`、`migration-scan`、`scheduler-fault`、`contracts-dual`、`compose-smoke` 五项均 success。此记录固定该实现版本；记录/任务同步后的最终head另由同一PR checks核验，不把旧head绿色转移给新head。没有把CodeRabbit状态当成人工独立批准。
+
+任务独占PG与所有父线程验证容器/三个image标签已清理；两个早期失败尝试遗留的key夹具目录只核对文件名后删除、未读取密钥内容。保留脱敏生命周期/浏览器证据与D盘固定Bun缓存，不清理其他工具或用户共享缓存。
+
 ## 实现与职责
 
 | 用户可观察能力                     | 实现位置与不变量                                                                                                                                                        |

@@ -30,7 +30,7 @@
 - [x] 3.3 A3、D1/D3/D9：真实多连接/进程验证停用先提交无新许可/接收，许可先提交如实在途；独立接收无锁环，取消门/真实回执/unknown 不重发不回归，历史匹配接收只核对。六项资格竞争、32项指定调度/故障及原生撤销终态消费者均通过。
 - [ ] 3.4 D6/D8/D10：真实成功/拒绝/超时/接受未知的邮件状态准确，预览/GET 零消费，日志/URL/浏览器持久存储无秘密；生产域 HTTPS/Secure Cookie 与 localhost 分开取证；403/503 不跳、重登后只有 GET，真实可访问页面/密码管理器属性与键盘粘贴可用。
 - [x] 3.5 D7/D8：合法0022旧副本升级、两个坏结构副本拒绝、真实故障后前向重试与两次正式启停、原事实和有限registry保留证据齐全；不是PG reconnect。正式入口/宿主路径适配与复用工件的范围在实现验证中明确。
-- [ ] 3.6 集成负责人在最终版本统一执行 `bun run verify`、`bun run test:contracts`、相关 `bun run test:integration`、`bun run test:scheduler`、OpenSpec strict 和 CI 五门，分别关联本地/隔离/生产证据及未覆盖项。
+- [x] 3.6 集成负责人执行 `bun run verify`、`bun run test:contracts`、相关 `bun run test:integration`、`bun run test:scheduler`、OpenSpec strict，首实现精确head五门CI通过；版本化证据见P1实现验证，最终文档head的同名五门在PR #115核验，不沿用旧head或P0绿色。本地/隔离/生产范围及未覆盖项分列。
 - [ ] 3.7 全部旅程/隔离/旧安装/外部证据与独立评审齐全后才放行邀请入口；独立收口 PR 执行 `openspec archive productize-invited-accounts`、同步有效 specs 与索引，最后关闭 #112。P0 不勾选此项。
 
 ## P0 Verification（2026-11-03）
