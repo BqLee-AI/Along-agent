@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { chmod, link, lstat, mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -54,6 +54,19 @@ const configSchema = z
     tzdbVersion: text,
     model: modelSchema.nullable(),
     registryFile: text.refine((value) => isAbsolute(value)).nullable(),
+    identityKeyringFile: text
+      .refine((value) => isAbsolute(value))
+      .nullable()
+      .optional(),
+    identityMail: z
+      .object({
+        provider: z.literal('resend'),
+        from: text,
+        apiKey: text,
+      })
+      .strict()
+      .nullable()
+      .optional(),
   })
   .strict();
 
@@ -128,6 +141,10 @@ export function createConfig(input) {
     tzdbVersion: values.tzdbVersion,
     model: values.model ?? null,
     registryFile: values.registryFile ?? null,
+    ...(values.identityKeyringFile !== undefined
+      ? { identityKeyringFile: values.identityKeyringFile }
+      : {}),
+    ...(values.identityMail !== undefined ? { identityMail: values.identityMail } : {}),
     origin: values.origin ?? `http://127.0.0.1:${webPort}`,
     ports: {
       postgres: values.ports?.postgres ?? 55432,
@@ -233,11 +250,19 @@ export async function loadConfig(file) {
   }
 }
 /** Read without normalization or rewriting; caller may preserve the original file bytes. */
-export async function loadPrivateJson(file) {
+export async function loadPrivateJsonSnapshot(file) {
   const target = resolve(file);
   const status = await checkRegularFile(target);
   await assertPrivate(target, status);
-  return JSON.parse(await readFile(target, 'utf8'));
+  const bytes = await readFile(target);
+  return {
+    value: JSON.parse(bytes.toString('utf8')),
+    version: createHash('sha256').update(bytes).digest('hex'),
+  };
+}
+
+export async function loadPrivateJson(file) {
+  return (await loadPrivateJsonSnapshot(file)).value;
 }
 
 export async function saveConfig(file, config, options = {}) {
@@ -245,7 +270,7 @@ export async function saveConfig(file, config, options = {}) {
 }
 
 /** Private JSON publication shared by configuration and host registry maintenance. */
-export async function savePrivateJson(file, value, { exclusive = false } = {}) {
+export async function savePrivateJson(file, value, { exclusive = false, expectedVersion } = {}) {
   let temporary;
   let handle;
   try {
@@ -260,6 +285,11 @@ export async function savePrivateJson(file, value, { exclusive = false } = {}) {
     await handle.sync();
     await handle.close();
     handle = null;
+    if (
+      expectedVersion !== undefined &&
+      (await loadPrivateJsonSnapshot(target)).version !== expectedVersion
+    )
+      throw new LocalConfigError('CONFIG_VERSION_CONFLICT');
     if (exclusive) {
       // Atomic no-clobber publication; access()+rename() would race another init.
       await link(temporary, target);
@@ -292,9 +322,24 @@ const fixedFields = [
  * @param {(current: LocalConfig) => LocalConfig | Promise<LocalConfig>} fn
  * @returns {Promise<LocalConfig>}
  */
-export async function updateConfig(file, fn) {
+export async function updateConfig(file, fn, { expectedVersion } = {}) {
   return withInstallationLock(file, async () => {
-    const original = await loadConfig(file);
+    let before;
+    try {
+      before = await loadPrivateJsonSnapshot(file);
+    } catch (error) {
+      if (error instanceof LocalConfigError) throw error;
+      throw new LocalConfigError(
+        error.code === 'ENOENT'
+          ? 'CONFIG_MISSING'
+          : error instanceof SyntaxError
+            ? 'CONFIG_INVALID'
+            : 'CONFIG_READ_FAILED',
+      );
+    }
+    if (expectedVersion !== undefined && before.version !== expectedVersion)
+      throw new LocalConfigError('CONFIG_VERSION_CONFLICT');
+    const original = validateConfig(before.value);
     let next;
     try {
       next = validateConfig(await fn(structuredClone(original)));
@@ -306,7 +351,7 @@ export async function updateConfig(file, fn) {
       if (JSON.stringify(original[field]) !== JSON.stringify(next[field]))
         throw new LocalConfigError('CONFIG_IDENTITY_IMMUTABLE');
     }
-    await saveConfig(file, next);
+    await saveConfig(file, next, { expectedVersion: before.version });
     return next;
   });
 }

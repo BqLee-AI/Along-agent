@@ -1,3 +1,4 @@
+import { admitTestUser } from './setup.js';
 // Issue #9: conversation SSE contract — deterministic triage, approval
 // cards, typed time failures, budget, idempotent replay,
 // after_seq cursor, disconnect cancellation, cancel approvals via tool call.
@@ -60,6 +61,7 @@ async function seedUser(pool: Pool): Promise<string> {
      VALUES ($1, $2, 'tester', 'Asia/Shanghai')`,
     [id, `tester-${id}@along.test`],
   );
+  await admitTestUser(pool, id);
   return id;
 }
 

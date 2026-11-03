@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { authStatusSchema } from '@along/contracts';
+import { authStatusSchema, AccountViewSchema } from '@along/contracts';
 import { PageHeading } from '@/components/page';
 import { Badge } from '@lorelum/lumen-ui/components/badge';
 import { Button } from '@lorelum/lumen-ui/components/button';
@@ -8,6 +8,7 @@ import { loginHref, safeReturnTo } from '../../lib/account-navigation';
 import { MeSchema } from '../../lib/types';
 import AccountForm from './AccountForm';
 import { AccountMaintenance, AccountReadError, AccountStatusNotice } from './AccountSupport';
+import AccountDashboard from './AccountDashboard';
 
 type AccountView = 'account' | 'login' | 'setup' | 'claim' | 'logout';
 
@@ -109,7 +110,6 @@ export default async function AccountScreen({
             </Button>
           ) : null}
         </div>
-        <AccountMaintenance />
       </AccountFrame>
     );
   }
@@ -177,10 +177,16 @@ export default async function AccountScreen({
             登录遇到问题？
           </summary>
           <div className="space-y-3 pb-1 pt-3 leading-6 text-muted-foreground">
-            <p>请使用此安装已设置的管理员用户名和密码，用户名不是邮箱，不区分大小写。</p>
+            <p>可明确选择用户名或已验证联系邮箱登录；用户名不区分大小写。</p>
             <p>
-              支持密码管理器自动填充和粘贴。此安装不开放公众注册或在线找回密码；如需帮助，请联系部署者通过原安装的本机维护入口处理。
+              支持密码管理器自动填充和粘贴。不开放公众注册；受邀者通过邮件链接设置账户后正式登录。
             </p>
+            <a
+              className="inline-flex min-h-11 items-center text-primary underline"
+              href="/forgot-password"
+            >
+              使用已验证邮箱找回密码
+            </a>
             <p>
               登录成功后返回{category}
               ，不会自动发送消息或提交批准等操作。登录请求的口令不会保存在本应用中。
@@ -238,7 +244,6 @@ export default async function AccountScreen({
             </Button>
           ) : null}
         </div>
-        <AccountMaintenance />
       </AccountFrame>
     );
   }
@@ -431,111 +436,26 @@ export default async function AccountScreen({
         <Button role="link" nativeButton={false} render={<a href={loginHref(destination)} />}>
           正式登录
         </Button>
-        <AccountMaintenance />
       </AccountFrame>
     );
   }
-  const workspace = status.workspace_state;
-  const workspaceLabel =
-    workspace === 'loaded'
-      ? '登记已加载'
-      : workspace === 'unconfigured'
-        ? '尚未配置'
-        : workspace === 'invalid'
-          ? '登记无效'
-          : workspace === 'unreadable'
-            ? '登记不可读'
-            : '状态未知';
-  const workspaceMessage =
-    workspace === 'loaded'
-      ? '仅表示资料工作区登记已加载，不证明模型、文件存在或所有资料能力可用。实际资料范围以任务入口读取的登记为准。'
-      : workspace === 'unconfigured'
-        ? '账户已配置，资料工作区尚未配置。原身份和历史仍然保留。'
-        : workspace === 'invalid'
-          ? '资料工作区登记无效，请部署者检查原配置；账户和历史仍然保留。'
-          : workspace === 'unreadable'
-            ? '资料工作区登记不可读，请部署者检查原安装；账户和历史仍然保留。'
-            : '当前响应没有提供可核验的工作区状态，不能认定资料或模型能力已就绪。';
-  return (
-    <AccountFrame
-      view="account"
-      title={titles.account}
-      description="确认当前身份、会话边界与原安装的资料登记状态。"
-    >
-      <section className="space-y-4 p-4 sm:p-6" aria-labelledby="account-identity-title">
-        <h2 id="account-identity-title" className="text-sm font-medium text-muted-foreground">
-          当前账户的展示名
-        </h2>
-        <p className="text-2xl font-semibold leading-9">{actor.user.display_name}</p>
-        <Badge variant="flat">{actor.csrf_token !== null ? '签名会话已核验' : '开发桥身份'}</Badge>
-        <p className="text-base leading-7 text-muted-foreground">
-          {actor.csrf_token !== null
-            ? '正式会话固定七天到期，读取页面不会续期。退出只撤销当前会话，不删除原身份或历史。'
-            : '此身份不提供会话绑定的 CSRF 凭据，不能用于原账户转正或撤销正式会话。请部署者关闭开发桥并使用正式登录。'}
-        </p>
-        <details className="text-sm">
-          <summary className="flex min-h-11 cursor-pointer items-center text-primary underline-offset-4 hover:underline focus-visible:rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-            技术信息
-          </summary>
-          <dl className="space-y-2 leading-6">
-            <dt className="text-muted-foreground">完整身份标识</dt>
-            <dd className="select-text font-mono">{actor.user.id}</dd>
-            <dt className="text-muted-foreground">已确认时区</dt>
-            <dd>{actor.confirmed_timezone ?? '未确认；不会以浏览器时区补写提醒'}</dd>
-          </dl>
-        </details>
-      </section>
-      <section className="space-y-3" aria-labelledby="account-workspace-title">
-        <div className="flex flex-wrap items-center gap-3">
-          <h2 id="account-workspace-title" className="text-lg font-semibold">
-            资料工作区
-          </h2>
-          <Badge variant="glass">{workspaceLabel}</Badge>
-        </div>
-        <p className="text-base leading-7 text-muted-foreground">{workspaceMessage}</p>
-      </section>
-      <AccountMaintenance />
-      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-        <Button
-          variant="glass"
-          color="default"
-          role="link"
-          nativeButton={false}
-          render={<a href="/account" />}
-        >
-          重新读取状态
-        </Button>
-        <Button
-          variant="clear"
-          color="default"
-          role="link"
-          nativeButton={false}
-          render={<a href="/" />}
-        >
-          返回今日
-        </Button>
-        {actor.csrf_token !== null ? (
-          <Button
-            variant="clear"
-            color="default"
-            role="link"
-            nativeButton={false}
-            render={<a href="/logout" />}
-          >
-            退出当前会话
-          </Button>
-        ) : (
-          <Button
-            variant="clear"
-            color="default"
-            role="link"
-            nativeButton={false}
-            render={<a href={loginHref('/account')} />}
-          >
-            使用正式登录
-          </Button>
-        )}
-      </div>
-    </AccountFrame>
-  );
+  const accountResult = await apiGet<unknown>('/api/v1/auth/account', '/account');
+  const account = accountResult.ok ? AccountViewSchema.safeParse(accountResult.data) : null;
+  if (!accountResult.ok || !account?.success || actor.csrf_token === null) {
+    return (
+      <AccountFrame
+        view="account"
+        title="账户"
+        description="账户资料暂时无法核验；不会将读取失败视为成功或执行任何写入。"
+      >
+        <AccountReadError
+          failure={accountResult.ok ? { status: 200, code: null, requestId: null } : accountResult}
+        />
+        <a className="inline-flex min-h-11 items-center text-primary underline" href="/account">
+          重新读取账户
+        </a>
+      </AccountFrame>
+    );
+  }
+  return <AccountDashboard account={account.data} csrfToken={actor.csrf_token} />;
 }

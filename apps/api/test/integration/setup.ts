@@ -1,8 +1,53 @@
 import { randomUUID } from 'node:crypto';
-import { readdir, readFile } from 'node:fs/promises';
-import { Pool } from 'pg';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { Pool, type PoolClient } from 'pg';
 import { createPool } from '../../src/db/pool.js';
 import { computePresentationHash } from '../../src/modules/approvals/presentation.js';
+import {
+  seedSession as seedLegacySession,
+  type SeededSession,
+  type SeedSessionOptions,
+} from '../../src/modules/identity/seed.js';
+import { identityKeyfileFixture } from '../helpers/identity-security.js';
+
+const originalKeyfile = process.env.IDENTITY_KEYRING_FILE;
+const activeKeyfiles = new Map<string, string>();
+
+async function acquireTestKeys(): Promise<() => Promise<void>> {
+  const root = process.platform === 'win32' ? 'D:/Temp' : (process.env.TMPDIR ?? tmpdir());
+  const directory = await mkdtemp(join(root, 'along-112-integration-keys-'));
+  const file = join(directory, 'identity-keys.json');
+  await writeFile(file, JSON.stringify(identityKeyfileFixture()), { mode: 0o600 });
+  activeKeyfiles.set(directory, file);
+  process.env.IDENTITY_KEYRING_FILE = file;
+  return async () => {
+    activeKeyfiles.delete(directory);
+    const latest = [...activeKeyfiles.values()].at(-1) ?? originalKeyfile;
+    if (latest === undefined) delete process.env.IDENTITY_KEYRING_FILE;
+    else process.env.IDENTITY_KEYRING_FILE = latest;
+    await rm(directory, { recursive: true, force: true });
+  };
+}
+
+/** Explicit test authorization; production seeds deliberately remain unadmitted. */
+export async function admitTestUser(pool: Pool | PoolClient, userId: string): Promise<void> {
+  await pool.query(
+    `INSERT INTO identity_account_admissions(user_id,source,admitted_at)
+     VALUES($1,'local_maintenance',clock_timestamp()) ON CONFLICT(user_id) DO NOTHING`,
+    [userId],
+  );
+}
+
+export async function seedAdmittedSession(
+  pool: Pool,
+  options: SeedSessionOptions = {},
+): Promise<SeededSession> {
+  const session = await seedLegacySession(pool, options);
+  await admitTestUser(pool, session.userId);
+  return session;
+}
 
 export const databaseUrl = process.env.DATABASE_URL;
 
@@ -30,6 +75,7 @@ export async function createIntegrationDatabase(): Promise<IntegrationDatabase> 
   let pool: Pool | undefined;
   let schemaCreated = false;
   let closing: Promise<void> | undefined;
+  const releaseKeys = await acquireTestKeys();
 
   async function cleanup(): Promise<void> {
     try {
@@ -38,7 +84,11 @@ export async function createIntegrationDatabase(): Promise<IntegrationDatabase> 
       try {
         if (schemaCreated) await managementPool.query(`DROP SCHEMA "${schema}" CASCADE`);
       } finally {
-        await managementPool.end();
+        try {
+          await managementPool.end();
+        } finally {
+          await releaseKeys();
+        }
       }
     }
   }
@@ -119,6 +169,13 @@ export async function seedApproval(
     occurrence: 'single',
     presentationVersion: 'v1',
   });
+  if (!overrides.ownerId) {
+    await pool.query('INSERT INTO users(id,auth_email) VALUES($1,$2)', [
+      ownerId,
+      `${ownerId}@local.invalid`,
+    ]);
+    await admitTestUser(pool, ownerId);
+  }
   await pool.query(
     `INSERT INTO approvals (id, owner_id, original_text, fire_at_utc, wall_time,
        timezone_id, fold, resolved_utc_offset_seconds, tzdb_version, occurrence,

@@ -1,26 +1,25 @@
 # 21. 受邀账户、联系邮箱与恢复
 
-> 状态：**Proposed（待评审）**；#112 的 P0 正式合同增量，不生效、不开放入口，不表示以下字段、路由或行为已存在。
-> 范围：业务准入与安装管理分离、加密联系邮箱、邀请/验证/恢复、固定会话、停用及无损前向升级的拟议合同。
-> 不包含：P1 生产实现/端点开放、部署、原安装变更、供应商采购、飞书/办公连接或 Harness/运行所有权重构。
-> 阶段：#112 账户 P0；合同与隔离可行性证据，P1 完整旅程另行授权。
-> 现行 Required 仍为 [design/16](16-r1-account-access.md)、[auth API §1–§4](../api/auth/auth_routes.md)、[identity schema 的既有章节](../schema/identity-schema.md) 与 `openspec/specs/identity/spec.md`。本提案经独立评审、P1 完整实现及验收后才替换明确指出的旧条款；本 PR 不改有效 specs、不 archive、不关闭 #112。
-> 依据：[#112](https://github.com/BqLee-AI/Along-agent/issues/112)、[规划 §1–§4、§7–§9、§11](../plans/account-and-office-connectors-plan.md)。API/字段分别在 auth API §5、identity schema 的 #112 Proposed 章节定义；行为增量位于 `openspec/changes/productize-invited-accounts/`。
+> 合同：#112 的账户准入、恢复与有限安装管理增量；外部入口放行受 §9 的完整验收门约束。
+> 范围：业务准入与安装管理分离、加密联系邮箱、邀请/验证/恢复、固定会话、停用及无损前向升级。
+> 不包含：部署、原安装变更、供应商采购、飞书/办公连接或 Harness/运行所有权重构。
+> 保留 [design/16](16-r1-account-access.md) 的原身份、库认证、固定会话和提交边界；本节替换“只有管理员可登录”和无邮箱恢复的限制。有效 OpenSpec 的独立收口不由实现 PR 代办。
+> 依据：[#112](https://github.com/BqLee-AI/Along-agent/issues/112)、[规划 §1–§4、§7–§9、§11](../plans/account-and-office-connectors-plan.md)。API/字段分别在 auth API §5、identity schema 的 #112 章节定义；行为增量位于 `openspec/changes/productize-invited-accounts/`，分层证据见[实现验证](../verification/invited-account-implementation-2026-11-03.md)。
 
 ## 1. 结论、现状与取舍
 
 推荐保留原认证链，只把“绑定管理员才可登录”的业务策略替换为 identity 持有的**显式准入且 active**；安装管理员仍只有一个，但不拥有别人的业务资料。真实邮箱使用独立加密联系方式，不迁写库的 `auth_email`，不启用库对 `local.invalid` 的邮件验证。邀请、验证和恢复各自一次凭证，事务只包含 PG 事实；邮件在提交后发送。接受邀请和恢复均不自动登录，正常登录仍由 Better Auth 签发 Cookie。
 
-**Observed（代码基线 `76f8b78bd334e025fc98b6c75cf4d9c7bb7b19ed`，静态核对）**：
+实现边界：
 
-- `identity/account-service.ts#signIn` 同时校验唯一 credential、active 和管理员绑定；仅插入普通用户并不能正式登录。`transaction` 现持安装级锁，普通账户操作不能继续全局串行。
-- `identity/crypto.ts#deriveAuthEmail` 对规范用户名作 HMAC，生成不透明 `@local.invalid` 句柄；`deriveEmailHash` 的简易正则和同用途密钥不是本提案的正式邮箱策略。
-- `identity/better-auth.ts` 固定 Better Auth 1.7.10，`email` 映射 `auth_email`，固定 604800 秒、不 refresh、不 cache。`pg-adapter.ts` 仅存 token HMAC；已有同 client 事务及提交后 Cookie 发布边界可复用。
-- `http/auth.ts#resolveSession` 查签名、HMAC、PG 到期/撤销与 active，但尚无准入检查。`identity/routes.ts` 与 `http/app.ts` 是两处精确名单，不是库 handler。
-- `tasks/scheduler/send.ts` 在 task/outbox 栅栏下领取一次发送许可，再复查后调用；`notifications/service.ts` 独立接收并提交，目前两者未核验账户准入/状态，必须有跨模块增量，不能声称现有门已覆盖停用。
-- workspaces 按 owner 提供 grant；无 workspace 的 conversations 分支已使用基础工具集合。本机 `local:account` 当前以绑定管理员为登记目标，不能照搬给普通账户。
+- `identity/account-service.ts` 以显式 admission 与 active 校验用户名/已验证邮箱登录；安装初始化仍使用安装锁，普通认证、改密和恢复使用逐用户锁与 credential revision。
+- `identity/crypto.ts#deriveAuthEmail` 保留原不透明认证句柄；`email-security.ts` 独立持有 contact lookup、challenge、encryption、rate-limit 四类密钥，不从原认证 secret 派生。
+- Better Auth 1.7.10、604800 秒固定会话、无 refresh/cache、PG token HMAC、同 client 事务及确认提交后的库 Cookie 发布保持不变。
+- resolver、Run/工具与只读历史入口核对当前资格；历史事实的内部终态记账不重新授予披露权，撤销后仍记录原已接受结果并结束执行。
+- scheduler 在 task/outbox 栅栏下提交一次许可时持 user SHARE，网络前释放；notifications 以独立连接核对当前资格并提交。既有回执只读核对原发送版本，不能把篡改版本当有效接收。
+- 本机 `local:account --admit` 明确准入历史普通 owner；`--workspace` 从已准入候选中选择有限独立 root，不接管其他登记。
 
-[2026-10-27 历史验收](../verification/account-access-verification-2026-10-27.md) 只证明 #68 的指定版本。[本轮 P0 可行性证据 F1–F5](../verification/invited-account-feasibility-2026-11-03.md) 已在 Better Auth 1.7.10、Bun 1.4.2、真实隔离 PG16.15 上观察：非管理员库 Cookie 可过正式 `/me`，而现行 sign-in 对同人仍 401/零 Cookie；原管理员身份/credential 不变；实际库改密及最小全撤销编排可用；真实 client 中途失败回滚；正式 HTTP 在 COMMIT 前无响应、提交失败和受控 ACK 丢失均 503/零 Cookie（后者 PG 已提交）。这些不是 P1 端点、逐用户竞争、双浏览器/正式 Web、邮件或生产 HTTPS 证据，不以样例或旧绿色替代。
+[P0 可行性 F1–F5](../verification/invited-account-feasibility-2026-11-03.md)保留其原源码版本，只证明库/事务接缝。[P1 验证](../verification/invited-account-implementation-2026-11-03.md)分别记录正式 API、隔离 PG、原生消费者、浏览器和旧副本生命周期，不用模拟邮件代替真实收件或生产 HTTPS。
 
 未选方案：公众注册不满足邀请准入；真实邮箱替换 `auth_email` 会破坏原用户名/credential 和密钥兼容；全量库 handler 暴露未评审入口；手写密码/Cookie 或第二认证系统重复安全状态。只沿现有 service、worker 和公共投影增加具体用例，不建角色平台、通用限流/邮件框架或第二 Run driver。
 
@@ -74,7 +73,7 @@
 
 凭证绑定目标、地址 digest/revision、用途和 generation。重发建立新 generation 并撤销旧代全部凭证与 queued 邮件，TTL 从新代创建时起算；已经 accepted/revoked 的邀请不得重发。撤销和重发使用同一地址/邀请锁，接受与撤销谁先持有写权且成功提交谁赢；失败事务不算赢。换绑、恢复成功、改密、停用/注销撤销相关旧凭证，不能跨用途兑换或在线激活停用账户。
 
-邀请创建与重发要求管理员范围内 `idempotency_key`（UUID）；同 action/actor/key 和同规范化输入重放原安全 DTO，不再写凭证/投递；同键异参 409。fingerprint 用 HMAC，不保存密码；密码只作当次授权、重放也重新核验。创建键至少保留 7 天，超期键明确失效冲突而不静默重新创建；P1 保留/清理策略获批准前不清键。撤销重复为成功，accepted 再撤销为状态冲突。一次凭证消费不接受通用幂等键；重复消费统一失败，不能凭重放再写密码或签 session。
+邀请创建与重发要求管理员范围内 `idempotency_key`（UUID）；同 action/actor/key 和同规范化输入重放原安全 DTO，不再写凭证/投递；同键异参 409。fingerprint 用 HMAC，保存计算时的 key-id 及不可变脱敏响应快照，不保存密码；轮换活动 key 或邀请后来关闭、投递状态改变均不重算原结果。密码只作当次授权、重放也重新核验。创建键至少保留 7 天，超期键明确失效冲突而不静默重新创建；保留/清理策略获批准前不清键。撤销重复为成功，accepted 再撤销为状态冲突。一次凭证消费不接受通用幂等键；重复消费统一失败，不能凭重放再写密码或签 session。
 
 凭证验证使用可恢复的用途 key-id：新凭证只用当前活动用途 key 写入，消费时仅在受支持的少量保留 key 上计算对应用途摘要，旧 key 保留到其最后凭证到期及批准审计期结束。不能因 key 轮换复活旧代或跨用途匹配；未知 key/缺 key 是依赖故障，不是重新开户/重发的理由。候选 challenge 地址密文在验证成功后立即擦除，否则最迟到期后24h擦除；邀请终结后的地址密文按批准期限擦除，只保留最小脱敏管理事实。
 
@@ -137,9 +136,11 @@ identity 只更新自有事实，不反向锁 task/Run 或写取消状态机。�
 
 本机维护从 identity 公共有限候选投影**明确选取普通准入账户**，通过 workspaces 公共校验增加不重叠有限 root；合并保留其他登记的 ID/root/权限和原配置。先核对原配置/文件版本，原子发布合并结果；并发修改报冲突不覆盖。PG、文件发布、配置保存和 reload 分开报告，释放锁/连接再 reload；失败只补未完成步骤，不回滚账户、不改其他 owner、不默认管理员 root 或整卷。无 workspace 永远是合法资源状态，不是开户失败。
 
+本地私有配置显式提供 keyring 和邮件配置，不继承环境中的身份密钥。受宿主私有性校验的 keyfile 只读挂载为 source；容器以私有权限复制到运行时文件再启动 API，避免 Windows ACL 私有文件在 Linux bind 上呈现 `0777` 而不可用，Linux loader 的权限/格式检查不放宽。部署者仍须批准密钥托管、备份和轮换；缺旧 contact key 时匿名恢复对所有目标统一报告依赖不可用，不能泄漏地址是否存在。
+
 ## 9. 前向升级与放行证据
 
-P0 只交拟议合同、change 和隔离可行性/外部前置证据。生产代码、依赖、迁移、原安装和配置均不动。迁移编号由 **P1 集成时**结合当时最新序列分配，本提案不预占编号、不写可执行 DDL、不改旧迁移。
+前向迁移为 `0024_invited_accounts.sql`，同步精确结构基线与扫描规则；既有迁移不改动。代码与隔离证据不替代真实邮件、生产 HTTPS、密钥托管和隐私保留批准。
 
 P1 必须同批交付：准入/邮箱/邀请/邮件/恢复/会话/停用的 API+正式页面、两处窄名单、共享 DTO、resolver/公共资格、scheduler/通知门、本机多 owner 维护、新迁移及结构核验/扫描规则。迁移先扫描重复 credential、绑定异常、邮箱冲突，不删除/合并旧行；只为绑定管理员补准入，其他旧人留显式维护路径。升级停旧写者，使用原卷/密钥/配置和正式本机生命周期；有新准入/邮箱/凭证事实后只前向修复，不回到不理解新事实的旧写者，失败不重建安装。
 

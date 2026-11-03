@@ -1,3 +1,4 @@
+import { admitTestUser } from './setup.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
@@ -37,6 +38,7 @@ maybe('delegation personal timezone transactions', () => {
       "INSERT INTO users(id,auth_email,display_name,timezone_id) VALUES($1,$2,'timezone tester','Asia/Shanghai')",
       [ownerId, `${ownerId}@timezone.test`],
     );
+    await admitTestUser(pool, ownerId);
     await pool.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
       conversationId,
       ownerId,

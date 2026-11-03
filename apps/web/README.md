@@ -132,10 +132,17 @@ stack; unit coverage alone is not provider or complete R1 evidence.
   deployer must use the original installation's `local:account` command to
   explicitly select and confirm the original account. Existing passwords are
   not overwritten and other owners are not merged.
-- `/login` uses the bound administrator's credentials. Passwords retain leading
-  and trailing spaces, support paste/password managers, and are never put in a
-  URL or browser storage. Sessions expire after seven fixed days; reads do not
-  extend them.
+- `/login` accepts an admitted account's username or verified contact email.
+  Passwords retain leading and trailing spaces, support paste/password managers,
+  and are never put in a URL or browser storage. Sessions expire after seven
+  fixed days; reads do not extend them.
+  All account forms declare native `method="post"` so a submit before hydration
+  or with JavaScript disabled cannot put passwords into query parameters. Native
+  page POST is not an alternate authentication endpoint and does not imply success.
+  Invite, reset and contact-verification links capture fragment tokens only in
+  memory and immediately clear them on entry and subsequent token hash changes.
+  A new token resets the prior form result; opening a link performs GET reads
+  only, and consumption always requires explicit submission.
 - 登录页只常驻用户名、密码、输入内显示/隐藏按钮与登录动作；维护及返回位置说明收进登录帮助。新密码提示至少 8 位，最大 128 位是兼容上限，不是建议长度。原口令不因界面改版被替换；服务端通过 Better Auth 使用随机盐和 scrypt 哈希，不存明文口令。
 - `/logout` requires an explicit submission and reports success only after the
   API confirms revocation. A failed/unknown response is not a completed logout;

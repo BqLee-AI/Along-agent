@@ -24,6 +24,7 @@ export default function AccountForm({
   const state = useAccountOperation({ operation, csrfToken, returnTo });
   const [showPassword, setShowPassword] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
+  const [loginMethod, setLoginMethod] = useState<'login_name' | 'email'>('login_name');
   const errorRef = useRef<HTMLDivElement>(null);
   const successRef = useRef<HTMLDivElement>(null);
   const newPassword = operation === 'initialize' || operation === 'claim';
@@ -84,6 +85,7 @@ export default function AccountForm({
 
   return (
     <form
+      method="post"
       className={signingIn ? 'space-y-6' : 'space-y-6 p-4 sm:p-6'}
       onSubmit={state.submit}
       aria-busy={state.busy}
@@ -169,40 +171,84 @@ export default function AccountForm({
               </p>
             </div>
           ) : null}
-          <div className="space-y-2">
-            <Label htmlFor="login_name">{signingIn ? '用户名' : '登录名（必填）'}</Label>
-            <Input
-              id="login_name"
-              name="login_name"
-              autoComplete="username"
-              autoCapitalize="none"
-              autoCorrect="off"
-              spellCheck={false}
-              required
-              maxLength={128}
-              readOnly={state.busy || state.rereadRequired}
-              aria-invalid={Boolean(state.fieldErrors.login_name)}
-              aria-describedby={
-                signingIn
-                  ? state.fieldErrors.login_name
-                    ? 'login_name-error'
-                    : undefined
-                  : state.fieldErrors.login_name
-                    ? 'login_name-help login_name-error'
-                    : 'login_name-help'
-              }
-            />
-            {!signingIn ? (
-              <p id="login_name-help" className="text-sm leading-6 text-muted-foreground">
-                此安装的管理员登录名，不是邮箱；不区分大小写。
+          {signingIn ? (
+            <fieldset className="space-y-2">
+              <legend className="text-sm font-medium">登录方式</legend>
+              <div className="flex flex-wrap gap-6">
+                {(['login_name', 'email'] as const).map((method) => (
+                  <label key={method} className="inline-flex min-h-11 items-center gap-2">
+                    <input
+                      type="radio"
+                      name="login_method"
+                      value={method}
+                      checked={loginMethod === method}
+                      disabled={state.busy || state.rereadRequired}
+                      onChange={() => setLoginMethod(method)}
+                    />
+                    {method === 'email' ? '已验证邮箱' : '用户名'}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          ) : null}
+          {signingIn && loginMethod === 'email' ? (
+            <div className="space-y-2">
+              <Label htmlFor="email">已验证联系邮箱</Label>
+              <Input
+                id="email"
+                name="email"
+                type="email"
+                autoComplete="username"
+                autoCapitalize="none"
+                spellCheck={false}
+                required
+                maxLength={254}
+                readOnly={state.busy || state.rereadRequired}
+                aria-invalid={Boolean(state.fieldErrors.email || state.fieldErrors.form)}
+                aria-describedby="email-error"
+              />
+              <p id="email-error" className="text-sm text-destructive">
+                {state.fieldErrors.email ?? state.fieldErrors.form}
               </p>
-            ) : null}
-            {state.fieldErrors.login_name ? (
-              <p id="login_name-error" className="text-sm leading-6 text-destructive">
-                {state.fieldErrors.login_name}
-              </p>
-            ) : null}
-          </div>
+            </div>
+          ) : (
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="login_name">{signingIn ? '用户名' : '登录名（必填）'}</Label>
+                <Input
+                  id="login_name"
+                  name="login_name"
+                  autoComplete="username"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  required
+                  maxLength={128}
+                  readOnly={state.busy || state.rereadRequired}
+                  aria-invalid={Boolean(state.fieldErrors.login_name)}
+                  aria-describedby={
+                    signingIn
+                      ? state.fieldErrors.login_name
+                        ? 'login_name-error'
+                        : undefined
+                      : state.fieldErrors.login_name
+                        ? 'login_name-help login_name-error'
+                        : 'login_name-help'
+                  }
+                />
+                {!signingIn ? (
+                  <p id="login_name-help" className="text-sm leading-6 text-muted-foreground">
+                    此安装的管理员登录名，不是邮箱；不区分大小写。
+                  </p>
+                ) : null}
+                {state.fieldErrors.login_name ? (
+                  <p id="login_name-error" className="text-sm leading-6 text-destructive">
+                    {state.fieldErrors.login_name}
+                  </p>
+                ) : null}
+              </div>
+            </>
+          )}
           <div className="space-y-2">
             <Label htmlFor="password">{newPassword ? '设置密码（必填）' : '密码'}</Label>
             <div className="relative">

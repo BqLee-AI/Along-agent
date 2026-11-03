@@ -1,5 +1,7 @@
 import path from 'node:path';
 import { lstat, mkdir, open } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
+import { loadPrivateJson } from './config.mjs';
 import net from 'node:net';
 import { failure, hostEnvironment, readJson, run, writeJson } from './commands.mjs';
 
@@ -25,6 +27,20 @@ export function assertLoopbackBinding(container, servicePort, hostPort) {
     throw failure('CONFIG_RELOAD_REQUIRED');
 }
 
+export async function configuredIdentityKeys(config, source = repositoryRoot) {
+  if (!config.identityKeyringFile) return undefined;
+  assertExternalConfiguration(config.identityKeyringFile);
+  try {
+    const input = await loadPrivateJson(config.identityKeyringFile);
+    const { parseIdentityKeyring } = await import(
+      pathToFileURL(path.join(source, 'apps/api/src/modules/identity/email-security.ts')).href
+    );
+    return parseIdentityKeyring(input);
+  } catch {
+    throw failure('IDENTITY_KEYRING_FILE_INVALID');
+  }
+}
+
 export function installationEnvironment(config, image = 'along-local:unprepared') {
   const databaseUrl = new URL('postgresql://postgres:5432');
   databaseUrl.username = config.database.user;
@@ -44,6 +60,10 @@ export function installationEnvironment(config, image = 'along-local:unprepared'
     DATABASE_URL: databaseUrl.toString(),
     BETTER_AUTH_SECRET: config.authSecret,
     APP_ORIGIN: config.origin,
+    IDENTITY_KEYRING_FILE: config.identityKeyringFile ? '/run/along-identity-keyring.json' : '',
+    IDENTITY_MAIL_PROVIDER: config.identityMail?.provider ?? '',
+    IDENTITY_MAIL_FROM: config.identityMail?.from ?? '',
+    IDENTITY_MAIL_API_KEY: config.identityMail?.apiKey ?? '',
     API_BASE: `http://127.0.0.1:${config.ports.api}`,
     TZDB_VERSION: config.tzdbVersion,
     HARNESS_MODEL_BASE_URL: config.model?.baseUrl ?? '',
@@ -83,17 +103,41 @@ export async function compose(
   await writeJson(registration, {
     services: {
       api: {
-        volumes: readableRegistration
-          ? [
-              {
-                type: 'bind',
-                source: config.registryFile,
-                target: '/run/along-registry.json',
-                read_only: true,
-                bind: { create_host_path: false },
-              },
-            ]
-          : [],
+        ...(config.identityKeyringFile
+          ? {
+              // Windows ACL-private binds can appear as mode 0777 in Linux.
+              // Seal the validated, read-only source without weakening the loader.
+              command: [
+                'sh',
+                '-ec',
+                'umask 077; cp /run/along-identity-keyring-source.json /run/along-identity-keyring.json; chmod 600 /run/along-identity-keyring.json; exec bun apps/api/dist/main.js',
+              ],
+            }
+          : {}),
+        volumes: [
+          ...(readableRegistration
+            ? [
+                {
+                  type: 'bind',
+                  source: config.registryFile,
+                  target: '/run/along-registry.json',
+                  read_only: true,
+                  bind: { create_host_path: false },
+                },
+              ]
+            : []),
+          ...(config.identityKeyringFile
+            ? [
+                {
+                  type: 'bind',
+                  source: config.identityKeyringFile,
+                  target: '/run/along-identity-keyring-source.json',
+                  read_only: true,
+                  bind: { create_host_path: false },
+                },
+              ]
+            : []),
+        ],
       },
     },
   });

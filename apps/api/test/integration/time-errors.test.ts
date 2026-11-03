@@ -1,3 +1,4 @@
+import { admitTestUser } from './setup.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
@@ -66,6 +67,7 @@ async function withApi(
     "INSERT INTO users (id, auth_email, display_name, timezone_id) VALUES ($1,$2,'A4 tester','Asia/Shanghai')",
     [ownerId, `a4-${ownerId}@along.test`],
   );
+  await admitTestUser(pool, ownerId);
   const actor: Actor = {
     ownerId,
     sessionId: null,

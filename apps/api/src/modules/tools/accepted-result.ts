@@ -15,8 +15,8 @@ const documentReceiptSchema = z
   })
   .strict();
 
-// Accepted-fact hydration is shared by read-side projections and execution replay.
-// No Run locks, invocation writes, effect dispatch, or mutable approval status.
+// Callers authorize content reads. Internal terminal accounting may hydrate
+// already-bound facts after revocation, without authorizing any disclosure.
 export async function readAcceptedInvocationResult(
   client: PoolClient,
   ctx: Pick<ToolContext, 'ownerId' | 'runId'>,

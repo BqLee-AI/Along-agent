@@ -1,3 +1,4 @@
+import { admitTestUser } from './setup.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -48,6 +49,7 @@ maybe('persistent tool invocation identity and local results', () => {
       'INSERT INTO users (id,auth_email,display_name,timezone_id) VALUES ($1,$2,$3,$4)',
       [ownerId, `${ownerId}@fixture.test`, 'tester', 'Asia/Shanghai'],
     );
+    await admitTestUser(pool, ownerId);
     const started = await startConversationRun(
       { pool, timeContext: loadTimeContext('fixture-v1') },
       ownerId,

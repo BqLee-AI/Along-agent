@@ -280,10 +280,16 @@ export async function markOutboxAckUnknown(
   );
 }
 
-export async function markOutboxSuperseded(client: PoolClient, outboxId: string): Promise<void> {
-  await client.query(`UPDATE outbox SET status = 'superseded', updated_at = now() WHERE id = $1`, [
-    outboxId,
-  ]);
+export async function markOutboxSuperseded(
+  client: PoolClient,
+  outboxId: string,
+  reason?: string,
+): Promise<void> {
+  await client.query(
+    `UPDATE outbox SET status='superseded', last_error=COALESCE($2,last_error),
+       updated_at=now() WHERE id=$1`,
+    [outboxId, reason ?? null],
+  );
 }
 
 export async function markOutboxFailedDeadline(

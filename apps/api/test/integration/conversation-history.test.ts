@@ -1,7 +1,8 @@
+import { admitTestUser } from './setup.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { Pool } from 'pg';
+import { Pool } from 'pg';
 import {
   ConversationListPageSchema,
   ConversationMessagePageSchema,
@@ -64,6 +65,7 @@ async function user(pool: Pool): Promise<string> {
     id,
     `${id}@history.test`,
   ]);
+  await admitTestUser(pool, id);
   return id;
 }
 async function conversation(
@@ -584,10 +586,13 @@ maybe('owner-scoped read-only conversation history HTTP', () => {
       await get(pool, owner, `${base}/${cid}?run_id=${rid}`);
     }
     expect(await snapshot()).toEqual(before);
-    const readOnly = await pool.connect();
+    const readOnlyUrl = new URL(database.connectionString);
+    readOnlyUrl.searchParams.set(
+      'options',
+      `${readOnlyUrl.searchParams.get('options') ?? ''} -cdefault_transaction_read_only=on`,
+    );
+    const readPool = new Pool({ connectionString: readOnlyUrl.toString() });
     try {
-      await readOnly.query('BEGIN READ ONLY');
-      const readPool = { query: readOnly.query.bind(readOnly) } as unknown as Pool;
       for (const path of [
         base,
         `${base}/${cid}/messages`,
@@ -595,9 +600,8 @@ maybe('owner-scoped read-only conversation history HTTP', () => {
         `${base}/${cid}?run_id=${rid}`,
       ])
         expect((await get(readPool, owner, path)).status).toBe(200);
-      await readOnly.query('ROLLBACK');
     } finally {
-      readOnly.release();
+      await readPool.end();
     }
     const broken = database.connect();
     await broken.query(`SET search_path TO pg_catalog`);

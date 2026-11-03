@@ -1,3 +1,4 @@
+import { admitTestUser } from './setup.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { ApprovalDetailSchema, EnvelopeSchema } from '@along/contracts';
@@ -53,6 +54,7 @@ suite('request-owned reminder date anchors through HTTP and PostgreSQL', () => {
       ownerId,
       `${ownerId}@along.test`,
     ]);
+    await admitTestUser(pool, ownerId);
   }
   async function at(time: string) {
     await pool.query('UPDATE test_clock SET at=$1', [time]);

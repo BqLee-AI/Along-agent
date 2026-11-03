@@ -65,9 +65,9 @@
 
 ## 3. 鉴权与 CSRF [Required]
 
-- 鉴权方案为 Better Auth 自建 credential。v0 会话自检与 R1 #68 窄账户接口见 [auth 合同](auth/auth_routes.md)；公众注册、OAuth/SSO、邮箱找回、滑动续期不在范围。
-- [Proposed · #112] 受邀账户增量见 [design/21](../design/21-invited-account-access.md) 与 [auth 合同](auth/auth_routes.md)。业务准入、邮箱验证/恢复、会话管理和窄安装管理仅为评审提案，不扩大本节 Required 匿名例外、不改变已开放端点计数，不开放库全量 handler；P1 实施后才可按已验收资格替换管理员登录白名单。
-- 状态、空安装初始化和登录是明确匿名例外；转正、退出及其他业务仍须有效签名会话与适用 CSRF。认证依赖失败不是 401，不猜空安装。
+- 鉴权方案为 Better Auth 自建 credential。v0 自检、#68 原账户与 #112 受邀账户接口见 [auth 合同](auth/auth_routes.md)；公众注册、OAuth/SSO、滑动续期不在范围。
+- #112 的显式准入、联系邮箱验证/恢复、本人会话管理和窄安装管理见 [design/21](../design/21-invited-account-access.md)与 auth §5，不开放库全量 handler。业务资格是 active 且已准入，管理资格不授予其他 owner 的资源读取权；真实邮件/生产 HTTPS 放行与实现证据分开。
+- 状态、空安装初始化、登录、邀请接受和密码找回/重置是精确列出的匿名例外；本人验证、转正、退出及其他业务仍须有效签名会话与适用 CSRF。认证依赖失败不是 401，不猜空安装。
 - [Required] 已定行为：
   - 除已列出的匿名认证入口外，业务端点需有效会话；`GET /me` 不匿名披露 actor，无有效会话返回 `401`（见 §5）。
   - 有会话但无权访问他人资源返回 `403`（服务端按 `owner_id` 强制过滤，不依赖客户端传参）。

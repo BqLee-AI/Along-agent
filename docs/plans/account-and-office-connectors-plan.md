@@ -5,7 +5,7 @@
 > 不包含：业务实现、部署、用户安装或凭据变更、远端 issue/PR、commit/push；不扩展短信、计费、多组织/RBAC、办公写入、自动同步、向量库或连接器市场。
 > 阶段：独立后端演进方向；代码观察基线 `3ac1b27`，与 #104 主线通过公共接口协作。
 
-> 账户 P0 合同入口：[design/21](../design/21-invited-account-access.md) 与 [productize-invited-accounts](../../openspec/changes/productize-invited-accounts/proposal.md)将账户方向细化为独立 Proposed 增量；[库实验](../verification/invited-account-feasibility-2026-11-03.md)和[外部前置](../verification/invited-account-external-prerequisites-2026-11-03.md)独立取证。本规划的原始范围声明不代替 #112 的后续授权；P0 不开放 P1 邀请入口，也不启动飞书连接。
+> #112 的后续授权独立于本规划：账户 P0 合同见 [design/21](../design/21-invited-account-access.md) 与 [change](../../openspec/changes/productize-invited-accounts/proposal.md)，P1 正式切片与隔离证据见[实现验证](../verification/invited-account-implementation-2026-11-03.md)。原始规划的非实施范围不撤回后续账户实施授权，也不授权部署或飞书连接；真实邮件/HTTPS放行仍依据[外部前置](../verification/invited-account-external-prerequisites-2026-11-03.md)，不随代码实现自动完成。
 
 ## 1. 结论与交付顺序
 

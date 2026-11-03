@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { hostEnvironment } from '../local/commands.mjs';
+import { mkdir, mkdtemp, rename, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { maintainAccount } from '../local/account.mjs';
+import {
+  configureWorkspaceRegistry,
+  getWorkspaceGrant,
+} from '../../apps/api/src/modules/workspaces/service.js';
 
 const file = path.join(tmpdir(), 'along-account-fixture', 'local.json');
 const registryFile = path.join(path.dirname(file), 'workspace-registry.json');
@@ -42,6 +47,7 @@ function fixture({
     bindCalls = 0,
     publishes = 0,
     updates = 0,
+    admitCalls = 0,
     reloads = 0;
   const binding = {
     get value() {
@@ -79,6 +85,37 @@ function fixture({
         throw Object.assign(new Error('UNAUTHENTICATED'), { code: 'UNAUTHENTICATED' });
       bound = admin;
     },
+    async admitLocal(input: {
+      selection: string;
+      confirmed: boolean;
+      loginName: string;
+      password: string;
+    }) {
+      admitCalls++;
+      expect(input.selection).toBe('opaque-candidate-handle');
+      expect(input.confirmed).toBe(true);
+      if (input.password === 'wrong-password')
+        throw Object.assign(new Error('UNAUTHENTICATED'), { code: 'UNAUTHENTICATED' });
+      return { admitted: true, userId: 'ordinary-owner' };
+    },
+    async listAdmittedLocalCandidates() {
+      return [
+        {
+          selection: 'ordinary-handle',
+          displayName: 'ordinary',
+          status: 'active',
+          installationAdmin: false,
+        },
+      ];
+    },
+    async resolveAdmittedLocalCandidate(selection: string) {
+      expect(selection).toBe('ordinary-handle');
+      return { userId: 'ordinary-owner', displayName: 'ordinary' };
+    },
+    async getAdmittedLocalOwner(userId: string) {
+      expect(userId).toBe('ordinary-owner');
+      return { userId, displayName: 'ordinary' };
+    },
   };
   const dependencies = {
     async lock(_file: string, callback: () => Promise<unknown>) {
@@ -92,6 +129,12 @@ function fixture({
     },
     async loadConfig() {
       return structuredClone(config);
+    },
+    async fileVersion(target: string, expected: unknown) {
+      const bytes = target === file ? JSON.stringify(config) : files.get(target);
+      if (bytes === undefined || JSON.stringify(JSON.parse(bytes)) !== JSON.stringify(expected))
+        throw Object.assign(new Error('changed'), { code: 'ACCOUNT_INSTALLATION_CHANGED' });
+      return bytes;
     },
     async prepare() {
       events.push('prepare');
@@ -136,12 +179,15 @@ function fixture({
         })),
       };
     },
-    async updateConfig(_file: string, callback: (value: typeof config) => typeof config) {
+    async updateConfig(
+      _file: string,
+      callback: (value: typeof config) => typeof config | Promise<typeof config>,
+    ) {
       expect(locked).toBe(false);
       expect(connections).toBe(0);
       updates++;
       events.push('config-save');
-      config = callback(structuredClone(config));
+      config = await callback(structuredClone(config));
       return config;
     },
     async reload(_file: string, options: { expectedConfig: typeof config }) {
@@ -175,6 +221,12 @@ function fixture({
     service,
     get counts() {
       return { bindCalls, publishes, updates, reloads, connections };
+    },
+    get admitCalls() {
+      return admitCalls;
+    },
+    get config() {
+      return config;
     },
   };
 }
@@ -364,5 +416,150 @@ describe('local:account explicit maintenance and non-atomic recovery', () => {
       code: 'WORKSPACE_REGISTRY_INVALID',
     });
     expect(f.counts.publishes).toBe(0);
+  });
+
+  it('admits an explicitly selected ordinary legacy owner without administrator binding or workspace side effects', async () => {
+    const f = fixture({
+      hasPassword: true,
+      answers: ['1', 'CONFIRM 1', 'ordinary-login', 'original-password'],
+    });
+    expect(await maintainAccount(file, f.io, f.dependencies, { operation: 'admit' })).toEqual({
+      account: 'committed',
+      workspace: 'unconfigured',
+    });
+    expect(f.admitCalls).toBe(1);
+    expect(f.binding.value).toEqual(admin);
+    expect(f.counts.bindCalls).toBe(0);
+    expect(f.counts.publishes).toBe(0);
+    expect(f.counts.reloads).toBe(0);
+    expect(f.prompts.filter((prompt) => prompt.secret)).toHaveLength(1);
+  });
+
+  it('adds a finite workspace for an explicitly selected admitted owner, preserving every original registration and source byte', async () => {
+    const answers = [
+      '1',
+      'CONFIRM 1',
+      'ADD',
+      '/var/lib/along/workspaces/ordinary',
+      'Ordinary',
+      '["notes.txt"]',
+      '[]',
+      'REGISTER',
+    ];
+    const f = fixture({ answers });
+    const before = f.files.get(registryFile);
+    await maintainAccount(file, f.io, f.dependencies, { operation: 'workspace' });
+    expect(f.files.get(registryFile)).toBe(before);
+    expect(f.config.registryFile).not.toBe(registryFile);
+    const rows = JSON.parse(f.files.get(f.config.registryFile!)!);
+    expect(rows[0]).toEqual(registration());
+    expect(rows[1].owner_id).toBe('ordinary-owner');
+    expect(rows[1].readable_paths).toEqual(['notes.txt']);
+    expect(rows[1].writable_paths).toEqual([]);
+    expect(f.counts.bindCalls).toBe(0);
+    expect(f.counts.connections).toBe(0);
+    expect(f.counts.reloads).toBe(1);
+    const published = f.config.registryFile;
+    const bytes = f.files.get(published!);
+    answers.push('1', 'CONFIRM 1', 'LOAD');
+    await maintainAccount(file, f.io, f.dependencies, { operation: 'workspace' });
+    expect(f.config.registryFile).toBe(published);
+    expect(f.files.get(published!)).toBe(bytes);
+    expect(f.counts.publishes).toBe(1);
+    expect(f.counts.reloads).toBe(2);
+  });
+
+  it('refuses registry byte-version changes before publishing and never overwrites the concurrent source', async () => {
+    const f = fixture({
+      answers: [
+        '1',
+        'CONFIRM 1',
+        'ADD',
+        '/var/lib/along/workspaces/ordinary',
+        'Ordinary',
+        '["notes.txt"]',
+        '[]',
+        'REGISTER',
+      ],
+    });
+    const original = f.files.get(registryFile)!;
+    const verify = f.dependencies.verifyRegistry;
+    f.dependencies.verifyRegistry = async (...args) => {
+      if (Array.isArray(args[2]) && args[2].length === 2)
+        f.files.set(registryFile, original + '\n');
+      return verify(...args);
+    };
+    await expect(
+      maintainAccount(file, f.io, f.dependencies, { operation: 'workspace' }),
+    ).rejects.toMatchObject({ code: 'WORKSPACE_IDENTITY_CHANGED' });
+    expect(f.files.get(registryFile)).toBe(original + '\n');
+    expect(f.counts.publishes).toBe(0);
+    expect(f.counts.updates).toBe(0);
+    expect(f.counts.reloads).toBe(0);
+  });
+
+  it('refuses changed physical roots during finite add and retains all existing registry bytes', async () => {
+    const f = fixture({
+      answers: [
+        '1',
+        'CONFIRM 1',
+        'ADD',
+        '/var/lib/along/workspaces/ordinary',
+        'Ordinary',
+        '["notes.txt"]',
+        '[]',
+        'REGISTER',
+      ],
+    });
+    const before = f.files.get(registryFile);
+    const verify = f.dependencies.verifyRegistry;
+    f.dependencies.verifyRegistry = async (...args) => {
+      const report = await verify(...args);
+      if (Array.isArray(args[2]) && args[2].length === 2)
+        report.grants[0]!.root_identity = 'replaced-device:replaced-inode';
+      return report;
+    };
+    await expect(
+      maintainAccount(file, f.io, f.dependencies, { operation: 'workspace' }),
+    ).rejects.toMatchObject({ code: 'WORKSPACE_IDENTITY_CHANGED' });
+    expect(f.files.get(registryFile)).toBe(before);
+    expect(f.counts.publishes).toBe(0);
+  });
+
+  it('uses the real registry validator to reject duplicate/nested roots and observe replaced physical identity', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'along-invited-registry-'));
+    try {
+      const originalRoot = path.join(directory, 'administrator');
+      const ordinaryRoot = path.join(directory, 'ordinary');
+      await mkdir(originalRoot);
+      await mkdir(ordinaryRoot);
+      const original = { ...registration(), root: originalRoot };
+      const ordinary = {
+        ...registration('ordinary-owner'),
+        workspace_id: 'ordinary-workspace',
+        root: ordinaryRoot,
+      };
+      expect((await configureWorkspaceRegistry([original])).state).toBe('loaded');
+      const before = getWorkspaceGrant(admin.userId, original.workspace_id);
+      expect((await configureWorkspaceRegistry([original, ordinary])).state).toBe('loaded');
+      expect(getWorkspaceGrant(admin.userId, original.workspace_id)).toEqual(before);
+      expect(
+        (await configureWorkspaceRegistry([original, { ...ordinary, root: originalRoot }])).state,
+      ).toBe('invalid');
+      const nested = path.join(originalRoot, 'nested');
+      await mkdir(nested);
+      expect(
+        (await configureWorkspaceRegistry([original, { ...ordinary, root: nested }])).state,
+      ).toBe('invalid');
+      await rename(originalRoot, path.join(directory, 'preserved-original'));
+      await mkdir(originalRoot);
+      expect((await configureWorkspaceRegistry([original, ordinary])).state).toBe('loaded');
+      expect(getWorkspaceGrant(admin.userId, original.workspace_id).root_identity).not.toBe(
+        before.root_identity,
+      );
+    } finally {
+      await configureWorkspaceRegistry([]);
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });

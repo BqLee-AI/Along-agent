@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { mkdir } from 'node:fs/promises';
-import { createConfig, loadConfig, saveConfig } from './config.mjs';
+import { createConfig, loadConfig, loadPrivateJsonSnapshot, saveConfig } from './config.mjs';
 import { withInstallationLock } from './lock.mjs';
 import { DeploymentDatabase, hostDatabaseUrl } from './database.mjs';
 import { failure, readJson, run, waitFor, writeJson } from './commands.mjs';
@@ -13,6 +13,7 @@ import {
   assertPortFree,
   checkDependencies,
   compose,
+  configuredIdentityKeys,
   installationDirectory,
   prepareVolumes,
   projectContainers,
@@ -140,6 +141,7 @@ async function stopWriters(config, directory) {
 }
 
 async function startWriters(file, config, directory, artifact, database) {
+  await configuredIdentityKeys(config, artifact.source);
   await database.assertLease();
   await assertNoForeignVolumeUsers(config);
   const containers = await projectContainers(config);
@@ -389,10 +391,15 @@ export async function upgradeInstallation(file) {
 }
 
 // #68 calls this after updateConfig; no identity selection or Agent resume occurs.
-export async function reloadInstallation(file, { expectedConfig } = {}) {
+export async function reloadInstallation(file, { expectedConfig, expectedConfigVersion } = {}) {
   return withInstallation(file, async (config, directory) => {
     if (expectedConfig && JSON.stringify(config) !== JSON.stringify(expectedConfig))
       throw failure('ACCOUNT_INSTALLATION_CHANGED');
+    if (
+      expectedConfigVersion !== undefined &&
+      (await loadPrivateJsonSnapshot(file)).version !== expectedConfigVersion
+    )
+      throw failure('CONFIG_VERSION_CONFLICT');
     const pending = await readJson(path.join(directory, 'upgrade.json'));
     if (pending && pending.phase !== 'complete') throw failure('UPGRADE_INCOMPLETE');
     await verifyVolumes(config, directory);

@@ -22,7 +22,11 @@ import { loadTimeContext, type TimeContext } from '../modules/time/context.js';
 import type { HarnessServices } from '../modules/conversations/harness-process.js';
 import type { RoutingRuntime } from '../modules/conversations/routing/index.js';
 import { createAccountService, type AccountService } from '../modules/identity/account-service.js';
-import { handleAccountRoute } from '../modules/identity/routes.js';
+import { handleAccountRoute, isKnownAccountRoute } from '../modules/identity/routes.js';
+import {
+  createInvitedAccountService,
+  type InvitedAccountService,
+} from '../modules/identity/invited-service.js';
 import { notReady } from './errors.js';
 
 export interface AppDeps {
@@ -33,6 +37,7 @@ export interface AppDeps {
   harness?: HarnessServices | null;
   routing?: RoutingRuntime;
   accountService?: AccountService;
+  invitedAccountService?: InvitedAccountService;
 }
 
 interface TzdbOnlyOpts {
@@ -121,16 +126,7 @@ async function dispatchRequest(
   let body: unknown;
   if (req.method !== 'GET' && req.method !== 'POST') closeUnreadRequest(req, res);
   if (pathname.startsWith('/api/v1/auth/')) {
-    const known =
-      (req.method === 'GET' && pathname === '/api/v1/auth/status') ||
-      (req.method === 'POST' &&
-        [
-          '/api/v1/auth/initialize',
-          '/api/v1/auth/claim',
-          '/api/v1/auth/sign-in',
-          '/api/v1/auth/sign-out',
-        ].includes(pathname));
-    if (!known) throw notFound();
+    if (!isKnownAccountRoute(req.method, pathname)) throw notFound();
     if (!deps.pool && !deps.accountService) throw notReady();
     const service = deps.accountService ?? createAccountService(deps.pool!);
     const result = await handleAccountRoute(
@@ -139,6 +135,9 @@ async function dispatchRequest(
       pathname,
       {
         service,
+        invitedService:
+          deps.invitedAccountService ??
+          (deps.pool ? createInvitedAccountService(deps.pool) : undefined),
         resolveActor,
         origin: process.env.APP_ORIGIN ?? 'http://localhost:3000',
         readBody: async () => {
@@ -367,6 +366,23 @@ export async function handleRequest(
     const failure = error instanceof HttpError ? error : notReady();
     closeUnreadRequest(req, res);
     const requestId = requestIdOf(req);
-    sendJson(res, failure.httpStatus, failEnvelope(failure, requestId), requestId);
+    const details = failure.details;
+    const retryAfter =
+      failure.httpStatus === 429 &&
+      details !== null &&
+      typeof details === 'object' &&
+      'retry_after_seconds' in details &&
+      typeof details.retry_after_seconds === 'number' &&
+      Number.isFinite(details.retry_after_seconds) &&
+      details.retry_after_seconds > 0
+        ? String(Math.ceil(details.retry_after_seconds))
+        : null;
+    sendJson(
+      res,
+      failure.httpStatus,
+      failEnvelope(failure, requestId),
+      requestId,
+      retryAfter ? { 'retry-after': retryAfter } : undefined,
+    );
   }
 }

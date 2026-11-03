@@ -60,7 +60,7 @@ import { ensureRunContextPolicy } from './context-policy.js';
 import { insertRoutingPolicy } from './routing-checkpoints.js';
 import { routingRuntimeOf } from './harness-config.js';
 import { acceptReminderDate } from './reminder-date.js';
-import { readUserPreferences } from '../identity/preferences.js';
+import { isActiveOwner, readUserPreferences } from '../identity/preferences.js';
 
 const AGENT_REVISION = 'assistant/r1';
 const BUSINESS_MAX_ITERATIONS = 10;
@@ -161,6 +161,8 @@ export async function startConversationRun(
   };
   try {
     started = await withTransaction(pool, async (client: PoolClient) => {
+      if (!(await isActiveOwner(client, ownerId, { lock: 'share' })))
+        throw forbidden('owner authorization revoked');
       const existing = await findIdempotency(client, ownerId, key);
       if (existing) {
         if (existing.request_hash !== requestHash) {

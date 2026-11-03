@@ -18,6 +18,10 @@ services:
       io.along.installation: ${ALONG_INSTALLATION}
     environment:
       APP_ORIGIN: ${APP_ORIGIN}
+      IDENTITY_KEYRING_FILE: ${IDENTITY_KEYRING_FILE:-}
+      IDENTITY_MAIL_PROVIDER: ${IDENTITY_MAIL_PROVIDER:-}
+      IDENTITY_MAIL_FROM: ${IDENTITY_MAIL_FROM:-}
+      IDENTITY_MAIL_API_KEY: ${IDENTITY_MAIL_API_KEY:-}
     ports: !override
       - '127.0.0.1:${ALONG_API_PORT}:3000'
     volumes: !override

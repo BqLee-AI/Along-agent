@@ -1,3 +1,4 @@
+import { admitTestUser } from './setup.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
@@ -33,6 +34,7 @@ maybe('read-only accepted invocation bootstrap', () => {
        ON CONFLICT(id) DO NOTHING`,
       [ownerId, `${ownerId}@fixture.test`],
     );
+    await admitTestUser(pool, ownerId);
     const started = await startConversationRun(
       { pool, timeContext: loadTimeContext('fixture-v1') },
       ownerId,

@@ -61,9 +61,9 @@
 - [Required · 验收边界] 隔离确认锁定库字段/事务/token/退出/proxy 后完整实施 API、数据库、页面与本机收尾；只新增下一序号迁移并配套版本核验和扫描规则。合同不等于已运行，规划不冒充缺陷复现。七项验收齐备后独立归档只关闭 #68，不进入 #69/#70/R2、不提前关闭 #66。
 - [验收依据] [2026-10-27 账户与本机登记验证记录](../verification/account-access-verification-2026-10-27.md)分别记录库实验、行为覆盖、真实生产构建、本机使用路径及独立静态审阅；[归档清单](../../openspec/changes/archive/2026-10-27-close-r1-account-access/tasks.md)对应七项验收，不以其中一种证据替代其余边界。
 
-## 受邀账户（#112，Proposed）
+## 受邀账户（#112）
 
-本节是账户 P0 的评审合同与 P1 验收目标，不改变 #68 的有效登录资格，不开放邀请/验证/恢复端点。设计、接口、字段与行为分别见 [design/21](../design/21-invited-account-access.md)、[auth API](../api/auth/auth_routes.md)、[identity schema](../schema/identity-schema.md) 与 [change](../../openspec/changes/productize-invited-accounts/proposal.md)。完整规划中的飞书连接不属于本阶段。
+本节定义账户准入与 P1 验收目标。设计、接口、字段与行为分别见 [design/21](../design/21-invited-account-access.md)、[auth API](../api/auth/auth_routes.md)、[identity schema](../schema/identity-schema.md)与 [change](../../openspec/changes/productize-invited-accounts/proposal.md)。[实现验证](../verification/invited-account-implementation-2026-11-03.md)分列正式代码、隔离真实 PG/HTTP/浏览器与生命周期证据；外部放行依然须满足下方真实邮件、HTTPS、密钥托管和保留批准，不能用实现代替。飞书连接不属于本阶段。
 
 - 准入与管理分离：绑定管理员仍是本人业务用户，只额外持有窄安装管理资格，不得读取其他 owner 的任务、批准、会话、Run、工具结果、通知或资料。邀请接受或明确本机维护建立准入；不因 `users.status=active`、邮箱相同或历史 owner 存在就放行。
 - 原身份保留：原管理员验证真实恢复地址时，原 ID、不透明 `auth_email`、credential、认证 secret、历史 owner 和工作区身份不变。真实邮箱独立加密与用途分离 HMAC；旧邮箱 hash/verified 字段不自动授予恢复资格。
@@ -77,7 +77,7 @@
 
 ### 受邀账户外部前置（#112）
 
-以下待确认项阻塞账户 P1 真实验收和入口放行，不阻塞 P0 合同与自有隔离 PG 实验。凭据只经既有安全配置渠道提供，不进入 issue、日志、Git 或本次 `.env*` 写入。
+以下待确认项阻塞账户 P1 真实外部验收和入口放行，不阻塞代码实现与自有隔离验证。凭据只经既有安全配置渠道提供，不进入 issue、日志、Git 或本次 `.env*` 写入。
 
 | 待确认项             | 提供/批准方       | 需要的事实与受阻验收                                                                                               |
 | -------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------ |
@@ -88,7 +88,7 @@
 | 密钥托管与恢复       | 部署者/安全负责人 | 联系人 HMAC、一次凭证用途密钥、AEAD 的独立 key-id/托管/访问人/备份恢复/轮换；原认证 secret 不变，缺 key 不重生覆盖 |
 | 隐私与保留           | 产品/安全负责人   | 供应商可见邮箱/链接、处理区域/保留、日志脱敏、本地载荷清理与注销请求口径；本地删除不承诺供应商零保留               |
 
-公开兼容性研究仅说明候选能力：例如 Resend 发送幂等窗口为 24 小时，不能以邀请 48 小时有效期推导无限重发安全；SES 沙箱不等于生产发送资格。来源、观察与限制见[外部核对记录](../verification/invited-account-external-prerequisites-2026-11-03.md)，不在此选定供应商或虚构真实取值。
+实现提供显式 Resend HTTPS 适配器，不自动选取账户或配置生产发件人。供应商批准与真实接受/收件仍需外部证据：其发送幂等窗口为 24 小时，不能以邀请 48 小时有效期推导无限重发安全；SES 沙箱也不等于生产发送资格。公开依据见[外部核对记录](../verification/invited-account-external-prerequisites-2026-11-03.md)。
 
 ## R1 会话历史与只读恢复（#69）
 

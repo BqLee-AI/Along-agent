@@ -32,3 +32,19 @@ export async function getTaskNotificationSource(
     originalNote: task.original_note,
   };
 }
+
+/** The original send version survives later task transitions and disablement. */
+export async function getNotificationSendVersion(
+  client: PoolClient,
+  ownerId: string,
+  taskId: string,
+  idempotencyKey: string,
+): Promise<number | null> {
+  const { rows } = await client.query<{ expected_state_version: number }>(
+    `SELECT expected_state_version FROM outbox
+     WHERE owner_id=$1 AND task_id=$2 AND idempotency_key=$3
+       AND command->>'kind'='send'`,
+    [ownerId, taskId, idempotencyKey],
+  );
+  return rows[0]?.expected_state_version ?? null;
+}
