@@ -7,7 +7,12 @@ import { confirmApproval } from '../../src/modules/approvals/confirm.js';
 import { invokeTool, reserveToolInvocation } from '../../src/modules/tools/gateway.js';
 import type { ToolContext, ToolOutcome } from '../../src/modules/tools/contracts.js';
 import { loadTimeContext } from '../../src/modules/time/context.js';
-import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
+import {
+  createIntegrationDatabase,
+  databaseUrl,
+  seedApproval,
+  type IntegrationDatabase,
+} from './setup.js';
 
 const maybe = databaseUrl ? describe : describe.skip;
 const tools = [
@@ -413,10 +418,11 @@ maybe('persistent tool invocation identity and local results', () => {
     const brief = await reserve(ctx, 'brief/1', 'read_brief_cards', { date: '2026-11-02' });
     const firstList = await invokeTool(pool, ctx, list);
     const firstBrief = await invokeTool(pool, ctx, brief);
+    const source = await seedApproval(pool, { ownerId: ctx.ownerId, state: 'consumed' });
     await pool.query(
-      `INSERT INTO tasks(id,owner_id,original_note,fire_at_utc,wall_time,timezone_id,fold,resolved_utc_offset_seconds,tzdb_version,occurrence,state,state_version)
-      VALUES($1,$2,'新提醒','2026-11-02T01:20:00Z','2026-11-02 09:20','Asia/Shanghai',0,28800,'fixture-v1','once','saved',1)`,
-      [randomUUID(), ctx.ownerId],
+      `INSERT INTO tasks(id,owner_id,original_note,fire_at_utc,wall_time,timezone_id,fold,resolved_utc_offset_seconds,tzdb_version,occurrence,state,state_version,source_approval_id)
+      VALUES($1,$2,'新提醒','2026-11-02T01:20:00Z','2026-11-02 09:20','Asia/Shanghai',0,28800,'fixture-v1','once','saved',1,$3)`,
+      [randomUUID(), ctx.ownerId, source.id],
     );
     expect(await invokeTool(pool, ctx, list)).toEqual({ ...firstList, replayed: true });
     expect(await invokeTool(pool, ctx, brief)).toEqual({ ...firstBrief, replayed: true });
@@ -441,10 +447,11 @@ maybe('persistent tool invocation identity and local results', () => {
     const terminal = ['fired', 'missed', 'cancelled'] as const;
     const ids = terminal.map(() => randomUUID());
     for (const [index, state] of terminal.entries()) {
+      const source = await seedApproval(pool, { ownerId: ctx.ownerId, state: 'consumed' });
       await pool.query(
-        `INSERT INTO tasks(id,owner_id,original_note,fire_at_utc,wall_time,timezone_id,fold,resolved_utc_offset_seconds,tzdb_version,occurrence,state,state_version)
-         VALUES($1,$2,'已结束的提醒','2026-11-01T08:40:00Z','2026-11-01 16:40','Asia/Shanghai',0,28800,'fixture-v1','once',$3,1)`,
-        [ids[index], ctx.ownerId, state],
+        `INSERT INTO tasks(id,owner_id,original_note,fire_at_utc,wall_time,timezone_id,fold,resolved_utc_offset_seconds,tzdb_version,occurrence,state,state_version,source_approval_id)
+         VALUES($1,$2,'已结束的提醒','2026-11-01T08:40:00Z','2026-11-01 16:40','Asia/Shanghai',0,28800,'fixture-v1','once',$3,1,$4)`,
+        [ids[index], ctx.ownerId, state, source.id],
       );
     }
     const active = await invokeTool(pool, ctx, await reserve(ctx, 'active/1', 'list_tasks', {}));

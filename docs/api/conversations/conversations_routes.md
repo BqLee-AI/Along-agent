@@ -6,7 +6,7 @@
 >
 > 时间失败、有限真实规则与 Web 候选选择按 #30 合同；安全 spec Scenario 1.2 的 typed failed 不得改成 completed。合同与实际验收记录分开。
 
-> 本人时区委托切片（#107）：Web 普通 Agent 显式请求 `authorization_revision:'delegation/1'`，当前仅接受无工作区的 `harness`。可信上下文、GoalResult、`harness/v6` 与新 SSE `v2` 已有对应实现；省略授权修订的请求仍为 legacy，不随协议升级扩权。新委托冻结 `request-bound`，不承诺后台继续；直接提醒、elapsed、文件自主写入及 server-owned 仍属 [design/20](../../design/20-goal-scoped-delegation.md) 的后续范围。合同描述不代替真实验收。
+> 本人委托：Web 普通 Agent 显式请求 `authorization_revision:'delegation/1'`，仅接受无工作区的 `harness`。可信上下文、GoalResult、`harness/v6` 与 SSE `v2` 配套；省略授权修订仍为 legacy。新接纳能力包含本人时区保存/清除和明确单次墙上提醒直接创建，旧冻结集合不扩权。生命周期为 `request-bound`，不承诺后台继续；elapsed、文件自主写入及 server-owned 不在此能力范围，见 [design/20](../../design/20-goal-scoped-delegation.md)。合同描述不代替真实验收。
 
 ## 1. 路由
 
@@ -89,6 +89,8 @@ data: {"protocol_version":"v1","seq":12,"type":"approval_required","payload":{"c
 - `waiting=null | {checkpoint_id,invocation_id,approval_id}`；文档等待额外带 `approval_kind:"document"`，旧 task 等待不加此字段。`can_resume` 表示当前是否可显式继续，不泄漏凭据/内部推理；
 - 可选 `workspace={workspace_id,label,readable_paths,writable_paths}` 为接纳 Run 时冻结的安全摘要，不是当前登记的动态替代，也不返回 root/物理 identity/登记摘要。历史缺摘要不从当前登记补造；
 - 新 delegation 另有可选 `authorization_revision:'delegation/1'`、`execution_lifecycle:'request-bound'` 和 `goal_result:GoalResult|null`；来自该 Run 冻结事实及终结结果，不按当前开关补造。legacy 缺这些字段仍沿原合同读取。Web 在初始接纳和历史视图显示连接限制，并分别展示目标状态、逐项结果、回执和最终答复；Run done 只表示执行结束。
+- `created_reminders` 为新 delegation 的可选只读数组，每项为真实 `task_created` 冻结结果加 `invocation_id`，包含 task ID、保存状态、原墙上时间/时区/fold/偏移/规则身份/UTC和备注。读取核对真实任务与接受结果，不读取模型自报事实。Web 提供任务详情链接和创建回执；此数组不声明实时排期、触发或通知状态。
+- `reminder_time_errors` 为该 delegation Run 的可选只读数组，每项含真实 `create_reminder` 接受结果中的 `invocation_id/error`，不表示成功创建。遇到已持久 time 澄清且实际 DST 候选唯一时，Web 复用 first/second 选择，保留原文及真实候选时区并显式关联前序 Run；提交的是用户选择，不是批准或前端计算的 UTC。不同候选来源不自动合并。
 - owner-scoped，不存在或他人 Run 返回404。读取不执行，不因状态可继续而自动唤醒。
 
 ### 显式取消

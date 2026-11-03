@@ -334,6 +334,27 @@ export function useConversationTask({
         }
         replyPending = current.status === 'running' || current.status === 'suspended_approval';
         const indexed = history.find((item) => item.run_id === current.run_id);
+        if (
+          current.authorization_revision === 'delegation/1' &&
+          ['blocked', 'partial'].includes(current.goal_result?.status ?? '') &&
+          current.goal_result?.clarification?.kind === 'time' &&
+          indexed?.original.state === 'available'
+        ) {
+          const ambiguities = new Map(
+            (current.reminder_time_errors ?? [])
+              .filter((item) => item.error.code === 'AMBIGUOUS_LOCAL_TIME')
+              .map((item) => [JSON.stringify(item.error.details), item.error.details]),
+          );
+          if (ambiguities.size === 1) {
+            const details = AmbiguousTimeDetailsSchema.safeParse(ambiguities.values().next().value);
+            if (details.success)
+              setAmbiguousProposal({
+                ...details.data,
+                raw_text: indexed.original.message.content,
+                source_run_id: current.run_id,
+              });
+          }
+        }
         if (indexed) indexed.status = current.status;
         const stored = sessionStorage.getItem(`run-resume:${cid}:${target.runId}`);
         if (stored) {
@@ -494,7 +515,16 @@ export function useConversationTask({
             confirmed_timezone:
               proposal?.timezone_id ?? (intent === 'chat' ? undefined : me.confirmed_timezone),
             fold_choice: proposal ? foldChoice : undefined,
-            clarification_of_run_id: proposal?.source_run_id,
+            clarification_of_run_id:
+              proposal?.source_run_id ??
+              (intent === 'chat' &&
+              run?.authorization_revision === 'delegation/1' &&
+              run.goal_result &&
+              ['blocked', 'partial'].includes(run.goal_result.status) &&
+              run.goal_result.clarification &&
+              ['time', 'timezone'].includes(run.goal_result.clarification.kind)
+                ? run.run_id
+                : undefined),
             ...taskAdmission(intent),
             ...(intent === 'document' ? { workspace_id: workspaceId } : {}),
             idempotency_key: crypto.randomUUID(),

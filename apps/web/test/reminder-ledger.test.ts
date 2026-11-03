@@ -30,6 +30,7 @@ const tasks: TaskListItem[] = Array.from({ length: 51 }, (_, index) => ({
   fire_at_local: frozenLocal,
   timezone_id: 'America/New_York',
   source_approval_id: null,
+  source_invocation_id: null,
   schedule_receipt: index === 0 ? 'receipt/raw' : null,
 }));
 const events: TaskEventItem[] = Array.from({ length: 51 }, (_, index) => ({

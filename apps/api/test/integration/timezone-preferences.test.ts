@@ -343,17 +343,17 @@ maybe('delegation personal timezone transactions', () => {
     const taskId = randomUUID();
     const approvalId = randomUUID();
     await pool.query(
-      `INSERT INTO tasks(id,owner_id,fire_at_utc,wall_time,timezone_id,fold,
-      resolved_utc_offset_seconds,tzdb_version,original_note)
-      VALUES($1,$2,'2027-01-01T01:20:00Z','2027-01-01 09:20','Asia/Shanghai',0,28800,'2024a','frozen reminder')`,
-      [taskId, ctx.ownerId],
-    );
-    await pool.query(
       `INSERT INTO approvals(id,owner_id,original_text,fire_at_utc,wall_time,timezone_id,fold,
       resolved_utc_offset_seconds,tzdb_version,occurrence,presentation_hash,presentation_version,state,expires_at)
       VALUES($1,$2,'frozen reminder','2027-01-01T01:20:00Z','2027-01-01 09:20','Asia/Shanghai',0,28800,
       '2024a','single','frozen-hash','v1','pending',clock_timestamp()+interval '1 hour')`,
       [approvalId, ctx.ownerId],
+    );
+    await pool.query(
+      `INSERT INTO tasks(id,owner_id,fire_at_utc,wall_time,timezone_id,fold,
+      resolved_utc_offset_seconds,tzdb_version,original_note,source_approval_id)
+      VALUES($1,$2,'2027-01-01T01:20:00Z','2027-01-01 09:20','Asia/Shanghai',0,28800,'2024a','frozen reminder',$3)`,
+      [taskId, ctx.ownerId, approvalId],
     );
     const beforeTask = (
       await pool.query('SELECT to_jsonb(t) AS value FROM tasks t WHERE id=$1', [taskId])

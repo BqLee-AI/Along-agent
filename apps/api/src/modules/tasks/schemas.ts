@@ -26,6 +26,7 @@ export const TaskItemSchema = z.object({
   fire_at_local: z.string(),
   timezone_id: z.string(),
   source_approval_id: z.string().nullable(),
+  source_invocation_id: z.string().nullable(),
   schedule_receipt: z.string().nullable(),
 });
 
@@ -38,6 +39,7 @@ export const TaskDetailSchema = z.object({
   fire_at_local: z.string(),
   timezone_id: z.string(),
   source_approval_id: z.string().nullable(),
+  source_invocation_id: z.string().nullable(),
   recreated_from: z.string().nullable(),
   schedule_receipt: z.string().nullable(),
   created_at: z.string(),
@@ -67,9 +69,8 @@ export const TaskEventsQuerySchema = z.object({
 
 export type TaskEventsQuery = z.infer<typeof TaskEventsQuerySchema>;
 
-// Outbox command staged by confirm (PR2). Minimal shape per plan: the
-// scheduler (#8) owns the vocabulary; approvals only needs to know the
-// envelope fields it writes.
+// Schedule commands are staged by the tasks creation use case; the scheduler
+// owns command consumption and registration receipts.
 export const OutboxCommandSchema = z.object({
   kind: z.literal('schedule'),
   task_id: z.string().uuid(),

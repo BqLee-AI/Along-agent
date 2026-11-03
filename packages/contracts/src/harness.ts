@@ -93,6 +93,21 @@ const timeFailure = z
       .optional(),
   })
   .strict();
+const taskCreatedSchema = z
+  .object({
+    kind: z.literal('task_created'),
+    task_id: uuid,
+    state: z.literal('saved'),
+    wall_time: small,
+    timezone_id: small,
+    fold: z.union([z.literal(0), z.literal(1)]),
+    resolved_utc_offset_seconds: z.number().int(),
+    tzdb_version: small,
+    fire_at_utc: small,
+    original_note: payloadText.nullable(),
+  })
+  .strict();
+
 export const HarnessToolPayloadSchema = z.union([
   z
     .object({
@@ -177,6 +192,7 @@ export const HarnessToolPayloadSchema = z.union([
       alias_version: small,
     })
     .strict(),
+  taskCreatedSchema,
   z.object({ kind: z.literal('effect_evidence'), evidence_ref: small }).strict(),
   z
     .object({ kind: z.literal('document_approval'), approval: DocumentApprovalReceiptSchema })
@@ -591,6 +607,14 @@ export const RunViewSchema = z
     authorization_revision: z.literal('delegation/1').optional(),
     execution_lifecycle: z.literal('request-bound').optional(),
     goal_result: GoalResultSchema.nullable().optional(),
+    created_reminders: z
+      .array(taskCreatedSchema.extend({ invocation_id: uuid }))
+      .max(64)
+      .optional(),
+    reminder_time_errors: z
+      .array(z.object({ invocation_id: uuid, error: timeFailure }).strict())
+      .max(64)
+      .optional(),
   })
   .strict();
 

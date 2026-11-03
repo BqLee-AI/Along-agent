@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { stateConflict } from '../../http/errors.js';
 import { readDocumentApprovalReceipt } from '../approvals/decision.js';
 import { readFrozenToolApproval } from '../approvals/tool-result.js';
+import { readCreatedTaskReceipt } from '../tasks/create.js';
 import type { ToolContext, ToolResult } from './contracts.js';
 import { approvalReceiptSchema, parseResult, resultKind } from './result-schema.js';
 
@@ -20,6 +21,8 @@ export async function readAcceptedInvocationResult(
   client: PoolClient,
   ctx: Pick<ToolContext, 'ownerId' | 'runId'>,
   row: {
+    invocation_id: string;
+    frozen_context?: unknown;
     result_version: number | null;
     tool_id: string;
     approval_id: string | null;
@@ -49,5 +52,21 @@ export async function readAcceptedInvocationResult(
   const result = parseResult(row.accepted_result);
   if (result.status === 'unknown' || resultKind(result) !== row.outcome_kind)
     throw stateConflict('invalid accepted tool result');
+  if (result.status === 'ok' && result.result.kind === 'task_created') {
+    const payload = result.result;
+    const frozen = row.frozen_context as { authorizationRevision?: unknown } | null;
+    const task = await readCreatedTaskReceipt(client, {
+      ownerId: ctx.ownerId,
+      invocationId: row.invocation_id,
+    });
+    if (
+      row.tool_id !== 'create_reminder' ||
+      row.approval_id !== null ||
+      frozen?.authorizationRevision !== 'delegation/1' ||
+      !task ||
+      Object.entries(task).some(([key, value]) => value !== payload[key as keyof typeof task])
+    )
+      throw stateConflict('invalid accepted reminder creation');
+  }
   return result;
 }

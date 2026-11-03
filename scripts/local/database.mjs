@@ -667,10 +667,13 @@ export class DeploymentDatabase {
       pg_get_expr(k.conbin,k.conrelid) AS expression
       FROM pg_constraint k JOIN pg_class c ON c.oid=k.conrelid JOIN pg_namespace n ON n.oid=c.relnamespace
       LEFT JOIN pg_class ref ON ref.oid=k.confrelid WHERE n.nspname='public' AND c.relname=ANY($1::text[])`,
-        [manifest.tables],
+        [[...new Set([...manifest.tables, ...manifest.constraints.map((c) => c.table)])]],
       )
     ).rows;
-    if (constraints.length !== manifest.constraints.length)
+    if (
+      constraints.filter((c) => manifest.tables.includes(c.table_name)).length !==
+      manifest.constraints.filter((c) => manifest.tables.includes(c.table)).length
+    )
       fail('baseline_additional_constraints_mismatch');
     for (const expected of manifest.constraints) {
       const actual = constraints.find(
@@ -730,7 +733,9 @@ export class DeploymentDatabase {
       const actual = (
         await this.#query(
           `SELECT t.tgtype AS type,t.tgenabled AS enabled,t.tgqual IS NULL AS unconditional,
-         t.tgnargs AS arguments,p.proname AS function_name,nf.nspname AS function_schema
+         t.tgnargs AS arguments,p.proname AS function_name,nf.nspname AS function_schema,
+         ARRAY(SELECT a.attname::text FROM unnest(t.tgattr::smallint[]) WITH ORDINALITY x(num,pos)
+           JOIN pg_attribute a ON a.attrelid=t.tgrelid AND a.attnum=x.num ORDER BY x.pos) AS columns
          FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
          JOIN pg_namespace n ON n.oid=c.relnamespace
          JOIN pg_proc p ON p.oid=t.tgfoid JOIN pg_namespace nf ON nf.oid=p.pronamespace
@@ -745,6 +750,7 @@ export class DeploymentDatabase {
         !actual.unconditional ||
         actual.arguments !== 0 ||
         actual.function_name !== expected.function ||
+        actual.columns.join(',') !== (expected.columns ?? []).join(',') ||
         actual.function_schema !== 'public'
       )
         fail('baseline_additional_triggers_mismatch');
@@ -830,7 +836,15 @@ export class DeploymentDatabase {
             `${c.columns.join(',')}>${c.target}.${c.target_columns.join(',')}:${c.delete_action}`,
         )
         .sort();
-      if (foreign.join('|') !== [...(FOREIGN[table] ?? [])].sort().join('|'))
+      const additions = this.#migrations
+        .filter((m) => m.version <= version && m.verify !== null && typeof m.verify === 'object')
+        .flatMap((m) => m.verify.constraints ?? [])
+        .filter((c) => c.table === table && c.type === 'f')
+        .map(
+          (c) =>
+            `${c.columns.join(',')}>${c.target}.${c.target_columns.join(',')}:${c.delete_action}`,
+        );
+      if (foreign.join('|') !== [...(FOREIGN[table] ?? []), ...additions].sort().join('|'))
         fail('baseline_foreign_keys_mismatch');
     }
     // Captured from an isolated PG16 database after the unchanged 0001–0016

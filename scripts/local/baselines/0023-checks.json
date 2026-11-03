@@ -1,0 +1,55 @@
+{
+  "version": "0023",
+  "tables": [],
+  "columns": [
+    {
+      "table": "tasks",
+      "name": "source_invocation_id",
+      "type": "uuid",
+      "required": false,
+      "default": ""
+    }
+  ],
+  "constraints": [
+    {
+      "table": "tasks",
+      "name": "tasks_source_invocation_id_fkey",
+      "type": "f",
+      "columns": ["source_invocation_id"],
+      "target": "tool_invocations",
+      "target_columns": ["invocation_id"],
+      "delete_action": "r"
+    },
+    {
+      "table": "tasks",
+      "name": "tasks_source_invocation_id_uniq",
+      "type": "u",
+      "columns": ["source_invocation_id"]
+    }
+  ],
+  "additional_checks": [
+    {
+      "table": "tasks",
+      "name": "tasks_source_xor_check",
+      "expression": "(num_nonnulls(source_approval_id, source_invocation_id) <= 1)"
+    }
+  ],
+  "functions": [
+    {
+      "name": "tasks_require_creation_source",
+      "arguments": "",
+      "result": "trigger",
+      "volatility": "v",
+      "strict": false
+    }
+  ],
+  "triggers": [
+    {
+      "table": "tasks",
+      "name": "tasks_creation_source_required",
+      "type": 23,
+      "function": "tasks_require_creation_source",
+      "columns": ["source_approval_id", "source_invocation_id"]
+    }
+  ]
+}

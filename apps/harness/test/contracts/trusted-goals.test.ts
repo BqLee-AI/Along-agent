@@ -220,7 +220,6 @@ test('v6 rejects v5, missing trust discriminator and unsupported frozen facts be
     },
     { trusted_context: { ...trusted, workspaces: [{ root: '/' }] } },
     { trusted_context: { ...trusted, timezone: { ...trusted.timezone, extra: true } } },
-    { tools: [{ ...timezoneTool, name: 'create_reminder' }] },
   ]) {
     expect(await nativeCase({ start, expectedExit: 2 })).toEqual([]);
   }
@@ -720,3 +719,247 @@ for (const code of ['UNKNOWN_TIMEZONE', 'TZDB_UNAVAILABLE']) {
     expect(legacy.at(-1)).toMatchObject({ type: 'finish', outcome: 'failed', error: { code } });
   });
 }
+
+const createdTask = {
+  kind: 'task_created',
+  task_id: randomUUID(),
+  state: 'saved',
+  wall_time: '2026-11-03 09:00',
+  timezone_id: 'America/New_York',
+  fold: 0,
+  resolved_utc_offset_seconds: -18000,
+  tzdb_version: 'controlled/1',
+  fire_at_utc: '2026-11-03T14:00:00Z',
+  original_note: '提交报告',
+};
+
+test('native rejects malformed task_created immutable observations before exposing receipts to the model', async () => {
+  for (const invalid of [
+    { task_id: 'not-a-uuid' },
+    { state: 'scheduled' },
+    { fold: 2 },
+    { resolved_utc_offset_seconds: -18000.5 },
+    { original_note: 42 },
+    { tzdb_version: null },
+    { extra: true },
+  ]) {
+    const requests = await nativeCase({
+      start: {
+        observations: [
+          {
+            view: 'full',
+            invocation_id: randomUUID(),
+            tool_id: 'create_reminder',
+            result: { status: 'ok', result: { ...createdTask, ...invalid } },
+          },
+        ],
+      },
+      expectedExit: 2,
+    });
+    expect(requests).toEqual([]);
+  }
+}, 120_000);
+
+for (const trustedContext of [trusted, null]) {
+  test(`native frozen ${trustedContext ? 'settings-only delegation' : 'legacy'} tool set never gains reminder dispatch`, async () => {
+    const requests = await nativeCase({
+      start: { trusted_context: trustedContext },
+      model: () => call('create_reminder', {}),
+    });
+    expect(requests.filter((request) => ['reserve', 'invoke'].includes(request.type))).toEqual([]);
+    expect(requests.at(-1)).toMatchObject({
+      type: 'finish',
+      outcome: 'failed',
+      error: { code: 'TOOL_DENIED' },
+    });
+  });
+}
+
+test('resuming a frozen settings-only snapshot does not authorize create_reminder', async () => {
+  const requests = await nativeCase({
+    start: {
+      snapshot: {
+        version: 2,
+        message_refs: [inputId],
+        tool_refs: [],
+        next_call_no: 3,
+        usage: { iterations: 2, tokens: 10 },
+        waiting: null,
+      },
+    },
+    model: () => call('create_reminder', {}),
+  });
+  expect(requests.filter((request) => ['reserve', 'invoke'].includes(request.type))).toEqual([]);
+  expect(requests.at(-1)).toMatchObject({
+    type: 'finish',
+    outcome: 'failed',
+    error: { code: 'TOOL_DENIED' },
+    usage: { iterations: 3, tokens: 15 },
+  });
+});
+
+const reminderTool = {
+  name: 'create_reminder',
+  description: 'Create an explicitly delegated wall/calendar reminder; success proves saved only.',
+  risk: 'medium',
+  parameters: {
+    type: 'object',
+    properties: {
+      raw_time_text: { type: 'string', minLength: 1 },
+      timezone_hint: { type: ['string', 'null'] },
+      note: { type: 'string', minLength: 1 },
+      occurrence: { const: 'once' },
+    },
+    required: ['raw_time_text', 'note', 'occurrence'],
+    additionalProperties: false,
+  },
+};
+const reminderArgs = {
+  raw_time_text: '2026年11月3日9:00提醒我提交报告',
+  timezone_hint: 'America/New_York',
+  note: '提交报告',
+  occurrence: 'once',
+};
+const reminderStart = {
+  tools: [reminderTool],
+  messages: [{ message_id: inputId, role: 'user', content: reminderArgs.raw_time_text }],
+  trusted_context: {
+    ...trusted,
+    time_capabilities: {
+      elapsed_revision: null,
+      wall_rules: {
+        ruleset_id: 'controlled/1',
+        tzdb_version: 'controlled/1',
+        alias_version: 'controlled/1',
+      },
+    },
+  },
+};
+
+test('frozen create_reminder dispatch accepts saved receipt and finishes without approval or schedule claims', async () => {
+  const receipts: string[] = [];
+  const result = {
+    ...goal(receipts),
+    outcomes: [
+      { description: '提醒已保存，尚无排期或通知回执', status: 'achieved', receipt_refs: receipts },
+    ],
+    answer: '提醒已保存；创建并不证明已排期、触发或通知。',
+  };
+  const requests = await nativeCase({
+    start: reminderStart,
+    model: (_request, index) =>
+      index === 0 ? call('create_reminder', reminderArgs) : call('finish_goal', result),
+    invoke: (request) => {
+      receipts.push(request.invocation_id as string);
+      return {
+        status: 'ok',
+        invocationId: request.invocation_id,
+        replayed: false,
+        result: createdTask,
+      };
+    },
+  });
+  expect(requests.filter((request) => request.type === 'reserve')).toEqual([
+    expect.objectContaining({
+      tool_id: 'create_reminder',
+      args: reminderArgs,
+      call_key: 'harness/1',
+    }),
+  ]);
+  expect(requests.filter((request) => request.type === 'invoke')).toHaveLength(1);
+  expect(requests.some((request) => request.type === 'suspend')).toBe(false);
+  expect(requests.at(-1)).toMatchObject({ type: 'finish_goal', goal_result: result });
+});
+
+test('task_created accepts nullable original note and preserves bootstrap invocation receipt', async () => {
+  const invocationId = randomUUID();
+  const requests = await nativeCase({
+    start: {
+      ...reminderStart,
+      snapshot: {
+        version: 2,
+        message_refs: [inputId],
+        tool_refs: [invocationId],
+        next_call_no: 2,
+        usage: { iterations: 0, tokens: 0 },
+        waiting: null,
+      },
+      observations: [
+        {
+          view: 'full',
+          invocation_id: invocationId,
+          tool_id: 'create_reminder',
+          result: { status: 'ok', result: { ...createdTask, original_note: null } },
+        },
+      ],
+    },
+    model: () => call('finish_goal', goal([invocationId])),
+  });
+  expect(requests.filter((request) => ['reserve', 'invoke'].includes(request.type))).toEqual([]);
+  expect(requests.at(-1)).toMatchObject({
+    type: 'finish_goal',
+    goal_result: { outcomes: [{ receipt_refs: [invocationId] }] },
+  });
+});
+
+test('invalid reminder GoalResult cannot dispatch another creation and only corrects within original budget', async () => {
+  const receipts: string[] = [];
+  const requests = await nativeCase({
+    start: { ...reminderStart, budget: { max_iterations: 4, max_tokens: 1000 } },
+    model: (_request, index) => {
+      if (index === 0 || index === 2) return call('create_reminder', reminderArgs);
+      if (index === 1) return call('finish_goal', goal([createdTask.task_id]));
+      return call('finish_goal', goal(receipts));
+    },
+    invoke: (request) => {
+      receipts.push(request.invocation_id as string);
+      return {
+        status: 'ok',
+        invocationId: request.invocation_id,
+        replayed: false,
+        result: createdTask,
+      };
+    },
+  });
+  expect(requests.filter((request) => request.type === 'invoke')).toHaveLength(1);
+  expect(requests.filter((request) => request.type === 'reserve')).toHaveLength(1);
+  expect(requests.filter((request) => request.type === 'model')).toHaveLength(4);
+  expect(requests.at(-1)).toMatchObject({ type: 'finish_goal', goal_result: goal(receipts) });
+});
+
+for (const code of ['TOOL_FORBIDDEN', 'UNKNOWN_TIMEZONE']) {
+  test(`reminder ${code} denial is not a receipt and allows truthful blocked completion`, async () => {
+    const result = {
+      status: 'blocked',
+      outcomes: [{ description: '提醒没有创建', status: 'blocked', receipt_refs: [] }],
+      clarification: null,
+      answer: '提醒未创建。',
+    };
+    const requests = await nativeCase({
+      start: reminderStart,
+      model: (_request, index) => {
+        if (index === 0 || (code === 'TOOL_FORBIDDEN' && index === 1))
+          return call('create_reminder', reminderArgs);
+        return call('finish_goal', result);
+      },
+      invoke: (request) => ({
+        status: 'denied',
+        invocationId: request.invocation_id,
+        replayed: false,
+        error: { code, message: 'Creation denied without an effect.' },
+      }),
+    });
+    expect(requests.filter((request) => request.type === 'invoke')).toHaveLength(1);
+    expect(requests.filter((request) => request.type === 'reserve')).toHaveLength(1);
+    expect(requests.at(-1)).toMatchObject({ type: 'finish_goal', goal_result: result });
+  });
+}
+
+test('legacy start cannot advertise the delegation-only create_reminder capability', async () => {
+  expect(
+    await nativeCase({
+      start: { trusted_context: null, tools: [reminderTool] },
+      expectedExit: 2,
+    }),
+  ).toEqual([]);
+});

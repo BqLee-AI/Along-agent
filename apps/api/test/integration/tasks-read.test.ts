@@ -18,17 +18,24 @@ import {
   getTaskEvents,
   listTasksForOwner,
 } from '../../src/modules/tasks/service.js';
-import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
+import {
+  createIntegrationDatabase,
+  databaseUrl,
+  seedApproval,
+  type IntegrationDatabase,
+} from './setup.js';
 
 const maybe = databaseUrl ? describe : describe.skip;
 
 async function seedTask(pool: Pool, ownerId: string): Promise<string> {
   const taskId = randomUUID();
+  // New rows require exactly one real creation source.
+  const source = await seedApproval(pool, { ownerId, state: 'consumed' });
   await pool.query(
     `INSERT INTO tasks (id, owner_id, fire_at_utc, wall_time, timezone_id, fold,
-       resolved_utc_offset_seconds, tzdb_version, original_note)
-     VALUES ($1,$2,'2026-10-17T01:20:00Z','2026-10-17 09:20','Asia/Shanghai',0,28800,'2024a','明天 9:20 喝水')`,
-    [taskId, ownerId],
+       resolved_utc_offset_seconds, tzdb_version, original_note, source_approval_id)
+     VALUES ($1,$2,'2026-10-17T01:20:00Z','2026-10-17 09:20','Asia/Shanghai',0,28800,'2024a','明天 9:20 喝水',$3)`,
+    [taskId, ownerId, source.id],
   );
   await pool.query(
     `INSERT INTO task_events (id, owner_id, task_id, state_version, type, evidence_ref)

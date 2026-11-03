@@ -5,6 +5,7 @@ export interface TaskRow {
   owner_id: string;
   kind: string;
   source_approval_id: string | null;
+  source_invocation_id: string | null;
   recreated_from_task_id: string | null;
   fire_at_utc: Date;
   wall_time: string;

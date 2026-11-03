@@ -184,9 +184,27 @@ export function RunStatusPanel({ task }: { task: ConversationTask }) {
         </div>
       ) : null}
       {goalResult ? (
-        <div className="px-4 py-3 text-sm">
-          <GoalResultPanel result={goalResult} />
-        </div>
+        <>
+          <div className="px-4 py-3 text-sm">
+            <GoalResultPanel result={goalResult} />
+          </div>
+          <ul className="space-y-3 px-4" aria-label="此次已创建的提醒">
+            {run?.created_reminders?.map((receipt) => (
+              <li key={receipt.invocation_id} className="space-y-1">
+                <Link className="underline underline-offset-4" href={`/tasks/${receipt.task_id}`}>
+                  {receipt.original_note ?? '查看提醒'} · {receipt.wall_time} {receipt.timezone_id}
+                </Link>
+                <p className="text-xs text-muted-foreground">
+                  已保存；排期、触发和通知请查看任务的真实记录。
+                </p>
+                <details className="text-xs text-muted-foreground">
+                  <summary className="min-h-8 content-center">查看创建回执</summary>
+                  <p className="font-mono">{receipt.invocation_id}</p>
+                </details>
+              </li>
+            ))}
+          </ul>
+        </>
       ) : null}
       {waiting || resumable ? (
         <div className="space-y-3 p-4" data-testid="run-waiting">

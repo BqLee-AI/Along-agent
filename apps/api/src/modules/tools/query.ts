@@ -3,6 +3,7 @@ import {
   HarnessObservationSchema,
   workspaceGrantSchema,
   type HarnessObservation,
+  type RunView,
 } from '@along/contracts';
 import { readDocumentApprovalReceipt } from '../approvals/decision.js';
 import {
@@ -11,8 +12,10 @@ import {
 } from '../conversations/tool-binding.js';
 import type { DocumentRunEvidence } from '../approvals/document-evidence.js';
 import type { ToolContext, TimezoneSettingPayload } from './contracts.js';
+import type { TaskCreatedPayload } from './contracts.js';
 import { parseResult, resultKind } from './result-schema.js';
 import { readAcceptedInvocationResult } from './accepted-result.js';
+import { readReminderTimeErrors } from './reminder-source.js';
 import {
   authorizeSliceOrigin,
   authorizeContextSource,
@@ -33,6 +36,46 @@ export async function readRunTimezoneSettings(
   return readTimezoneSettings(client, binding);
 }
 
+export async function readRunCreatedReminders(client: PoolClient, binding: RunBinding) {
+  await assertToolRunBinding(client, binding);
+  return readCreatedReminders(client, binding);
+}
+
+export async function readRunReminderTimeErrors(
+  client: PoolClient,
+  binding: RunBinding,
+): Promise<NonNullable<RunView['reminder_time_errors']>> {
+  await assertToolRunBinding(client, binding);
+  return readReminderTimeErrors(client, binding);
+}
+
+async function readCreatedReminders(
+  client: PoolClient,
+  binding: RunBinding,
+): Promise<Array<{ invocation_id: string } & TaskCreatedPayload>> {
+  const { rows } = await client.query<{
+    invocation_id: string;
+    tool_id: string;
+    result_version: number | null;
+    outcome_kind: string | null;
+    approval_id: string | null;
+    accepted_result: unknown;
+    frozen_context: { authorizationRevision?: unknown };
+  }>(
+    `SELECT invocation_id,tool_id,result_version,outcome_kind,approval_id,accepted_result,frozen_context
+     FROM tool_invocations WHERE owner_id=$1 AND conversation_id=$2 AND run_id=$3
+       AND tool_id='create_reminder' AND state='completed' ORDER BY accepted_at,invocation_id`,
+    [binding.ownerId, binding.conversationId, binding.runId],
+  );
+  const receipts: Array<{ invocation_id: string } & TaskCreatedPayload> = [];
+  for (const row of rows) {
+    const result = await readAcceptedInvocationResult(client, binding, row);
+    if (result.status !== 'ok' || result.result.kind !== 'task_created') continue;
+    receipts.push({ invocation_id: row.invocation_id, ...result.result });
+  }
+  return receipts;
+}
+
 // Internal terminal projection, never a content/observation read boundary.
 // Binding is checked before reading any receipts; hydration retains the same
 // accepted-result version, outcome, payload and frozen-profile integrity checks.
@@ -46,7 +89,8 @@ export async function readRunInterruptionEvidence(client: PoolClient, binding: R
     [binding.ownerId, binding.conversationId, binding.runId],
   );
   const settings = await readTimezoneSettings(client, binding);
-  return { hasUnknown: rows[0]!.has_unknown, settings };
+  const creations = await readCreatedReminders(client, binding);
+  return { hasUnknown: rows[0]!.has_unknown, settings, creations };
 }
 
 async function readTimezoneSettings(

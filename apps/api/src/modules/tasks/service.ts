@@ -25,6 +25,7 @@ export interface TaskListItem {
   fire_at_local: string;
   timezone_id: string;
   source_approval_id: string | null;
+  source_invocation_id: string | null;
   schedule_receipt: string | null;
 }
 
@@ -37,6 +38,7 @@ export interface TaskDetail {
   fire_at_local: string;
   timezone_id: string;
   source_approval_id: string | null;
+  source_invocation_id: string | null;
   recreated_from: string | null;
   schedule_receipt: string | null;
   created_at: string;
@@ -99,6 +101,7 @@ export async function listTasksForOwner(
     fire_at_local: row.wall_time,
     timezone_id: row.timezone_id,
     source_approval_id: row.source_approval_id,
+    source_invocation_id: row.source_invocation_id,
     schedule_receipt: row.schedule_receipt,
   }));
   const lastRow = page[page.length - 1] as
@@ -134,6 +137,7 @@ export async function getTaskDetail(
       fire_at_local: row.wall_time,
       timezone_id: row.timezone_id,
       source_approval_id: row.source_approval_id,
+      source_invocation_id: row.source_invocation_id,
       recreated_from: row.recreated_from_task_id,
       schedule_receipt: row.schedule_receipt,
       created_at: row.created_at.toISOString(),

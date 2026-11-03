@@ -2,7 +2,7 @@
 // Approved results, local approval inserts and audit rows commit together.
 import type { Pool, PoolClient } from 'pg';
 import { normalizeTime } from '../time/normalize.js';
-import { reminderDateExpression } from '@along/time-core';
+import { classifyEntry, reminderDateExpression } from '@along/time-core';
 import { readReminderDateInput } from '../conversations/reminder-date.js';
 import { createCancelTaskApproval, createTaskApproval } from '../approvals/create.js';
 import {
@@ -33,6 +33,8 @@ import { utf8Bytes, WorkspaceDeniedError } from '../workspaces/service.js';
 import { callWorkspaceMcp, type WorkspaceReadTool } from './mcp-workspace.js';
 import { readRunDocumentEvidence } from './query.js';
 import { readObservationPage } from './observation-page.js';
+import { createTaskWithinTransaction } from '../tasks/create.js';
+import { readRunTimezoneSettings } from './query.js';
 
 const workspaceDenied = (): ToolResult => ({
   status: 'denied',
@@ -278,6 +280,150 @@ async function runProposeTask(
     },
     errorCode: null,
   };
+}
+
+async function runCreateReminder(
+  client: PoolClient,
+  ctx: ToolContext,
+  args: unknown,
+  invocationId: string,
+): Promise<ToolResult> {
+  const parsed = TOOL_INPUT_SCHEMAS.create_reminder.safeParse(args);
+  if (!parsed.success || ctx.authorizationRevision !== 'delegation/1')
+    return {
+      status: 'denied',
+      error: { code: 'TOOL_FORBIDDEN', message: '创建参数或运行授权不合法。' },
+    };
+  const input = parsed.data;
+  const authority = await readReminderDateInput(client, ctx);
+  if (!authority || authority.source.kind === 'unresolved')
+    return {
+      status: 'ok',
+      result: {
+        kind: 'clarify',
+        reason: 'DATE_SOURCE_UNCLEAR',
+        phrase_key: 'ASK_EXACT_TIME',
+        text: '请完整重述这条提醒的日期、时间、时区和事项。',
+      },
+    };
+  const sourceText = authority.clarificationText ?? authority.originalText;
+  if (authority.source.kind !== 'clarification' && !sourceText.includes(input.raw_time_text))
+    return {
+      status: 'ok',
+      result: {
+        kind: 'clarify',
+        reason: 'DATE_SOURCE_UNCLEAR',
+        phrase_key: 'ASK_EXACT_TIME',
+        text: '时间必须引用本次请求或可信同目标补充，不猜测日期和时刻。',
+      },
+    };
+  const settings = await readRunTimezoneSettings(client, ctx);
+  let timezone =
+    input.timezone_hint ??
+    (settings.length ? settings[settings.length - 1]!.timezone_id : ctx.confirmedTimezone);
+  const now = (
+    await client.query<{ now: string }>(
+      `SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') AS now`,
+    )
+  ).rows[0]!.now;
+  let selectedText = input.raw_time_text;
+  if (authority.source.kind === 'clarification' && ctx.timeContext.available) {
+    const timeContext = ctx.timeContext;
+    const supplement = sourceText.slice(authority.originalText.length).trim();
+    const date = reminderDateExpression(authority.originalText);
+    const classify = (text: string) =>
+      classifyEntry({
+        text,
+        anchorReceivedAtUtc: ctx.anchorReceivedAtUtc,
+        receivedAtUtc: now,
+        confirmedTz: timezone ?? '',
+        fold: ctx.foldChoice,
+        ruleset: timeContext.ruleset,
+        aliases: timeContext.aliases,
+        requireCompleteReminder: true,
+        reminderContent: input.note,
+      });
+    let trusted = classify(sourceText);
+    if (trusted.reason === 'DATE_MISSING' && date) trusted = classify(`${date} ${supplement}`);
+    // Inherit only missing facts. Never normalize a complete selection as the
+    // whole multi-action source: its first clock belongs to a different task.
+    timezone ??= trusted.timezone_id ?? null;
+    let selected = classify(selectedText);
+    if (selected.reason === 'DAYPART_MISSING' && supplement) {
+      selectedText = `${selectedText} ${supplement}`;
+      selected = classify(selectedText);
+    }
+    if (selected.reason === 'DATE_MISSING' && date) {
+      selectedText = `${date} ${selectedText}`;
+      selected = classify(selectedText);
+    }
+    // A composed/expanded single-date reference must still denote the trusted
+    // facts. Literal per-action selections remain valid in multi-action inputs.
+    if (
+      !sourceText.includes(input.raw_time_text) &&
+      !(
+        selected.class === 'normalize_ok' &&
+        trusted.class === 'normalize_ok' &&
+        selected.wall_time === trusted.wall_time &&
+        selected.timezone_id === trusted.timezone_id
+      )
+    )
+      return {
+        status: 'ok',
+        result: {
+          kind: 'clarify',
+          reason: 'DATE_SOURCE_UNCLEAR',
+          phrase_key: 'ASK_EXACT_TIME',
+          text: '时间必须引用本次请求或可信同目标补充，不猜测日期和时刻。',
+        },
+      };
+  }
+  const result = normalizeTime(ctx.timeContext, {
+    raw_text: selectedText,
+    anchorReceivedAtUtc: ctx.anchorReceivedAtUtc,
+    receivedAtUtc: now,
+    confirmedTimezone: timezone,
+    foldChoice: ctx.foldChoice,
+    requireCompleteReminder: true,
+    reminderContent: input.note,
+  });
+  if (result.kind === 'error')
+    return { status: 'ok', result: { kind: 'time_error', error: result.error } };
+  if (result.kind === 'clarify') {
+    const phrase = result.classified.phrase_key ?? 'ASK_EXACT_TIME';
+    return {
+      status: 'ok',
+      result: {
+        kind: 'clarify',
+        reason: result.classified.reason ?? 'UNCLASSIFIED',
+        phrase_key: phrase,
+        text: CLARIFY_TEXT[phrase] ?? CLARIFY_TEXT.ASK_EXACT_TIME,
+      },
+    };
+  }
+  if (new Date(result.normalized.fire_at_utc).getTime() <= new Date(now).getTime())
+    return {
+      status: 'ok',
+      result: {
+        kind: 'clarify',
+        reason: 'FIRE_TIME_PASSED',
+        phrase_key: 'ASK_EXACT_TIME',
+        text: '原目标时刻已过，未创建；请给新的未来时间，不会自动顺延。',
+      },
+    };
+  const receipt = await createTaskWithinTransaction(client, {
+    ownerId: ctx.ownerId,
+    source: { invocationId },
+    fireAtUtc: result.normalized.fire_at_utc,
+    wallTime: `${result.wall_time.slice(0, 10)} ${result.wall_time.slice(11, 16)}`,
+    timezoneId: result.timezone_id,
+    fold: result.normalized.fold,
+    resolvedUtcOffsetSeconds: result.normalized.offset_seconds,
+    tzdbVersion: result.tzdb_version,
+    originalNote: input.note,
+    idempotencyKey: `create:${invocationId}`,
+  });
+  return { status: 'ok', result: { kind: 'task_created', ...receipt } };
 }
 
 async function runRequestCancelTask(
@@ -527,6 +673,8 @@ export function invokeTool(
   return executeLocalInvocation(pool, ctx, input, async (client, frozen) => {
     let executed: ToolExecution;
     switch (input.toolId) {
+      case 'create_reminder':
+        return runCreateReminder(client, frozen, input.args, input.invocationId);
       case 'set_user_timezone':
         return runSetUserTimezone(client, frozen, input.args);
       case 'workspace_propose_replace':

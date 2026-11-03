@@ -82,6 +82,7 @@ export type ReadRunObservationInput = z.infer<typeof ReadRunObservationInputSche
 
 export const TOOL_INPUT_SCHEMAS = {
   propose_task: ProposeTaskInputSchema,
+  create_reminder: ProposeTaskInputSchema,
   request_cancel_task: RequestCancelTaskInputSchema,
   list_tasks: ListTasksInputSchema,
   read_brief_cards: ReadBriefCardsInputSchema,

@@ -2,7 +2,7 @@
 
 > 状态：既有 task 与 R1 独立文档批准 schema 合同。范围：`approvals`、`approval_revision_requests`、`document_approvals`、`document_approval_decisions`、`tasks`、`task_events`、`outbox`、`notifications`；合同不表示迁移演练或真实模型/用户材料验收已通过。不包含：重复提醒、日历授权、投递对账网关（v1 盒子）。
 
-> Proposed 演进：tasks直接来源`source_invocation_id`与旧`source_approval_id`分别受约束，新增可空`time_basis`不回填历史；仅严格UTC elapsed依据且UTC/offset0/fold0分支允许tzdb_version空，其余时间字段/真实规则身份继续约束，见 [design/20 §4.3、§6–§7](../design/20-goal-scoped-delegation.md)。旧批准只属legacy，新正常写不制造consumed批准；文档无task统一24小时TTL。事务、append-only/回执保留，本规范不实施DDL。
+> 直接创建：tasks 的 `source_invocation_id` 与旧 `source_approval_id` 分别受约束，新写必须恰有一项；0023 前向迁移保留历史双空来源，不制造批准。time_basis、严格 UTC elapsed 的 nullable 规则仍是后续合同，见 [design/20 §4.3、§6–§7](../design/20-goal-scoped-delegation.md)，本切片不启用。事务、append-only 与调度回执门不变。
 
 ## 设计依据
 
@@ -118,7 +118,7 @@ tasks 1 ── 0..1 tasks       (recreated_from_task_id 自引用)
 
 ### 用途
 
-[Required] 正式调度对象（旧称 R）。确认后才创建；触发门禁三查（对得上 + `scheduled` + 登记凭据绑同一 task）。
+[Required] 正式调度对象（旧称 R）。legacy 确认或具有直接创建能力的本人委托创建；两者共用 tasks 公共事务用例。触发门禁三查（对得上 + `scheduled` + 登记凭据绑同一 task）。
 
 ### 字段
 
@@ -128,6 +128,7 @@ tasks 1 ── 0..1 tasks       (recreated_from_task_id 自引用)
 | `owner_id`                    | `uuid`        | not null                          | 所属用户，查询必带                                                               |
 | `kind`                        | `text`        | not null, default `'notify_only'` | 按 `notify_only` 约束（v0 仅此值；06 喝水=调度子用例，不走 LLM 先验调度）        |
 | `source_approval_id`          | `uuid`        | nullable                          | 来源 approval（逻辑引用，同事务创建）                                            |
+| `source_invocation_id`        | `uuid`        | nullable, unique, FK restrict     | 直接创建的真实工具 invocation；与批准来源互斥                                    |
 | `recreated_from_task_id`      | `uuid`        | nullable                          | 重约来源（自引用，唯一；只保证找得回去，不继承授权）                             |
 | `fire_at_utc`                 | `timestamptz` | not null                          | 触发瞬间（归一输出，出差不改）                                                   |
 | `wall_time`                   | `text`        | not null                          | 墙上时间（精确到秒）                                                             |
@@ -145,6 +146,7 @@ tasks 1 ── 0..1 tasks       (recreated_from_task_id 自引用)
 ### 约束与索引
 
 - `unique(recreated_from_task_id)`（非 NULL 唯一），同一旧号只有一个后继。
+- 新 INSERT 和显式更新来源字段时，`source_approval_id` / `source_invocation_id` 必须恰有一个非空。CHECK 禁止双来源，触发器要求新写来源完整；0023 不回填历史双空行，普通状态更新不触发来源要求。直接来源的唯一约束阻止同 invocation 创建第二条 task。
 - Contract `UNIQUE(task_id, fire_at)` 落为 `unique(id, fire_at_utc)`（防同一 task 双触发点分叉；以本行为准）。
 - `index(owner_id, state)`，调度/列表查询。
 - `index(fire_at_utc)`，到点扫描（claim lease 用）。

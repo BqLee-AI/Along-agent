@@ -23,6 +23,7 @@ export const HARNESS_BASE_TOOL_IDS = [...BUSINESS_TOOL_IDS, ...CONTEXT_TOOL_IDS]
 export const DELEGATION_TOOL_IDS = [
   'get_user_prefs',
   'set_user_timezone',
+  'create_reminder',
   'list_tasks',
   'read_brief_cards',
   'read_run_observation',
@@ -110,6 +111,18 @@ export interface TimezoneSettingPayload {
   previous_timezone_id: string | null;
   alias_version: string;
 }
+export interface TaskCreatedPayload {
+  kind: 'task_created';
+  task_id: string;
+  state: 'saved';
+  wall_time: string;
+  timezone_id: string;
+  fold: 0 | 1;
+  resolved_utc_offset_seconds: number;
+  tzdb_version: string;
+  fire_at_utc: string;
+  original_note: string | null;
+}
 // Internal non-transactional evidence, not a registered product tool.
 export interface EvidencePayload {
   kind: 'effect_evidence';
@@ -128,6 +141,7 @@ export type ToolPayload =
   | BriefPayload
   | PrefsPayload
   | TimezoneSettingPayload
+  | TaskCreatedPayload
   | EvidencePayload
   | WorkspaceResult;
 export type ToolResult =
