@@ -2,6 +2,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Pool } from 'pg';
 import type { ActorResolver } from '../../http/auth.js';
+import type { TimeContext } from '../time/context.js';
 import {
   failEnvelope,
   HttpError,
@@ -16,6 +17,7 @@ export interface BriefRouteDeps {
   pool: Pool | null;
   resolveActor: ActorResolver;
   tzdbVersion?: string;
+  timeContext?: TimeContext;
 }
 
 // Returns true when handled (including auth failures).
@@ -41,7 +43,7 @@ export async function handleBriefRoute(
       }
     });
     const brief = await getBrief(
-      { pool: deps.pool, tzdbVersion: deps.tzdbVersion },
+      { pool: deps.pool, tzdbVersion: deps.tzdbVersion, timeContext: deps.timeContext },
       actor.ownerId,
       actor.timezoneId,
       query,

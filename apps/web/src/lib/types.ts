@@ -1,5 +1,9 @@
 import { z } from 'zod';
 
+export { ElapsedTimeBasisSchema } from '@along/contracts';
+export type { ElapsedTimeBasis } from '@along/contracts';
+import { ElapsedTimeBasisSchema, type ElapsedTimeBasis } from '@along/contracts';
+
 // Wire types for the v0 API. The Web layer reads these frozen fields only.
 export interface BriefCard {
   card_id: string;
@@ -8,6 +12,9 @@ export interface BriefCard {
   title: string;
   status?: string;
   fire_at_local?: string;
+  timezone_id?: string;
+  time_basis?: ElapsedTimeBasis | null;
+  display_version?: 'elapsed/1' | null;
   ref?: { task_id?: string; approval_id?: string };
 }
 
@@ -37,9 +44,14 @@ export interface TaskListItem {
   fire_at_utc: string;
   fire_at_local: string;
   timezone_id: string;
+  fold?: number;
+  resolved_utc_offset_seconds?: number;
+  tzdb_version?: string | null;
   source_approval_id: string | null;
   source_invocation_id: string | null;
   schedule_receipt: string | null;
+  time_basis?: ElapsedTimeBasis | null;
+  display_version?: 'elapsed/1' | null;
 }
 
 export const TaskDetailSchema = z
@@ -49,9 +61,14 @@ export const TaskDetailSchema = z
     fire_at_utc: z.string(),
     fire_at_local: z.string(),
     timezone_id: z.string(),
+    fold: z.number().int().optional(),
+    resolved_utc_offset_seconds: z.number().int().optional(),
+    tzdb_version: z.string().nullable().optional(),
     source_approval_id: z.string().nullable(),
     source_invocation_id: z.string().uuid().nullable(),
     schedule_receipt: z.string().nullable(),
+    time_basis: ElapsedTimeBasisSchema.nullable().optional(),
+    display_version: z.literal('elapsed/1').nullable().optional(),
     kind: z.string(),
     state_version: z.number(),
     recreated_from: z.string().nullable(),

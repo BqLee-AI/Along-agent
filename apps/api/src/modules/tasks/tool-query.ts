@@ -9,7 +9,7 @@ export interface CancelTaskCandidate {
   timezone_id: string;
   fold: number;
   resolved_utc_offset_seconds: number;
-  tzdb_version: string;
+  tzdb_version: string | null;
   fire_at_utc: Date;
   original_note: string | null;
 }

@@ -296,7 +296,9 @@ export async function startConversationRun(
                 }
               : null,
             time_capabilities: {
-              elapsed_revision: null,
+              elapsed_revision: (allowlist as readonly string[]).includes('create_reminder')
+                ? 'elapsed/1'
+                : null,
               wall_rules: deps.timeContext.available
                 ? {
                     ruleset_id: deps.timeContext.ruleset_id,

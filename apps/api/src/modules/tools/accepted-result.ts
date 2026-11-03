@@ -1,4 +1,5 @@
 import type { PoolClient } from 'pg';
+import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import { stateConflict } from '../../http/errors.js';
 import { readDocumentApprovalReceipt } from '../approvals/decision.js';
@@ -64,7 +65,9 @@ export async function readAcceptedInvocationResult(
       row.approval_id !== null ||
       frozen?.authorizationRevision !== 'delegation/1' ||
       !task ||
-      Object.entries(task).some(([key, value]) => value !== payload[key as keyof typeof task])
+      Object.entries(task).some(
+        ([key, value]) => !isDeepStrictEqual(value, payload[key as keyof typeof task]),
+      )
     )
       throw stateConflict('invalid accepted reminder creation');
   }

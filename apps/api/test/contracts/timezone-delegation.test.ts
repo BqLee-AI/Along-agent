@@ -768,7 +768,7 @@ for (const mode of ['local', 'http'] as const) {
       authorization_revision: 'delegation/1',
       execution_lifecycle: 'request-bound',
       timezone: { timezone_id: 'America/New_York', source: 'explicit' },
-      time_capabilities: { elapsed_revision: null },
+      time_capabilities: { elapsed_revision: 'elapsed/1' },
       workspaces: [],
     });
     const persisted = (

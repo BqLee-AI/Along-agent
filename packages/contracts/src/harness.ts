@@ -5,7 +5,11 @@ import {
   DocumentApprovalReceiptSchema,
 } from './document-approvals.js';
 import { RoutingPolicySchema, RoutingIntentSchema } from './routing.js';
-import { GoalResultSchema, TrustedExecutionContextSchema } from './goals.js';
+import {
+  ElapsedTimeBasisSchema,
+  GoalResultSchema,
+  TrustedExecutionContextSchema,
+} from './goals.js';
 
 export const HARNESS_PROTOCOL_VERSION = 'harness/v6' as const;
 export const HARNESS_MAX_FRAME_BYTES = 1024 * 1024;
@@ -102,11 +106,20 @@ const taskCreatedSchema = z
     timezone_id: small,
     fold: z.union([z.literal(0), z.literal(1)]),
     resolved_utc_offset_seconds: z.number().int(),
-    tzdb_version: small,
+    tzdb_version: small.nullable(),
     fire_at_utc: small,
     original_note: payloadText.nullable(),
+    time_basis: ElapsedTimeBasisSchema.optional(),
+    display_version: z.literal('elapsed/1').optional(),
   })
-  .strict();
+  .strict()
+  .refine((task) =>
+    task.time_basis
+      ? task.display_version === 'elapsed/1' &&
+        (task.tzdb_version !== null ||
+          (task.timezone_id === 'UTC' && task.fold === 0 && task.resolved_utc_offset_seconds === 0))
+      : task.display_version === undefined && task.tzdb_version !== null,
+  );
 
 export const HarnessToolPayloadSchema = z.union([
   z
@@ -159,6 +172,7 @@ export const HarnessToolPayloadSchema = z.union([
       kind: z.literal('brief'),
       brief_id: small,
       date: small,
+      timezone_id: small.optional(),
       cards: z
         .array(
           z
@@ -608,7 +622,20 @@ export const RunViewSchema = z
     execution_lifecycle: z.literal('request-bound').optional(),
     goal_result: GoalResultSchema.nullable().optional(),
     created_reminders: z
-      .array(taskCreatedSchema.extend({ invocation_id: uuid }))
+      .array(
+        taskCreatedSchema
+          .innerType()
+          .extend({ invocation_id: uuid })
+          .refine((task) =>
+            task.time_basis
+              ? task.display_version === 'elapsed/1' &&
+                (task.tzdb_version !== null ||
+                  (task.timezone_id === 'UTC' &&
+                    task.fold === 0 &&
+                    task.resolved_utc_offset_seconds === 0))
+              : task.display_version === undefined && task.tzdb_version !== null,
+          ),
+      )
       .max(64)
       .optional(),
     reminder_time_errors: z

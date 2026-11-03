@@ -1,0 +1,30 @@
+{
+  "version": "0025",
+  "tables": [],
+  "columns": [],
+  "constraints": [],
+  "additional_checks": [
+    {
+      "table": "approvals",
+      "name": "approvals_tzdb_version_check",
+      "expression": "((tzdb_version IS NOT NULL) OR ((kind = 'cancel_task'::text) AND (timezone_id = 'UTC'::text) AND (fold = 0) AND (resolved_utc_offset_seconds = 0)))"
+    }
+  ],
+  "functions": [
+    {
+      "name": "approvals_guard_null_tzdb",
+      "arguments": "",
+      "result": "trigger",
+      "volatility": "v",
+      "strict": false
+    }
+  ],
+  "triggers": [
+    {
+      "table": "approvals",
+      "name": "approvals_null_tzdb_guard",
+      "type": 23,
+      "function": "approvals_guard_null_tzdb"
+    }
+  ]
+}

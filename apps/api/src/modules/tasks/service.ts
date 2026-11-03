@@ -12,6 +12,7 @@ import {
   type HttpError,
 } from '../../http/errors.js';
 import { getTask, listTaskEvents, listTasks } from './repository.js';
+import type { ElapsedTimeBasis } from './create.js';
 import { TaskEventsQuerySchema, TaskListQuerySchema } from './schemas.js';
 
 export interface Deps {
@@ -24,6 +25,11 @@ export interface TaskListItem {
   fire_at_utc: string;
   fire_at_local: string;
   timezone_id: string;
+  fold: number;
+  resolved_utc_offset_seconds: number;
+  tzdb_version: string | null;
+  time_basis: ElapsedTimeBasis | null;
+  display_version: 'elapsed/1' | null;
   source_approval_id: string | null;
   source_invocation_id: string | null;
   schedule_receipt: string | null;
@@ -37,6 +43,11 @@ export interface TaskDetail {
   fire_at_utc: string;
   fire_at_local: string;
   timezone_id: string;
+  fold: number;
+  resolved_utc_offset_seconds: number;
+  tzdb_version: string | null;
+  time_basis: ElapsedTimeBasis | null;
+  display_version: 'elapsed/1' | null;
   source_approval_id: string | null;
   source_invocation_id: string | null;
   recreated_from: string | null;
@@ -100,6 +111,11 @@ export async function listTasksForOwner(
     // fire_at_local is display-only: wall_time as stored (design/03 §5-§7).
     fire_at_local: row.wall_time,
     timezone_id: row.timezone_id,
+    fold: row.fold,
+    resolved_utc_offset_seconds: row.resolved_utc_offset_seconds,
+    tzdb_version: row.tzdb_version,
+    time_basis: row.time_basis,
+    display_version: row.display_version,
     source_approval_id: row.source_approval_id,
     source_invocation_id: row.source_invocation_id,
     schedule_receipt: row.schedule_receipt,
@@ -136,6 +152,11 @@ export async function getTaskDetail(
       fire_at_utc: row.fire_at_utc.toISOString(),
       fire_at_local: row.wall_time,
       timezone_id: row.timezone_id,
+      fold: row.fold,
+      resolved_utc_offset_seconds: row.resolved_utc_offset_seconds,
+      tzdb_version: row.tzdb_version,
+      time_basis: row.time_basis,
+      display_version: row.display_version,
       source_approval_id: row.source_approval_id,
       source_invocation_id: row.source_invocation_id,
       recreated_from: row.recreated_from_task_id,

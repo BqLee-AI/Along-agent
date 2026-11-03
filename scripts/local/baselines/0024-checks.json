@@ -671,6 +671,12 @@
   ],
   "constraints": [
     {
+      "table": "auth_accounts",
+      "name": "auth_accounts_user_id_key",
+      "type": "u",
+      "columns": ["user_id"]
+    },
+    {
       "table": "tasks",
       "name": "tasks_source_invocation_id_fkey",
       "type": "f",

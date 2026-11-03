@@ -27,6 +27,12 @@ export interface NoticeFields {
   wallTime: string;
   timezoneId: string;
   originalNote: string | null;
+  elapsedDisplay?: {
+    fireAtUtc: string;
+    offsetSeconds: number;
+    anchorUtc: string;
+    durationSeconds: number;
+  };
 }
 
 export interface NoticeCopy {
@@ -38,6 +44,18 @@ export interface NoticeCopy {
 export function noticeCopyFor(fields: NoticeFields): NoticeCopy {
   const when = `${fields.wallTime} ${fields.timezoneId}`;
   const note = fields.originalNote && fields.originalNote.length > 0 ? fields.originalNote : '提醒';
+  if (fields.elapsedDisplay) {
+    const { fireAtUtc, offsetSeconds, anchorUtc, durationSeconds } = fields.elapsedDisplay;
+    const absoluteOffset = Math.abs(offsetSeconds);
+    const hours = String(Math.floor(absoluteOffset / 3600)).padStart(2, '0');
+    const minutes = String(Math.floor((absoluteOffset % 3600) / 60)).padStart(2, '0');
+    const seconds = absoluteOffset % 60;
+    const offset = `UTC${offsetSeconds < 0 ? '-' : '+'}${hours}:${minutes}${seconds ? `:${String(seconds).padStart(2, '0')}` : ''}`;
+    return {
+      title: `提醒 ${when} ${offset}`,
+      body: `${RECEIPT_COPY}：${note}（${when} ${offset}；UTC ${fireAtUtc}；依据：${anchorUtc} 起经过 ${durationSeconds} 秒）。到点在调度器运行时尝试通知，关机、休眠或队列拥堵可能错过。`,
+    };
+  }
   return {
     title: `提醒 ${when}`,
     body: `${RECEIPT_COPY}：${note}（${when}）。到点在调度器运行时尝试通知，关机、休眠或队列拥堵可能错过。`,

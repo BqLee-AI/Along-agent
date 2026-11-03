@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises';
+import { copyFile, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pg from 'pg';
@@ -56,7 +56,7 @@ databaseTests('direct reminder source schema admission against PG16', () => {
     }
   }
 
-  async function seedInvocation(client: pg.Client, ownerId: string) {
+  async function seedInvocation(client: pg.Client, ownerId: string, conversationId = randomUUID()) {
     const invocationId = randomUUID();
     await client.query(
       `INSERT INTO tool_invocations(invocation_id,owner_id,conversation_id,run_id,
@@ -66,7 +66,7 @@ databaseTests('direct reminder source schema admission against PG16', () => {
       [
         invocationId,
         ownerId,
-        randomUUID(),
+        conversationId,
         randomUUID(),
         randomUUID(),
         randomUUID(),
@@ -150,13 +150,13 @@ databaseTests('direct reminder source schema admission against PG16', () => {
           await expect(database.initialize()).rejects.toMatchObject({
             code: 'explicit_upgrade_required',
           });
-          expect((await database.upgrade()).version).toBe('0024');
+          expect((await database.upgrade()).version).toBe('0026');
         });
         await sql(url, async (client) => {
           expect(
             (
               await client.query(
-                "SELECT to_jsonb(t)-'source_invocation_id' AS value FROM tasks t WHERE id=$1",
+                "SELECT to_jsonb(t)-ARRAY['source_invocation_id','time_basis','display_version'] AS value FROM tasks t WHERE id=$1",
                 [taskId],
               )
             ).rows[0].value,
@@ -177,7 +177,7 @@ databaseTests('direct reminder source schema admission against PG16', () => {
           expect(
             (
               await client.query(
-                `SELECT to_jsonb(t)-ARRAY['source_invocation_id','state','state_version','schedule_receipt']
+                `SELECT to_jsonb(t)-ARRAY['source_invocation_id','time_basis','display_version','state','state_version','schedule_receipt']
               AS value FROM tasks t WHERE id=$1`,
                 [taskId],
               )
@@ -210,8 +210,284 @@ databaseTests('direct reminder source schema admission against PG16', () => {
           }
         });
         await deployment(url, async (database) => {
-          expect(await database.classify()).toMatchObject({ kind: 'supported', version: '0024' });
-          expect((await database.initialize()).version).toBe('0024');
+          expect(await database.classify()).toMatchObject({ kind: 'supported', version: '0026' });
+          expect((await database.initialize()).version).toBe('0026');
+        });
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 30000);
+
+  it('upgrades 0023 task facts unchanged and enforces elapsed UTC provenance', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'elapsed-0023-'));
+    const migrations = new URL('../../infra/migrations/', import.meta.url);
+    try {
+      for (const name of (await readdir(migrations)).filter(
+        (name) => name.endsWith('.sql') && name.slice(0, 4) <= '0023',
+      )) {
+        await copyFile(new URL(name, migrations), join(directory, name));
+      }
+      await isolated(async (url) => {
+        await deployment(
+          url,
+          async (database) => {
+            expect((await database.initialize()).version).toBe('0023');
+          },
+          directory,
+        );
+        const ownerId = randomUUID();
+        let taskId = '';
+        let original: unknown;
+        await sql(url, async (client) => {
+          taskId = await insertTask(client, ownerId, null, await seedInvocation(client, ownerId));
+          await client.query("UPDATE tasks SET tzdb_version='' WHERE id=$1", [taskId]);
+          original = (
+            await client.query('SELECT to_jsonb(t) AS value FROM tasks t WHERE id=$1', [taskId])
+          ).rows[0].value;
+        });
+        await deployment(url, async (database) => {
+          expect(await database.classify()).toMatchObject({
+            kind: 'supported',
+            version: '0023',
+            reason: 'explicit_upgrade_required',
+          });
+          expect((await database.upgrade()).version).toBe('0026');
+        });
+        await sql(url, async (client) => {
+          expect(
+            (
+              await client.query(
+                "SELECT to_jsonb(t)-ARRAY['time_basis','display_version'] AS value FROM tasks t WHERE id=$1",
+                [taskId],
+              )
+            ).rows[0].value,
+          ).toEqual(original);
+          await client.query(
+            "UPDATE tasks SET state='scheduled',state_version=state_version+1 WHERE id=$1",
+            [taskId],
+          );
+          const invocationId = await seedInvocation(client, ownerId);
+          const conversationId = (
+            await client.query(
+              'SELECT conversation_id FROM tool_invocations WHERE invocation_id=$1',
+              [invocationId],
+            )
+          ).rows[0].conversation_id;
+          const messageId = randomUUID();
+          await client.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
+            conversationId,
+            ownerId,
+          ]);
+          await client.query(
+            "INSERT INTO messages(id,owner_id,conversation_id,role,content) VALUES($1,$2,$3,'user','remind me')",
+            [messageId, ownerId, conversationId],
+          );
+          const basis = {
+            kind: 'elapsed',
+            anchor_utc: '2030-11-03T01:20:00Z',
+            duration_seconds: 60,
+            source_message_id: messageId,
+            revision: 'elapsed/1',
+          };
+          const elapsedId = randomUUID();
+          await client.query(
+            `INSERT INTO tasks(id,owner_id,source_invocation_id,fire_at_utc,wall_time,timezone_id,fold,resolved_utc_offset_seconds,tzdb_version,time_basis,display_version)
+            VALUES($1,$2,$3,'2030-11-03T01:21:00Z','2030-11-03 01:21:00','UTC',0,0,NULL,$4,'elapsed/1')`,
+            [elapsedId, ownerId, invocationId, basis],
+          );
+          await client.query(
+            "UPDATE tasks SET state='scheduled',state_version=state_version+1 WHERE id=$1",
+            [elapsedId],
+          );
+          for (const assignment of [
+            "wall_time='2030-11-03 01:22:00'",
+            "timezone_id='Asia/Shanghai'",
+            'fold=1',
+            'resolved_utc_offset_seconds=1',
+            "tzdb_version='changed'",
+            'time_basis=NULL',
+          ]) {
+            await expect(
+              client.query(`UPDATE tasks SET ${assignment} WHERE id=$1`, [elapsedId]),
+            ).rejects.toMatchObject({ code: '23514' });
+          }
+          await expect(
+            client.query("UPDATE tasks SET time_basis=$2,display_version='elapsed/1' WHERE id=$1", [
+              taskId,
+              basis,
+            ]),
+          ).rejects.toMatchObject({ code: '23514' });
+          for (const [zone, fold, offset, wall] of [
+            ['Asia/Shanghai', 0, 0, '2030-11-03 01:21:00'],
+            ['UTC', 1, 0, '2030-11-03 01:21:00'],
+            ['UTC', 0, 1, '2030-11-03 01:21:00'],
+            ['UTC', 0, 0, '2030-11-03 01:22:00'],
+          ] as const) {
+            const other = await seedInvocation(client, ownerId, conversationId);
+            await expect(
+              client.query(
+                `INSERT INTO tasks(id,owner_id,source_invocation_id,fire_at_utc,wall_time,timezone_id,fold,resolved_utc_offset_seconds,tzdb_version,time_basis,display_version)
+              VALUES($1,$2,$3,'2030-11-03T01:21:00Z',$4,$5,$6,$7,NULL,$8,'elapsed/1')`,
+                [randomUUID(), ownerId, other, wall, zone, fold, offset, basis],
+              ),
+            ).rejects.toMatchObject({ code: '23514' });
+          }
+        });
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 30000);
+
+  it('upgrades legacy elapsed approvals unchanged and admits only matching UTC elapsed cancellations', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'approval-0024-'));
+    const migrations = new URL('../../infra/migrations/', import.meta.url);
+    try {
+      for (const name of (await readdir(migrations)).filter(
+        (name) => name.endsWith('.sql') && name.slice(0, 4) <= '0023',
+      )) {
+        await copyFile(new URL(name, migrations), join(directory, name));
+      }
+      await isolated(async (url) => {
+        await deployment(
+          url,
+          async (database) => {
+            expect((await database.initialize()).version).toBe('0023');
+          },
+          directory,
+        );
+        const ownerId = randomUUID();
+        const elapsedId = randomUUID();
+        let legacyId = '';
+        let original: unknown;
+        await sql(url, async (client) => {
+          await client.query(
+            await readFile(
+              new URL('./fixtures/0024_tasks_elapsed_basis.sql', import.meta.url),
+              'utf8',
+            ),
+          );
+          await client.query(
+            await readFile(new URL('0025_approval_utc_cancellation.sql', migrations), 'utf8'),
+          );
+          legacyId = await seedApproval(client, ownerId);
+          original = (
+            await client.query('SELECT to_jsonb(a) AS value FROM approvals a WHERE id=$1', [
+              legacyId,
+            ])
+          ).rows[0].value;
+          const conversationId = randomUUID();
+          const invocationId = await seedInvocation(client, ownerId, conversationId);
+          const messageId = randomUUID();
+          await client.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
+            conversationId,
+            ownerId,
+          ]);
+          await client.query(
+            "INSERT INTO messages(id,owner_id,conversation_id,role,content) VALUES($1,$2,$3,'user','remind me')",
+            [messageId, ownerId, conversationId],
+          );
+          await client.query(
+            `INSERT INTO tasks(id,owner_id,source_invocation_id,fire_at_utc,wall_time,timezone_id,fold,resolved_utc_offset_seconds,tzdb_version,time_basis,display_version)
+             VALUES($1,$2,$3,'2030-11-03T01:21:00Z','2030-11-03 01:21:00','UTC',0,0,NULL,$4,'elapsed/1')`,
+            [
+              elapsedId,
+              ownerId,
+              invocationId,
+              {
+                kind: 'elapsed',
+                anchor_utc: '2030-11-03T01:20:00Z',
+                duration_seconds: 60,
+                source_message_id: messageId,
+                revision: 'elapsed/1',
+              },
+            ],
+          );
+        });
+        await deployment(url, async (database) => {
+          expect(await database.classify()).toMatchObject({
+            kind: 'supported',
+            version: '0025',
+            reason: 'explicit_upgrade_required',
+          });
+          expect((await database.upgrade()).version).toBe('0026');
+        });
+        await sql(url, async (client) => {
+          expect(
+            (
+              await client.query('SELECT to_jsonb(a) AS value FROM approvals a WHERE id=$1', [
+                legacyId,
+              ])
+            ).rows[0].value,
+          ).toEqual(original);
+          const wallTask = await insertTask(client, ownerId, legacyId, null);
+          await client.query(
+            `INSERT INTO approvals(id,owner_id,fire_at_utc,wall_time,timezone_id,fold,
+              resolved_utc_offset_seconds,tzdb_version,presentation_hash,presentation_version,
+              expires_at,kind,target_task_id,expected_state_version)
+             VALUES($1,$2,'2030-11-03T01:20:00Z','2030-11-03 09:20','Asia/Shanghai',0,
+              28800,'frozen-fixture','hash','v1',clock_timestamp()+interval '1 hour',
+              'cancel_task',$3,1)`,
+            [randomUUID(), ownerId, wallTask],
+          );
+          const insert = `INSERT INTO approvals(id,owner_id,fire_at_utc,wall_time,timezone_id,fold,
+            resolved_utc_offset_seconds,tzdb_version,presentation_hash,presentation_version,expires_at,
+            kind,target_task_id,expected_state_version)
+            VALUES($1,$2,'2030-11-03T01:21:00Z',$3,$4,$5,$6,NULL,'hash','v1',
+              clock_timestamp()+interval '1 hour',$7,$8,$9)`;
+          const args = (
+            owner: string,
+            wall: string,
+            zone: string,
+            fold: number,
+            offset: number,
+            kind: string,
+            target: string | null,
+            version: number | null,
+          ) => [randomUUID(), owner, wall, zone, fold, offset, kind, target, version];
+          const approvalId = randomUUID();
+          await client.query(insert, [
+            approvalId,
+            ownerId,
+            '2030-11-03 01:21:00',
+            'UTC',
+            0,
+            0,
+            'cancel_task',
+            elapsedId,
+            1,
+          ]);
+          expect(
+            (await client.query('SELECT tzdb_version FROM approvals WHERE id=$1', [approvalId]))
+              .rows[0].tzdb_version,
+          ).toBeNull();
+          await client.query("UPDATE approvals SET state='consumed' WHERE id=$1", [approvalId]);
+          for (const values of [
+            args(ownerId, '2030-11-03 01:21:00', 'UTC', 0, 0, 'create_task', null, null),
+            args(
+              ownerId,
+              '2030-11-03 01:21:00',
+              'Asia/Shanghai',
+              0,
+              0,
+              'cancel_task',
+              elapsedId,
+              1,
+            ),
+            args(ownerId, '2030-11-03 01:21:00', 'UTC', 1, 0, 'cancel_task', elapsedId, 1),
+            args(ownerId, '2030-11-03 01:21:00', 'UTC', 0, 1, 'cancel_task', elapsedId, 1),
+            args(ownerId, '2030-11-03 01:22:00', 'UTC', 0, 0, 'cancel_task', elapsedId, 1),
+            args(randomUUID(), '2030-11-03 01:21:00', 'UTC', 0, 0, 'cancel_task', elapsedId, 1),
+            args(ownerId, '2030-11-03 01:21:00', 'UTC', 0, 0, 'cancel_task', randomUUID(), 1),
+            args(ownerId, '2030-11-03 01:21:00', 'UTC', 0, 0, 'cancel_task', wallTask, 1),
+          ]) {
+            await expect(client.query(insert, values)).rejects.toMatchObject({ code: '23514' });
+          }
+        });
+        await deployment(url, async (database) => {
+          expect(await database.classify()).toMatchObject({ kind: 'supported', version: '0026' });
+          expect((await database.upgrade()).version).toBe('0026');
         });
       });
     } finally {
@@ -222,7 +498,7 @@ databaseTests('direct reminder source schema admission against PG16', () => {
   it('enforces source cardinality, real invocation references and uniqueness on inserts and source updates', async () => {
     await isolated(async (url) => {
       await deployment(url, async (database) => {
-        expect((await database.initialize()).version).toBe('0024');
+        expect((await database.initialize()).version).toBe('0026');
       });
       await sql(url, async (client) => {
         const ownerId = randomUUID();
@@ -369,12 +645,23 @@ databaseTests('direct reminder source schema admission against PG16', () => {
     ],
     ['changed source function volatility', 'ALTER FUNCTION tasks_require_creation_source() STABLE'],
     ['unstamped source schema', "DELETE FROM schema_migrations WHERE version='0023'"],
+    ['missing elapsed column', 'ALTER TABLE tasks DROP COLUMN time_basis CASCADE'],
+    ['required tzdb', 'ALTER TABLE tasks ALTER COLUMN tzdb_version SET NOT NULL'],
+    ['missing elapsed check', 'ALTER TABLE tasks DROP CONSTRAINT tasks_time_basis_check'],
+    [
+      'weakened elapsed UTC check',
+      `ALTER TABLE tasks DROP CONSTRAINT tasks_tzdb_version_check;
+      ALTER TABLE tasks ADD CONSTRAINT tasks_tzdb_version_check CHECK(true)`,
+    ],
+    ['disabled elapsed trigger', 'ALTER TABLE tasks DISABLE TRIGGER tasks_elapsed_basis_guard'],
+    ['changed elapsed function volatility', 'ALTER FUNCTION tasks_guard_elapsed_basis() STABLE'],
+    ['unstamped 0024 schema', "DELETE FROM schema_migrations WHERE version='0024'"],
   ])(
     'refuses %s without repairing schema or rewriting the ledger',
     async (_name, mutation) => {
       await isolated(async (url) => {
         await deployment(url, async (database) => {
-          expect((await database.initialize()).version).toBe('0024');
+          expect((await database.initialize()).version).toBe('0026');
         });
         const snapshot = `SELECT jsonb_build_object(
         'ledger',(SELECT jsonb_agg(to_jsonb(m) ORDER BY version) FROM schema_migrations m),
@@ -385,8 +672,8 @@ databaseTests('direct reminder source schema admission against PG16', () => {
           WHERE a.attrelid='tasks'::regclass AND a.attnum>0 AND NOT a.attisdropped),
         'triggers',(SELECT jsonb_agg(jsonb_build_array(tgname,tgtype,tgenabled,tgattr::text,tgfoid) ORDER BY tgname)
           FROM pg_trigger WHERE tgrelid='tasks'::regclass AND NOT tgisinternal),
-        'functions',(SELECT jsonb_agg(jsonb_build_array(oid,proname,provolatile,proisstrict,prosecdef,proconfig))
-          FROM pg_proc WHERE oid=to_regprocedure('public.tasks_require_creation_source()'))) AS value`;
+        'functions',(SELECT jsonb_agg(jsonb_build_array(oid,proname,provolatile,proisstrict,prosecdef,proconfig,prosrc) ORDER BY proname)
+          FROM pg_proc WHERE oid IN (to_regprocedure('public.tasks_require_creation_source()'),to_regprocedure('public.tasks_guard_elapsed_basis()')))) AS value`;
         let before: unknown;
         await sql(url, async (client) => {
           await client.query(mutation);

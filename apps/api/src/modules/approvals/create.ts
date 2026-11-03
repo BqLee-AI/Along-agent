@@ -37,7 +37,7 @@ export interface CancelTaskApprovalInput {
   fold: 0 | 1;
   offsetSeconds: number;
   fireAtUtc: string;
-  tzdbVersion: string;
+  tzdbVersion: string | null;
 }
 
 export interface CreatedApproval {

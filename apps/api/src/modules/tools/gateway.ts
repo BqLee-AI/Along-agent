@@ -2,7 +2,7 @@
 // Approved results, local approval inserts and audit rows commit together.
 import type { Pool, PoolClient } from 'pg';
 import { normalizeTime } from '../time/normalize.js';
-import { classifyEntry, reminderDateExpression } from '@along/time-core';
+import { addElapsed, classifyEntry, reminderDateExpression, utcToLocal } from '@along/time-core';
 import { readReminderDateInput } from '../conversations/reminder-date.js';
 import { createCancelTaskApproval, createTaskApproval } from '../approvals/create.js';
 import {
@@ -326,6 +326,112 @@ async function runCreateReminder(
       `SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') AS now`,
     )
   ).rows[0]!.now;
+  if ('time_kind' in input) {
+    const frozen = (
+      await client.query<{
+        revision: string | null;
+        anchor: string | null;
+        timezone_id: string | null;
+        timezone_source: string | null;
+      }>(
+        `SELECT frozen_context->'trustedExecutionContext'->'time_capabilities'->>'elapsed_revision' AS revision,
+                frozen_context->'trustedExecutionContext'->>'request_anchor_utc' AS anchor,
+                frozen_context->'trustedExecutionContext'->'timezone'->>'timezone_id' AS timezone_id,
+                frozen_context->'trustedExecutionContext'->'timezone'->>'source' AS timezone_source
+         FROM agent_runs WHERE id=$1 AND owner_id=$2 AND conversation_id=$3`,
+        [ctx.runId, ctx.ownerId, ctx.conversationId],
+      )
+    ).rows[0];
+    if (
+      frozen?.revision !== 'elapsed/1' ||
+      frozen.anchor !== ctx.anchorReceivedAtUtc ||
+      !sourceText.includes(input.raw_time_text)
+    )
+      return {
+        status: 'denied',
+        error: { code: 'TOOL_FORBIDDEN', message: '此运行未冻结该时间能力或来源不可信。' },
+      };
+    const elapsedTimezone =
+      input.timezone_hint ??
+      (settings.length
+        ? settings[settings.length - 1]!.timezone_id
+        : (frozen.timezone_id ?? ctx.confirmedTimezone));
+    const explicitTimezone =
+      input.timezone_hint != null ||
+      (!settings.length && frozen.timezone_source === 'explicit' && frozen.timezone_id != null);
+    const fireAtUtc = addElapsed(ctx.anchorReceivedAtUtc, input.duration_seconds);
+    if (!fireAtUtc || fireAtUtc <= now)
+      return {
+        status: 'ok',
+        result: {
+          kind: 'clarify',
+          reason: 'FIRE_TIME_PASSED',
+          phrase_key: 'ASK_EXACT_TIME',
+          text: '原目标时刻已过或超出可用范围，未创建；请给新的未来时间。',
+        },
+      };
+    let wallTime = fireAtUtc.replace('T', ' ').replace('Z', '');
+    let timezoneId = 'UTC';
+    let offset = 0;
+    let fold: 0 | 1 = 0;
+    let tzdbVersion: string | null = null;
+    if (elapsedTimezone && elapsedTimezone !== 'UTC') {
+      if (!ctx.timeContext.available) {
+        if (explicitTimezone)
+          return {
+            status: 'ok',
+            result: {
+              kind: 'time_error',
+              error: { code: 'TZDB_UNAVAILABLE', message: '时区规则暂不可用。', http_status: 503 },
+            },
+          };
+      } else {
+        const zone = ctx.timeContext.aliases.aliases[elapsedTimezone] ?? elapsedTimezone;
+        const local = utcToLocal(fireAtUtc, zone, ctx.timeContext.ruleset);
+        if (local.kind === 'error') {
+          if (explicitTimezone)
+            return {
+              status: 'ok',
+              result: {
+                kind: 'time_error',
+                error: {
+                  code:
+                    local.error === 'UNKNOWN_TIMEZONE' ? 'UNKNOWN_TIMEZONE' : 'TZDB_UNAVAILABLE',
+                  message: '无法按指定时区显示该时刻。',
+                  http_status: local.error === 'UNKNOWN_TIMEZONE' ? 422 : 503,
+                },
+              },
+            };
+        } else {
+          wallTime = local.wall_time.replace('T', ' ');
+          timezoneId = zone;
+          offset = local.offset_seconds;
+          fold = local.fold;
+          tzdbVersion = ctx.timeContext.tzdb_version;
+        }
+      }
+    }
+    const receipt = await createTaskWithinTransaction(client, {
+      ownerId: ctx.ownerId,
+      source: { invocationId },
+      fireAtUtc,
+      wallTime,
+      timezoneId,
+      fold,
+      resolvedUtcOffsetSeconds: offset,
+      tzdbVersion,
+      timeBasis: {
+        kind: 'elapsed',
+        anchor_utc: ctx.anchorReceivedAtUtc,
+        duration_seconds: input.duration_seconds,
+        source_message_id: authority.source.inputMessageId,
+        revision: 'elapsed/1',
+      },
+      originalNote: input.note,
+      idempotencyKey: `create:${invocationId}`,
+    });
+    return { status: 'ok', result: { kind: 'task_created', ...receipt } };
+  }
   let selectedText = input.raw_time_text;
   if (authority.source.kind === 'clarification' && ctx.timeContext.available) {
     const timeContext = ctx.timeContext;
@@ -546,7 +652,7 @@ async function runReadBriefCards(
       errorCode: null,
     };
   }
-  const projection = await readToolBriefCards(client, ctx.ownerId, parsed.data);
+  const projection = await readToolBriefCards(client, ctx.ownerId, parsed.data, ctx.timeContext);
   return {
     payload: { kind: 'brief', ...projection },
     errorCode: null,

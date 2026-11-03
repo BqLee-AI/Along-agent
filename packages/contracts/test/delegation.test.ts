@@ -54,6 +54,17 @@ test('v6 accepts trusted request-bound facts but rejects v5, invented elapsed an
     }).success,
   ).toBe(false);
 });
+test('v6 accepts the delivered elapsed revision without granting unknown revisions', () => {
+  expect(
+    HarnessStartSchema.safeParse({
+      ...start,
+      trusted_context: {
+        ...trusted,
+        time_capabilities: { elapsed_revision: 'elapsed/1', wall_rules: null },
+      },
+    }).success,
+  ).toBe(true);
+});
 test('finish_goal carries outcomes and receipts, not a plain Run done', () => {
   const request = {
     protocol: 'harness/v6',

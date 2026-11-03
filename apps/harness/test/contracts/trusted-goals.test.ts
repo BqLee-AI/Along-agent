@@ -225,6 +225,21 @@ test('v6 rejects v5, missing trust discriminator and unsupported frozen facts be
   }
 }, 120_000);
 
+test('native accepts frozen elapsed capability without wall rules and exposes it to the model', async () => {
+  const requests = await nativeCase({
+    start: {
+      trusted_context: {
+        ...trusted,
+        time_capabilities: { elapsed_revision: 'elapsed/1', wall_rules: null },
+      },
+    },
+    model: () => call('finish_goal', goal()),
+  });
+  const model = requests.find((request) => request.type === 'model');
+  expect(JSON.stringify(model)).toContain('elapsed/1');
+  expect(requests.at(-1)).toMatchObject({ type: 'finish_goal' });
+});
+
 test('trusted context is system-only; accepted save and clear receipts remain visible until explicit finish_goal', async () => {
   const refs: string[] = [];
   const requests = await nativeCase({
@@ -732,6 +747,102 @@ const createdTask = {
   fire_at_utc: '2026-11-03T14:00:00Z',
   original_note: '提交报告',
 };
+
+const elapsedTask = {
+  ...createdTask,
+  wall_time: '2026-11-02 12:05',
+  timezone_id: 'UTC',
+  fold: 0,
+  resolved_utc_offset_seconds: 0,
+  tzdb_version: null,
+  fire_at_utc: '2026-11-02T12:05:00Z',
+  time_basis: {
+    kind: 'elapsed',
+    anchor_utc: '2026-11-02T12:00:00Z',
+    duration_seconds: 300,
+    source_message_id: inputId,
+    revision: 'elapsed/1',
+  },
+  display_version: 'elapsed/1',
+};
+
+test('native preserves a UTC elapsed receipt without wall rules and its invocation reference', async () => {
+  const invocationId = randomUUID();
+  const requests = await nativeCase({
+    start: {
+      ...reminderStart,
+      snapshot: {
+        version: 2,
+        message_refs: [inputId],
+        tool_refs: [invocationId],
+        next_call_no: 2,
+        usage: { iterations: 0, tokens: 0 },
+        waiting: null,
+      },
+      trusted_context: {
+        ...trusted,
+        time_capabilities: { elapsed_revision: 'elapsed/1', wall_rules: null },
+      },
+      observations: [
+        {
+          view: 'full',
+          invocation_id: invocationId,
+          tool_id: 'create_reminder',
+          result: { status: 'ok', result: elapsedTask },
+        },
+      ],
+    },
+    model: () => call('finish_goal', goal([invocationId])),
+  });
+  expect(JSON.stringify(requests.find((request) => request.type === 'model'))).toContain(
+    'duration_seconds',
+  );
+  expect(requests.at(-1)).toMatchObject({
+    type: 'finish_goal',
+    goal_result: { outcomes: [{ receipt_refs: [invocationId] }] },
+  });
+});
+
+test('native rejects malformed elapsed receipts and null rules outside UTC', async () => {
+  for (const invalid of [
+    { display_version: 'elapsed/2' },
+    { time_basis: null },
+    { time_basis: { ...elapsedTask.time_basis, duration_seconds: 0 } },
+    { time_basis: { ...elapsedTask.time_basis, source_message_id: 'invalid' } },
+    { time_basis: { ...elapsedTask.time_basis, anchor_utc: '2026-02-30T12:00:00Z' } },
+    { time_basis: { ...elapsedTask.time_basis, revision: 'elapsed/2' } },
+    { time_basis: { ...elapsedTask.time_basis, extra: true } },
+    { timezone_id: 'America/New_York' },
+    { resolved_utc_offset_seconds: 1 },
+    { fold: 1 },
+  ]) {
+    const invocationId = randomUUID();
+    expect(
+      await nativeCase({
+        start: {
+          ...reminderStart,
+          snapshot: {
+            version: 2,
+            message_refs: [inputId],
+            tool_refs: [invocationId],
+            next_call_no: 2,
+            usage: { iterations: 0, tokens: 0 },
+            waiting: null,
+          },
+          observations: [
+            {
+              view: 'full',
+              invocation_id: invocationId,
+              tool_id: 'create_reminder',
+              result: { status: 'ok', result: { ...elapsedTask, ...invalid } },
+            },
+          ],
+        },
+        expectedExit: 2,
+      }),
+    ).toEqual([]);
+  }
+}, 120_000);
 
 test('native rejects malformed task_created immutable observations before exposing receipts to the model', async () => {
   for (const invalid of [

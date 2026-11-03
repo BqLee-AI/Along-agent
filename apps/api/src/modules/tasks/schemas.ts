@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ElapsedTimeBasisSchema } from '@along/contracts';
 
 export const TaskListQuerySchema = z.object({
   status: z
@@ -25,6 +26,11 @@ export const TaskItemSchema = z.object({
   fire_at_utc: z.string(),
   fire_at_local: z.string(),
   timezone_id: z.string(),
+  fold: z.number().int(),
+  resolved_utc_offset_seconds: z.number().int(),
+  tzdb_version: z.string().nullable(),
+  time_basis: ElapsedTimeBasisSchema.nullable(),
+  display_version: z.literal('elapsed/1').nullable(),
   source_approval_id: z.string().nullable(),
   source_invocation_id: z.string().nullable(),
   schedule_receipt: z.string().nullable(),
@@ -38,6 +44,11 @@ export const TaskDetailSchema = z.object({
   fire_at_utc: z.string(),
   fire_at_local: z.string(),
   timezone_id: z.string(),
+  fold: z.number().int(),
+  resolved_utc_offset_seconds: z.number().int(),
+  tzdb_version: z.string().nullable(),
+  time_basis: ElapsedTimeBasisSchema.nullable(),
+  display_version: z.literal('elapsed/1').nullable(),
   source_approval_id: z.string().nullable(),
   source_invocation_id: z.string().nullable(),
   recreated_from: z.string().nullable(),

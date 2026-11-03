@@ -16,6 +16,19 @@ export const ProposeTaskInputSchema = z
   .strict();
 
 export type ProposeTaskInput = z.infer<typeof ProposeTaskInputSchema>;
+export const CreateReminderInputSchema = z.union([
+  ProposeTaskInputSchema,
+  z
+    .object({
+      raw_time_text: z.string().min(1).max(1000),
+      timezone_hint: z.string().min(1).max(100).nullable().optional(),
+      note: z.string().min(1).max(1000),
+      occurrence: z.literal('once'),
+      time_kind: z.literal('elapsed'),
+      duration_seconds: z.number().int().positive().safe(),
+    })
+    .strict(),
+]);
 
 export const RequestCancelTaskInputSchema = z
   .object({
@@ -82,7 +95,7 @@ export type ReadRunObservationInput = z.infer<typeof ReadRunObservationInputSche
 
 export const TOOL_INPUT_SCHEMAS = {
   propose_task: ProposeTaskInputSchema,
-  create_reminder: ProposeTaskInputSchema,
+  create_reminder: CreateReminderInputSchema,
   request_cancel_task: RequestCancelTaskInputSchema,
   list_tasks: ListTasksInputSchema,
   read_brief_cards: ReadBriefCardsInputSchema,

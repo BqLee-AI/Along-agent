@@ -2,7 +2,7 @@
 
 > 状态：既有 task 与 R1 独立文档批准 schema 合同。范围：`approvals`、`approval_revision_requests`、`document_approvals`、`document_approval_decisions`、`tasks`、`task_events`、`outbox`、`notifications`；合同不表示迁移演练或真实模型/用户材料验收已通过。不包含：重复提醒、日历授权、投递对账网关（v1 盒子）。
 
-> 直接创建：tasks 的 `source_invocation_id` 与旧 `source_approval_id` 分别受约束，新写必须恰有一项；0023 前向迁移保留历史双空来源，不制造批准。time_basis、严格 UTC elapsed 的 nullable 规则仍是后续合同，见 [design/20 §4.3、§6–§7](../design/20-goal-scoped-delegation.md)，本切片不启用。事务、append-only 与调度回执门不变。
+> 直接创建：tasks 的 `source_invocation_id` 与旧 `source_approval_id` 分别受约束，新写必须恰有一项；0023 保留历史双空来源。经过时长依据和展示版本允许严格 UTC 的 elapsed 任务保留空 tzdb；0025 允许其取消批准保留相同空版本。两条 0024 历史路径由 0026 收敛，不迁写历史行。事务、append-only 与调度回执门不变。
 
 ## 设计依据
 
@@ -46,7 +46,7 @@ tasks 1 ── 0..1 tasks       (recreated_from_task_id 自引用)
 | `timezone_id`                 | `text`        | not null                          | IANA 时区                                                      |
 | `fold`                        | `smallint`    | not null, default `0`             | 歧义时刻选择（`0` 非歧义，`1` 第二次出现）                     |
 | `resolved_utc_offset_seconds` | `integer`     | not null                          | 归一偏移（秒，如 `+08:00` → `28800`）                          |
-| `tzdb_version`                | `text`        | not null                          | 时区库版本                                                     |
+| `tzdb_version`                | `text`        | nullable                          | 规则版本；仅严格 UTC 取消批准允许 null，创建批准必须保留版本   |
 | `occurrence`                  | `text`        | not null, default `'single'`      | 按 `single` 约束（v0 仅单次）                                  |
 | `presentation_hash`           | `text`        | not null                          | 回显规范编码哈希（排版空格不算，原话空格算，时间先归一再编码） |
 | `presentation_version`        | `text`        | not null                          | 回显模板版本（冻结，旧 approval 用旧模板）                     |
@@ -135,7 +135,9 @@ tasks 1 ── 0..1 tasks       (recreated_from_task_id 自引用)
 | `timezone_id`                 | `text`        | not null                          | IANA 时区                                                                        |
 | `fold`                        | `smallint`    | not null, default `0`             | 歧义选择冻结                                                                     |
 | `resolved_utc_offset_seconds` | `integer`     | not null                          | 归一偏移（秒）                                                                   |
-| `tzdb_version`                | `text`        | not null                          | 时区库版本                                                                       |
+| `tzdb_version`                | `text`        | nullable                          | 规则版本；仅严格 UTC elapsed 可为 null，历史 wall 原值保留                       |
+| `time_basis`                  | `jsonb`       | nullable                          | elapsed 的可信锚、秒数、来源消息与修订；wall 为 null                             |
+| `display_version`             | `text`        | nullable                          | elapsed 展示合同版本 `elapsed/1`；wall 为 null                                   |
 | `occurrence`                  | `text`        | not null, default `'once'`        | 按 `once` 约束（v0 仅单次）                                                      |
 | `state`                       | `text`        | not null, default `'saved'`       | 按 `saved/pending_schedule/scheduled/fired/missed/cancel_pending/cancelled` 约束 |
 | `state_version`               | `integer`     | not null, default `1`             | 本机发，提交时原子递增（outbox 验版本依据）                                      |

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import type { Pool } from 'pg';
 import { withClient, withTransaction } from '../../src/db/transaction.js';
 import { confirmApproval } from '../../src/modules/approvals/confirm.js';
@@ -20,6 +20,35 @@ const migrationUrl = new URL(
   '../../../../infra/migrations/0023_tasks_direct_creation.sql',
   import.meta.url,
 );
+const elapsedMigrationUrl = new URL(
+  '../../../../scripts/test/fixtures/0024_tasks_elapsed_basis.sql',
+  import.meta.url,
+);
+const approvalMigrationUrl = new URL(
+  '../../../../infra/migrations/0025_approval_utc_cancellation.sql',
+  import.meta.url,
+);
+const convergenceMigrationUrl = new URL(
+  '../../../../infra/migrations/0026_reconcile_0024.sql',
+  import.meta.url,
+);
+
+async function restoreHistoricalSchema(pool: Pool, version: string): Promise<void> {
+  const client = await pool.connect();
+  try {
+    const schema = (await client.query<{ name: string }>('SELECT current_schema() AS name'))
+      .rows[0]!.name;
+    await client.query(`DROP SCHEMA "${schema}" CASCADE; CREATE SCHEMA "${schema}"`);
+    const directory = new URL('../../../../infra/migrations/', import.meta.url);
+    for (const name of (await readdir(directory))
+      .filter((name) => name.endsWith('.sql') && name.slice(0, 4) <= version)
+      .sort()) {
+      await client.query(await readFile(new URL(name, directory), 'utf8'));
+    }
+  } finally {
+    client.release();
+  }
+}
 
 async function seedInvocation(pool: Pool, ownerId: string): Promise<string> {
   const invocationId = randomUUID();
@@ -147,6 +176,181 @@ maybe('task creation provenance', () => {
       (await pool.query('SELECT count(*)::int n FROM approvals WHERE owner_id=$1', [input.ownerId]))
         .rows[0],
     ).toEqual({ n: 0 });
+  });
+  it('persists elapsed provenance and frozen UTC seconds in receipts, list and detail', async () => {
+    const input = await frozenInput(pool);
+    const invocation = (
+      await pool.query('SELECT conversation_id FROM tool_invocations WHERE invocation_id=$1', [
+        input.source.invocationId,
+      ])
+    ).rows[0];
+    const messageId = randomUUID();
+    await pool.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
+      invocation.conversation_id,
+      input.ownerId,
+    ]);
+    await pool.query(
+      "INSERT INTO messages(id,owner_id,conversation_id,role,content) VALUES($1,$2,$3,'user','remind me')",
+      [messageId, input.ownerId, invocation.conversation_id],
+    );
+    const anchor = (
+      await pool.query<{ anchor: Date }>(
+        "SELECT date_trunc('second',clock_timestamp()) + interval '1 day' AS anchor",
+      )
+    ).rows[0]!.anchor;
+    const fire = new Date(anchor.getTime() + 180_000);
+    const timeBasis = {
+      kind: 'elapsed' as const,
+      anchor_utc: anchor.toISOString().replace('.000Z', 'Z'),
+      duration_seconds: 180,
+      source_message_id: messageId,
+      revision: 'elapsed/1' as const,
+    };
+    const elapsed = {
+      ...input,
+      fireAtUtc: fire.toISOString(),
+      wallTime: fire.toISOString().slice(0, 19).replace('T', ' '),
+      timezoneId: 'UTC',
+      fold: 0 as const,
+      resolvedUtcOffsetSeconds: 0,
+      tzdbVersion: null,
+      timeBasis,
+    };
+    const receipt = await withTransaction(pool, (client) =>
+      createTaskWithinTransaction(client, elapsed),
+    );
+    expect(receipt).toMatchObject({
+      time_basis: timeBasis,
+      display_version: 'elapsed/1',
+      tzdb_version: null,
+    });
+    expect(
+      await withClient(pool, (client) =>
+        readCreatedTaskReceipt(client, {
+          ownerId: input.ownerId,
+          invocationId: input.source.invocationId,
+        }),
+      ),
+    ).toEqual(receipt);
+    const frozen = {
+      time_basis: timeBasis,
+      display_version: 'elapsed/1',
+      tzdb_version: null,
+      fold: 0,
+      resolved_utc_offset_seconds: 0,
+      fire_at_local: elapsed.wallTime,
+    };
+    expect(await getTaskDetail({ pool }, input.ownerId, receipt.task_id)).toMatchObject(frozen);
+    expect((await listTasksForOwner({ pool }, input.ownerId, {})).items[0]).toMatchObject(frozen);
+    expect(await ownerEffects(pool, input.ownerId)).toEqual({ tasks: 1, events: 1, commands: 1 });
+    await expect(
+      pool.query('UPDATE tasks SET time_basis=NULL WHERE id=$1', [receipt.task_id]),
+    ).rejects.toMatchObject({ code: '23514' });
+    await expect(
+      pool.query("UPDATE tasks SET fire_at_utc=fire_at_utc+interval '1 second' WHERE id=$1", [
+        receipt.task_id,
+      ]),
+    ).rejects.toMatchObject({ code: '23514' });
+
+    // Every invalid attempt is rolled back before task/event/outbox effects.
+    for (const changes of [
+      { timeBasis: { ...timeBasis, duration_seconds: 0 } },
+      { timeBasis: { ...timeBasis, duration_seconds: 181 } },
+      { timeBasis: { ...timeBasis, source_message_id: randomUUID() } },
+      { timezoneId: 'Asia/Shanghai' },
+      { fold: 1 as const },
+      { resolvedUtcOffsetSeconds: 3600 },
+      { tzdbVersion: '' },
+      { wallTime: '2030-01-01 00:00:00' },
+      { timeBasis: null },
+    ]) {
+      await expect(
+        withTransaction(pool, (client) =>
+          createTaskWithinTransaction(client, { ...elapsed, ...changes }),
+        ),
+      ).rejects.toThrow();
+    }
+    expect(await ownerEffects(pool, input.ownerId)).toEqual({ tasks: 1, events: 1, commands: 1 });
+    const localInvocation = await seedInvocation(pool, input.ownerId);
+    const localConversation = (
+      await pool.query('SELECT conversation_id FROM tool_invocations WHERE invocation_id=$1', [
+        localInvocation,
+      ])
+    ).rows[0].conversation_id;
+    const localMessage = randomUUID();
+    await pool.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
+      localConversation,
+      input.ownerId,
+    ]);
+    await pool.query(
+      "INSERT INTO messages(id,owner_id,conversation_id,role,content) VALUES($1,$2,$3,'user','remind me')",
+      [localMessage, input.ownerId, localConversation],
+    );
+    const localTime = new Date(fire.getTime() + 8 * 3600_000)
+      .toISOString()
+      .slice(0, 19)
+      .replace('T', ' ');
+    const local = await withTransaction(pool, (client) =>
+      createTaskWithinTransaction(client, {
+        ...elapsed,
+        source: { invocationId: localInvocation },
+        idempotencyKey: `create:${localInvocation}`,
+        timezoneId: 'Asia/Shanghai',
+        wallTime: localTime,
+        resolvedUtcOffsetSeconds: 28800,
+        tzdbVersion: 'real-fixture',
+        timeBasis: { ...timeBasis, source_message_id: localMessage },
+      }),
+    );
+    expect(local).toMatchObject({
+      wall_time: localTime,
+      tzdb_version: 'real-fixture',
+      display_version: 'elapsed/1',
+    });
+  });
+
+  it('preserves pre-elapsed tasks during an idempotent 0024 upgrade', async () => {
+    const upgrade = await createIntegrationDatabase();
+    const db = upgrade.pool;
+    try {
+      await restoreHistoricalSchema(db, '0023');
+      const input = await frozenInput(db);
+      await db.query(
+        `INSERT INTO tasks(id,owner_id,source_invocation_id,fire_at_utc,wall_time,
+        timezone_id,fold,resolved_utc_offset_seconds,tzdb_version)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [
+          randomUUID(),
+          input.ownerId,
+          input.source.invocationId,
+          input.fireAtUtc,
+          input.wallTime,
+          input.timezoneId,
+          input.fold,
+          input.resolvedUtcOffsetSeconds,
+          input.tzdbVersion,
+        ],
+      );
+      const before = (await db.query('SELECT to_jsonb(t) facts FROM tasks t')).rows;
+      const migration = await readFile(elapsedMigrationUrl, 'utf8');
+      await db.query(migration);
+      await db.query(migration);
+      expect(
+        (
+          await db.query(
+            "SELECT to_jsonb(t)-ARRAY['time_basis','display_version'] facts FROM tasks t",
+          )
+        ).rows,
+      ).toEqual(before);
+      expect((await db.query('SELECT time_basis,display_version FROM tasks')).rows).toEqual([
+        { time_basis: null, display_version: null },
+      ]);
+      await db.query("UPDATE tasks SET state='pending_schedule' WHERE owner_id=$1", [
+        input.ownerId,
+      ]);
+    } finally {
+      await upgrade.close();
+    }
   });
 
   it('rejects both sources, missing invocation, duplicate invocation and clearing a source', async () => {
@@ -361,15 +565,13 @@ maybe('task creation provenance', () => {
     const upgrade = await createIntegrationDatabase();
     const db = upgrade.pool;
     try {
-      // Restore the actual 0022 task shape inside this isolated fixture only.
-      await db.query(
-        `DROP TRIGGER tasks_creation_source_required ON tasks;
-         DROP FUNCTION tasks_require_creation_source();
-         ALTER TABLE tasks DROP CONSTRAINT tasks_source_xor_check;
-         ALTER TABLE tasks DROP COLUMN source_invocation_id;
-         DELETE FROM schema_migrations WHERE version='0023'`,
-      );
-      const legacy = await seedApproval(db, {});
+      await restoreHistoricalSchema(db, '0022');
+      const ownerId = randomUUID();
+      await db.query('INSERT INTO users(id,auth_email) VALUES($1,$2)', [
+        ownerId,
+        `${ownerId}@local.invalid`,
+      ]);
+      const legacy = await seedApproval(db, { ownerId });
       const pending = await seedApproval(db, { ownerId: legacy.ownerId });
       const { detail } = await getApprovalDetail({ pool: db }, legacy.ownerId, legacy.id);
       // The shared implementation requires 0023, so seed the real pre-0023
@@ -407,6 +609,9 @@ maybe('task creation provenance', () => {
           )
         ).rows,
       ).toEqual(tasksBefore);
+      await db.query(await readFile(elapsedMigrationUrl, 'utf8'));
+      await db.query(await readFile(approvalMigrationUrl, 'utf8'));
+      await db.query(await readFile(convergenceMigrationUrl, 'utf8'));
       expect((await db.query('SELECT * FROM approvals ORDER BY id')).rows).toEqual(approvalsBefore);
       await db.query("UPDATE tasks SET state='pending_schedule',state_version=2 WHERE id=$1", [
         unknownId,

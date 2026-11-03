@@ -2,7 +2,7 @@ import type { CreatedApproval } from '../approvals/create.js';
 import type { TimeContext } from '../time/context.js';
 import type { TimeFailure } from '../time/normalize.js';
 import type { WorkspaceGrant, WorkspaceResult } from '@along/contracts';
-import type { DocumentApprovalReceipt } from '@along/contracts';
+import type { DocumentApprovalReceipt, ElapsedTimeBasis } from '@along/contracts';
 
 export const BUSINESS_TOOL_IDS = [
   'propose_task',
@@ -89,6 +89,7 @@ export interface BriefPayload {
   kind: 'brief';
   brief_id: string;
   date: string;
+  timezone_id?: string;
   cards: {
     card_id: string;
     kind: string;
@@ -119,7 +120,9 @@ export interface TaskCreatedPayload {
   timezone_id: string;
   fold: 0 | 1;
   resolved_utc_offset_seconds: number;
-  tzdb_version: string;
+  tzdb_version: string | null;
+  time_basis?: ElapsedTimeBasis;
+  display_version?: 'elapsed/1';
   fire_at_utc: string;
   original_note: string | null;
 }

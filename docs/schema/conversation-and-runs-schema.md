@@ -2,7 +2,7 @@
 
 > 状态：业务与正式 Harness 存储合同。范围：对话/Run/attempt、只追加事件/有限快照、冻结执行权威与调用接受结果。不包含：任意崩溃自动恢复或通用 exactly-once。TS 长期持有 PostgreSQL 与事实，仓颉组织循环和本次上下文（design/09/11）。
 
-> 本人时区委托切片（#107）：Run 在 `frozen_context` 独立冻结授权修订、实际能力和 request-bound 生命周期，供 v6 trusted start 与只读投影；`0021_trusted_execution_goals.sql` 增加根列 `agent_runs.goal_result`。旧 Run/pending/快照/模板/hash/accepted result 不迁写或扩权，历史结果保持 NULL；snapshot 仍为2，不增输入长等待/目标表/模型去重层。新委托 SSE 为 v2，legacy/v1 历史保持。后续 server-owned、直接提醒、elapsed、文件自主能力仍见 [design/20](../design/20-goal-scoped-delegation.md)，不由本迁移交付。
+> Run 在 `frozen_context` 独立冻结授权修订、实际能力和 request-bound 生命周期，供 v6 trusted start 与只读投影；`0021_trusted_execution_goals.sql` 增加根列 `agent_runs.goal_result`。旧 Run/pending/快照/模板/hash/accepted result 不迁写或扩权，历史结果保持 NULL；snapshot 仍为2。新委托 SSE 为 v2，legacy/v1 历史保持。server-owned 和文件自主能力见 [design/20](../design/20-goal-scoped-delegation.md)，不由本切片交付。
 
 ## 设计依据
 
@@ -121,7 +121,7 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 - [Required] 创建时冻结 execution、owner/conversation、revision、mode、预算、工具范围、上下文与输入引用；0015 trigger 禁止事后改变，终态 Run 不可改写。
 - [Required] harness suspended_approval 时三个 waiting 引用必须齐备；其他 harness 状态必须为空。TS 锁内进一步验证实际 owner/Run/已接受调用/批准对应关系，引用本身不作授权。
 - [Required] legacy 已接受助手 delta 合并的消息、终态 checkpoint、attempt/Run 同事务；无助手输出的结构化失败不合成助手消息。新 delegation 将真实 GoalResult、其 `answer` 最终消息、终结事件和 Run/attempt 终态同事务提交，不把中间 delta 当最终 answer。取消不能覆盖已提交事实或伪撤销既成效果，失败/断连仍保留真实已接受设置收据及未完成或未知项。
-- 新委托在接纳事务冻结 `frozen_context.authorization_revision='delegation/1'`、`execution_lifecycle='request-bound'` 及 `trustedExecutionContext`；HTTP 必须显式请求该修订且为无 workspace 的 harness。可信上下文含版本1、输入消息引用、UTC received/anchor、可空 continuation/时区来源、实际可空 wall_rules；当前 `elapsed_revision:null,workspaces:[]`。它进入 v6 start 的 system 权威层，legacy `trusted_context:null` 保留原能力；不从模型或当前部署补写旧事实。
+- 新委托在接纳事务冻结 `frozen_context.authorization_revision='delegation/1'`、`execution_lifecycle='request-bound'` 及 `trustedExecutionContext`；HTTP 必须显式请求该修订且为无 workspace 的 harness。可信上下文含版本1、输入消息引用、UTC received/anchor、可空 continuation/时区来源、实际可空 wall_rules；合格新 Run 冻结 `elapsed_revision:'elapsed/1'` 与空工作区集合。它进入 v6 start 的 system 权威层，legacy `trusted_context:null` 和旧 Run 保留原能力；不从模型或当前部署补写旧事实。
 - `0021` 在0020之后新增根 `goal_result jsonb NULL`；`0022` 将非空结果约束收紧为明确为真，不能以缺失 legacy 字段产生的 SQL NULL 通过 CHECK。非空值必须是 object、Run 冻结 delegation/1、status 为 done/failed/cancelled，目标状态属于 completed/partial/blocked/cancelled/unknown。strict 逐项 shape、收据归属/成功状态和真实偏好事实由 TS 校验；DB 列本身不证明目标达成。RunView 投影冻结授权/生命周期与根结果，不泄漏完整 trusted context。
 
 ### 提醒请求日期来源（#92）

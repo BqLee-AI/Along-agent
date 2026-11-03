@@ -2,6 +2,7 @@
 // Source: docs/api/brief/brief_routes.md. v0 is a read-only projection of
 // tasks + approvals; there is no briefs/cards table and no LLM generation.
 import { z } from 'zod';
+import { ElapsedTimeBasisSchema } from '@along/contracts';
 
 const DateTextSchema = z
   .string()
@@ -39,6 +40,9 @@ export const TaskCardSchema = z
     kind: z.literal('task'),
     status: z.string().min(1).max(40),
     fire_at_local: z.string().min(1).max(60),
+    timezone_id: z.string(),
+    time_basis: ElapsedTimeBasisSchema.nullable(),
+    display_version: z.literal('elapsed/1').nullable(),
     ref: z.object({ task_id: z.string().uuid() }).strict(),
   })
   .strict();

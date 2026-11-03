@@ -5,6 +5,7 @@ import type { ApiResult } from '@/lib/api';
 import type { Me, TaskDetail } from '@/lib/types';
 import CancelAction from '@/app/tasks/[id]/CancelAction';
 import { TaskState } from './resource-ui';
+import { ElapsedBasis } from './elapsed-basis';
 
 export function TaskSummary({ task }: { task: TaskDetail }) {
   return (
@@ -14,6 +15,7 @@ export function TaskSummary({ task }: { task: TaskDetail }) {
         <p className="text-muted-foreground">
           {task.timezone_id} · 创建时冻结的本地时间，不在 Web 换算
         </p>
+        <ElapsedBasis basis={task.time_basis} />
         <TaskState state={task.state} />
       </div>
       <dl className="grid gap-2 sm:grid-cols-[140px_minmax(0,1fr)]">
