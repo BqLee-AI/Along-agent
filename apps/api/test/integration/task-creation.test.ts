@@ -24,6 +24,10 @@ const elapsedMigrationUrl = new URL(
   '../../../../infra/migrations/0024_tasks_elapsed_basis.sql',
   import.meta.url,
 );
+const approvalMigrationUrl = new URL(
+  '../../../../infra/migrations/0025_approval_utc_cancellation.sql',
+  import.meta.url,
+);
 
 async function seedInvocation(pool: Pool, ownerId: string): Promise<string> {
   const invocationId = randomUUID();
@@ -548,7 +552,12 @@ maybe('task creation provenance', () => {
     try {
       // Restore the actual 0022 task shape inside this isolated fixture only.
       await db.query(
-        `DROP TRIGGER tasks_elapsed_basis_guard ON tasks;
+        `DROP TRIGGER approvals_null_tzdb_guard ON approvals;
+         DROP FUNCTION approvals_guard_null_tzdb();
+         ALTER TABLE approvals DROP CONSTRAINT approvals_tzdb_version_check;
+         ALTER TABLE approvals ALTER COLUMN tzdb_version SET NOT NULL;
+         DELETE FROM schema_migrations WHERE version='0025';
+         DROP TRIGGER tasks_elapsed_basis_guard ON tasks;
          DROP FUNCTION tasks_guard_elapsed_basis();
          ALTER TABLE tasks DROP CONSTRAINT tasks_time_basis_check,
            DROP CONSTRAINT tasks_display_version_check, DROP CONSTRAINT tasks_tzdb_version_check,
@@ -600,6 +609,7 @@ maybe('task creation provenance', () => {
         ).rows,
       ).toEqual(tasksBefore);
       await db.query(await readFile(elapsedMigrationUrl, 'utf8'));
+      await db.query(await readFile(approvalMigrationUrl, 'utf8'));
       expect((await db.query('SELECT * FROM approvals ORDER BY id')).rows).toEqual(approvalsBefore);
       await db.query("UPDATE tasks SET state='pending_schedule',state_version=2 WHERE id=$1", [
         unknownId,
