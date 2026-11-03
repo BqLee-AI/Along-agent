@@ -327,92 +327,112 @@ describe('direct reminder accepted facts', () => {
     await call(ctx, 'create/2');
     expect(await counts(ctx)).toEqual({ approvals: 0, tasks: 2, task_events: 2, outbox: 2 });
   });
-  it('denies unadmitted and disabled owners without creating or replaying reminders', async () => {
-    const unadmitted = await fresh();
-    const unadmittedBinding = await reserveToolInvocation(db.pool, unadmitted, {
-      callKey: 'unadmitted/1',
-      toolId: 'create_reminder',
-      args,
-    });
-    await db.pool.query('DELETE FROM identity_account_admissions WHERE user_id=$1', [
-      unadmitted.ownerId,
-    ]);
-    expect(
-      await invokeTool(db.pool, unadmitted, {
-        ...unadmittedBinding,
+  for (const timeKind of ['wall', 'elapsed'] as const) {
+    const reminderArgs = timeKind === 'elapsed' ? elapsedArgs : args;
+    it(`denies unadmitted and disabled owners without creating or replaying ${timeKind} reminders`, async () => {
+      const unadmitted = timeKind === 'elapsed' ? await elapsedContext() : await fresh();
+      const unadmittedBinding = await reserveToolInvocation(db.pool, unadmitted, {
+        callKey: 'unadmitted/1',
         toolId: 'create_reminder',
-        args,
-      }),
-    ).toMatchObject({ status: 'denied' });
-    expect(await counts(unadmitted)).toEqual({ approvals: 0, tasks: 0, task_events: 0, outbox: 0 });
-
-    const disabled = await fresh();
-    const { binding, outcome } = await call(disabled, 'accepted/1');
-    expect(outcome).toMatchObject({ status: 'ok', result: { kind: 'task_created' } });
-    const pending = await reserveToolInvocation(db.pool, disabled, {
-      callKey: 'pending/1',
-      toolId: 'create_reminder',
-      args,
-    });
-    await db.pool.query("UPDATE users SET status='disabled' WHERE id=$1", [disabled.ownerId]);
-    expect(
-      await invokeTool(db.pool, disabled, { ...binding, toolId: 'create_reminder', args }),
-    ).toMatchObject({ status: 'denied' });
-    expect(
-      await invokeTool(db.pool, disabled, { ...pending, toolId: 'create_reminder', args }),
-    ).toMatchObject({ status: 'denied' });
-    const client = await db.pool.connect();
-    try {
-      await expect(readRunCreatedReminders(client, disabled)).rejects.toMatchObject({
-        httpStatus: 403,
+        args: reminderArgs,
       });
-      expect((await readRunInterruptionEvidence(client, disabled)).creations).toMatchObject([
-        { invocation_id: binding.invocationId, kind: 'task_created' },
+      await db.pool.query('DELETE FROM identity_account_admissions WHERE user_id=$1', [
+        unadmitted.ownerId,
       ]);
-    } finally {
-      client.release();
-    }
-    expect(await counts(disabled)).toEqual({ approvals: 0, tasks: 1, task_events: 1, outbox: 1 });
-  });
-  it('committed disable wins over a concurrent direct reminder and leaves no creation facts', async () => {
-    const ctx = await fresh();
-    const binding = await reserveToolInvocation(db.pool, ctx, {
-      callKey: 'disable-race/1',
-      toolId: 'create_reminder',
-      args,
-    });
-    const disabler = await db.pool.connect();
-    let pending: Promise<ToolOutcome> | undefined;
-    try {
-      await disabler.query('BEGIN');
-      const pid = (await disabler.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]!
-        .pid;
-      await disabler.query("UPDATE users SET status='disabled' WHERE id=$1", [ctx.ownerId]);
-      pending = invokeTool(db.pool, ctx, { ...binding, toolId: 'create_reminder', args });
-      void pending.catch(() => {});
-      const deadline = Date.now() + 5000;
-      let blocked = false;
-      while (Date.now() < deadline) {
-        const result = await disabler.query(
-          'SELECT 1 FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid))',
-          [pid],
-        );
-        if (result.rowCount) {
-          blocked = true;
-          break;
-        }
-        await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(
+        await invokeTool(db.pool, unadmitted, {
+          ...unadmittedBinding,
+          toolId: 'create_reminder',
+          args: reminderArgs,
+        }),
+      ).toMatchObject({ status: 'denied' });
+      expect(await counts(unadmitted)).toEqual({
+        approvals: 0,
+        tasks: 0,
+        task_events: 0,
+        outbox: 0,
+      });
+
+      const disabled = timeKind === 'elapsed' ? await elapsedContext() : await fresh();
+      const { binding, outcome } = await call(disabled, 'accepted/1', reminderArgs);
+      expect(outcome).toMatchObject({ status: 'ok', result: { kind: 'task_created' } });
+      const pending = await reserveToolInvocation(db.pool, disabled, {
+        callKey: 'pending/1',
+        toolId: 'create_reminder',
+        args: reminderArgs,
+      });
+      await db.pool.query("UPDATE users SET status='disabled' WHERE id=$1", [disabled.ownerId]);
+      expect(
+        await invokeTool(db.pool, disabled, {
+          ...binding,
+          toolId: 'create_reminder',
+          args: reminderArgs,
+        }),
+      ).toMatchObject({ status: 'denied' });
+      expect(
+        await invokeTool(db.pool, disabled, {
+          ...pending,
+          toolId: 'create_reminder',
+          args: reminderArgs,
+        }),
+      ).toMatchObject({ status: 'denied' });
+      const client = await db.pool.connect();
+      try {
+        await expect(readRunCreatedReminders(client, disabled)).rejects.toMatchObject({
+          httpStatus: 403,
+        });
+        expect((await readRunInterruptionEvidence(client, disabled)).creations).toMatchObject([
+          { invocation_id: binding.invocationId, kind: 'task_created' },
+        ]);
+      } finally {
+        client.release();
       }
-      expect(blocked).toBe(true);
-      await disabler.query('COMMIT');
-      expect(await pending).toMatchObject({ status: 'denied' });
-      expect(await counts(ctx)).toEqual({ approvals: 0, tasks: 0, task_events: 0, outbox: 0 });
-    } finally {
-      await disabler.query('ROLLBACK');
-      if (pending) await Promise.allSettled([pending]);
-      disabler.release();
-    }
-  });
+      expect(await counts(disabled)).toEqual({ approvals: 0, tasks: 1, task_events: 1, outbox: 1 });
+    });
+    it(`committed disable wins over a concurrent ${timeKind} reminder and leaves no creation facts`, async () => {
+      const ctx = timeKind === 'elapsed' ? await elapsedContext() : await fresh();
+      const binding = await reserveToolInvocation(db.pool, ctx, {
+        callKey: 'disable-race/1',
+        toolId: 'create_reminder',
+        args: reminderArgs,
+      });
+      const disabler = await db.pool.connect();
+      let pending: Promise<ToolOutcome> | undefined;
+      try {
+        await disabler.query('BEGIN');
+        const pid = (await disabler.query<{ pid: number }>('SELECT pg_backend_pid() AS pid'))
+          .rows[0]!.pid;
+        await disabler.query("UPDATE users SET status='disabled' WHERE id=$1", [ctx.ownerId]);
+        pending = invokeTool(db.pool, ctx, {
+          ...binding,
+          toolId: 'create_reminder',
+          args: reminderArgs,
+        });
+        void pending.catch(() => {});
+        const deadline = Date.now() + 5000;
+        let blocked = false;
+        while (Date.now() < deadline) {
+          const result = await disabler.query(
+            'SELECT 1 FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid))',
+            [pid],
+          );
+          if (result.rowCount) {
+            blocked = true;
+            break;
+          }
+          await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+        expect(blocked).toBe(true);
+        await disabler.query('COMMIT');
+        expect(await pending).toMatchObject({ status: 'denied' });
+        expect(await counts(ctx)).toEqual({ approvals: 0, tasks: 0, task_events: 0, outbox: 0 });
+      } finally {
+        await disabler.query('ROLLBACK');
+        if (pending) await Promise.allSettled([pending]);
+        disabler.release();
+      }
+    });
+  }
   it('keeps settings-only frozen runs unable to create', async () => {
     const ctx = await fresh(['set_user_timezone']);
     expect((await call(ctx, 'create/1')).outcome).toMatchObject({ status: 'denied' });

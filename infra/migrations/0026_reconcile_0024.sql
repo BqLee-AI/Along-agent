@@ -29,7 +29,7 @@ BEGIN
       AND EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'tasks'::regclass AND attname = 'tzdb_version' AND atttypid = 'text'::regtype AND NOT attnotnull AND NOT attisdropped)
       AND (SELECT count(*) = 3 FROM pg_constraint WHERE conrelid = 'tasks'::regclass AND contype = 'c' AND convalidated AND conname IN ('tasks_time_basis_check','tasks_display_version_check','tasks_tzdb_version_check'))
       AND EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-                  WHERE n.nspname = schema_name AND p.proname = 'tasks_guard_elapsed_basis' AND p.pronargs = 0 AND p.prorettype = 'trigger'::regtype AND p.prosrc = $elapsed_body$
+                  WHERE n.nspname = schema_name AND p.proname = 'tasks_guard_elapsed_basis' AND p.pronargs = 0 AND p.prorettype = 'trigger'::regtype AND replace(p.prosrc, chr(13) || chr(10), chr(10)) = replace($elapsed_body$
   BEGIN
     IF TG_OP = 'UPDATE' AND OLD.time_basis IS NULL AND NEW.time_basis IS NOT NULL THEN
       RAISE EXCEPTION 'historical tasks cannot acquire elapsed provenance' USING ERRCODE = '23514';
@@ -62,7 +62,7 @@ BEGIN
     END IF;
     RETURN NEW;
   END;
-  $elapsed_body$)
+  $elapsed_body$, chr(13) || chr(10), chr(10)))
       AND EXISTS (SELECT 1 FROM pg_trigger t JOIN pg_proc p ON p.oid=t.tgfoid JOIN pg_namespace n ON n.oid=p.pronamespace
                   WHERE t.tgrelid='tasks'::regclass AND t.tgname='tasks_elapsed_basis_guard' AND NOT t.tgisinternal AND t.tgtype=23 AND t.tgenabled='O' AND n.nspname=schema_name AND p.proname='tasks_guard_elapsed_basis')
       INTO elapsed_complete;
@@ -77,7 +77,7 @@ BEGIN
     SELECT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid='approvals'::regclass AND attname='tzdb_version' AND atttypid='text'::regtype AND NOT attnotnull AND NOT attisdropped)
       AND EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='approvals'::regclass AND conname='approvals_tzdb_version_check' AND contype='c' AND convalidated)
       AND EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
-                  WHERE n.nspname=schema_name AND p.proname='approvals_guard_null_tzdb' AND p.pronargs=0 AND p.prorettype='trigger'::regtype AND p.prosrc=$approval_body$
+                  WHERE n.nspname=schema_name AND p.proname='approvals_guard_null_tzdb' AND p.pronargs=0 AND p.prorettype='trigger'::regtype AND replace(p.prosrc, chr(13) || chr(10), chr(10)) = replace($approval_body$
   BEGIN
     IF NEW.tzdb_version IS NULL AND NOT EXISTS (
       SELECT 1 FROM tasks t
@@ -92,7 +92,7 @@ BEGIN
     END IF;
     RETURN NEW;
   END;
-  $approval_body$)
+  $approval_body$, chr(13) || chr(10), chr(10)))
       AND EXISTS (SELECT 1 FROM pg_trigger t JOIN pg_proc p ON p.oid=t.tgfoid JOIN pg_namespace n ON n.oid=p.pronamespace
                   WHERE t.tgrelid='approvals'::regclass AND t.tgname='approvals_null_tzdb_guard' AND NOT t.tgisinternal AND t.tgtype=23 AND t.tgenabled='O' AND n.nspname=schema_name AND p.proname='approvals_guard_null_tzdb')
       INTO approval_complete;

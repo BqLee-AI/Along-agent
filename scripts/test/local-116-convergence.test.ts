@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import { copyFile, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { copyFile, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pg from 'pg';
@@ -74,7 +74,7 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
   }
 
   type History = 'main' | 'legacy';
-  async function historical(url: string, history: History) {
+  async function historical(url: string, history: History, ending: '\n' | '\r\n' = '\n') {
     await deployment(
       url,
       async (db) => expect((await db.initialize()).version).toBe('0023'),
@@ -112,10 +112,14 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
       );
       const source =
         history === 'main' ? new URL('0024_invited_accounts.sql', migrations) : elapsedFixture;
-      await client.query(await readFile(source, 'utf8'));
+      await client.query(
+        (await readFile(source, 'utf8')).replaceAll('\r\n', '\n').replaceAll('\n', ending),
+      );
       if (history === 'legacy') {
         await client.query(
-          await readFile(new URL('0025_approval_utc_cancellation.sql', migrations), 'utf8'),
+          (await readFile(new URL('0025_approval_utc_cancellation.sql', migrations), 'utf8'))
+            .replaceAll('\r\n', '\n')
+            .replaceAll('\n', ending),
         );
         const conversation = randomUUID(),
           invocation = randomUUID(),
@@ -252,6 +256,195 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
       });
     }, 30000);
   }
+
+  for (const [historyEnding, nextEnding] of [
+    ['\n', '\r\n'],
+    ['\r\n', '\n'],
+  ] as const) {
+    it(`upgrades legacy functions from ${JSON.stringify(historyEnding)} to ${JSON.stringify(nextEnding)} checkout`, async () => {
+      await isolated(async (url) => {
+        await historical(url, 'legacy', historyEnding);
+        const before = await sql(url, async (client) => {
+          const bodies = (
+            await client.query(
+              "SELECT proname,prosrc FROM pg_proc WHERE proname IN ('tasks_guard_elapsed_basis','approvals_guard_null_tzdb') ORDER BY proname",
+            )
+          ).rows;
+          expect(bodies).toHaveLength(2);
+          for (const body of bodies) {
+            expect(body.prosrc.includes('\r\n')).toBe(historyEnding === '\r\n');
+          }
+          return facts(client, 'legacy');
+        });
+        const directory = await mkdtemp(join(tmpdir(), 'convergence-endings-'));
+        try {
+          for (const name of (await readdir(migrations)).filter((name) => name.endsWith('.sql'))) {
+            const source = await readFile(new URL(name, migrations), 'utf8');
+            await writeFile(
+              join(directory, name),
+              source.replaceAll('\r\n', '\n').replaceAll('\n', nextEnding),
+            );
+          }
+          await deployment(
+            url,
+            async (db) => {
+              expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0025' });
+              expect((await db.upgrade()).version).toBe('0026');
+            },
+            directory,
+          );
+          await sql(url, async (client) => {
+            expect(await facts(client, 'legacy')).toEqual(before);
+          });
+        } finally {
+          await rm(directory, { recursive: true, force: true });
+        }
+      });
+    }, 30000);
+  }
+
+  it('recognizes an installation that already applied the original 0026 without rerunning it', async () => {
+    await isolated(async (url) => {
+      await historical(url, 'legacy');
+      const before = await sql(url, async (client) => {
+        const current = await readFile(new URL('0026_reconcile_0024.sql', migrations), 'utf8');
+        const original = current
+          .replace(
+            'replace(p.prosrc, chr(13) || chr(10), chr(10)) = replace($elapsed_body$',
+            'p.prosrc = $elapsed_body$',
+          )
+          .replace('$elapsed_body$, chr(13) || chr(10), chr(10)))', '$elapsed_body$)')
+          .replace(
+            'replace(p.prosrc, chr(13) || chr(10), chr(10)) = replace($approval_body$',
+            'p.prosrc=$approval_body$',
+          )
+          .replace('$approval_body$, chr(13) || chr(10), chr(10)))', '$approval_body$)');
+        expect(original).not.toBe(current);
+        await client.query(original);
+        return {
+          facts: await facts(client, 'legacy'),
+          ledger: (await client.query('SELECT * FROM schema_migrations ORDER BY version')).rows,
+          admission: (
+            await client.query('SELECT * FROM identity_account_admissions ORDER BY user_id')
+          ).rows,
+        };
+      });
+      await deployment(url, async (db) => {
+        expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0026' });
+        expect((await db.upgrade()).version).toBe('0026');
+      });
+      await sql(url, async (client) => {
+        expect(await facts(client, 'legacy')).toEqual(before.facts);
+        expect(
+          (await client.query('SELECT * FROM schema_migrations ORDER BY version')).rows,
+        ).toEqual(before.ledger);
+        expect(
+          (await client.query('SELECT * FROM identity_account_admissions ORDER BY user_id')).rows,
+        ).toEqual(before.admission);
+      });
+    });
+  }, 30000);
+
+  for (const object of ['elapsed', 'approval'] as const) {
+    for (const drift of ['body', 'trigger'] as const) {
+      it(`refuses ${object} ${drift} drift even with equivalent line endings`, async () => {
+        await isolated(async (url) => {
+          await historical(url, 'legacy', '\r\n');
+          const before = await sql(url, async (client) => {
+            const name =
+              object === 'elapsed' ? 'tasks_guard_elapsed_basis' : 'approvals_guard_null_tzdb';
+            if (drift === 'body') {
+              const original =
+                object === 'elapsed'
+                  ? await readFile(elapsedFixture, 'utf8')
+                  : await readFile(
+                      new URL('0025_approval_utc_cancellation.sql', migrations),
+                      'utf8',
+                    );
+              const definition = original.match(
+                new RegExp(`CREATE FUNCTION ${name}\\(\\)[\\s\\S]*?\\$function\\$;`),
+              )?.[0];
+              expect(definition).toBeDefined();
+              await client.query(
+                definition!
+                  .replace('CREATE FUNCTION', 'CREATE OR REPLACE FUNCTION')
+                  .replace('RETURN NEW;', 'RETURN NULL;'),
+              );
+            } else {
+              await client.query(
+                object === 'elapsed'
+                  ? 'ALTER TABLE tasks DISABLE TRIGGER tasks_elapsed_basis_guard'
+                  : 'ALTER TABLE approvals DISABLE TRIGGER approvals_null_tzdb_guard',
+              );
+            }
+            return facts(client, 'legacy');
+          });
+          await deployment(url, async (db) => {
+            expect((await db.classify()).kind).toBe('unknown');
+            await expect(db.upgrade()).rejects.toBeDefined();
+          });
+          await sql(url, async (client) => {
+            expect(await facts(client, 'legacy')).toEqual(before);
+            expect(
+              (await client.query("SELECT count(*) FROM schema_migrations WHERE version='0026'"))
+                .rows[0].count,
+            ).toBe('0');
+          });
+        });
+      }, 30000);
+    }
+  }
+
+  it('rolls back an interrupted 0026 after DDL and retries without changing historical facts', async () => {
+    await isolated(async (url) => {
+      await historical(url, 'legacy');
+      const before = await sql(url, (client) => facts(client, 'legacy'));
+      const directory = await mkdtemp(join(tmpdir(), 'convergence-interrupted-'));
+      try {
+        for (const name of (await readdir(migrations)).filter((name) => name.endsWith('.sql'))) {
+          const source = await readFile(new URL(name, migrations), 'utf8');
+          await writeFile(
+            join(directory, name),
+            name.startsWith('0026_')
+              ? source.replace(
+                  "  INSERT INTO schema_migrations(version) VALUES ('0026');",
+                  "  RAISE EXCEPTION 'injected failure after reconciliation';\n  INSERT INTO schema_migrations(version) VALUES ('0026');",
+                )
+              : source,
+          );
+        }
+        await deployment(
+          url,
+          async (db) => {
+            await expect(db.upgrade()).rejects.toMatchObject({
+              code: 'migration_failed_reconcile_before_retry',
+            });
+          },
+          directory,
+        );
+        await sql(url, async (client) => {
+          expect(await facts(client, 'legacy')).toEqual(before);
+          expect(
+            (
+              await client.query(
+                "SELECT to_regclass('public.identity_account_admissions') AS relation",
+              )
+            ).rows[0].relation,
+          ).toBeNull();
+          expect(
+            (await client.query("SELECT count(*) FROM schema_migrations WHERE version='0026'"))
+              .rows[0].count,
+          ).toBe('0');
+        });
+        await deployment(url, async (db) => {
+          expect((await db.upgrade()).version).toBe('0026');
+        });
+        await sql(url, async (client) => expect(await facts(client, 'legacy')).toEqual(before));
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+  }, 30000);
 
   for (const anomaly of ['missing_elapsed_guard', 'mixed_identity'] as const) {
     it(`refuses ${anomaly} without changing the historical ledger or activating privileges`, async () => {
