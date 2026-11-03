@@ -4,7 +4,7 @@
 | ---------------------------- | ----------------------------------------------------- | -------------------------------------------------------- | -------------------------- |
 | 跟随 design/09/11 的运行合同 | ID、执行归属、预算、task/document 批准等待与补读/恢复 | 实际供应商选型、完整 R1 真模型验收结论、无人值守通用恢复 | 正式仓颉核心与 TS 长期能力 |
 
-> profile作用域：本文v5/单grant/原批准恢复仍描述现行/legacy。拟议授权修订与冻结执行生命周期独立，早期委托可request-bound，只有server-owned不因离开撤销执行；真实上下文/结果/占有见 [design/20 §1、§4–§9](../design/20-goal-scoped-delegation.md)。停止不回滚，每Run预算/同Run恢复累计和snapshot2保留，规范不证明后台或未交付工具已上线。
+> profile 作用域：单 grant/原批准恢复描述 legacy；wire 统一为严格 v6，不代表权限升级。普通 Web Agent 显式接纳 delegation/1，仅交付本人默认时区和只读工具，冻结 request-bound。可信上下文、结构化目标结果与生命周期由 [design/20 §1、§4–§9](../design/20-goal-scoped-delegation.md) 定义；直接提醒、资料写入、elapsed 和 server-owned 是独立能力，不能从修订推断上线。
 
 ## ID 边界
 
@@ -26,8 +26,11 @@
 - 新接受调用保留标准函数历史：`assistant.tool_calls` 与 `role=tool` 原 `tool_call_id` 成对。容量压力下仅仓颉按旧到新整体替换已向模型呈现过的调用对，以不可信普通资料保留来源；不伪造函数参数或留下孤立结果。恢复先发送可信有界视图，snapshot 保留全部事实引用，TS 只原样传输。
 - TS 冻结输入、revision、工具范围和时间规则；每个动作根据真实 owner/当前权限/最新 attempt/取消裁决执行资格，不信帧自报权限。workspace grant 还须符合当前登记；历史冻结事实可读不代表新动作持续获权。
 - 新 Harness Run 接纳事务内冻结同 owner、同 conversation 的最新 63 条已存 user/assistant 消息引用，按 PostgreSQL `created_at/id` 确定顺序，再追加本轮完整用户输入一次；总计最多64条。消息仅提供可见上下文，不重放此前工具调用，也不把文本当授权。恢复按同一冻结引用及 snapshot 顺序读取，不纳入后来消息；没有跨轮引用的旧 Run 保持原来仅本轮输入的语义。窗口是有界会话上下文而非永久记忆，超1MiB聚合帧仍以 `HARNESS_CONTEXT_LIMIT` 明确失败，不按字节截断输入。
-- Run/checkpoint/接受结果及审计留 TS；正式 pipe 为 `harness/v5`（含只读路由帧，路由默认 off，内部记录不进入外部七词），snapshot2 只存安全引用/usage/逻辑进度，不存完整推理链或原始工具参数副本。历史 snapshot1 限定读取规则不变：无 workspace、已完成旧业务/task 引用、不含 document 批准；构造 snapshot2 不改写历史、不执行旧 wire。字段见 [design/18](../design/18-r2a-harness-context.md) 和共享 schema。
+- Run/checkpoint/接受结果及审计留 TS；正式 pipe 为 `harness/v6`，legacy 明确 `trusted_context:null`，新委托使用接纳事务产生的可信 system 事实。v5 wire 硬拒绝新 shape；只读路由仅保留原 profile。snapshot2 仍只存安全引用/usage/逻辑进度；内部路由 checkpoint 的 `harness/v5` 是冻结存储 schema，不是可执行旧 wire。历史 snapshot1 限定读取规则不变：无 workspace、已完成旧业务/task 引用、不含 document 批准；不回写历史。
 - finish 的消息/终态/attempt/Run 同事务；cancel 先提交资格撤销和唯一事件，再终止 native/模型请求。已接受工具与按钮确认任务不被假撤销。
+- delegation/1 使用 `finish_goal` 提交目标结果，SSE v2 和 RunView 保存逐项目标事实；最终答复、GoalResult、terminal 事件、attempt 与 Run 同事务，异常/取消按同一终结事务保留既成效果。纯正文或工具 completed 不代替目标完成。输入/规则拒绝可交同一模型反馈；`TOOL_FORBIDDEN` / `TOOL_DENIED` 只允许结果说明与 `finish_goal`，native 和 TS 均停止该 Run 后续业务动作；failed/unknown 不继续。请求断开按取消收尾，不回滚已接受偏好；导航、刷新、重登和 GET 只读，不启动新 attempt 或重做设置。
+- `finish_goal` 的模型参数与 pipe 帧错误分开处理：JSON、字段、状态聚合或收据资格不合法时，native 返回配对的 `accepted:false / INVALID_GOAL_RESULT` 控制观察，不接纳目标、不伪造成功；此后只允许提交修正后的目标结果，不再预约或执行业务工具。修正使用原模型迭代/token预算，耗尽按原预算错误终结；既成领域结果与收据保留。pipe/传输故障仍按原协议失败，不捕获为可继续的业务观察。普通用户无需知道或输入控制工具名。
+- owner 在途 disabled 时拒绝后续动作；内部失败追账只核验 owner/conversation/run、冻结 profile 与既成接受结果完整性，不重新索取已撤销的执行资格，因此仍能原子保存唯一终态。该内部投影不是公开读取或执行入口；普通工具/GET仍要求有效身份，撤权后的原连接也不披露包含目标结果或收据的终结内容。恢复有效身份后只读原持久事实，不自动重做。
 - 有限 workspace 仅提供 `workspace_list/workspace_grep/workspace_read/workspace_propose_replace/workspace_apply_replace` 五工具；前三个经 TS 薄只读 MCP，提案绑定本 Run 的真实全文 read。工具顺序由仓颉决定，TS 不隐藏另一套 Agent 或固定代跑链。
 
 ## 预算

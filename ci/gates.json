@@ -116,7 +116,9 @@
           "apps/api/test/contracts/harness-context-consumer.test.ts",
           "apps/api/test/contracts/harness-context-native.test.ts",
           "apps/api/test/contracts/harness-routing-consumer.test.ts",
-          "apps/api/test/contracts/context-observation.test.ts"
+          "apps/api/test/contracts/context-observation.test.ts",
+          "apps/api/test/contracts/timezone-delegation.test.ts",
+          "apps/harness/test/contracts/trusted-goals.test.ts"
         ],
         "consumer_cases": [
           "D8.approval.local",
@@ -155,7 +157,19 @@
           "D8.http.readonly-required-harness-routing-policy",
           "D8.http.readonly-required-harness-routing-decision",
           "D8.http.readonly-required-harness-snapshot",
-          "D8.http.readonly-required-harness-routing-render"
+          "D8.http.readonly-required-harness-routing-render",
+          "D8.timezone-local-save-clear",
+          "D8.timezone-http-save-clear",
+          "D8.timezone-local-single-use-context",
+          "D8.timezone-http-single-use-context",
+          "D8.timezone-local-forged-receipt",
+          "D8.timezone-http-forged-receipt",
+          "D8.timezone-local-cancel-accepted",
+          "D8.timezone-http-cancel-accepted",
+          "D8.timezone-local-legacy-profile",
+          "D8.timezone-http-legacy-profile",
+          "D8.timezone-local-unsupported",
+          "D8.timezone-http-unsupported"
         ]
       }
     },

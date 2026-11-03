@@ -62,6 +62,7 @@ test('D8.wire-rejection', async () => {
     const start = HarnessStartSchema.parse({
       protocol: HARNESS_PROTOCOL_VERSION,
       type: 'start',
+      trusted_context: null,
       routing_policy: { revision: 'r2b/1', mode: 'off' },
       eligible_phase: 'disabled',
       context_policy: contextPolicy,

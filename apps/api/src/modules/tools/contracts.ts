@@ -20,8 +20,15 @@ export const WORKSPACE_TOOL_IDS = [
 ] as const;
 export const CONTEXT_TOOL_IDS = ['read_run_observation'] as const;
 export const HARNESS_BASE_TOOL_IDS = [...BUSINESS_TOOL_IDS, ...CONTEXT_TOOL_IDS] as const;
+export const DELEGATION_TOOL_IDS = [
+  'get_user_prefs',
+  'set_user_timezone',
+  'list_tasks',
+  'read_brief_cards',
+  'read_run_observation',
+] as const;
 export const TOOL_IDS = [...BUSINESS_TOOL_IDS, ...WORKSPACE_TOOL_IDS, ...CONTEXT_TOOL_IDS] as const;
-export type ToolId = (typeof TOOL_IDS)[number];
+export type ToolId = (typeof TOOL_IDS)[number] | (typeof DELEGATION_TOOL_IDS)[number];
 
 export const TASK_STATES = [
   'saved',
@@ -40,6 +47,7 @@ export interface ToolContext {
   attemptId: string;
   requestId: string;
   allowlist: readonly string[];
+  authorizationRevision?: 'delegation/1';
   confirmedTimezone: string | null;
   anchorReceivedAtUtc: string;
   receivedAtUtc: string;
@@ -96,6 +104,12 @@ export interface PrefsPayload {
   quiet_hours: null;
   locale: null;
 }
+export interface TimezoneSettingPayload {
+  kind: 'timezone_setting';
+  timezone_id: string | null;
+  previous_timezone_id: string | null;
+  alias_version: string;
+}
 // Internal non-transactional evidence, not a registered product tool.
 export interface EvidencePayload {
   kind: 'effect_evidence';
@@ -113,6 +127,7 @@ export type ToolPayload =
   | ListTasksPayload
   | BriefPayload
   | PrefsPayload
+  | TimezoneSettingPayload
   | EvidencePayload
   | WorkspaceResult;
 export type ToolResult =

@@ -1,7 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { ThreadEventSchema, type ThreadEvent } from '@along/stream-protocol';
+import type { GoalResult } from '@along/contracts';
 import { NextRequest } from 'next/server';
-import { consumeThreadStream, mergeThreadEvents, readEnvelope } from '../src/lib/conversation-run';
+import {
+  collectRunTranscripts,
+  consumeThreadStream,
+  mergeThreadEvents,
+  readEnvelope,
+} from '../src/lib/conversation-run';
 import { createServer, type Server } from 'node:http';
 import { once } from 'node:events';
 import type { GET as ProxyGet } from '../src/app/api/[...path]/route';
@@ -83,6 +89,75 @@ describe('Run event consumers', () => {
         .map((value) => value.payload.delta)
         .join(''),
     ).toBe('已提议。已确认。');
+  });
+
+  it('consumes v2 lifecycle and durable outcomes without promoting deltas or erasing accepted effects on cancellation', async () => {
+    const goalResult: GoalResult = {
+      status: 'cancelled',
+      outcomes: [
+        { description: '默认时区已保存为 Asia/Shanghai', status: 'achieved', receipt_refs: [cid] },
+        { description: '后续问题尚未回答', status: 'not_done', receipt_refs: [] },
+      ],
+      clarification: null,
+      answer: '设置已保存；执行随后停止，尚未回答后续问题。',
+    };
+    const incoming = [
+      ThreadEventSchema.parse({
+        protocol_version: 'v2',
+        seq: 1,
+        type: 'thread.started',
+        payload: {
+          conversation_id: cid,
+          run_id: rid,
+          stream_protocol_version: 'v2',
+          ruleset_id: 'rules-v1',
+          tzdb_version: '2026a',
+          authorization_revision: 'delegation/1',
+          execution_lifecycle: 'request-bound',
+        },
+        request_id: 'delegation-consumer',
+      }),
+      ThreadEventSchema.parse({
+        protocol_version: 'v2',
+        seq: 2,
+        type: 'message.delta',
+        payload: { conversation_id: cid, run_id: rid, delta: '尚在生成的正文' },
+        request_id: 'delegation-consumer',
+      }),
+      ThreadEventSchema.parse({
+        protocol_version: 'v2',
+        seq: 4,
+        type: 'thread.cancelled',
+        payload: {
+          conversation_id: cid,
+          run_id: rid,
+          reason: 'client_disconnected',
+          goal_result: goalResult,
+        },
+        request_id: 'delegation-consumer',
+      }),
+    ];
+    const accepted: ThreadEvent[] = [];
+    await consumeThreadStream(
+      new Response(incoming.map((value) => `data: ${JSON.stringify(value)}\n\n`).join('')),
+      (value) => accepted.push(value),
+    );
+    const started = collectRunTranscripts(accepted.slice(0, 1)).get(rid)!;
+    expect(started.authorization_revision).toBe('delegation/1');
+    expect(started.execution_lifecycle).toBe('request-bound');
+    expect(started.goal_result).toBeUndefined();
+    expect(collectRunTranscripts(accepted.slice(0, 2)).get(rid)?.goal_result).toBeUndefined();
+    const restored = collectRunTranscripts(mergeThreadEvents(accepted, accepted)).get(rid)!;
+    expect(restored.text).toBe('尚在生成的正文');
+    expect(restored.goal_result).toEqual(goalResult);
+    expect(restored.goal_result?.outcomes[0]?.receipt_refs).toEqual([cid]);
+    expect(collectRunTranscripts(accepted, { includeText: false }).get(rid)?.goal_result).toEqual(
+      goalResult,
+    );
+    expect(
+      collectRunTranscripts([event(1, 'thread.started'), event(3, 'thread.completed')]).get(rid)
+        ?.goal_result,
+    ).toBeUndefined();
   });
 });
 

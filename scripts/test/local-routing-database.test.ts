@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -11,8 +11,23 @@ const databaseTests = connectionString ? describe : describe.skip;
 
 databaseTests('routing lifecycle schema admission against PG16', () => {
   const admin = new pg.Pool({ connectionString, max: 1 });
+  let routingMigrationsDirectory: string;
+  beforeAll(async () => {
+    routingMigrationsDirectory = await mkdtemp(join(tmpdir(), 'routing-0020-'));
+    const migrations = new URL('../../infra/migrations/', import.meta.url);
+    for (const name of (await readdir(migrations)).filter(
+      (name) => name.endsWith('.sql') && name.slice(0, 4) <= '0020',
+    )) {
+      await copyFile(new URL(name, migrations), join(routingMigrationsDirectory, name));
+    }
+  });
   afterAll(async () => {
-    await admin.end();
+    try {
+      await admin.end();
+    } finally {
+      if (routingMigrationsDirectory)
+        await rm(routingMigrationsDirectory, { recursive: true, force: true });
+    }
   });
 
   async function isolated(action: (url: string) => Promise<void>) {
@@ -30,7 +45,7 @@ databaseTests('routing lifecycle schema admission against PG16', () => {
   async function deployment(
     url: string,
     action: (database: DeploymentDatabase) => Promise<void>,
-    migrationsDirectory?: string,
+    migrationsDirectory = routingMigrationsDirectory,
   ) {
     const database = new DeploymentDatabase({
       connectionString: url,

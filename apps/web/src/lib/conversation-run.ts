@@ -163,7 +163,7 @@ export async function consumeThreadStream(
 export const runStatusLabel: Record<RunView['status'], string> = {
   running: '运行中（读取不会自动继续）',
   suspended_approval: '运行已挂起；请核对决议与继续资格',
-  done: '已完成',
+  done: '运行已结束（不等于目标完成）',
   failed: '运行失败',
   cancelled: '已停止；已发生的效果不会撤销',
 };
@@ -235,7 +235,10 @@ export interface HistoryApprovalReference {
   seq: number;
 }
 
-export interface RunTranscript {
+export interface RunTranscript extends Pick<
+  RunView,
+  'authorization_revision' | 'execution_lifecycle' | 'goal_result'
+> {
   text: string;
   approvals: HistoryApprovalReference[];
 }
@@ -256,6 +259,20 @@ export function collectRunTranscripts(
       transcripts.set(runId, transcript);
     }
     if (includeText && event.type === 'message.delta') transcript.text += event.payload.delta;
+    if (event.protocol_version === 'v2') {
+      if (event.type === 'thread.started') {
+        if (event.payload.authorization_revision !== undefined)
+          transcript.authorization_revision = event.payload.authorization_revision;
+        if (event.payload.execution_lifecycle !== undefined)
+          transcript.execution_lifecycle = event.payload.execution_lifecycle;
+      } else if (
+        event.type === 'thread.completed' ||
+        event.type === 'thread.failed' ||
+        event.type === 'thread.cancelled'
+      ) {
+        transcript.goal_result = event.payload.goal_result;
+      }
+    }
     if (event.type !== 'approval_required') continue;
     const approvalId = event.payload.approval_id;
     const kind = event.payload.card_id === `document-approval:${approvalId}` ? 'document' : 'task';

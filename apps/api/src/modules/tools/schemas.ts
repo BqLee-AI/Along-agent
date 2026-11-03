@@ -48,6 +48,12 @@ export const GetUserPrefsInputSchema = z.object({}).strict();
 
 export type GetUserPrefsInput = z.infer<typeof GetUserPrefsInputSchema>;
 
+export const SetUserTimezoneInputSchema = z
+  .object({ timezone_id: z.string().min(1).max(100).nullable() })
+  .strict();
+
+export type SetUserTimezoneInput = z.infer<typeof SetUserTimezoneInputSchema>;
+
 export const WorkspaceListInputSchema = z.object({ path: z.string() }).strict();
 export const WorkspaceGrepInputSchema = z
   .object({ path: z.string(), literal: z.string().min(1) })
@@ -80,6 +86,7 @@ export const TOOL_INPUT_SCHEMAS = {
   list_tasks: ListTasksInputSchema,
   read_brief_cards: ReadBriefCardsInputSchema,
   get_user_prefs: GetUserPrefsInputSchema,
+  set_user_timezone: SetUserTimezoneInputSchema,
   workspace_list: WorkspaceListInputSchema,
   workspace_grep: WorkspaceGrepInputSchema,
   workspace_read: WorkspaceReadInputSchema,

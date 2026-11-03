@@ -1,0 +1,21 @@
+{
+  "version": "0021",
+  "tables": [],
+  "columns": [
+    {
+      "table": "agent_runs",
+      "name": "goal_result",
+      "type": "jsonb",
+      "required": false,
+      "default": ""
+    }
+  ],
+  "constraints": [],
+  "additional_checks": [
+    {
+      "table": "agent_runs",
+      "name": "agent_runs_goal_result_check",
+      "expression": "((goal_result IS NULL) OR (((frozen_context ->> 'authorization_revision'::text) = 'delegation/1'::text) AND (status = ANY (ARRAY['done'::text, 'failed'::text, 'cancelled'::text])) AND (jsonb_typeof(goal_result) = 'object'::text) AND ((goal_result ->> 'status'::text) = ANY (ARRAY['completed'::text, 'partial'::text, 'blocked'::text, 'cancelled'::text, 'unknown'::text]))))"
+    }
+  ]
+}

@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { ArrowUp, Bell, Files, MessageSquare, Plus, Square, X } from 'lucide-react';
+import type { GoalResult } from '@along/contracts';
 import { Dropdown } from '@lorelum/lumen-ui/components/dropdown';
 import { Button } from '@lorelum/lumen-ui/components/button';
 import { Textarea } from '@lorelum/lumen-ui/components/textarea';
@@ -16,6 +17,7 @@ import { Card } from '@lorelum/lumen-ui/components/card';
 import { ErrorNotice } from '@/components/page';
 import { runStatusLabel } from '@/lib/conversation-run';
 import { shouldSubmitMessage } from './task-model';
+import { AssistantMarkdown } from './assistant-markdown';
 import type { ConversationTask } from './use-conversation-task';
 
 export function ScopePaths({ title, paths }: { title: string; paths: readonly string[] }) {
@@ -67,7 +69,7 @@ export function LeaveRunDialog({ task }: { task: ConversationTask }) {
         <Dialog.Header>
           <Dialog.Title>离开并断开当前执行连接？</Dialog.Title>
           <Dialog.Description>
-            离开将断开当前执行连接，服务端按取消合同处理；已发生的文件效果不会撤回。此提示不是停止回执，也不保证后台继续。
+            离开将断开当前执行连接，服务端按取消合同处理；已接受的设置、提醒或文件效果不会撤回。此提示不是停止回执，也不保证后台继续。
           </Dialog.Description>
         </Dialog.Header>
         <Dialog.Footer>
@@ -81,9 +83,77 @@ export function LeaveRunDialog({ task }: { task: ConversationTask }) {
   );
 }
 
+const goalStatusLabel: Record<GoalResult['status'], string> = {
+  completed: '目标已完成',
+  partial: '目标部分完成',
+  blocked: '目标受阻',
+  cancelled: '目标已停止',
+  unknown: '目标结果未知',
+};
+
+const outcomeStatusLabel: Record<GoalResult['outcomes'][number]['status'], string> = {
+  achieved: '已达成',
+  not_done: '未完成',
+  blocked: '受阻',
+  unknown: '结果未知',
+};
+
+export function GoalResultPanel({ result }: { result: GoalResult }) {
+  return (
+    <section
+      className="min-w-0 space-y-3 [overflow-wrap:anywhere]"
+      aria-label="已保存的目标结果"
+      data-testid="goal-result"
+      data-goal-status={result.status}
+    >
+      <h3 className="font-medium">{goalStatusLabel[result.status]}</h3>
+      {result.outcomes.length ? (
+        <ul className="space-y-3">
+          {result.outcomes.map((outcome, index) => (
+            <li key={index} className="space-y-1" data-outcome-status={outcome.status}>
+              <p>
+                <span className="font-medium">{outcomeStatusLabel[outcome.status]}</span>
+                {' · '}
+                {outcome.description}
+              </p>
+              {outcome.receipt_refs.length ? (
+                <details className="text-xs text-muted-foreground">
+                  <summary className="min-h-8 content-center">
+                    已接受回执 · {outcome.receipt_refs.length}
+                  </summary>
+                  <ul className="space-y-1 font-mono">
+                    {outcome.receipt_refs.map((reference) => (
+                      <li key={reference}>{reference}</li>
+                    ))}
+                  </ul>
+                </details>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {result.clarification ? (
+        <p className="whitespace-pre-wrap">需要补充：{result.clarification.question}</p>
+      ) : null}
+      <details>
+        <summary className="min-h-11 content-center text-muted-foreground">
+          查看已保存的最终答复
+        </summary>
+        <AssistantMarkdown text={result.answer} />
+      </details>
+      <p className="text-xs text-muted-foreground">
+        此处来自已保存的目标结果；运行结束或生成中的正文不能代替完成证据。
+      </p>
+    </section>
+  );
+}
+
 export function RunStatusPanel({ task }: { task: ConversationTask }) {
   const { run, selected, effectsUnknown } = task;
   if (!selected) return null;
+  const transcript = task.transcript.get(selected.runId);
+  const lifecycle = run?.execution_lifecycle ?? transcript?.execution_lifecycle;
+  const goalResult = run?.goal_result ?? transcript?.goal_result;
   const waiting = run?.status === 'suspended_approval';
   const resumable = Boolean(
     run &&
@@ -104,6 +174,19 @@ export function RunStatusPanel({ task }: { task: ConversationTask }) {
             </Alert.Description>
           </Alert.Content>
         </Alert>
+      ) : null}
+      {lifecycle === 'request-bound' ? (
+        <div className="space-y-2 px-4 py-3" data-testid="request-bound-lifecycle">
+          <p className="font-medium">本次执行绑定当前连接，不在后台继续</p>
+          <p className="text-muted-foreground">
+            离开、刷新、断网或退出会断开执行连接，服务端按取消合同收尾；请读取原运行核对终态。已接受的时区设置等效果不会回滚，也不会因重连自动重做。
+          </p>
+        </div>
+      ) : null}
+      {goalResult ? (
+        <div className="px-4 py-3 text-sm">
+          <GoalResultPanel result={goalResult} />
+        </div>
       ) : null}
       {waiting || resumable ? (
         <div className="space-y-3 p-4" data-testid="run-waiting">

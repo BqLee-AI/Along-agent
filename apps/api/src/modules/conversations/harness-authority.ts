@@ -39,8 +39,10 @@ import {
   readRunDocumentEvidence,
 } from '../tools/query.js';
 import type { ToolContext, ToolPayload } from '../tools/contracts.js';
-import { HARNESS_BASE_TOOL_IDS, TOOL_IDS } from '../tools/contracts.js';
-import { HARNESS_TOOL_DEFINITIONS } from '../tools/catalog.js';
+import { HARNESS_BASE_TOOL_IDS, DELEGATION_TOOL_IDS, TOOL_IDS } from '../tools/contracts.js';
+import { HARNESS_TOOL_DEFINITIONS, DELEGATION_TOOL_DEFINITIONS } from '../tools/catalog.js';
+import { GOAL_CONTROL_TOOL } from './goal-control.js';
+import { validateGoalResult } from './goal-result.js';
 import { validateWorkspaceGrant } from '../workspaces/service.js';
 import { runNativeHarness } from './harness-process.js';
 import type { ConversationDeps, EventWriter, RunContext, StartResult } from './contracts.js';
@@ -195,11 +197,21 @@ async function contextOf(
     maxIterations: run.budget_max_iterations,
     maxTokens: run.budget_max_tokens,
     allowlist: run.tools_allowlist.filter((name) =>
-      ((frozen.workspaceGrant ? TOOL_IDS : HARNESS_BASE_TOOL_IDS) as readonly string[]).includes(
-        name,
-      ),
+      (
+        (frozen.authorization_revision
+          ? DELEGATION_TOOL_IDS
+          : frozen.workspaceGrant
+            ? TOOL_IDS
+            : HARNESS_BASE_TOOL_IDS) as readonly string[]
+      ).includes(name),
     ),
     ...(frozen.workspaceGrant ? { workspaceGrant: frozen.workspaceGrant } : {}),
+    ...(frozen.authorization_revision
+      ? {
+          authorizationRevision: frozen.authorization_revision,
+          trustedExecutionContext: frozen.trustedExecutionContext,
+        }
+      : {}),
     messageRefs,
     messages,
     contextPolicy,
@@ -238,11 +250,17 @@ function buildHarnessStart(
   const start: HarnessStart = {
     protocol: HARNESS_PROTOCOL_VERSION,
     type: 'start',
+    trusted_context: context.trustedExecutionContext ?? null,
     messages: context.messages,
     context_policy: context.contextPolicy,
-    routing_policy: routingPolicy,
-    eligible_phase: eligiblePhase,
-    tools: HARNESS_TOOL_DEFINITIONS.filter((tool) => context.allowlist.includes(tool.name)),
+    routing_policy: context.authorizationRevision
+      ? { revision: 'r2b/1', mode: 'off' }
+      : routingPolicy,
+    eligible_phase: context.authorizationRevision ? 'disabled' : eligiblePhase,
+    tools: (context.authorizationRevision
+      ? DELEGATION_TOOL_DEFINITIONS
+      : HARNESS_TOOL_DEFINITIONS
+    ).filter((tool) => context.allowlist.includes(tool.name)),
     budget: { max_iterations: context.maxIterations, max_tokens: context.maxTokens },
     snapshot,
     observations,
@@ -297,7 +315,7 @@ export async function cancelConversationRun(
           [ownerId, input.idempotency_key, runId, reason],
         );
       if (locked.run.status === 'running' || locked.run.status === 'suspended_approval') {
-        await commitTerminal(
+        const terminal = await commitTerminal(
           client,
           { ownerId, conversationId, runId, attemptId: locked.attempt.id, requestId },
           'cancelled',
@@ -307,6 +325,8 @@ export async function cancelConversationRun(
             reason,
           },
         );
+        if (terminal.protocol_version === 'v2' && terminal.type === 'thread.cancelled')
+          locked.run.goal_result = terminal.payload.goal_result;
         locked.run.status = 'cancelled';
         locked.run.waiting_checkpoint_id = null;
         locked.run.waiting_invocation_id = null;
@@ -485,6 +505,7 @@ export async function createHarnessSession(
       [context.attemptId],
     );
     const eligible =
+      !context.authorizationRevision &&
       locked.attempt.attempt_no === 1 &&
       !resume &&
       !snapshot &&
@@ -504,7 +525,7 @@ export async function createHarnessSession(
     initial.policy?.payload.policy ?? null,
     initial.eligible ? 'fresh_first_step' : 'disabled',
   );
-  const tools = start.tools;
+  const tools = context.authorizationRevision ? [...start.tools, GOAL_CONTROL_TOOL] : start.tools;
   let stopped = false;
   let lastSnapshot = initial.snapshot;
   const delivered = new Set(initial.snapshot?.tool_refs ?? []);
@@ -1378,6 +1399,45 @@ export async function createHarnessSession(
           if (modelStream) modelStream.pendingDelta = null;
           return { accepted: true };
         }
+        if (request.type === 'finish_goal') {
+          if (!context.authorizationRevision || !modelStarted)
+            throw stateConflict('goal completion requires delegated model execution');
+          if (
+            request.usage.iterations !== cumulative.iterations ||
+            request.usage.tokens !== cumulative.tokens
+          )
+            throw stateConflict('goal usage must match accepted model steps');
+          if (
+            request.usage.iterations > context.maxIterations ||
+            (request.usage.tokens !== null && request.usage.tokens > context.maxTokens)
+          )
+            throw new HttpError(429, 429, 'BUDGET_EXCEEDED', '本轮推理预算用完，已停下。');
+          const event = await guarded(async (client) => {
+            const goal = await validateGoalResult(
+              client,
+              toolContext(context),
+              request.goal_result,
+            );
+            return commitTerminal(
+              client,
+              context,
+              goal.status === 'cancelled' ? 'cancelled' : 'done',
+              {
+                ...eventPayload(context),
+                ...(goal.status === 'cancelled'
+                  ? { reason: 'harness_cancelled' }
+                  : { approval_id: null }),
+                goal_result: goal,
+              },
+            );
+          });
+          stopped = true;
+          await send(event);
+          return { accepted: true };
+        }
+        if (request.type !== 'finish') throw stateConflict('unsupported terminal control');
+        if (context.authorizationRevision && request.outcome === 'done')
+          throw stateConflict('delegated goal requires finish_goal');
         if (
           modelStarted &&
           (request.usage.iterations !== cumulative.iterations ||
@@ -1601,9 +1661,12 @@ export async function executeHarness(
           },
         });
       });
+      // Durable accounting does not authorize disclosure to the old connection.
+      // Reuse the ordinary owner/Run read gate after the terminal commit.
+      await withTransaction(pool, (client) => lockRun(client, context, false));
       await write(failed);
     } catch {
-      // Cancelled, suspended, stale or terminal authority wins; never overwrite.
+      // Stale/terminal authority wins; revoked readers receive no failure content.
     }
   } finally {
     await closeSession?.();

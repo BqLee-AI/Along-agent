@@ -9,6 +9,7 @@ import type {
   WorkspaceGrant,
   WorkspaceSummary,
 } from '@along/contracts';
+import type { GoalResult, TrustedExecutionContext } from '@along/contracts';
 import { forbidden, notFound, stateConflict } from '../../http/errors.js';
 import { isActiveOwner } from '../identity/preferences.js';
 import type { RunContext } from './contracts.js';
@@ -33,6 +34,7 @@ export interface RunRow {
   waiting_checkpoint_id: string | null;
   waiting_invocation_id: string | null;
   waiting_approval_id: string | null;
+  goal_result: GoalResult | null;
 }
 export interface FrozenContext {
   confirmedTimezone: string | null;
@@ -46,6 +48,9 @@ export interface FrozenContext {
   messageRefs?: string[];
   workspaceGrant?: WorkspaceGrant | null;
   workspaceSummary?: WorkspaceSummary | null;
+  authorization_revision?: 'delegation/1';
+  execution_lifecycle?: 'request-bound';
+  trustedExecutionContext?: TrustedExecutionContext;
 }
 export interface LockedRun {
   run: RunRow;
@@ -293,6 +298,7 @@ export async function appendCheckpoint(
     type: string;
     payload: unknown;
     requestId: string;
+    streamProtocolVersion?: 'v1' | 'v2';
   },
 ): Promise<number> {
   const { rows } = await client.query<{ event_seq: string }>(
@@ -306,7 +312,7 @@ export async function appendCheckpoint(
       args.seq,
       args.type,
       JSON.stringify({ type: args.type, payload: args.payload, request_id: args.requestId }),
-      THREAD_PROTOCOL_VERSION,
+      args.streamProtocolVersion ?? THREAD_PROTOCOL_VERSION,
     ],
   );
   const seq = rows[0]?.event_seq;
@@ -379,11 +385,12 @@ export async function insertIdempotency(
 interface CheckpointRow {
   event_seq: string;
   payload: { type: string; payload: unknown; request_id: string };
+  stream_protocol_version: string;
 }
 
 function envelopeOf(row: CheckpointRow): ThreadEvent {
   return ThreadEventSchema.parse({
-    protocol_version: THREAD_PROTOCOL_VERSION,
+    protocol_version: row.stream_protocol_version,
     seq: Number(row.event_seq),
     type: row.payload.type,
     payload: row.payload.payload,
@@ -397,7 +404,7 @@ export async function listRunEvents(
   runId: string,
 ): Promise<ThreadEvent[]> {
   const { rows } = await client.query<CheckpointRow>(
-    `SELECT c.event_seq, c.payload
+    `SELECT c.event_seq, c.payload, c.stream_protocol_version
      FROM run_checkpoints c
      JOIN run_attempts a ON a.id = c.attempt_id
      JOIN agent_runs r ON r.id = a.run_id
@@ -421,7 +428,7 @@ export async function listConversationEvents(
   },
 ): Promise<ThreadEvent[]> {
   const { rows } = await client.query<CheckpointRow>(
-    `SELECT c.event_seq, c.payload
+    `SELECT c.event_seq, c.payload, c.stream_protocol_version
      FROM run_checkpoints c
      JOIN run_attempts a ON a.id = c.attempt_id
      JOIN agent_runs r ON r.id = a.run_id

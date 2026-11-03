@@ -61,6 +61,26 @@ under `apps/web`.
   `/conversations?conversation_id=…&run_id=…`; reopening it reads buffered
   conversation events and the owner-scoped Run view, without starting execution.
   Event sequence IDs deduplicate replay and same-Run continuation.
+- Fresh plain Agent sends explicitly include `authorization_revision:'delegation/1'`.
+  Reminder and document shortcuts omit it and retain legacy authority. Explicit
+  same-key retries reuse their original frozen body, including pre-upgrade
+  requests without this field; historical reads never add or upgrade authority.
+- New non-workspace Agent runs consume SSE `v2` and the matching `RunView`:
+  frozen `authorization_revision` and `execution_lifecycle` are not inferred from
+  the page version. `request-bound` is shown as connection-bound on admission
+  and historical reads, with no background continuation promise. Refresh,
+  reconnect and login remain GET-only; accepted timezone settings are not
+  rolled back or automatically repeated after disconnect.
+- `GoalResult` is the durable source for goal status, item outcomes, accepted
+  receipt references, clarification and final answer. Run `done` means execution
+  ended, not that the goal completed; partial, blocked, cancelled and unknown
+  results retain their own status and already accepted effects. The saved final
+  answer replaces a live draft when available and remains inspectable beside
+  the structured result. Historical SSE `v1`, reminders, workspace grants and
+  inline approval/explicit continuation workflows keep their existing behavior.
+- Plain Agent sends do not promote a cached `/me` preference into an explicit
+  timezone hint. Admission reads the actual saved preference; legacy shortcuts
+  and explicit ambiguity choices retain their original timezone input.
 - Approval links retain those original IDs and open a separate tab. Keep the
   original conversation open: an approval may arrive before its native snapshot
   commits, and ordinary disconnection still cancels active execution.

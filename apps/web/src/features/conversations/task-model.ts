@@ -16,8 +16,13 @@ export function taskIntentFromQuery(query: {
   return query.intent === 'reminder' || query.intent === 'document' ? query.intent : 'chat';
 }
 
-export function taskExecution(intent: TaskIntent): ExecutionKind {
-  return intent === 'reminder' ? 'business' : 'harness';
+export function taskAdmission(intent: TaskIntent): {
+  execution: ExecutionKind;
+  authorization_revision?: 'delegation/1';
+} {
+  return intent === 'chat'
+    ? { execution: 'harness', authorization_revision: 'delegation/1' }
+    : { execution: intent === 'reminder' ? 'business' : 'harness' };
 }
 
 export function taskSendEligibility({

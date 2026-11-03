@@ -44,5 +44,6 @@
 - Windows 宿主首次根 verify 在 unit 阶段为 644 pass、7 skip、1 fail：`local-lock.test.ts` 同进程锁用例监听触发 EADDRINUSE→LOCK_UNAVAILABLE，中止后续步骤。宿主高位监听与锁端口哈希范围重叠，但未取得失败端口和具体监听者的对应关系；未停止未知进程、未改锁代码、未把 Windows 失败记成通过。以上 Linux 验证通过隔离网络命名空间消除共享宿主监听影响。
 - `openspec validate productize-invited-accounts --strict` 单项通过；临时相对链接/heading 检查18份受影响文档、266个链接，零缺失/断锚。该轻量检查不替代评审，执行后删除临时脚本。
 - 核对并行 #111：共享 docs/README、PRD、auth API、identity schema，但该 PR 不改变 `isActiveOwner(client,ownerId)` 签名；本 Proposed 仅追加身份门职责，不改其本人时区用例或占用迁移号，合并时保留双方独立增量。
+- 本地基线检查后，#111 合入 main `b433e302fb08d238cd1120e4f28efcd7978cc2bb`，使首提交 `6ee93414c1ad0a9dc3f47b15565788ea0a8c497e` 的 #113 发生索引冲突，五项 Actions 未启动（只有 CodeRabbit 检查通过）。集成时合入该 main，仅组合双方索引增量，保留 #107 正式时区与 v6 说明及本 Proposed 第21篇；其余共享接口/schema/PRD 自动合并后逐节核对。上述本地数量仍属于原源码基线，不冒充合并后重跑；合并版本以 PR 正文关联的精确 head 五门结果为准。
 - 外部真实邮件、生产 HTTPS、两个浏览器完整受邀旅程、P1 一次凭证/逐用户竞态/持久限流及旧安装副本升级未执行：P1 未获实施授权，外部授权配置缺项见 [PRD](../../../docs/prd/04-acceptance-open-questions.md#受邀账户外部前置112) 和 [外部取证](../../../docs/verification/invited-account-external-prerequisites-2026-11-03.md)。现有集成绿色不替代这些新增行为的验收。
 - `test:scheduler` 未另重复本地执行：本 PR 不修改调度运行代码；完整 `test:integration` 已涵盖 D9 四个文件，精确提交的 scheduler-fault CI 单列。后续 P1 新账户许可门仍须两种提交顺序的真实竞争证明。

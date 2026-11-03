@@ -5,8 +5,9 @@ import {
   DocumentApprovalReceiptSchema,
 } from './document-approvals.js';
 import { RoutingPolicySchema, RoutingIntentSchema } from './routing.js';
+import { GoalResultSchema, TrustedExecutionContextSchema } from './goals.js';
 
-export const HARNESS_PROTOCOL_VERSION = 'harness/v5' as const;
+export const HARNESS_PROTOCOL_VERSION = 'harness/v6' as const;
 export const HARNESS_MAX_FRAME_BYTES = 1024 * 1024;
 
 const uuid = z.string().uuid();
@@ -166,6 +167,14 @@ export const HarnessToolPayloadSchema = z.union([
       alias_version: small,
       quiet_hours: z.null(),
       locale: z.null(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('timezone_setting'),
+      timezone_id: small.nullable(),
+      previous_timezone_id: small.nullable(),
+      alias_version: small,
     })
     .strict(),
   z.object({ kind: z.literal('effect_evidence'), evidence_ref: small }).strict(),
@@ -449,6 +458,14 @@ export const HarnessRequestSchema = z
     z
       .object({
         ...request,
+        type: z.literal('finish_goal'),
+        goal_result: GoalResultSchema,
+        usage: HarnessUsageSchema,
+      })
+      .strict(),
+    z
+      .object({
+        ...request,
         type: z.literal('finish'),
         outcome: z.enum(['done', 'failed', 'cancelled']),
         usage: HarnessUsageSchema,
@@ -500,6 +517,7 @@ export const HarnessStartSchema = z
   .object({
     protocol: z.literal(HARNESS_PROTOCOL_VERSION),
     type: z.literal('start'),
+    trusted_context: TrustedExecutionContextSchema.nullable(),
     messages: z
       .array(
         z.object({ message_id: uuid, role: z.enum(['user', 'assistant']), content: text }).strict(),
@@ -570,6 +588,9 @@ export const RunViewSchema = z
       .nullable(),
     workspace: workspaceSummarySchema.optional(),
     can_resume: z.boolean(),
+    authorization_revision: z.literal('delegation/1').optional(),
+    execution_lifecycle: z.literal('request-bound').optional(),
+    goal_result: GoalResultSchema.nullable().optional(),
   })
   .strict();
 
