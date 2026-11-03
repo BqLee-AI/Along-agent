@@ -2,7 +2,7 @@
 // Approved results, local approval inserts and audit rows commit together.
 import type { Pool, PoolClient } from 'pg';
 import { normalizeTime } from '../time/normalize.js';
-import { reminderDateExpression } from '@along/time-core';
+import { classifyEntry, reminderDateExpression } from '@along/time-core';
 import { readReminderDateInput } from '../conversations/reminder-date.js';
 import { createCancelTaskApproval, createTaskApproval } from '../approvals/create.js';
 import {
@@ -318,7 +318,7 @@ async function runCreateReminder(
       },
     };
   const settings = await readRunTimezoneSettings(client, ctx);
-  const timezone =
+  let timezone =
     input.timezone_hint ??
     (settings.length ? settings[settings.length - 1]!.timezone_id : ctx.confirmedTimezone);
   const now = (
@@ -326,8 +326,60 @@ async function runCreateReminder(
       `SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') AS now`,
     )
   ).rows[0]!.now;
-  let result = normalizeTime(ctx.timeContext, {
-    raw_text: authority.source.kind === 'clarification' ? sourceText : input.raw_time_text,
+  let selectedText = input.raw_time_text;
+  if (authority.source.kind === 'clarification' && ctx.timeContext.available) {
+    const timeContext = ctx.timeContext;
+    const supplement = sourceText.slice(authority.originalText.length).trim();
+    const date = reminderDateExpression(authority.originalText);
+    const classify = (text: string) =>
+      classifyEntry({
+        text,
+        anchorReceivedAtUtc: ctx.anchorReceivedAtUtc,
+        receivedAtUtc: now,
+        confirmedTz: timezone ?? '',
+        fold: ctx.foldChoice,
+        ruleset: timeContext.ruleset,
+        aliases: timeContext.aliases,
+        requireCompleteReminder: true,
+        reminderContent: input.note,
+      });
+    let trusted = classify(sourceText);
+    if (trusted.reason === 'DATE_MISSING' && date) trusted = classify(`${date} ${supplement}`);
+    // Inherit only missing facts. Never normalize a complete selection as the
+    // whole multi-action source: its first clock belongs to a different task.
+    timezone ??= trusted.timezone_id ?? null;
+    let selected = classify(selectedText);
+    if (selected.reason === 'DAYPART_MISSING' && supplement) {
+      selectedText = `${selectedText} ${supplement}`;
+      selected = classify(selectedText);
+    }
+    if (selected.reason === 'DATE_MISSING' && date) {
+      selectedText = `${date} ${selectedText}`;
+      selected = classify(selectedText);
+    }
+    // A composed/expanded single-date reference must still denote the trusted
+    // facts. Literal per-action selections remain valid in multi-action inputs.
+    if (
+      !sourceText.includes(input.raw_time_text) &&
+      !(
+        selected.class === 'normalize_ok' &&
+        trusted.class === 'normalize_ok' &&
+        selected.wall_time === trusted.wall_time &&
+        selected.timezone_id === trusted.timezone_id
+      )
+    )
+      return {
+        status: 'ok',
+        result: {
+          kind: 'clarify',
+          reason: 'DATE_SOURCE_UNCLEAR',
+          phrase_key: 'ASK_EXACT_TIME',
+          text: '时间必须引用本次请求或可信同目标补充，不猜测日期和时刻。',
+        },
+      };
+  }
+  const result = normalizeTime(ctx.timeContext, {
+    raw_text: selectedText,
     anchorReceivedAtUtc: ctx.anchorReceivedAtUtc,
     receivedAtUtc: now,
     confirmedTimezone: timezone,
@@ -335,23 +387,6 @@ async function runCreateReminder(
     requireCompleteReminder: true,
     reminderContent: input.note,
   });
-  if (
-    authority.source.kind === 'clarification' &&
-    result.kind === 'clarify' &&
-    result.classified.reason === 'DATE_MISSING'
-  ) {
-    const date = reminderDateExpression(authority.originalText);
-    if (date)
-      result = normalizeTime(ctx.timeContext, {
-        raw_text: `${date} ${sourceText.slice(authority.originalText.length).trim()}`,
-        anchorReceivedAtUtc: ctx.anchorReceivedAtUtc,
-        receivedAtUtc: now,
-        confirmedTimezone: timezone,
-        foldChoice: ctx.foldChoice,
-        requireCompleteReminder: true,
-        reminderContent: input.note,
-      });
-  }
   if (result.kind === 'error')
     return { status: 'ok', result: { kind: 'time_error', error: result.error } };
   if (result.kind === 'clarify') {
