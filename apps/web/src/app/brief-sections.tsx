@@ -9,6 +9,7 @@ import { ErrorNotice } from '@/components/page';
 import type { ApiResult } from '@/lib/api';
 import type { Brief } from '@/lib/types';
 import { describeCard } from '@/lib/presentation';
+import { ElapsedBasis } from '@/features/reminders/elapsed-basis';
 
 export function BriefSectionsContent({ response }: { response: ApiResult<Brief> }) {
   if (!response.ok)
@@ -138,6 +139,12 @@ export function BriefSectionsContent({ response }: { response: ApiResult<Brief> 
                       {view.warning && (
                         <p className="text-sm text-muted-foreground">{view.warning}</p>
                       )}
+                      {card.kind === 'task' && card.timezone_id && (
+                        <p className="text-sm text-muted-foreground">
+                          冻结时区：{card.timezone_id}
+                        </p>
+                      )}
+                      {card.kind === 'task' && <ElapsedBasis basis={card.time_basis} />}
                     </div>
                     {view.time && (
                       <p className="w-full text-sm tabular-nums text-muted-foreground sm:w-auto">

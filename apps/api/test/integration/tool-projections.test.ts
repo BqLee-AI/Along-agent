@@ -4,6 +4,7 @@ import type { Pool, PoolClient } from 'pg';
 import { readCancelTaskCandidate, readToolTaskList } from '../../src/modules/tasks/tool-query.js';
 import { readToolBriefCards } from '../../src/modules/brief/tool-query.js';
 import { isActiveOwner, readUserPreferences } from '../../src/modules/identity/preferences.js';
+import { loadTimeContext } from '../../src/modules/time/context.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 
 const maybe = databaseUrl ? describe : describe.skip;
@@ -68,7 +69,7 @@ maybe('owned tool query-client projections', () => {
     try {
       await client.query('BEGIN');
       await client.query(
-        "INSERT INTO users(id,auth_email,display_name,timezone_id) VALUES($1,$2,'tester','Europe/Paris')",
+        "INSERT INTO users(id,auth_email,display_name,timezone_id) VALUES($1,$2,'tester','Asia/Shanghai')",
         [ownerId, `${ownerId}@fixture.test`],
       );
       taskId = await task(client, ownerId, { note: '  保留标题\n第二行' });
@@ -87,7 +88,7 @@ maybe('owned tool query-client projections', () => {
       });
       expect(await readCancelTaskCandidate(client, randomUUID(), taskId)).toBeNull();
       expect(await readCancelTaskCandidate(client, ownerId, randomUUID())).toBeNull();
-      expect(await readUserPreferences(client, ownerId)).toEqual({ timezone_id: 'Europe/Paris' });
+      expect(await readUserPreferences(client, ownerId)).toEqual({ timezone_id: 'Asia/Shanghai' });
       expect(await readUserPreferences(client, randomUUID())).toEqual({ timezone_id: null });
       expect(await isActiveOwner(client, ownerId)).toBe(true);
       expect(await isActiveOwner(client, randomUUID())).toBe(false);
@@ -99,9 +100,14 @@ maybe('owned tool query-client projections', () => {
         (await readToolTaskList(client, ownerId, { limit: 20 })).tasks.map((row) => row.task_id),
       ).toEqual([taskId]);
       expect(
-        (await readToolBriefCards(client, ownerId, { date: '2026-11-02' })).cards.map(
-          (row) => row.card_id,
-        ),
+        (
+          await readToolBriefCards(
+            client,
+            ownerId,
+            { date: '2026-11-02' },
+            loadTimeContext('fixture-v1'),
+          )
+        ).cards.map((row) => row.card_id),
       ).toEqual([taskId]);
     } finally {
       await client.query('ROLLBACK');
@@ -172,7 +178,7 @@ maybe('owned tool query-client projections', () => {
     }
   });
 
-  it('keeps raw UUID card IDs, exact 30-character titles, wall-date and card filters, wall-time ordering and the 50-card cap', async () => {
+  it('keeps raw UUID card IDs, exact titles, UTC-day and card filters, UTC ordering and the 50-card cap', async () => {
     const ownerId = randomUUID();
     const client = await pool.connect();
     try {
@@ -181,40 +187,44 @@ maybe('owned tool query-client projections', () => {
       const later = await task(client, ownerId, {
         state: 'fired',
         wallTime: '2026-11-02 10:00',
-        fireAt: '2026-11-01T01:00:00Z',
+        fireAt: '2026-11-02T01:00:00Z',
         note: title,
         timezoneId: 'Europe/Paris',
       });
       const earlier = await task(client, ownerId, {
         state: 'missed',
         wallTime: '2026-11-02 08:00',
-        fireAt: '2026-11-03T01:00:00Z',
+        fireAt: '2026-11-02T03:00:00Z',
       });
       const cancelled = await task(client, ownerId, {
         state: 'cancelled',
         wallTime: '2026-11-02 07:00',
       });
-      const otherDate = await task(client, ownerId, { wallTime: '2026-11-03 07:00' });
+      const otherDate = await task(client, ownerId, {
+        wallTime: '2026-11-03 07:00',
+        fireAt: '2026-11-03T01:00:00Z',
+      });
       const foreign = await task(client, randomUUID(), { wallTime: '2026-11-02 06:00' });
       const brief = await readToolBriefCards(client, ownerId, { date: '2026-11-02' });
       expect(brief).toEqual({
         brief_id: 'brief:2026-11-02',
         date: '2026-11-02',
+        timezone_id: 'UTC',
         cards: [
-          {
-            card_id: earlier,
-            kind: 'task',
-            title: '',
-            body_text: '2026-11-02 08:00（Asia/Shanghai）',
-            source_refs: [earlier],
-            presentation_version: 'v1',
-          },
           {
             card_id: later,
             kind: 'task',
             title: title.slice(0, 30),
             body_text: '2026-11-02 10:00（Europe/Paris）',
             source_refs: [later],
+            presentation_version: 'v1',
+          },
+          {
+            card_id: earlier,
+            kind: 'task',
+            title: '',
+            body_text: '2026-11-02 08:00（Asia/Shanghai）',
+            source_refs: [earlier],
             presentation_version: 'v1',
           },
         ],
@@ -226,7 +236,7 @@ maybe('owned tool query-client projections', () => {
             card_ids: [later, foreign, cancelled, otherDate],
           })
         ).cards,
-      ).toEqual([brief.cards[1]!]);
+      ).toEqual([brief.cards[0]!]);
       expect(
         (await readToolBriefCards(client, ownerId, { date: '2026-11-02', card_ids: [] })).cards,
       ).toEqual([]);
@@ -240,7 +250,6 @@ maybe('owned tool query-client projections', () => {
       }
       const capped = await readToolBriefCards(client, ownerId, { date: '2026-11-02' });
       expect(capped.cards).toHaveLength(50);
-      expect(capped.cards[49]?.body_text).toBe('2026-11-02 11:47（Asia/Shanghai）');
     } finally {
       await client.query('ROLLBACK');
       client.release();

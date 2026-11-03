@@ -6,6 +6,7 @@ import { EmptyState } from '@/components/page';
 import type { TaskListItem } from '@/lib/types';
 import { TaskListPageSchema, taskListPath, type PageSnapshot, type TaskFilter } from './data';
 import { PageControls, ResourceError, TaskState } from './resource-ui';
+import { ElapsedBasis } from './elapsed-basis';
 import { useReminderPages } from './use-reminder-pages';
 
 const taskIdentity = (task: TaskListItem) => task.task_id;
@@ -65,6 +66,7 @@ export function TaskCollection({
                 <div className="min-w-0 space-y-2 [overflow-wrap:anywhere]">
                   <p className="font-medium">{task.fire_at_local}</p>
                   <p className="text-sm text-muted-foreground">{task.timezone_id} · 冻结本地时间</p>
+                  <ElapsedBasis basis={task.time_basis} />
                   <div className="flex flex-wrap items-center gap-2">
                     <TaskState state={task.state} />
                     <span className="text-sm text-muted-foreground">

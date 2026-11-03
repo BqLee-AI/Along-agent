@@ -6,6 +6,14 @@ export type TaskCreationSource =
   | { approvalId: string; invocationId?: never }
   | { invocationId: string; approvalId?: never };
 
+export interface ElapsedTimeBasis {
+  kind: 'elapsed';
+  anchor_utc: string;
+  duration_seconds: number;
+  source_message_id: string;
+  revision: 'elapsed/1';
+}
+
 export interface CreateTaskInput {
   ownerId: string;
   source: TaskCreationSource;
@@ -14,7 +22,9 @@ export interface CreateTaskInput {
   timezoneId: string;
   fold: 0 | 1;
   resolvedUtcOffsetSeconds: number;
-  tzdbVersion: string;
+  tzdbVersion: string | null;
+  timeBasis?: ElapsedTimeBasis | null;
+  displayVersion?: 'elapsed/1' | null;
   originalNote: string | null;
   idempotencyKey: string;
 }
@@ -26,7 +36,9 @@ export interface CreatedTaskReceipt {
   timezone_id: string;
   fold: 0 | 1;
   resolved_utc_offset_seconds: number;
-  tzdb_version: string;
+  tzdb_version: string | null;
+  time_basis?: ElapsedTimeBasis;
+  display_version?: 'elapsed/1';
   fire_at_utc: string;
   original_note: string | null;
 }
@@ -55,8 +67,8 @@ export async function createTaskWithinTransaction(
   const { rows } = await client.query<{ fire_at_utc: Date }>(
     `INSERT INTO tasks (id, owner_id, kind, source_approval_id, source_invocation_id,
        fire_at_utc, wall_time, timezone_id, fold, resolved_utc_offset_seconds,
-       tzdb_version, occurrence, state, state_version, original_note)
-     VALUES ($1,$2,'notify_only',$3,$4,$5,$6,$7,$8,$9,$10,'once','saved',1,$11)
+       tzdb_version, occurrence, state, state_version, original_note, time_basis, display_version)
+     VALUES ($1,$2,'notify_only',$3,$4,$5,$6,$7,$8,$9,$10,'once','saved',1,$11,$12::jsonb,$13)
      RETURNING fire_at_utc`,
     [
       taskId,
@@ -70,6 +82,8 @@ export async function createTaskWithinTransaction(
       input.resolvedUtcOffsetSeconds,
       input.tzdbVersion,
       input.originalNote,
+      input.timeBasis ? JSON.stringify(input.timeBasis) : null,
+      input.timeBasis ? (input.displayVersion ?? 'elapsed/1') : null,
     ],
   );
   const fireAtUtc = rows[0]!.fire_at_utc.toISOString();
@@ -108,6 +122,9 @@ export async function createTaskWithinTransaction(
     tzdb_version: input.tzdbVersion,
     fire_at_utc: fireAtUtc,
     original_note: input.originalNote,
+    ...(input.timeBasis
+      ? { time_basis: input.timeBasis, display_version: input.displayVersion ?? 'elapsed/1' }
+      : {}),
   };
 }
 
@@ -117,12 +134,15 @@ export async function readCreatedTaskReceipt(
   input: { ownerId: string; invocationId: string },
 ): Promise<CreatedTaskReceipt | null> {
   const { rows } = await client.query<
-    Omit<CreatedTaskReceipt, 'state' | 'fire_at_utc'> & {
+    Omit<CreatedTaskReceipt, 'state' | 'fire_at_utc' | 'time_basis' | 'display_version'> & {
       fire_at_utc: Date;
+      time_basis: ElapsedTimeBasis | null;
+      display_version: 'elapsed/1' | null;
     }
   >(
     `SELECT t.id AS task_id, t.wall_time, t.timezone_id, t.fold,
-       t.resolved_utc_offset_seconds, t.tzdb_version, t.fire_at_utc, t.original_note
+       t.resolved_utc_offset_seconds, t.tzdb_version, t.fire_at_utc, t.original_note,
+       t.time_basis, t.display_version
      FROM tasks t
      WHERE t.owner_id=$1 AND t.source_invocation_id=$2
        AND EXISTS (SELECT 1 FROM task_events e WHERE e.task_id=t.id
@@ -130,5 +150,12 @@ export async function readCreatedTaskReceipt(
     [input.ownerId, input.invocationId],
   );
   const row = rows[0];
-  return row ? { ...row, state: 'saved', fire_at_utc: row.fire_at_utc.toISOString() } : null;
+  if (!row) return null;
+  const { time_basis, display_version, ...facts } = row;
+  return {
+    ...facts,
+    state: 'saved',
+    fire_at_utc: row.fire_at_utc.toISOString(),
+    ...(time_basis && display_version ? { time_basis, display_version } : {}),
+  };
 }

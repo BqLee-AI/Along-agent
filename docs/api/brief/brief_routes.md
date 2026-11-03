@@ -4,7 +4,7 @@
 >
 > 蓝图引用：B06（v0 切片首环：简报→卡片→对话；06 喝水提醒降级为调度子用例 `task.kind=notify_only`）。
 
-> Proposed 演进：新 UTC/跨冻结时区提醒同批改为明确浏览时区的服务端 UTC 日区间查询，卡片仍读各自冻结字段，见 [design/20 §4.3](../../design/20-goal-scoped-delegation.md#43-存储api-和今日投影同交付)。本文参数语义为现行/legacy，不把新分支漏项留到收口；生成保存的简报是 workspace 文件，不建 briefs/cards 表，本规范不改当前 API。
+> 按本人浏览时区计算 UTC 半开日区间，卡片保留各自冻结的本地时间和时区；未设置偏好时使用并明确标示 UTC。生成保存的简报是 workspace 文件，不建 briefs/cards 表。
 
 ## 1. 路由
 
@@ -16,10 +16,10 @@
 
 查询参数：
 
-| 参数       | 必填 | 说明                                                                                                                                                 |
-| ---------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `date`     | 否   | `YYYY-MM-DD`（按已确认时区解释）。缺省为服务端“今日”（首次接收时刻 + 已确认时区冻结的“今天”，见 conversations）。非法格式返回 `400 VALIDATION_ERROR` |
-| `timezone` | 否   | 仅回显校验用；与已确认时区不一致时服务端不换算，只在 `meta.timezone_note` 提示                                                                       |
+| 参数       | 必填 | 说明                                                                                                          |
+| ---------- | ---- | ------------------------------------------------------------------------------------------------------------- |
+| `date`     | 否   | `YYYY-MM-DD`（按本人浏览时区解释）；缺省为该时区的今天，无偏好时使用 UTC。非法日期返回 `400 VALIDATION_ERROR` |
+| `timezone` | 否   | 仅回显校验用；与浏览时区不一致时在 `meta.timezone_note` 提示，不改变查询时区                                  |
 
 成功响应 `200`：
 
@@ -61,9 +61,9 @@
 
 - `cards[].kind`：v0 仅 `task | approval` 两种 [Required]（S0 #14 冻结：只读投影，不建 `cards` 表；`content-schema` 的 `task_confirm/task_progress/info` 为 P1 后卡片持久化词汇，v0 不用）。其他 kind 由服务端 zod 拒收，见 §3。
 - `cards[].schema_version`：卡片 schema 版本，v0 为 `1`；前端未知版本做纯文本降级展示（见 §3）[Required]。
-- `cards[].fire_at_local`：冻结的 `tasks.wall_time` 原文（`YYYY-MM-DD HH:mm`），不换算、不补秒、不改写；展示层原样输出 [Required]。
-- `date` 缺省时按已确认时区的本地日期取“今天”（服务端时钟）；已确认时区为空返回 `400 VALIDATION_ERROR`，不猜时区。
-- 只聚合 `timezone_id` 等于已确认时区的 tasks/approvals，按冻结的 `wall_time` 日期前缀过滤；不做跨时区换算，避免读路径重算本地时间。
+- `cards[].fire_at_local` 与 `timezone_id` 来自各任务冻结字段，原样展示；elapsed 卡片另附冻结 `time_basis` 与 `display_version`。
+- 浏览时区使用本人已确认时区，无偏好时明确使用 UTC。按真实规则求该日期对应的 UTC 半开区间，以 `fire_at_utc` 聚合任务和批准；跨冻结时区的记录也可进入当天，展示不重新换算。
+- 所需非 UTC 规则不可用时返回错误，不使用数据库自带时区规则或猜测区间。
 - `task` 卡片 `ref.task_id` / `approval` 卡片 `ref.approval_id`：跳转详情的唯一依据，不拼 URL 猜测 [Required]。
 - `meta.brief_state`：`empty`（今日无卡片）/ `day-in-progress`（有未终态卡片）/ `stale`（快照过期，前端提示下拉重试）[Required]（S0 #14 冻结：删 `generating` 态；v0 简报为确定性组装，无 LLM 生成中状态）。
 - 空简报：`cards: []` + `brief_state=empty`，仍 `200` [Required]。
@@ -78,5 +78,5 @@
 ## 4. 错误
 
 - `401 UNAUTHENTICATED` / `403 FORBIDDEN`：同通用约定。
-- `400 VALIDATION_ERROR`：`date` 非法、已确认时区为空或不是合法 IANA 时区。
+- `400 VALIDATION_ERROR`：`date` 非法或浏览时区不受支持。
 - `503 NOT_READY`：/readyz 非就绪时的连带（S0 #14 冻结：旧名 `SERVICE_NOT_READY` 作废）。

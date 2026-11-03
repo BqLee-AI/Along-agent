@@ -33,6 +33,45 @@ describe('notifier-core copy ceiling', () => {
     expect(copy.body).not.toMatch(/必达|已读|一定响|保证送达/);
   });
 
+  it('renders frozen elapsed seconds, UTC, offset and basis without changing legacy copy', () => {
+    const copy = noticeCopyFor({
+      wallTime: '2026-10-17 09:20:37',
+      timezoneId: 'Asia/Shanghai',
+      originalNote: '喝水',
+      elapsedDisplay: {
+        fireAtUtc: '2026-10-17T01:20:37.000Z',
+        offsetSeconds: 28800,
+        anchorUtc: '2026-10-17T01:19:07.000Z',
+        durationSeconds: 90,
+      },
+    });
+    expect(copy.title).toBe('提醒 2026-10-17 09:20:37 Asia/Shanghai UTC+08:00');
+    expect(copy.body).toContain('UTC 2026-10-17T01:20:37.000Z');
+    expect(copy.body).toContain('2026-10-17T01:19:07.000Z 起经过 90 秒');
+    expect(copy.body).not.toMatch(/必达|已读|一定响|保证送达/);
+  });
+
+  it('renders zero and second-precision negative frozen offsets', () => {
+    const fields = {
+      wallTime: '2026-10-17 01:20:37',
+      timezoneId: 'UTC',
+      originalNote: null,
+      elapsedDisplay: {
+        fireAtUtc: '2026-10-17T01:20:37.000Z',
+        offsetSeconds: 0,
+        anchorUtc: '2026-10-17T01:20:36.000Z',
+        durationSeconds: 1,
+      },
+    };
+    expect(noticeCopyFor(fields).title).toContain('UTC+00:00');
+    expect(
+      noticeCopyFor({
+        ...fields,
+        elapsedDisplay: { ...fields.elapsedDisplay, offsetSeconds: -18030 },
+      }).title,
+    ).toContain('UTC-05:00:30');
+  });
+
   it('keeps the cancel-intercept and missed wording frozen', () => {
     expect(CANCEL_INTERCEPT_COPY).toContain('仍无法确认');
     expect(MISSED_COPY).toContain('已错过');

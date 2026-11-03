@@ -97,6 +97,7 @@ export function createLocalInAppProvider(receivePool: Pool): InAppProvider {
         wallTime: source.wallTime,
         timezoneId: source.timezoneId,
         originalNote: source.originalNote,
+        elapsedDisplay: source.elapsedDisplay,
       });
       const id = await insertReceivedNotice(client, {
         ownerId: notice.ownerId,

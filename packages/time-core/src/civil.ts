@@ -25,6 +25,7 @@ export function daysInMonth(year: number, month: number): number {
 
 export function daysSinceEpoch(year: number, month: number, day: number): number {
   let days = 0;
+  for (let y = year; y < 1970; y += 1) days -= isLeapYear(y) ? 366 : 365;
   for (let y = 1970; y < year; y += 1) days += isLeapYear(y) ? 366 : 365;
   for (let m = 1; m < month; m += 1) days += daysInMonth(year, m);
   days += day - 1;
@@ -44,6 +45,10 @@ export function civilFromEpoch(epochSeconds: number): Civil {
   let days = Math.floor(epochSeconds / 86400);
   const sod = epochSeconds - days * 86400;
   let y = 1970;
+  while (days < 0) {
+    y -= 1;
+    days += isLeapYear(y) ? 366 : 365;
+  }
   for (;;) {
     const len = isLeapYear(y) ? 366 : 365;
     if (days < len) break;
@@ -73,7 +78,7 @@ export function pad2(n: number): string {
 
 export function formatUtc(epochSeconds: number): string {
   const c = civilFromEpoch(epochSeconds);
-  return `${c.y}-${pad2(c.mo)}-${pad2(c.d)}T${pad2(c.h)}:${pad2(c.mi)}:${pad2(c.s)}Z`;
+  return `${String(c.y).padStart(4, '0')}-${pad2(c.mo)}-${pad2(c.d)}T${pad2(c.h)}:${pad2(c.mi)}:${pad2(c.s)}Z`;
 }
 
 export interface WallParts {
@@ -98,7 +103,7 @@ function readParts(m: RegExpMatchArray): WallParts | null {
 }
 
 export function wallPartsToString(p: WallParts): string {
-  return `${p.y}-${pad2(p.mo)}-${pad2(p.d)}T${pad2(p.h)}:${pad2(p.mi)}:${pad2(p.s)}`;
+  return `${String(p.y).padStart(4, '0')}-${pad2(p.mo)}-${pad2(p.d)}T${pad2(p.h)}:${pad2(p.mi)}:${pad2(p.s)}`;
 }
 
 export function parseUtcEpoch(value: string): number | null {

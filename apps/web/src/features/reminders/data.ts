@@ -2,7 +2,7 @@ import { EnvelopeSchema } from '@along/contracts';
 import { z } from 'zod';
 import { requireClientSession } from '@/lib/account-navigation';
 import type { ApiResult } from '@/lib/api';
-import { TaskDetailSchema } from '@/lib/types';
+import { ElapsedTimeBasisSchema, TaskDetailSchema } from '@/lib/types';
 
 export const taskStates = [
   'all',
@@ -44,9 +44,14 @@ export const TaskListPageSchema = z
           fire_at_utc: z.string(),
           fire_at_local: z.string(),
           timezone_id: z.string(),
+          fold: z.number().int().optional(),
+          resolved_utc_offset_seconds: z.number().int().optional(),
+          tzdb_version: z.string().nullable().optional(),
           source_approval_id: z.string().nullable(),
           source_invocation_id: z.string().uuid().nullable(),
           schedule_receipt: z.string().nullable(),
+          time_basis: ElapsedTimeBasisSchema.nullable().optional(),
+          display_version: z.literal('elapsed/1').nullable().optional(),
         })
         .strict(),
     ),

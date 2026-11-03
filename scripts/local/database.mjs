@@ -793,7 +793,9 @@ export class DeploymentDatabase {
     for (const [table, spec] of Object.entries(TABLES)) {
       for (const token of spec.split(' ')) {
         const [name, rawType] = token.split(':');
-        const nullable = rawType.endsWith('?'),
+        const nullable =
+            rawType.endsWith('?') ||
+            (version >= '0024' && table === 'tasks' && name === 'tzdb_version'),
           type = rawType.replace(/\?$/, '');
         const actual = columns.find((c) => c.table_name === table && c.name === name);
         if (

@@ -46,12 +46,14 @@ describe('direct reminder accepted facts', () => {
   async function fresh(
     tools = ['create_reminder', 'set_user_timezone'],
     request = text,
+    options: { anchor?: string; elapsedRevision?: 'elapsed/1' } = {},
   ): Promise<ToolContext> {
     const ownerId = randomUUID(),
       conversationId = randomUUID(),
       runId = randomUUID(),
       attemptId = randomUUID(),
       messageId = randomUUID();
+    const anchor = options.anchor ?? '2027-11-03T00:00:00Z';
     await db.pool.query(
       "INSERT INTO users(id,auth_email,display_name,timezone_id) VALUES($1,$2,'reminder tester','Asia/Shanghai')",
       [ownerId, `${ownerId}@reminder.test`],
@@ -74,6 +76,14 @@ describe('direct reminder accepted facts', () => {
         JSON.stringify({
           authorization_revision: 'delegation/1',
           execution_lifecycle: 'request-bound',
+          ...(options.elapsedRevision
+            ? {
+                trustedExecutionContext: {
+                  request_anchor_utc: anchor,
+                  time_capabilities: { elapsed_revision: options.elapsedRevision },
+                },
+              }
+            : {}),
           reminderDateSource: { version: 1, kind: 'new', inputMessageId: messageId },
         }),
         messageId,
@@ -92,8 +102,8 @@ describe('direct reminder accepted facts', () => {
       allowlist: tools,
       authorizationRevision: 'delegation/1',
       confirmedTimezone: 'Asia/Shanghai',
-      anchorReceivedAtUtc: '2027-11-03T00:00:00Z',
-      receivedAtUtc: '2027-11-03T00:00:00Z',
+      anchorReceivedAtUtc: anchor,
+      receivedAtUtc: anchor,
       foldChoice: 'none',
       timeContext: loadTimeContext('fixture-v1'),
     };
@@ -122,6 +132,149 @@ describe('direct reminder accepted facts', () => {
       ).rows[0].n;
     return values;
   }
+  const elapsedText = '三分钟后提醒我核对报告';
+  const elapsedArgs = {
+    raw_time_text: elapsedText,
+    note: '核对报告',
+    occurrence: 'once',
+    time_kind: 'elapsed',
+    duration_seconds: 180,
+  };
+  async function elapsedContext(secondsFromNow = 60, enabled = true) {
+    const anchor = (
+      await db.pool.query<{ anchor: string }>(
+        `SELECT to_char((clock_timestamp() + $1::int * interval '1 second') AT TIME ZONE 'UTC',
+                        'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS anchor`,
+        [secondsFromNow],
+      )
+    ).rows[0]!.anchor;
+    return fresh(['create_reminder'], elapsedText, {
+      anchor,
+      ...(enabled ? { elapsedRevision: 'elapsed/1' as const } : {}),
+    });
+  }
+  it('creates anchor plus 180 seconds and replays the same elapsed invocation exactly once', async () => {
+    const ctx = await elapsedContext();
+    ctx.confirmedTimezone = 'UTC';
+    const binding = await reserveToolInvocation(db.pool, ctx, {
+      callKey: 'elapsed/1',
+      toolId: 'create_reminder',
+      args: elapsedArgs,
+    });
+    const invoke = () =>
+      invokeTool(db.pool, ctx, { ...binding, toolId: 'create_reminder', args: elapsedArgs });
+    const [first, concurrent] = await Promise.all([invoke(), invoke()]);
+    expect([first.replayed, concurrent.replayed].sort()).toEqual([false, true]);
+    expect({ ...first, replayed: true }).toEqual({ ...concurrent, replayed: true });
+    expect(await invoke()).toEqual({ ...first, replayed: true });
+    const sourceMessageId = (
+      await db.pool.query('SELECT input_message_id FROM agent_runs WHERE id=$1', [ctx.runId])
+    ).rows[0].input_message_id;
+    const fireAt = new Date(Date.parse(ctx.anchorReceivedAtUtc) + 180_000).toISOString();
+    const basis = {
+      kind: 'elapsed',
+      anchor_utc: ctx.anchorReceivedAtUtc,
+      duration_seconds: 180,
+      source_message_id: sourceMessageId,
+      revision: 'elapsed/1',
+    };
+    expect(first).toMatchObject({
+      status: 'ok',
+      result: {
+        kind: 'task_created',
+        fire_at_utc: fireAt,
+        time_basis: basis,
+        display_version: 'elapsed/1',
+      },
+    });
+    expect(await counts(ctx)).toEqual({ approvals: 0, tasks: 1, task_events: 1, outbox: 1 });
+    const saved = (
+      await db.pool.query(
+        'SELECT fire_at_utc, time_basis, display_version, source_invocation_id FROM tasks WHERE owner_id=$1',
+        [ctx.ownerId],
+      )
+    ).rows[0];
+    expect(saved.fire_at_utc.toISOString()).toBe(fireAt);
+    expect(saved).toMatchObject({
+      time_basis: basis,
+      display_version: 'elapsed/1',
+      source_invocation_id: binding.invocationId,
+    });
+  });
+  it('uses UTC display for elapsed time without timezone rules', async () => {
+    const ctx = await elapsedContext();
+    ctx.timeContext = loadTimeContext(undefined);
+    const { outcome } = await call(ctx, 'elapsed/no-rules', elapsedArgs);
+    const fireAt = new Date(Date.parse(ctx.anchorReceivedAtUtc) + 180_000).toISOString();
+    expect(outcome).toMatchObject({
+      status: 'ok',
+      result: {
+        kind: 'task_created',
+        fire_at_utc: fireAt,
+        timezone_id: 'UTC',
+        wall_time: fireAt.slice(0, 19).replace('T', ' '),
+        fold: 0,
+        resolved_utc_offset_seconds: 0,
+        tzdb_version: null,
+      },
+    });
+    expect(await counts(ctx)).toEqual({ approvals: 0, tasks: 1, task_events: 1, outbox: 1 });
+  });
+  it('does not silently replace an explicit timezone when rules are unavailable', async () => {
+    const ctx = await elapsedContext();
+    ctx.timeContext = loadTimeContext(undefined);
+    expect(
+      (await call(ctx, 'elapsed/explicit-zone', { ...elapsedArgs, timezone_hint: 'Asia/Shanghai' }))
+        .outcome,
+    ).toMatchObject({
+      status: 'ok',
+      result: { kind: 'time_error', error: { code: 'TZDB_UNAVAILABLE' } },
+    });
+    expect(await counts(ctx)).toEqual({ approvals: 0, tasks: 0, task_events: 0, outbox: 0 });
+  });
+  it('does not grant elapsed capability to an older frozen run', async () => {
+    const ctx = await elapsedContext(60, false);
+    expect((await call(ctx, 'elapsed/old', elapsedArgs)).outcome).toMatchObject({
+      status: 'denied',
+      error: { code: 'TOOL_FORBIDDEN' },
+    });
+    expect(await counts(ctx)).toEqual({ approvals: 0, tasks: 0, task_events: 0, outbox: 0 });
+  });
+  it('rejects a context anchor that differs from the frozen trusted anchor', async () => {
+    const ctx = await elapsedContext();
+    ctx.anchorReceivedAtUtc = new Date(Date.parse(ctx.anchorReceivedAtUtc) + 60_000)
+      .toISOString()
+      .replace('.000Z', 'Z');
+    expect((await call(ctx, 'elapsed/anchor-forgery', elapsedArgs)).outcome).toMatchObject({
+      status: 'denied',
+      error: { code: 'TOOL_FORBIDDEN' },
+    });
+    expect(await counts(ctx)).toEqual({ approvals: 0, tasks: 0, task_events: 0, outbox: 0 });
+  });
+  it('does not accept forged source text or a caller-provided source message', async () => {
+    const ctx = await elapsedContext();
+    expect(
+      (await call(ctx, 'elapsed/forged-text', { ...elapsedArgs, raw_time_text: '十分钟后' }))
+        .outcome,
+    ).toMatchObject({ status: 'ok', result: { kind: 'clarify', reason: 'DATE_SOURCE_UNCLEAR' } });
+    expect(
+      (
+        await call(ctx, 'elapsed/forged-source', {
+          ...elapsedArgs,
+          source_message_id: randomUUID(),
+        })
+      ).outcome,
+    ).toMatchObject({ status: 'denied', error: { code: 'TOOL_FORBIDDEN' } });
+    expect(await counts(ctx)).toEqual({ approvals: 0, tasks: 0, task_events: 0, outbox: 0 });
+  });
+  it('does not create an elapsed reminder after its anchored target has passed', async () => {
+    const ctx = await elapsedContext(-3600);
+    expect((await call(ctx, 'elapsed/expired', elapsedArgs)).outcome).toMatchObject({
+      status: 'ok',
+      result: { kind: 'clarify', reason: 'FIRE_TIME_PASSED' },
+    });
+    expect(await counts(ctx)).toEqual({ approvals: 0, tasks: 0, task_events: 0, outbox: 0 });
+  });
   it('creates without approval and concurrent replay preserves one immutable task, event, command and acceptance', async () => {
     const ctx = await fresh();
     const binding = await reserveToolInvocation(db.pool, ctx, {

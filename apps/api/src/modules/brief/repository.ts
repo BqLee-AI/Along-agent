@@ -1,7 +1,8 @@
 // Brief read projection (issue #10). [跨模块读] tasks + approvals by
-// owner and frozen local date. Reads only: the brief has no write path and no
-// snapshot table (S0 #14: v0 briefs are a deterministic projection).
+// owner and the browsing timezone's UTC day interval. Display facts remain frozen.
+// Reads only: the brief has no write path and no snapshot table.
 import type { PoolClient } from 'pg';
+import type { ElapsedTimeBasis } from '@along/contracts';
 
 export interface BriefTaskRow {
   id: string;
@@ -10,6 +11,8 @@ export interface BriefTaskRow {
   wall_time: string;
   timezone_id: string;
   original_note: string | null;
+  time_basis: ElapsedTimeBasis | null;
+  display_version: 'elapsed/1' | null;
 }
 
 export interface BriefApprovalRow {
@@ -25,18 +28,18 @@ export interface BriefApprovalRow {
 export async function listBriefTasks(
   client: PoolClient,
   ownerId: string,
-  date: string,
-  timezoneId: string,
+  start: string,
+  end: string,
 ): Promise<BriefTaskRow[]> {
   const { rows } = await client.query<BriefTaskRow>(
-    `SELECT id, state, fire_at_utc, wall_time, timezone_id, original_note
+    `SELECT id, state, fire_at_utc, wall_time, timezone_id, original_note, time_basis, display_version
        FROM tasks
       WHERE owner_id = $1
         AND state <> 'cancelled'
-        AND timezone_id = $2
-        AND wall_time LIKE $3 || '%'
+        AND fire_at_utc >= $2::timestamptz
+        AND fire_at_utc < $3::timestamptz
       ORDER BY fire_at_utc ASC, id ASC`,
-    [ownerId, timezoneId, date],
+    [ownerId, start, end],
   );
   return rows;
 }
@@ -44,8 +47,8 @@ export async function listBriefTasks(
 export async function listBriefApprovals(
   client: PoolClient,
   ownerId: string,
-  date: string,
-  timezoneId: string,
+  start: string,
+  end: string,
   now: Date,
 ): Promise<BriefApprovalRow[]> {
   const { rows } = await client.query<BriefApprovalRow>(
@@ -55,10 +58,10 @@ export async function listBriefApprovals(
         AND state = 'pending'
         AND expires_at > $4
         AND fire_at_utc > $4
-        AND timezone_id = $2
-        AND wall_time LIKE $3 || '%'
+        AND fire_at_utc >= $2::timestamptz
+        AND fire_at_utc < $3::timestamptz
       ORDER BY fire_at_utc ASC, id ASC`,
-    [ownerId, timezoneId, date, now.toISOString()],
+    [ownerId, start, end, now.toISOString()],
   );
   return rows;
 }

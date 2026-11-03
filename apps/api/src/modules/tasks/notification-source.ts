@@ -11,6 +11,12 @@ export interface TaskNotificationSource {
   wallTime: string;
   timezoneId: string;
   originalNote: string | null;
+  elapsedDisplay?: {
+    fireAtUtc: string;
+    offsetSeconds: number;
+    anchorUtc: string;
+    durationSeconds: number;
+  };
 }
 
 /** Frozen values only: no normalization, time conversion, locks, or writes. */
@@ -22,6 +28,9 @@ export async function getTaskNotificationSource(
   const lookup = await getTask(client, ownerId, taskId);
   if (!lookup.found || lookup.forbidden) return null;
   const task = lookup.row;
+  if (task.display_version === 'elapsed/1' && !task.time_basis) {
+    throw new Error('elapsed notification missing frozen time basis');
+  }
   return {
     fireAtUtc: task.fire_at_utc.toISOString(),
     state: task.state,
@@ -30,5 +39,15 @@ export async function getTaskNotificationSource(
     wallTime: task.wall_time,
     timezoneId: task.timezone_id,
     originalNote: task.original_note,
+    ...(task.display_version === 'elapsed/1' && task.time_basis
+      ? {
+          elapsedDisplay: {
+            fireAtUtc: task.fire_at_utc.toISOString(),
+            offsetSeconds: task.resolved_utc_offset_seconds,
+            anchorUtc: task.time_basis.anchor_utc,
+            durationSeconds: task.time_basis.duration_seconds,
+          },
+        }
+      : {}),
   };
 }

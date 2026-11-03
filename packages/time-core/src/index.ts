@@ -20,3 +20,5 @@ export type { EntryInput } from './entry.js';
 export { isSupportedRuleset, utcInCoverage } from './profile.js';
 export { freezeValue, sameValue } from './immutable.js';
 export { reminderDateExpression, reminderTimezoneReply } from './reminder-source.js';
+export { addElapsed, utcToLocal } from './elapsed.js';
+export type { UtcToLocalResult } from './elapsed.js';

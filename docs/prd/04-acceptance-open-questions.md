@@ -127,11 +127,11 @@
 
 ## 本人目标内委托（#105 目标合同；#107 本人时区切片）
 
-合同真源为 [design/20 §1–§10](../design/20-goal-scoped-delegation.md) 及 [OpenSpec 增量](../../openspec/changes/refactor-assistant-capability-authorization/proposal.md)，总范围为 #104。本人默认时区保存/NULL清除及明确 wall/calendar 提醒直接创建采用可信执行/结果切片；elapsed、文件自主能力、通用缺口接续和 server-owned 仍不在此能力范围。实现、受控消费者与真实用户路径分别取证，整体 change 随适用实施与真实验收收口。
+合同真源为 [design/20 §1–§10](../design/20-goal-scoped-delegation.md) 及 [OpenSpec 增量](../../openspec/changes/refactor-assistant-capability-authorization/proposal.md)，总范围为 #104。本人默认时区、明确 wall/calendar 与严格 elapsed 提醒采用可信执行/结果切片；文件自主能力、通用缺口接续和 server-owned 不属于此切片。实现、受控消费者与真实用户路径分别取证，整体 change 随适用实施与真实验收收口。
 
 - 当前实施边界：Web 普通 Agent 明确发送 `authorization_revision:'delegation/1'`，服务端仅允许无 workspace 的 harness；省略修订和提醒/资料快捷入口保持 legacy，不从部署或 wire 自动升级权限。本人时区写入经 identity 窄用例，与工具接受结果/审计原子提交，不生成批准，不开放任意账户 patch；仅支持实际有限别名/规则，单次提示不保存，清除不保留旧偏好。
 - 配套合同：v6 start 的真实 trusted context 进入 system 层，legacy 显式 null；新委托 SSE v2 与旧 v1 历史严格分读。RunView 展示冻结 request-bound 与持久 GoalResult；0021 只新增根 `agent_runs.goal_result`，旧数据 NULL 不回填。最终 answer、目标结果和 Run/attempt/事件终结原子保存，收据须符合真实接受结果/设置事实，Run done 不能代替目标完成。
-- 本切片的连接验收：初次发送和历史恢复均说明绑定连接、无后台继续；断连/停止后已接受设置和提醒仍可见，未完成或未知项不掩盖。GET、刷新、重连、重登只有只读恢复，不自动发消息/批准/继续/取消或重做已接受效果。新 profile 可用 `create_reminder` 直接创建明确的单次墙上时间提醒，缺口仅补实际信息，可信同目标补齐后不再批准；不暴露 elapsed 修订或文件动作，旧 settings-only 和 legacy 不扩权。
+- 本切片的连接验收：初次发送和历史恢复均说明绑定连接、无后台继续；断连/停止后已接受设置和提醒仍可见，未完成或未知项不掩盖。GET、刷新、重连、重登只有只读恢复，不自动发消息/批准/继续/取消或重做已接受效果。新 profile 可用 `create_reminder` 直接创建明确的单次墙上时间或严格经过时长提醒，缺口仅补实际信息；旧 settings-only 和 legacy 不扩权。
 
 - 正常自主：真实保存/清除本人时区，明确提醒直接创建/唯一取消，受管资料正常编辑/有限创建，多步混合目标零机械批准；明确重写/覆盖/取消不问相同授权。
 - 必要打断：实质歧义只补缺口，新增目标/影响只授新增部分。新profile允许一次精确“授权并继续”，不机械要求第二按钮；决议自身不是写入/保存，拒绝/停止/unknown/迟到或无效等待点不推进，GET/重登不授权/继续。legacy保持原显式继续合同，HTTP次数不预设；跨owner、登记外/链接、缺能力不能按钮突破，零写冲突可自主新读修正。

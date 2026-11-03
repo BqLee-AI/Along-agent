@@ -55,6 +55,10 @@ for (const mode of ['local', 'http'] as const) {
   ] as const) {
     test(`D8.${mode}.native-readonly-${tool.replaceAll('_', '-')}`, async () => {
       const actor = await fixture.actor(mode);
+      if (tool === 'read_brief_cards')
+        await fixture.database.pool.query('UPDATE users SET timezone_id=NULL WHERE id=$1', [
+          actor.ownerId,
+        ]);
       const body = {
         execution: 'harness',
         raw_text: command,

@@ -284,6 +284,7 @@ async function dispatchRequest(
       pool: deps.pool,
       resolveActor,
       tzdbVersion,
+      timeContext,
     });
     if (handled) return;
   }

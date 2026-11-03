@@ -3,6 +3,8 @@
 import type { Pool, PoolClient } from 'pg';
 import { withClient } from '../../db/transaction.js';
 import { notReady, validationError, type HttpError } from '../../http/errors.js';
+import type { TimeContext } from '../time/context.js';
+import { briefDayRange } from './day-range.js';
 import {
   listBriefApprovals,
   listBriefTasks,
@@ -19,6 +21,7 @@ import {
 export interface BriefDeps {
   pool: Pool | null;
   tzdbVersion?: string;
+  timeContext?: TimeContext;
   now?: () => Date;
 }
 
@@ -54,25 +57,6 @@ function validatedCard(entry: CardEntry, requestId: string): BriefCard {
   };
 }
 
-function localDateAt(now: Date, timezoneId: string): string {
-  try {
-    const parts = new Intl.DateTimeFormat('en-US', {
-      timeZone: timezoneId,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).formatToParts(now);
-    const value = (type: string) => parts.find((part) => part.type === type)?.value;
-    const year = value('year');
-    const month = value('month');
-    const day = value('day');
-    if (!year || !month || !day) throw new RangeError('missing date parts');
-    return `${year}-${month}-${day}`;
-  } catch {
-    throw validationError('confirmed timezone is not a valid IANA zone') as HttpError;
-  }
-}
-
 function taskEntry(row: BriefTaskRow): CardEntry {
   return {
     fireAt: row.fire_at_utc,
@@ -83,6 +67,9 @@ function taskEntry(row: BriefTaskRow): CardEntry {
       title: shortTitle(row.original_note, '提醒'),
       status: row.state,
       fire_at_local: row.wall_time,
+      timezone_id: row.timezone_id,
+      time_basis: row.time_basis,
+      display_version: row.display_version,
       ref: { task_id: row.id },
     },
   };
@@ -110,28 +97,30 @@ export async function getBrief(
   requestId: string,
 ): Promise<BriefResponse> {
   if (!deps.pool) throw notReady() as HttpError;
-  if (!deps.tzdbVersion) throw notReady() as HttpError;
+  if (confirmedTimezone && confirmedTimezone !== 'UTC' && !deps.timeContext?.available)
+    throw notReady() as HttpError;
   const parsed = BriefQuerySchema.safeParse({
     date: Array.isArray(query.date) ? query.date[0] : query.date,
     timezone: Array.isArray(query.timezone) ? query.timezone[0] : query.timezone,
   });
   if (!parsed.success) throw validationError('invalid query') as HttpError;
-  if (!confirmedTimezone) {
-    throw validationError('confirmed timezone is required') as HttpError;
-  }
+  const browsingTimezone = confirmedTimezone ?? 'UTC';
 
   const now = deps.now?.() ?? new Date();
-  // Validate the stored zone even when the caller supplied an explicit date.
-  const currentDay = localDateAt(now, confirmedTimezone);
-  const date = parsed.data.date ?? currentDay;
+  const { date, start, end } = briefDayRange(
+    parsed.data.date,
+    browsingTimezone,
+    now,
+    deps.timeContext,
+  );
   const timezoneNote =
-    parsed.data.timezone && parsed.data.timezone !== confirmedTimezone
-      ? `请求时区 ${parsed.data.timezone} 与已确认时区 ${confirmedTimezone} 不一致；未换算，按已确认时区展示。`
+    parsed.data.timezone && parsed.data.timezone !== browsingTimezone
+      ? `请求时区 ${parsed.data.timezone} 与浏览时区 ${browsingTimezone} 不一致；卡片保留冻结时间，未换算。`
       : null;
 
   const { tasks, approvals } = await withClient(deps.pool, async (client: PoolClient) => ({
-    tasks: await listBriefTasks(client, ownerId, date, confirmedTimezone),
-    approvals: await listBriefApprovals(client, ownerId, date, confirmedTimezone, now),
+    tasks: await listBriefTasks(client, ownerId, start, end),
+    approvals: await listBriefApprovals(client, ownerId, start, end, now),
   }));
 
   const entries: CardEntry[] = [...tasks.map(taskEntry), ...approvals.map(approvalEntry)].sort(
@@ -145,7 +134,7 @@ export async function getBrief(
 
   return {
     date,
-    timezone_id: confirmedTimezone,
+    timezone_id: browsingTimezone,
     summary: {
       pending_count: approvals.length,
       fired_count: tasks.filter((row) => row.state === 'fired').length,

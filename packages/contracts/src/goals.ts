@@ -2,6 +2,17 @@ import { z } from 'zod';
 
 const uuid = z.string().uuid();
 const text = z.string().min(1).max(8192);
+export const ElapsedTimeBasisSchema = z
+  .object({
+    kind: z.literal('elapsed'),
+    anchor_utc: z.string().datetime({ precision: 0 }),
+    duration_seconds: z.number().int().positive().safe(),
+    source_message_id: uuid,
+    revision: z.literal('elapsed/1'),
+  })
+  .strict();
+export type ElapsedTimeBasis = z.infer<typeof ElapsedTimeBasisSchema>;
+
 export const GoalResultSchema = z
   .object({
     status: z.enum(['completed', 'partial', 'blocked', 'cancelled', 'unknown']),
@@ -74,7 +85,7 @@ export const TrustedExecutionContextSchema = z
       .nullable(),
     time_capabilities: z
       .object({
-        elapsed_revision: z.null(),
+        elapsed_revision: z.literal('elapsed/1').nullable(),
         wall_rules: z
           .object({
             ruleset_id: z.string().min(1).max(128),

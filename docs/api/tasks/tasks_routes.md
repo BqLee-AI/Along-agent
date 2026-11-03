@@ -4,7 +4,7 @@
 >
 > 蓝图引用：B06（R 状态机 saved→pending_schedule→scheduled→fired|missed→cancel 路；超 15min 标 missed 不补发；取消后触发数=0 一级指标；06 喝水 task.kind=notify_only 不走 LLM 先验调度）。
 
-> 直接创建由新委托的 `create_reminder` 工具进入 tasks 公共事务，legacy confirm 复用同一用例；不增加另一条创建路由或伪造批准。列表/详情/通知识别真实 `source_invocation_id`，旧冻结不回填。直接取消、elapsed/time_basis 和 UTC秒精度的新合同不在此创建切片启用，见 [design/20 §4.3、§5–§6](../../design/20-goal-scoped-delegation.md)。created、排期、取消中和撤销回执分别呈现。
+> 直接创建由委托的 `create_reminder` 工具进入 tasks 公共事务，legacy confirm 复用同一用例；不增加另一条创建路由或伪造批准。列表/详情/通知识别真实 `source_invocation_id`，旧冻结不回填。严格经过时长任务保存可信请求锚、秒数、来源和冻结展示版本；直接取消仍按原合同处理，见 [design/20 §4.3、§5–§6](../../design/20-goal-scoped-delegation.md)。created、排期、取消中和撤销回执分别呈现。
 
 ## 1. 路由
 
@@ -41,6 +41,7 @@
 
 - `kind=notify_only`：v0 喝水类提醒，不走 LLM 先验调度 [Required]。
 - 来源字段 `source_approval_id` 和 `source_invocation_id` 均为可空 UUID。新任务恰有一个真实来源：legacy 按钮批准或直接创建工具 invocation；直接创建不制造 approval。历史来源缺失行只读保留，不回填。列表与详情均返回这两个字段。
+- 严格经过时长任务的 `time_basis` 含 `anchor_utc`、`duration_seconds`、`source_message_id` 和 `revision`，`display_version` 为 `elapsed/1`。列表和详情返回冻结本地时间、时区、UTC、偏移及规则版本；严格 UTC 可无 tzdb 版本。历史 wall 任务的依据和展示版本为 `null`，不回写。
 - `schedule_receipt`：有登记回执才为 `scheduled`；无回执停 `pending_schedule`，前端展示“待排期”，不谎称已排 [Required]。
 - 口径天花板：详情只报告系统记录到的状态（已保存/已排期/已触发/已错过），不声称用户已读/必达 [Required]。
 - 不存在/他人资源：`404` / `403`。

@@ -15,7 +15,7 @@ import {
   taskListPath,
   type PageSnapshot,
 } from '../src/features/reminders/data';
-import type { TaskEventItem, TaskListItem } from '../src/lib/types';
+import { TaskDetailSchema, type TaskEventItem, type TaskListItem } from '../src/lib/types';
 
 const taskId = '11111111-1111-4111-8111-111111111111';
 const otherId = '22222222-2222-4222-8222-222222222222';
@@ -40,6 +40,36 @@ const events: TaskEventItem[] = Array.from({ length: 51 }, (_, index) => ({
   state_version: index + 1,
   evidence_ref: index === 0 ? '  original evidence\nline two  ' : '',
 }));
+
+it('preserves elapsed basis and accepts legacy task records without inventing one', () => {
+  const time_basis = {
+    kind: 'elapsed' as const,
+    anchor_utc: '2026-11-01T05:00:00Z',
+    duration_seconds: 1800,
+    source_message_id: taskId,
+    revision: 'elapsed/1' as const,
+  };
+  const item = { ...tasks[0]!, time_basis, display_version: 'elapsed/1' as const };
+  expect(
+    TaskListPageSchema.parse({ items: [item], next_cursor: null }).items[0]?.time_basis,
+  ).toEqual(time_basis);
+  expect(
+    TaskListPageSchema.parse({ items: [tasks[0]], next_cursor: null }).items[0]?.time_basis,
+  ).toBeUndefined();
+  const detail = {
+    ...item,
+    kind: 'reminder',
+    state_version: 1,
+    recreated_from: null,
+    created_at: frozenUtc,
+    notifications: [],
+  };
+  expect(TaskDetailSchema.parse(detail).time_basis).toEqual(time_basis);
+  expect(
+    TaskDetailSchema.safeParse({ ...detail, time_basis: { ...time_basis, revision: 'elapsed/2' } })
+      .success,
+  ).toBe(false);
+});
 
 describe('bounded reminder GET consumers', () => {
   let server: Server;

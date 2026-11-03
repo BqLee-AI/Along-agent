@@ -1,4 +1,5 @@
 import type { PoolClient } from 'pg';
+import type { ElapsedTimeBasis } from './create.js';
 
 export interface TaskRow {
   id: string;
@@ -12,7 +13,9 @@ export interface TaskRow {
   timezone_id: string;
   fold: number;
   resolved_utc_offset_seconds: number;
-  tzdb_version: string;
+  tzdb_version: string | null;
+  time_basis: ElapsedTimeBasis | null;
+  display_version: 'elapsed/1' | null;
   occurrence: string;
   state: string;
   state_version: number;
