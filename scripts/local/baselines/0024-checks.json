@@ -674,207 +674,148 @@
       "table": "tasks",
       "name": "tasks_source_invocation_id_fkey",
       "type": "f",
-      "columns": [
-        "source_invocation_id"
-      ],
+      "columns": ["source_invocation_id"],
       "target": "tool_invocations",
-      "target_columns": [
-        "invocation_id"
-      ],
+      "target_columns": ["invocation_id"],
       "delete_action": "r"
     },
     {
       "table": "tasks",
       "name": "tasks_source_invocation_id_uniq",
       "type": "u",
-      "columns": [
-        "source_invocation_id"
-      ]
+      "columns": ["source_invocation_id"]
     },
     {
       "table": "identity_account_admissions",
       "name": "identity_account_admissions_contact_generation_check",
       "type": "c",
-      "columns": [
-        "contact_generation"
-      ],
+      "columns": ["contact_generation"],
       "expression": "(contact_generation >= 0)"
     },
     {
       "table": "identity_account_admissions",
       "name": "identity_account_admissions_credential_revision_check",
       "type": "c",
-      "columns": [
-        "credential_revision"
-      ],
+      "columns": ["credential_revision"],
       "expression": "(credential_revision >= 1)"
     },
     {
       "table": "identity_account_admissions",
       "name": "identity_account_admissions_invitation_id_fkey",
       "type": "f",
-      "columns": [
-        "invitation_id"
-      ],
+      "columns": ["invitation_id"],
       "target": "identity_invitations",
-      "target_columns": [
-        "id"
-      ],
+      "target_columns": ["id"],
       "delete_action": "r"
     },
     {
       "table": "identity_account_admissions",
       "name": "identity_account_admissions_invitation_id_key",
       "type": "u",
-      "columns": [
-        "invitation_id"
-      ]
+      "columns": ["invitation_id"]
     },
     {
       "table": "identity_account_admissions",
       "name": "identity_account_admissions_pkey",
       "type": "p",
-      "columns": [
-        "user_id"
-      ]
+      "columns": ["user_id"]
     },
     {
       "table": "identity_account_admissions",
       "name": "identity_account_admissions_reset_generation_check",
       "type": "c",
-      "columns": [
-        "reset_generation"
-      ],
+      "columns": ["reset_generation"],
       "expression": "(reset_generation >= 0)"
     },
     {
       "table": "identity_account_admissions",
       "name": "identity_account_admissions_source_binding_check",
       "type": "c",
-      "columns": [
-        "source",
-        "invitation_id"
-      ],
+      "columns": ["source", "invitation_id"],
       "expression": "(((source = 'invitation'::text) AND (invitation_id IS NOT NULL)) OR ((source = ANY (ARRAY['installation_admin'::text, 'local_maintenance'::text])) AND (invitation_id IS NULL)))"
     },
     {
       "table": "identity_account_admissions",
       "name": "identity_account_admissions_source_check",
       "type": "c",
-      "columns": [
-        "source"
-      ],
+      "columns": ["source"],
       "expression": "(source = ANY (ARRAY['installation_admin'::text, 'invitation'::text, 'local_maintenance'::text]))"
     },
     {
       "table": "identity_account_admissions",
       "name": "identity_account_admissions_user_id_fkey",
       "type": "f",
-      "columns": [
-        "user_id"
-      ],
+      "columns": ["user_id"],
       "target": "users",
-      "target_columns": [
-        "id"
-      ],
+      "target_columns": ["id"],
       "delete_action": "r"
     },
     {
       "table": "identity_action_keys",
       "name": "identity_action_keys_action_check",
       "type": "c",
-      "columns": [
-        "action"
-      ],
+      "columns": ["action"],
       "expression": "(action = ANY (ARRAY['invite_create'::text, 'invite_resend'::text]))"
     },
     {
       "table": "identity_action_keys",
       "name": "identity_action_keys_actor_id_fkey",
       "type": "f",
-      "columns": [
-        "actor_id"
-      ],
+      "columns": ["actor_id"],
       "target": "users",
-      "target_columns": [
-        "id"
-      ],
+      "target_columns": ["id"],
       "delete_action": "r"
     },
     {
       "table": "identity_action_keys",
       "name": "identity_action_keys_delivery_id_fkey",
       "type": "f",
-      "columns": [
-        "delivery_id"
-      ],
+      "columns": ["delivery_id"],
       "target": "identity_mail_deliveries",
-      "target_columns": [
-        "id"
-      ],
+      "target_columns": ["id"],
       "delete_action": "r"
     },
     {
       "table": "identity_action_keys",
       "name": "identity_action_keys_generation_check",
       "type": "c",
-      "columns": [
-        "generation"
-      ],
+      "columns": ["generation"],
       "expression": "(generation >= 1)"
     },
     {
       "table": "identity_action_keys",
       "name": "identity_action_keys_invitation_id_fkey",
       "type": "f",
-      "columns": [
-        "invitation_id"
-      ],
+      "columns": ["invitation_id"],
       "target": "identity_invitations",
-      "target_columns": [
-        "id"
-      ],
+      "target_columns": ["id"],
       "delete_action": "r"
     },
     {
       "table": "identity_action_keys",
       "name": "identity_action_keys_pkey",
       "type": "p",
-      "columns": [
-        "actor_id",
-        "action",
-        "key"
-      ]
+      "columns": ["actor_id", "action", "key"]
     },
     {
       "table": "identity_action_keys",
       "name": "identity_action_keys_replay_check",
       "type": "c",
-      "columns": [
-        "replay_until",
-        "created_at"
-      ],
+      "columns": ["replay_until", "created_at"],
       "expression": "(replay_until >= (created_at + '7 days'::interval))"
     },
     {
       "table": "identity_action_keys",
       "name": "identity_action_keys_request_digest_check",
       "type": "c",
-      "columns": [
-        "request_digest"
-      ],
+      "columns": ["request_digest"],
       "expression": "(octet_length(request_digest) = 32)"
     },
     {
       "table": "identity_challenges",
       "name": "identity_challenges_binding_check",
       "type": "c",
-      "columns": [
-        "purpose",
-        "invitation_id",
-        "user_id",
-        "contact_revision"
-      ],
+      "columns": ["purpose", "invitation_id", "user_id", "contact_revision"],
       "expression": "(((purpose = 'invitation'::text) AND (invitation_id IS NOT NULL) AND (user_id IS NULL) AND (contact_revision IS NULL)) OR ((purpose = 'verify_contact'::text) AND (invitation_id IS NULL) AND (user_id IS NOT NULL) AND (contact_revision IS NULL)) OR ((purpose = 'reset_password'::text) AND (invitation_id IS NULL) AND (user_id IS NOT NULL) AND (contact_revision IS NOT NULL)))"
     },
     {
@@ -895,212 +836,155 @@
       "table": "identity_challenges",
       "name": "identity_challenges_contact_revision_check",
       "type": "c",
-      "columns": [
-        "contact_revision"
-      ],
+      "columns": ["contact_revision"],
       "expression": "(contact_revision >= 1)"
     },
     {
       "table": "identity_challenges",
       "name": "identity_challenges_expiry_check",
       "type": "c",
-      "columns": [
-        "expires_at",
-        "created_at"
-      ],
+      "columns": ["expires_at", "created_at"],
       "expression": "(expires_at > created_at)"
     },
     {
       "table": "identity_challenges",
       "name": "identity_challenges_generation_check",
       "type": "c",
-      "columns": [
-        "generation"
-      ],
+      "columns": ["generation"],
       "expression": "(generation >= 1)"
     },
     {
       "table": "identity_challenges",
       "name": "identity_challenges_invitation_id_fkey",
       "type": "f",
-      "columns": [
-        "invitation_id"
-      ],
+      "columns": ["invitation_id"],
       "target": "identity_invitations",
-      "target_columns": [
-        "id"
-      ],
+      "target_columns": ["id"],
       "delete_action": "r"
     },
     {
       "table": "identity_challenges",
       "name": "identity_challenges_lookup_digest_check",
       "type": "c",
-      "columns": [
-        "lookup_digest"
-      ],
+      "columns": ["lookup_digest"],
       "expression": "(octet_length(lookup_digest) = 32)"
     },
     {
       "table": "identity_challenges",
       "name": "identity_challenges_pkey",
       "type": "p",
-      "columns": [
-        "id"
-      ]
+      "columns": ["id"]
     },
     {
       "table": "identity_challenges",
       "name": "identity_challenges_purpose_check",
       "type": "c",
-      "columns": [
-        "purpose"
-      ],
+      "columns": ["purpose"],
       "expression": "(purpose = ANY (ARRAY['invitation'::text, 'verify_contact'::text, 'reset_password'::text]))"
     },
     {
       "table": "identity_challenges",
       "name": "identity_challenges_purpose_invitation_id_generation_key",
       "type": "u",
-      "columns": [
-        "purpose",
-        "invitation_id",
-        "generation"
-      ]
+      "columns": ["purpose", "invitation_id", "generation"]
     },
     {
       "table": "identity_challenges",
       "name": "identity_challenges_purpose_user_id_generation_key",
       "type": "u",
-      "columns": [
-        "purpose",
-        "user_id",
-        "generation"
-      ]
+      "columns": ["purpose", "user_id", "generation"]
     },
     {
       "table": "identity_challenges",
       "name": "identity_challenges_token_digest_check",
       "type": "c",
-      "columns": [
-        "token_digest"
-      ],
+      "columns": ["token_digest"],
       "expression": "(octet_length(token_digest) = 32)"
     },
     {
       "table": "identity_challenges",
       "name": "identity_challenges_token_digest_key",
       "type": "u",
-      "columns": [
-        "token_digest"
-      ]
+      "columns": ["token_digest"]
     },
     {
       "table": "identity_challenges",
       "name": "identity_challenges_user_id_fkey",
       "type": "f",
-      "columns": [
-        "user_id"
-      ],
+      "columns": ["user_id"],
       "target": "users",
-      "target_columns": [
-        "id"
-      ],
+      "target_columns": ["id"],
       "delete_action": "r"
     },
     {
       "table": "identity_contacts",
       "name": "identity_contacts_address_nonce_check",
       "type": "c",
-      "columns": [
-        "address_nonce"
-      ],
+      "columns": ["address_nonce"],
       "expression": "(octet_length(address_nonce) = 12)"
     },
     {
       "table": "identity_contacts",
       "name": "identity_contacts_address_tag_check",
       "type": "c",
-      "columns": [
-        "address_tag"
-      ],
+      "columns": ["address_tag"],
       "expression": "(octet_length(address_tag) = 16)"
     },
     {
       "table": "identity_contacts",
       "name": "identity_contacts_lookup_digest_check",
       "type": "c",
-      "columns": [
-        "lookup_digest"
-      ],
+      "columns": ["lookup_digest"],
       "expression": "(octet_length(lookup_digest) = 32)"
     },
     {
       "table": "identity_contacts",
       "name": "identity_contacts_lookup_digest_key",
       "type": "u",
-      "columns": [
-        "lookup_digest"
-      ]
+      "columns": ["lookup_digest"]
     },
     {
       "table": "identity_contacts",
       "name": "identity_contacts_pkey",
       "type": "p",
-      "columns": [
-        "id"
-      ]
+      "columns": ["id"]
     },
     {
       "table": "identity_contacts",
       "name": "identity_contacts_revision_check",
       "type": "c",
-      "columns": [
-        "revision"
-      ],
+      "columns": ["revision"],
       "expression": "(revision >= 1)"
     },
     {
       "table": "identity_contacts",
       "name": "identity_contacts_user_id_fkey",
       "type": "f",
-      "columns": [
-        "user_id"
-      ],
+      "columns": ["user_id"],
       "target": "users",
-      "target_columns": [
-        "id"
-      ],
+      "target_columns": ["id"],
       "delete_action": "r"
     },
     {
       "table": "identity_contacts",
       "name": "identity_contacts_user_id_key",
       "type": "u",
-      "columns": [
-        "user_id"
-      ]
+      "columns": ["user_id"]
     },
     {
       "table": "identity_invitations",
       "name": "identity_invitations_accepted_user_id_fkey",
       "type": "f",
-      "columns": [
-        "accepted_user_id"
-      ],
+      "columns": ["accepted_user_id"],
       "target": "users",
-      "target_columns": [
-        "id"
-      ],
+      "target_columns": ["id"],
       "delete_action": "r"
     },
     {
       "table": "identity_invitations",
       "name": "identity_invitations_accepted_user_id_key",
       "type": "u",
-      "columns": [
-        "accepted_user_id"
-      ]
+      "columns": ["accepted_user_id"]
     },
     {
       "table": "identity_invitations",
@@ -1119,214 +1003,154 @@
       "table": "identity_invitations",
       "name": "identity_invitations_created_by_fkey",
       "type": "f",
-      "columns": [
-        "created_by"
-      ],
+      "columns": ["created_by"],
       "target": "users",
-      "target_columns": [
-        "id"
-      ],
+      "target_columns": ["id"],
       "delete_action": "r"
     },
     {
       "table": "identity_invitations",
       "name": "identity_invitations_expiry_check",
       "type": "c",
-      "columns": [
-        "expires_at",
-        "created_at"
-      ],
+      "columns": ["expires_at", "created_at"],
       "expression": "(expires_at > created_at)"
     },
     {
       "table": "identity_invitations",
       "name": "identity_invitations_generation_check",
       "type": "c",
-      "columns": [
-        "generation"
-      ],
+      "columns": ["generation"],
       "expression": "(generation >= 1)"
     },
     {
       "table": "identity_invitations",
       "name": "identity_invitations_lookup_digest_check",
       "type": "c",
-      "columns": [
-        "lookup_digest"
-      ],
+      "columns": ["lookup_digest"],
       "expression": "(octet_length(lookup_digest) = 32)"
     },
     {
       "table": "identity_invitations",
       "name": "identity_invitations_pkey",
       "type": "p",
-      "columns": [
-        "id"
-      ]
+      "columns": ["id"]
     },
     {
       "table": "identity_invitations",
       "name": "identity_invitations_state_check",
       "type": "c",
-      "columns": [
-        "state"
-      ],
+      "columns": ["state"],
       "expression": "(state = ANY (ARRAY['pending'::text, 'accepted'::text, 'revoked'::text, 'expired'::text]))"
     },
     {
       "table": "identity_invitations",
       "name": "identity_invitations_terminal_check",
       "type": "c",
-      "columns": [
-        "state",
-        "accepted_user_id",
-        "accepted_at",
-        "revoked_at"
-      ],
+      "columns": ["state", "accepted_user_id", "accepted_at", "revoked_at"],
       "expression": "(((state = 'accepted'::text) AND (accepted_user_id IS NOT NULL) AND (accepted_at IS NOT NULL) AND (revoked_at IS NULL)) OR ((state = 'revoked'::text) AND (accepted_user_id IS NULL) AND (accepted_at IS NULL) AND (revoked_at IS NOT NULL)) OR ((state = ANY (ARRAY['pending'::text, 'expired'::text])) AND (accepted_user_id IS NULL) AND (accepted_at IS NULL) AND (revoked_at IS NULL)))"
     },
     {
       "table": "identity_mail_deliveries",
       "name": "identity_mail_deliveries_attempt_count_check",
       "type": "c",
-      "columns": [
-        "attempt_count"
-      ],
+      "columns": ["attempt_count"],
       "expression": "(attempt_count >= 0)"
     },
     {
       "table": "identity_mail_deliveries",
       "name": "identity_mail_deliveries_challenge_id_fkey",
       "type": "f",
-      "columns": [
-        "challenge_id"
-      ],
+      "columns": ["challenge_id"],
       "target": "identity_challenges",
-      "target_columns": [
-        "id"
-      ],
+      "target_columns": ["id"],
       "delete_action": "r"
     },
     {
       "table": "identity_mail_deliveries",
       "name": "identity_mail_deliveries_challenge_id_key",
       "type": "u",
-      "columns": [
-        "challenge_id"
-      ]
+      "columns": ["challenge_id"]
     },
     {
       "table": "identity_mail_deliveries",
       "name": "identity_mail_deliveries_generation_check",
       "type": "c",
-      "columns": [
-        "generation"
-      ],
+      "columns": ["generation"],
       "expression": "(generation >= 1)"
     },
     {
       "table": "identity_mail_deliveries",
       "name": "identity_mail_deliveries_payload_check",
       "type": "c",
-      "columns": [
-        "payload_ciphertext",
-        "payload_nonce",
-        "payload_tag",
-        "encryption_key_id"
-      ],
+      "columns": ["payload_ciphertext", "payload_nonce", "payload_tag", "encryption_key_id"],
       "expression": "(((payload_ciphertext IS NOT NULL) AND (payload_nonce IS NOT NULL) AND (octet_length(payload_nonce) = 12) AND (payload_tag IS NOT NULL) AND (octet_length(payload_tag) = 16) AND (encryption_key_id IS NOT NULL)) OR ((payload_ciphertext IS NULL) AND (payload_nonce IS NULL) AND (payload_tag IS NULL) AND (encryption_key_id IS NULL)))"
     },
     {
       "table": "identity_mail_deliveries",
       "name": "identity_mail_deliveries_pkey",
       "type": "p",
-      "columns": [
-        "id"
-      ]
+      "columns": ["id"]
     },
     {
       "table": "identity_mail_deliveries",
       "name": "identity_mail_deliveries_purpose_check",
       "type": "c",
-      "columns": [
-        "purpose"
-      ],
+      "columns": ["purpose"],
       "expression": "(purpose = ANY (ARRAY['invitation'::text, 'verify_contact'::text, 'reset_password'::text]))"
     },
     {
       "table": "identity_mail_deliveries",
       "name": "identity_mail_deliveries_status_check",
       "type": "c",
-      "columns": [
-        "status"
-      ],
+      "columns": ["status"],
       "expression": "(status = ANY (ARRAY['queued'::text, 'submitting'::text, 'submitted'::text, 'failed'::text, 'unknown'::text, 'suppressed'::text]))"
     },
     {
       "table": "identity_rate_limits",
       "name": "identity_rate_limits_action_check",
       "type": "c",
-      "columns": [
-        "action"
-      ],
+      "columns": ["action"],
       "expression": "(action = ANY (ARRAY['sign_in'::text, 'forgot'::text, 'accept'::text, 'reset'::text, 'contact_request'::text, 'contact_verify'::text, 'invite_create'::text, 'invite_resend'::text, 'password_write'::text]))"
     },
     {
       "table": "identity_rate_limits",
       "name": "identity_rate_limits_count_check",
       "type": "c",
-      "columns": [
-        "count"
-      ],
+      "columns": ["count"],
       "expression": "(count >= 0)"
     },
     {
       "table": "identity_rate_limits",
       "name": "identity_rate_limits_dimension_check",
       "type": "c",
-      "columns": [
-        "dimension"
-      ],
+      "columns": ["dimension"],
       "expression": "(dimension = ANY (ARRAY['identifier'::text, 'address'::text, 'ip'::text, 'actor'::text, 'token'::text]))"
     },
     {
       "table": "identity_rate_limits",
       "name": "identity_rate_limits_expiry_check",
       "type": "c",
-      "columns": [
-        "expires_at",
-        "window_started_at"
-      ],
+      "columns": ["expires_at", "window_started_at"],
       "expression": "(expires_at > window_started_at)"
     },
     {
       "table": "identity_rate_limits",
       "name": "identity_rate_limits_pkey",
       "type": "p",
-      "columns": [
-        "action",
-        "dimension",
-        "subject_digest",
-        "window_started_at",
-        "window_seconds"
-      ]
+      "columns": ["action", "dimension", "subject_digest", "window_started_at", "window_seconds"]
     },
     {
       "table": "identity_rate_limits",
       "name": "identity_rate_limits_subject_digest_check",
       "type": "c",
-      "columns": [
-        "subject_digest"
-      ],
+      "columns": ["subject_digest"],
       "expression": "(octet_length(subject_digest) = 32)"
     },
     {
       "table": "identity_rate_limits",
       "name": "identity_rate_limits_window_seconds_check",
       "type": "c",
-      "columns": [
-        "window_seconds"
-      ],
+      "columns": ["window_seconds"],
       "expression": "(window_seconds > 0)"
     }
   ],
@@ -1352,10 +1176,7 @@
       "name": "tasks_creation_source_required",
       "type": 23,
       "function": "tasks_require_creation_source",
-      "columns": [
-        "source_approval_id",
-        "source_invocation_id"
-      ]
+      "columns": ["source_approval_id", "source_invocation_id"]
     }
   ],
   "indexes": [
@@ -1365,12 +1186,8 @@
       "unique": true,
       "method": "btree",
       "predicate": null,
-      "keys": [
-        "user_id"
-      ],
-      "options": [
-        0
-      ]
+      "keys": ["user_id"],
+      "options": [0]
     },
     {
       "table": "identity_challenges",
@@ -1378,12 +1195,8 @@
       "unique": false,
       "method": "btree",
       "predicate": null,
-      "keys": [
-        "expires_at"
-      ],
-      "options": [
-        0
-      ]
+      "keys": ["expires_at"],
+      "options": [0]
     },
     {
       "table": "identity_challenges",
@@ -1391,14 +1204,8 @@
       "unique": false,
       "method": "btree",
       "predicate": null,
-      "keys": [
-        "invitation_id",
-        "generation"
-      ],
-      "options": [
-        0,
-        0
-      ]
+      "keys": ["invitation_id", "generation"],
+      "options": [0, 0]
     },
     {
       "table": "identity_challenges",
@@ -1406,16 +1213,8 @@
       "unique": false,
       "method": "btree",
       "predicate": null,
-      "keys": [
-        "user_id",
-        "purpose",
-        "generation"
-      ],
-      "options": [
-        0,
-        0,
-        0
-      ]
+      "keys": ["user_id", "purpose", "generation"],
+      "options": [0, 0, 0]
     },
     {
       "table": "identity_invitations",
@@ -1423,16 +1222,8 @@
       "unique": false,
       "method": "btree",
       "predicate": null,
-      "keys": [
-        "created_by",
-        "created_at",
-        "id"
-      ],
-      "options": [
-        0,
-        3,
-        3
-      ]
+      "keys": ["created_by", "created_at", "id"],
+      "options": [0, 3, 3]
     },
     {
       "table": "identity_invitations",
@@ -1440,12 +1231,8 @@
       "unique": true,
       "method": "btree",
       "predicate": "(state = 'pending'::text)",
-      "keys": [
-        "lookup_digest"
-      ],
-      "options": [
-        0
-      ]
+      "keys": ["lookup_digest"],
+      "options": [0]
     },
     {
       "table": "identity_invitations",
@@ -1453,14 +1240,8 @@
       "unique": false,
       "method": "btree",
       "predicate": null,
-      "keys": [
-        "state",
-        "expires_at"
-      ],
-      "options": [
-        0,
-        0
-      ]
+      "keys": ["state", "expires_at"],
+      "options": [0, 0]
     },
     {
       "table": "identity_mail_deliveries",
@@ -1468,16 +1249,8 @@
       "unique": false,
       "method": "btree",
       "predicate": null,
-      "keys": [
-        "status",
-        "created_at",
-        "id"
-      ],
-      "options": [
-        0,
-        0,
-        0
-      ]
+      "keys": ["status", "created_at", "id"],
+      "options": [0, 0, 0]
     },
     {
       "table": "identity_rate_limits",
@@ -1485,12 +1258,8 @@
       "unique": false,
       "method": "btree",
       "predicate": null,
-      "keys": [
-        "expires_at"
-      ],
-      "options": [
-        0
-      ]
+      "keys": ["expires_at"],
+      "options": [0]
     }
   ]
 }

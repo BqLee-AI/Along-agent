@@ -2,7 +2,10 @@ import { readAcceptedInvocationResult } from '../../src/modules/tools/accepted-r
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { invokeTool, reserveToolInvocation } from '../../src/modules/tools/gateway.js';
-import { readRunCreatedReminders, readRunInterruptionEvidence } from '../../src/modules/tools/query.js';
+import {
+  readRunCreatedReminders,
+  readRunInterruptionEvidence,
+} from '../../src/modules/tools/query.js';
 import type { ToolContext, ToolOutcome } from '../../src/modules/tools/contracts.js';
 import { loadTimeContext } from '../../src/modules/time/context.js';
 import { admitTestUser, createIntegrationDatabase, type IntegrationDatabase } from './setup.js';
@@ -229,8 +232,8 @@ describe('direct reminder accepted facts', () => {
     let pending: Promise<ToolOutcome> | undefined;
     try {
       await disabler.query('BEGIN');
-      const pid = (await disabler.query<{ pid: number }>('SELECT pg_backend_pid() AS pid'))
-        .rows[0]!.pid;
+      const pid = (await disabler.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]!
+        .pid;
       await disabler.query("UPDATE users SET status='disabled' WHERE id=$1", [ctx.ownerId]);
       pending = invokeTool(db.pool, ctx, { ...binding, toolId: 'create_reminder', args });
       void pending.catch(() => {});
