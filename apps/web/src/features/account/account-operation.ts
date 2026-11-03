@@ -33,7 +33,9 @@ export function validateAccountFields(operation: AccountOperation, fields: FormD
         ? { login_name, password, confirmed: fields.get('confirmed') === 'on' }
         : operation === 'sign-out'
           ? {}
-          : { login_name, password };
+          : fields.get('login_method') === 'email'
+            ? { email: String(fields.get('email') ?? ''), password }
+            : { login_name, password };
   const schema =
     operation === 'initialize'
       ? authInitializeSchema
@@ -56,11 +58,13 @@ export function validateAccountFields(operation: AccountOperation, fields: FormD
               : '密码过长，请检查输入。'
           : name === 'confirmed'
             ? '请确认只为当前原账户设置正式登录。'
-            : name === 'display_name'
-              ? '请填写 1–128 个字符的展示名。'
-              : login_name.trim().length === 0
-                ? '请输入用户名。'
-                : '用户名过长，请检查输入。';
+            : name === 'email' || (name === 'form' && fields.get('login_method') === 'email')
+              ? '请输入有效的联系邮箱。'
+              : name === 'display_name'
+                ? '请填写 1–128 个字符的展示名。'
+                : login_name.trim().length === 0
+                  ? '请输入用户名。'
+                  : '用户名过长，请检查输入。';
     }
   }
   if (

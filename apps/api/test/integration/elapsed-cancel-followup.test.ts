@@ -10,7 +10,12 @@ import { runSchedulePhase } from '../../src/modules/tasks/scheduler/schedule.js'
 import { loadTimeContext } from '../../src/modules/time/context.js';
 import type { ToolContext } from '../../src/modules/tools/contracts.js';
 import { invokeTool, reserveToolInvocation } from '../../src/modules/tools/gateway.js';
-import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
+import {
+  admitTestUser,
+  createIntegrationDatabase,
+  databaseUrl,
+  type IntegrationDatabase,
+} from './setup.js';
 
 const maybe = databaseUrl ? describe : describe.skip;
 
@@ -41,6 +46,7 @@ maybe('elapsed UTC cancellation follow-up', () => {
       "INSERT INTO users(id,auth_email,display_name,timezone_id) VALUES($1,$2,'tester','UTC')",
       [ownerId, `${ownerId}@fixture.test`],
     );
+    await admitTestUser(db.pool, ownerId);
     await db.pool.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
       conversationId,
       ownerId,

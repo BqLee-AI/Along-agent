@@ -13,9 +13,15 @@ const failures = [];
 // (identity 0001, conversation 0002, commitments 0003+).
 // Conversation-owned ledger additions extend through 0014; commitments keep
 // their existing [3,9998] range.
-const groupRanges = { identity: [1, 1], conversation: [2, 14], commitments: [3, 9998] };
+const groupRanges = {
+  identity: [1, 1],
+  conversation: [2, 14],
+  commitments: [3, 9998],
+  invited: [0, 0],
+};
 // R1 identity owns exactly this next migration, not the intervening groups' range.
 const identityAccountMigration = '0017_identity_account_access.sql';
+const invitedAccountMigration = '0024_invited_accounts.sql';
 // History owns exactly this addition; intervening conversation ranges stay frozen.
 const conversationHistoryMigration = '0018_conversation_history.sql';
 // R2-A owns only its immutable per-Run policy migration.
@@ -25,6 +31,7 @@ const files = readdirSync(dir)
   .filter((f) => f.endsWith('.sql'))
   .sort();
 if (files.length === 0) failures.push('infra/migrations: no .sql files');
+const sequences = new Set();
 for (const f of files) {
   const m = /^(\d{4})_([a-z0-9]+)_[a-z0-9_]+\.sql$/.exec(f);
   if (!m) {
@@ -32,11 +39,14 @@ for (const f of files) {
     continue;
   }
   const [, seq, group] = m;
+  if (sequences.has(seq)) failures.push(`${f}: duplicate migration sequence ${seq}`);
+  sequences.add(seq);
   const range = groupRanges[group];
   if (
     range &&
     (+seq < range[0] || +seq > range[1]) &&
     f !== identityAccountMigration &&
+    f !== invitedAccountMigration &&
     f !== conversationHistoryMigration &&
     f !== conversationContextMigration &&
     f !== conversationRoutingMigration

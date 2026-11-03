@@ -60,7 +60,21 @@
 - 先停旧写者并备份，显式升级 `0022→0023` 后再部署配套 API/Web；DDL、约束、触发器与版本账同事务提交，失败保留0022原事实。重复执行已记账0023不再做DDL。新接受结果产生后仅停写前滚，不删来源/任务/事件/审计或降级旧写者；旧有效 pending 仍只由原确认门消费。
 - 专用真实 PG 消费者覆盖位于 `apps/api/test/integration/task-creation.test.ts`；legacy owner/hash/过期/consumed 重放继续由 `approvals-confirm.test.ts` 保护。测试代码存在不表示已执行或升级已验收。
 
+## 0024：受邀账户显式准入
+
+- 在完整0023基线上事务性新增 `identity_account_admissions`、`identity_contacts`、`identity_invitations`、`identity_challenges`、`identity_mail_deliveries`、`identity_action_keys`、`identity_rate_limits`。摘要固定32字节，AEAD nonce/tag固定12/16字节，加密组全有或全空；联系人密钥版本必填，pending邀请地址必填，challenge用途/绑定/revision互斥。邀请pending地址partial UNIQUE不使用时钟；凭证用途/代次、联系人owner/地址、动作幂等键及固定配额窗口由唯一约束兜底。字段合同见 [identity schema](../../docs/schema/identity-schema.md)。
+- 新增 `auth_accounts_user_id_key UNIQUE(user_id)` 前持原identity表锁，拒绝旧重复credential、错误provider/account_id、空/损坏哈希、带密码seed及缺可用credential的管理员绑定。非空哈希格式按锁定Better Auth的32位hex盐与128位hex scrypt结果预检；不以格式检查替代本人密码验证。异常整笔回滚DDL和版本账，原user/credential/session/业务owner/secret不改，不自动删行、合并或修复。
+- 只从原明确 `installation_admin` 插入一条准入；普通active历史用户不自动获准，disabled/deleted_requested状态不变。普通旧owner须经 `local:account --admit` 明确选择并验证本人原口令（非空哈希不覆盖），或在合法无密码原身份上显式设密；工作区另经 `--workspace` 维护。迁移不发邮件、不生成生产密钥、不改宿主配置。
+- 停旧API/worker/Web写者、核实备份后走原显式 `local:upgrade`；普通 `start` 仅核验，不隐式升级。DDL/预检失败保持停写并保留原事实，修复来源后显式前滚。新准入/邮件事实写入后禁止降回不理解它们的旧写者，不删版本账/准入/邮件记录恢复旧版。
+- `0024-checks.json` 合并主线0023结构事实与账户新表的列/类型/默认值、PK/FK/UNIQUE/CHECK及索引；原0016–0023核验继续有效。账户事实源于此前隔离PG16 catalog，合并后的基线尚须统一验证。核验包含新credential唯一索引、partial谓词、索引方向/null顺序、valid/ready/live；损坏只读拒绝，不自动修复。`local-invited-database.test.ts` 覆盖旧0023隔离副本升级、准入数量/原事实保持、预检/真实DDL故障回滚、损坏拒绝及两次零DDL数据库重连；数据库重连不冒充正式Docker/API/Web两次实际启停，生产邮件/HTTPS和真实旧用户安装复制也不由该测试证明。
+
 ## 0025：严格 UTC 提醒的取消批准
 
 - 取消批准保留目标任务真实的空 `tzdb_version`；仅同 owner、冻结时间一致的严格 UTC elapsed 目标可使用空版本。创建批准和其他取消批准仍须有原规则版本。
 - 迁移不改写历史批准或 hash。确认消费、取消命令和撤销回执继续遵循原事务及状态机；升级后不应重新启用不能处理空版本的旧写者。
+
+## 0026：两条 0024 历史收敛
+
+- 主线 0024 为受邀账户；已部署的另一条 0024 为经过时长提醒，并已有取消批准 0025。版本号本身不足以识别来源；受管升级须完整核验相应结构，拒绝部分、混合或漂移的库。
+- 0026 保留原版本行及其时间，不回填或改写任务、批准、用户和凭据。账户路径补经过时长结构；提醒路径按原账户迁移预检和管理员准入规则补账户结构。仅明确绑定的原管理员取得准入，停权状态不变。
+- 必须通过受管升级入口停写、备份并核验；迁移 SQL 自身只做有限结构检查，不替代完整基线检查。升级期间禁止其他 DDL 和旧写者，失败保留原事实并按原流程前滚。

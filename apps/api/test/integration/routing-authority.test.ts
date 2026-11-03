@@ -42,7 +42,7 @@ import {
   type RoutingRuntime,
   type EnabledRoutingPolicy,
 } from '../../src/modules/conversations/routing/index.js';
-import { seedSession } from '../../src/modules/identity/seed.js';
+import { seedAdmittedSession as seedSession } from './setup.js';
 import type { SeededSession } from '../../src/modules/identity/seed.js';
 import { loadTimeContext } from '../../src/modules/time/context.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';

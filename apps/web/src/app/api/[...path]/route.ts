@@ -85,6 +85,9 @@ async function proxy(req: NextRequest, context: RouteContext): Promise<Response>
     responseHeaders.delete('set-cookie');
     for (const cookie of cookies) responseHeaders.append('set-cookie', cookie);
   }
+  if (path[0] === 'v1' && (path[1] === 'auth' || path[1] === 'me')) {
+    responseHeaders.set('cache-control', 'no-store');
+  }
   if (!upstream.body) {
     req.signal.removeEventListener('abort', abort);
     return new Response(null, { status: upstream.status, headers: responseHeaders });

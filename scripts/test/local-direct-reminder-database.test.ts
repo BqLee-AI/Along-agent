@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises';
+import { copyFile, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pg from 'pg';
@@ -150,7 +150,7 @@ databaseTests('direct reminder source schema admission against PG16', () => {
           await expect(database.initialize()).rejects.toMatchObject({
             code: 'explicit_upgrade_required',
           });
-          expect((await database.upgrade()).version).toBe('0025');
+          expect((await database.upgrade()).version).toBe('0026');
         });
         await sql(url, async (client) => {
           expect(
@@ -210,8 +210,8 @@ databaseTests('direct reminder source schema admission against PG16', () => {
           }
         });
         await deployment(url, async (database) => {
-          expect(await database.classify()).toMatchObject({ kind: 'supported', version: '0025' });
-          expect((await database.initialize()).version).toBe('0025');
+          expect(await database.classify()).toMatchObject({ kind: 'supported', version: '0026' });
+          expect((await database.initialize()).version).toBe('0026');
         });
       });
     } finally {
@@ -252,7 +252,7 @@ databaseTests('direct reminder source schema admission against PG16', () => {
             version: '0023',
             reason: 'explicit_upgrade_required',
           });
-          expect((await database.upgrade()).version).toBe('0025');
+          expect((await database.upgrade()).version).toBe('0026');
         });
         await sql(url, async (client) => {
           expect(
@@ -340,12 +340,12 @@ databaseTests('direct reminder source schema admission against PG16', () => {
     }
   }, 30000);
 
-  it('upgrades 0024 approvals unchanged and admits only matching UTC elapsed cancellations', async () => {
+  it('upgrades legacy elapsed approvals unchanged and admits only matching UTC elapsed cancellations', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'approval-0024-'));
     const migrations = new URL('../../infra/migrations/', import.meta.url);
     try {
       for (const name of (await readdir(migrations)).filter(
-        (name) => name.endsWith('.sql') && name.slice(0, 4) <= '0024',
+        (name) => name.endsWith('.sql') && name.slice(0, 4) <= '0023',
       )) {
         await copyFile(new URL(name, migrations), join(directory, name));
       }
@@ -353,7 +353,7 @@ databaseTests('direct reminder source schema admission against PG16', () => {
         await deployment(
           url,
           async (database) => {
-            expect((await database.initialize()).version).toBe('0024');
+            expect((await database.initialize()).version).toBe('0023');
           },
           directory,
         );
@@ -362,6 +362,15 @@ databaseTests('direct reminder source schema admission against PG16', () => {
         let legacyId = '';
         let original: unknown;
         await sql(url, async (client) => {
+          await client.query(
+            await readFile(
+              new URL('./fixtures/0024_tasks_elapsed_basis.sql', import.meta.url),
+              'utf8',
+            ),
+          );
+          await client.query(
+            await readFile(new URL('0025_approval_utc_cancellation.sql', migrations), 'utf8'),
+          );
           legacyId = await seedApproval(client, ownerId);
           original = (
             await client.query('SELECT to_jsonb(a) AS value FROM approvals a WHERE id=$1', [
@@ -399,10 +408,10 @@ databaseTests('direct reminder source schema admission against PG16', () => {
         await deployment(url, async (database) => {
           expect(await database.classify()).toMatchObject({
             kind: 'supported',
-            version: '0024',
+            version: '0025',
             reason: 'explicit_upgrade_required',
           });
-          expect((await database.upgrade()).version).toBe('0025');
+          expect((await database.upgrade()).version).toBe('0026');
         });
         await sql(url, async (client) => {
           expect(
@@ -477,8 +486,8 @@ databaseTests('direct reminder source schema admission against PG16', () => {
           }
         });
         await deployment(url, async (database) => {
-          expect(await database.classify()).toMatchObject({ kind: 'supported', version: '0025' });
-          expect((await database.upgrade()).version).toBe('0025');
+          expect(await database.classify()).toMatchObject({ kind: 'supported', version: '0026' });
+          expect((await database.upgrade()).version).toBe('0026');
         });
       });
     } finally {
@@ -489,7 +498,7 @@ databaseTests('direct reminder source schema admission against PG16', () => {
   it('enforces source cardinality, real invocation references and uniqueness on inserts and source updates', async () => {
     await isolated(async (url) => {
       await deployment(url, async (database) => {
-        expect((await database.initialize()).version).toBe('0025');
+        expect((await database.initialize()).version).toBe('0026');
       });
       await sql(url, async (client) => {
         const ownerId = randomUUID();
@@ -646,13 +655,13 @@ databaseTests('direct reminder source schema admission against PG16', () => {
     ],
     ['disabled elapsed trigger', 'ALTER TABLE tasks DISABLE TRIGGER tasks_elapsed_basis_guard'],
     ['changed elapsed function volatility', 'ALTER FUNCTION tasks_guard_elapsed_basis() STABLE'],
-    ['unstamped elapsed schema', "DELETE FROM schema_migrations WHERE version='0024'"],
+    ['unstamped 0024 schema', "DELETE FROM schema_migrations WHERE version='0024'"],
   ])(
     'refuses %s without repairing schema or rewriting the ledger',
     async (_name, mutation) => {
       await isolated(async (url) => {
         await deployment(url, async (database) => {
-          expect((await database.initialize()).version).toBe('0025');
+          expect((await database.initialize()).version).toBe('0026');
         });
         const snapshot = `SELECT jsonb_build_object(
         'ledger',(SELECT jsonb_agg(to_jsonb(m) ORDER BY version) FROM schema_migrations m),

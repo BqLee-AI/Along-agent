@@ -5,7 +5,12 @@ import { readCancelTaskCandidate, readToolTaskList } from '../../src/modules/tas
 import { readToolBriefCards } from '../../src/modules/brief/tool-query.js';
 import { isActiveOwner, readUserPreferences } from '../../src/modules/identity/preferences.js';
 import { loadTimeContext } from '../../src/modules/time/context.js';
-import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
+import {
+  admitTestUser,
+  createIntegrationDatabase,
+  databaseUrl,
+  type IntegrationDatabase,
+} from './setup.js';
 
 const maybe = databaseUrl ? describe : describe.skip;
 
@@ -72,6 +77,7 @@ maybe('owned tool query-client projections', () => {
         "INSERT INTO users(id,auth_email,display_name,timezone_id) VALUES($1,$2,'tester','Asia/Shanghai')",
         [ownerId, `${ownerId}@fixture.test`],
       );
+      await admitTestUser(client, ownerId);
       taskId = await task(client, ownerId, { note: '  保留标题\n第二行' });
       expect(await readCancelTaskCandidate(client, ownerId, taskId)).toEqual({
         id: taskId,

@@ -1,12 +1,16 @@
+import { admitTestUser } from './setup.js';
 // Issue #9: conversation SSE contract — deterministic triage, approval
 // cards, typed time failures, budget, idempotent replay,
 // after_seq cursor, disconnect cancellation, cancel approvals via tool call.
 import { beforeAll, afterAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
+import { once } from 'node:events';
+import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { EventEmitter } from 'node:events';
 import type { Pool } from 'pg';
 import { ThreadEventSchema, type ThreadEvent } from '@along/stream-protocol';
+import { handleRequest } from '../../src/http/app.js';
 import { handleConversationRoute } from '../../src/modules/conversations/routes.js';
 import {
   executeRun,
@@ -24,6 +28,7 @@ import {
   databaseUrl,
   type IntegrationDatabase,
   seedApproval,
+  seedAdmittedSession,
 } from './setup.js';
 import { loadTimeContext } from '../../src/modules/time/context.js';
 
@@ -60,6 +65,7 @@ async function seedUser(pool: Pool): Promise<string> {
      VALUES ($1, $2, 'tester', 'Asia/Shanghai')`,
     [id, `tester-${id}@along.test`],
   );
+  await admitTestUser(pool, id);
   return id;
 }
 
@@ -349,6 +355,93 @@ maybe('conversation runtime', () => {
       key,
     );
     await expect(mismatch).rejects.toMatchObject({ httpStatus: 409 });
+  });
+
+  it('does not replay stored SSE after the owner is disabled following admission', async () => {
+    const session = await seedAdmittedSession(pool);
+    const key = randomUUID();
+    const body = { raw_text: '明天 9:20 提醒我喝水', confirmed_timezone: 'Asia/Shanghai' };
+    const first = await startConversationRun(
+      { pool, timeContext },
+      session.userId,
+      randomUUID(),
+      body,
+      key,
+    );
+    const original = await collect(pool, first);
+    expect(original.length).toBeGreaterThan(0);
+
+    let revoked = false;
+    const replayPool = new Proxy(pool, {
+      get(target, property) {
+        if (property === 'connect')
+          return async () => {
+            const client = await target.connect();
+            let foundReplay = false;
+            return new Proxy(client, {
+              get(connection, key) {
+                if (key === 'query')
+                  return async (...args: unknown[]) => {
+                    const result = await Reflect.apply(connection.query, connection, args);
+                    if (
+                      typeof args[0] === 'string' &&
+                      args[0].includes('FROM conversation_idempotency') &&
+                      result.rows?.some((row: { run_id?: string }) => row.run_id === first.runId)
+                    ) {
+                      foundReplay = true;
+                    }
+                    if (args[0] === 'COMMIT' && foundReplay && !revoked) {
+                      // COMMIT has released the admission lock; the route cannot
+                      // continue until this independent deactivation commits.
+                      await pool.query("UPDATE users SET status = 'disabled' WHERE id = $1", [
+                        session.userId,
+                      ]);
+                      revoked = true;
+                    }
+                    return result;
+                  };
+                const value = Reflect.get(connection, key, connection);
+                return typeof value === 'function' ? value.bind(connection) : value;
+              },
+            });
+          };
+        const value = Reflect.get(target, property, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const server = createServer((req, res) => {
+      void handleRequest(req, res, { pool: replayPool, timeContext }).catch(() => res.destroy());
+    });
+    const listening = once(server, 'listening');
+    server.listen(0, '127.0.0.1');
+    await listening;
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('HTTP address unavailable');
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:${address.port}/api/v1/conversations/messages`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            cookie: `better-auth.session_token=${session.token}`,
+            'x-csrf-token': session.csrfToken,
+            'idempotency-key': key,
+          },
+          body: JSON.stringify(body),
+        },
+      );
+      const text = await response.text();
+      expect(revoked).toBe(true);
+      expect([200, 403]).toContain(response.status);
+      expect(text).not.toContain('data: ');
+      for (const event of original) expect(text).not.toContain(JSON.stringify(event));
+    } finally {
+      const closed = once(server, 'close');
+      server.closeAllConnections();
+      server.close();
+      await closed;
+    }
   });
 
   it('an expired idempotency key starts a fresh run instead of colliding', async () => {

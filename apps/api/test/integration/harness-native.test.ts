@@ -18,7 +18,7 @@ import { createHarnessModelTransport } from '../../src/modules/conversations/har
 import { runNativeHarness } from '../../src/modules/conversations/harness-process.js';
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
 import { measureHarnessContext } from '../../src/modules/conversations/harness-context.js';
-import { seedSession } from '../../src/modules/identity/seed.js';
+import { seedAdmittedSession as seedSession } from './setup.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 import {
   findModelObservation,

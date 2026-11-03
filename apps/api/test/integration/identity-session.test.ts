@@ -11,7 +11,7 @@ import {
   type IntegrationDatabase,
   seedApproval,
 } from './setup.js';
-import { seedSession } from '../../src/modules/identity/seed.js';
+import { seedAdmittedSession as seedSession } from './setup.js';
 import { getApprovalDetail } from '../../src/modules/approvals/service.js';
 const maybe = databaseUrl ? describe : describe.skip;
 

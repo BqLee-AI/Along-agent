@@ -35,7 +35,7 @@ import type {
 import { createHarnessModelTransport } from '../../src/modules/conversations/harness-model.js';
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
 import { SendMessageBodySchema } from '../../src/modules/conversations/schemas.js';
-import { seedSession } from '../../src/modules/identity/seed.js';
+import { seedAdmittedSession as seedSession } from '../integration/setup.js';
 import type { SeededSession } from '../../src/modules/identity/seed.js';
 import { loadTimeContext } from '../../src/modules/time/context.js';
 import { createIntegrationDatabase } from '../integration/setup.js';

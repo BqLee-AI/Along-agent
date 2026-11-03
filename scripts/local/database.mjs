@@ -327,6 +327,7 @@ export class DeploymentDatabase {
   #lease = false;
   #migrations;
   #baselineChecks;
+  #legacyElapsed;
   #connected = false;
   constructor({
     connectionString,
@@ -501,6 +502,28 @@ export class DeploymentDatabase {
               (verify.additional_checks !== undefined && !Array.isArray(verify.additional_checks))
             )
               fail('migration_inventory_invalid');
+            // Manifests may carry forward unchanged facts from earlier versions.
+            // Runtime checks operate on each migration's delta so a prior object
+            // is neither mistaken for an unstamped future object nor counted twice.
+            for (const key of [
+              'tables',
+              'columns',
+              'constraints',
+              'additional_checks',
+              'functions',
+              'triggers',
+              'indexes',
+            ]) {
+              if (!Array.isArray(verify[key])) continue;
+              const prior = new Set(
+                migrations.flatMap((migration) =>
+                  typeof migration.verify === 'object' && migration.verify !== null
+                    ? (migration.verify[key] ?? []).map((fact) => JSON.stringify(fact))
+                    : [],
+                ),
+              );
+              verify[key] = verify[key].filter((fact) => !prior.has(JSON.stringify(fact)));
+            }
           } catch (error) {
             if (error.code !== 'ENOENT') throw error;
             // Existing isolated upgrade fixtures and future SQL verifiers remain supported.
@@ -520,6 +543,23 @@ export class DeploymentDatabase {
       this.#baselineChecks = JSON.parse(
         await readFile(path.join(ROOT, 'scripts/local/baselines/0016-checks.json'), 'utf8'),
       );
+      // Optional for isolated migration fixtures that do not include reconciliation.
+      if (migrations.some((migration) => migration.version === '0026')) {
+        this.#legacyElapsed = JSON.parse(
+          await readFile(
+            path.join(this.verificationDirectory, 'legacy-elapsed-checks.json'),
+            'utf8',
+          ),
+        );
+        if (
+          this.#legacyElapsed.version !== '0024' ||
+          !Array.isArray(this.#legacyElapsed.tables) ||
+          !Array.isArray(this.#legacyElapsed.columns) ||
+          !Array.isArray(this.#legacyElapsed.constraints) ||
+          !Array.isArray(this.#legacyElapsed.additional_checks)
+        )
+          fail('migration_inventory_invalid');
+      }
       this.#migrations = migrations;
     } catch (error) {
       if (error instanceof DeploymentDatabaseError) throw error;
@@ -578,27 +618,26 @@ export class DeploymentDatabase {
       if (last > this.targetVersion) return unknown('database_newer_than_artifacts', last);
       if (last < BASELINE) return unknown('unsupported_legacy_database', last);
       try {
-        await this.#verifyBaseline(last);
-        for (const migration of this.#migrations.filter((m) => m.version > last)) {
-          if (typeof migration.verify !== 'object' || !migration.verify) continue;
-          const pending = migration.verify;
-          const present = await this.#query(
-            `SELECT EXISTS (
-            SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-            WHERE n.nspname='public' AND c.relname=ANY($1::text[])
-            UNION ALL
-            SELECT 1 FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid
-            JOIN pg_namespace n ON n.oid=c.relnamespace
-            WHERE n.nspname='public' AND a.attnum>0 AND NOT a.attisdropped
-              AND (c.relname || '.' || a.attname)=ANY($2::text[])
-          ) AS present`,
-            [pending.tables, pending.columns.map((c) => `${c.table}.${c.name}`)],
-          );
-          if (present.rows[0].present) fail('baseline_unstamped_migration_objects');
+        const elapsed = this.#migrations.find((m) => m.version === '0026')?.verify;
+        const invited = this.#migrations.find((m) => m.version === '0024')?.verify;
+        // Only the deployed elapsed 0024 + approval 0025 combination is a
+        // recognized alternate history. Never infer it from the ledger alone.
+        const legacy =
+          last === '0025' && this.#legacyElapsed && (await this.#hasManifestObjects(elapsed));
+        const effective = this.#migrations.map((migration) =>
+          legacy && migration.version === '0024'
+            ? { ...migration, verify: this.#legacyElapsed }
+            : migration,
+        );
+        if (legacy && (await this.#hasManifestObjects(invited)))
+          fail('baseline_unstamped_migration_objects');
+        await this.#verifyBaseline(last, effective, Boolean(legacy));
+        for (const migration of effective.filter((m) => m.version > last)) {
+          if (legacy && migration.version === '0026') continue;
+          if (await this.#hasManifestObjects(migration.verify))
+            fail('baseline_unstamped_migration_objects');
         }
-        for (const migration of this.#migrations.filter(
-          (m) => m.version > BASELINE && m.version <= last,
-        ))
+        for (const migration of effective.filter((m) => m.version > BASELINE && m.version <= last))
           await this.#verifyAdditional(migration.verify);
       } catch (error) {
         if (this.#lost) throw error;
@@ -618,6 +657,42 @@ export class DeploymentDatabase {
           last === this.targetVersion ? 'target_schema_verified' : 'explicit_upgrade_required',
       };
     });
+  }
+  async #hasManifestObjects(manifest) {
+    if (typeof manifest !== 'object' || !manifest) return false;
+    const present = await this.#query(
+      `SELECT EXISTS (
+        SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+          WHERE n.nspname='public' AND c.relname=ANY($1::text[])
+        UNION ALL
+        SELECT 1 FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid
+          JOIN pg_namespace n ON n.oid=c.relnamespace
+          WHERE n.nspname='public' AND a.attnum>0 AND NOT a.attisdropped
+            AND (c.relname || '.' || a.attname)=ANY($2::text[])
+        UNION ALL
+        SELECT 1 FROM pg_constraint k JOIN pg_class c ON c.oid=k.conrelid
+          JOIN pg_namespace n ON n.oid=c.relnamespace
+          WHERE n.nspname='public' AND (c.relname || '.' || k.conname)=ANY($3::text[])
+        UNION ALL
+        SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+          WHERE n.nspname='public' AND p.proname=ANY($4::text[])
+        UNION ALL
+        SELECT 1 FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
+          JOIN pg_namespace n ON n.oid=c.relnamespace
+          WHERE n.nspname='public' AND NOT t.tgisinternal
+            AND (c.relname || '.' || t.tgname)=ANY($5::text[])
+      ) AS present`,
+      [
+        [...manifest.tables, ...(manifest.indexes ?? []).map((index) => index.name)],
+        manifest.columns.map((column) => `${column.table}.${column.name}`),
+        [...manifest.constraints, ...(manifest.additional_checks ?? [])].map(
+          (constraint) => `${constraint.table}.${constraint.name}`,
+        ),
+        (manifest.functions ?? []).map((fn) => fn.name),
+        (manifest.triggers ?? []).map((trigger) => `${trigger.table}.${trigger.name}`),
+      ],
+    );
+    return present.rows[0].present;
   }
   async #verifyAdditional(manifest) {
     if (typeof manifest === 'string') return this.#query(manifest);
@@ -758,7 +833,8 @@ export class DeploymentDatabase {
     for (const expected of manifest.indexes ?? []) {
       const actual = (
         await this.#query(
-          `SELECT i.indisvalid AS valid,i.indisready AS ready,i.indisunique AS unique,
+          `SELECT i.indisvalid AS valid,i.indisready AS ready,i.indislive AS live,i.indisunique AS unique,
+          i.indoption::smallint[] AS options,
           am.amname AS method,pg_get_expr(i.indpred,i.indrelid) AS predicate,
           ARRAY(SELECT pg_get_indexdef(i.indexrelid,n,true)
             FROM generate_series(1,i.indnkeyatts) n) AS keys
@@ -772,15 +848,18 @@ export class DeploymentDatabase {
         !actual ||
         !actual.valid ||
         !actual.ready ||
+        !actual.live ||
         actual.unique !== expected.unique ||
         actual.method !== expected.method ||
         actual.keys.join(',') !== expected.keys.join(',') ||
+        (expected.options !== undefined &&
+          actual.options.join(',') !== expected.options.join(',')) ||
         actual.predicate !== expected.predicate
       )
         fail('baseline_additional_indexes_mismatch');
     }
   }
-  async #verifyBaseline(version) {
+  async #verifyBaseline(version, migrations = this.#migrations, legacy = false) {
     const columns = (
       await this.#query(`SELECT c.relname AS table_name,a.attname AS name,t.typname AS type,a.attnotnull AS required,
       pg_get_expr(d.adbin,d.adrelid) AS default_value,c.relkind,c.relrowsecurity
@@ -795,7 +874,7 @@ export class DeploymentDatabase {
         const [name, rawType] = token.split(':');
         const nullable =
             rawType.endsWith('?') ||
-            (version >= '0024' && table === 'tasks' && name === 'tzdb_version') ||
+            ((legacy || version >= '0026') && table === 'tasks' && name === 'tzdb_version') ||
             (version >= '0025' && table === 'approvals' && name === 'tzdb_version'),
           type = rawType.replace(/\?$/, '');
         const actual = columns.find((c) => c.table_name === table && c.name === name);
@@ -839,7 +918,7 @@ export class DeploymentDatabase {
             `${c.columns.join(',')}>${c.target}.${c.target_columns.join(',')}:${c.delete_action}`,
         )
         .sort();
-      const additions = this.#migrations
+      const additions = migrations
         .filter((m) => m.version <= version && m.verify !== null && typeof m.verify === 'object')
         .flatMap((m) => m.verify.constraints ?? [])
         .filter((c) => c.table === table && c.type === 'f')
@@ -856,7 +935,7 @@ export class DeploymentDatabase {
     const expectedChecks = new Map(
       this.#baselineChecks.map((check) => [`${check.table}.${check.name}`, check]),
     );
-    for (const migration of this.#migrations.filter((item) => item.version <= version)) {
+    for (const migration of migrations.filter((item) => item.version <= version)) {
       if (typeof migration.verify !== 'object' || migration.verify === null) continue;
       for (const check of migration.verify.baseline_checks ?? []) {
         const key = `${check.table}.${check.name}`;

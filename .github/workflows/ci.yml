@@ -58,8 +58,8 @@ jobs:
       - run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/db/verify-constraints.sql
       - name: Verify readonly routing upgrade and schema drift refusal
         run: bun --no-env-file test scripts/test/local-routing-database.test.ts
-      - name: Verify delegation and direct-reminder incremental upgrades and drift refusal
-        run: bun --no-env-file test scripts/test/local-goal-database.test.ts scripts/test/local-direct-reminder-database.test.ts
+      - name: Verify account and reminder migration convergence
+        run: bun --no-env-file test scripts/test/local-goal-database.test.ts scripts/test/local-direct-reminder-database.test.ts scripts/test/local-invited-database.test.ts scripts/test/local-116-convergence.test.ts
       - run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/db/verify-conversation.sql
       - run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/db/d3-d5.test.sql
       - run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/db/conversation.test.sql

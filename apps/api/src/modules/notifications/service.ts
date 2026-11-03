@@ -4,7 +4,11 @@ import type { Pool, PoolClient } from 'pg';
 import { noticeCopyFor } from '@along/notifier-core';
 import { sendKeyFor } from '@along/scheduler-core';
 import { withTransaction } from '../../db/transaction.js';
-import { getTaskNotificationSource } from '../tasks/notification-source.js';
+import {
+  getNotificationSendVersion,
+  getTaskNotificationSource,
+} from '../tasks/notification-source.js';
+import { isActiveOwner } from '../identity/preferences.js';
 import { findReceivedNotice, insertReceivedNotice, listTaskNotices } from './repository.js';
 
 const inAppProviderCalls = channel('along.notifications.provider-call');
@@ -84,6 +88,28 @@ export function createLocalInAppProvider(receivePool: Pool): InAppProvider {
       inAppProviderCalls.publish({ taskId: notice.taskId });
     }
     const notificationId = await withTransaction(receivePool, async (client) => {
+      // Existing receipt is a historical fact, not new intake permission.
+      const existing = await getReceivedInApp(
+        client,
+        notice.ownerId,
+        notice.taskId,
+        notice.idempotencyKey,
+      );
+      if (existing) {
+        const sendVersion = await getNotificationSendVersion(
+          client,
+          notice.ownerId,
+          notice.taskId,
+          notice.idempotencyKey,
+        );
+        if (existing.expectedStateVersion !== sendVersion)
+          throw new Error('inapp intake idempotency binding conflict');
+        return existing.notificationId;
+      }
+      // Never lock/write tasks here: the sending stack may hold their fence.
+      if (!(await isActiveOwner(client, notice.ownerId, { lock: 'share' }))) {
+        throw new Error('inapp intake owner_ineligible');
+      }
       const source = await getTaskNotificationSource(client, notice.ownerId, notice.taskId);
       if (
         !source ||

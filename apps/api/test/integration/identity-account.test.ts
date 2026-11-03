@@ -285,7 +285,7 @@ maybe('R1 account application service and public HTTP', () => {
   });
 
   it('does not initialize over orphan business owners or invalid/unreadable registries', async () => {
-    await seedApproval(pool);
+    await seedApproval(pool, { ownerId: randomUUID() });
     await expect(service.status()).rejects.toMatchObject({ httpStatus: 503 });
     await expect(service.initialize(fields)).rejects.toMatchObject({ httpStatus: 503 });
     expect(await counts()).toEqual([0, 0, 0, 0]);
@@ -399,17 +399,13 @@ maybe('R1 account application service and public HTTP', () => {
     expect((await pool.query('SELECT count(*)::int AS n FROM sessions')).rows[0].n).toBe(2);
   });
 
-  for (const conflict of ['disabled', 'inconsistent', 'duplicate', 'password'] as const) {
+  for (const conflict of ['disabled', 'inconsistent', 'password'] as const) {
     it(`refuses legacy ${conflict} without changing account or activating user`, async () => {
       const original = await seedSession(pool);
       if (conflict === 'disabled')
         await pool.query("UPDATE users SET status='disabled' WHERE id=$1", [original.userId]);
       if (conflict === 'inconsistent')
         await pool.query("UPDATE auth_accounts SET account_id='wrong-owner' WHERE user_id=$1", [
-          original.userId,
-        ]);
-      if (conflict === 'duplicate')
-        await pool.query("INSERT INTO auth_accounts(user_id,account_id) VALUES($1,'duplicate')", [
           original.userId,
         ]);
       if (conflict === 'password')

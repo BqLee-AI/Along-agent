@@ -1,6 +1,7 @@
 // Navigation carries a location only, never a saved request or action body.
 const RETURN_BASE = 'http://return.internal';
-const ACCOUNT_ENTRY = /^\/(?:login|setup|claim|logout)(?:\/|$)/i;
+const ACCOUNT_ENTRY =
+  /^\/(?:login|setup|claim|logout|invite|reset-password|verify-contact|forgot-password)(?:\/|$)/i;
 
 export type PageQuery = Record<string, string | string[] | undefined>;
 

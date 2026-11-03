@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import type { Pool } from 'pg';
 import { withClient, withTransaction } from '../../src/db/transaction.js';
 import { confirmApproval } from '../../src/modules/approvals/confirm.js';
@@ -21,13 +21,34 @@ const migrationUrl = new URL(
   import.meta.url,
 );
 const elapsedMigrationUrl = new URL(
-  '../../../../infra/migrations/0024_tasks_elapsed_basis.sql',
+  '../../../../scripts/test/fixtures/0024_tasks_elapsed_basis.sql',
   import.meta.url,
 );
 const approvalMigrationUrl = new URL(
   '../../../../infra/migrations/0025_approval_utc_cancellation.sql',
   import.meta.url,
 );
+const convergenceMigrationUrl = new URL(
+  '../../../../infra/migrations/0026_reconcile_0024.sql',
+  import.meta.url,
+);
+
+async function restoreHistoricalSchema(pool: Pool, version: string): Promise<void> {
+  const client = await pool.connect();
+  try {
+    const schema = (await client.query<{ name: string }>('SELECT current_schema() AS name'))
+      .rows[0]!.name;
+    await client.query(`DROP SCHEMA "${schema}" CASCADE; CREATE SCHEMA "${schema}"`);
+    const directory = new URL('../../../../infra/migrations/', import.meta.url);
+    for (const name of (await readdir(directory))
+      .filter((name) => name.endsWith('.sql') && name.slice(0, 4) <= version)
+      .sort()) {
+      await client.query(await readFile(new URL(name, directory), 'utf8'));
+    }
+  } finally {
+    client.release();
+  }
+}
 
 async function seedInvocation(pool: Pool, ownerId: string): Promise<string> {
   const invocationId = randomUUID();
@@ -292,13 +313,7 @@ maybe('task creation provenance', () => {
     const upgrade = await createIntegrationDatabase();
     const db = upgrade.pool;
     try {
-      await db.query(`DROP TRIGGER tasks_elapsed_basis_guard ON tasks;
-        DROP FUNCTION tasks_guard_elapsed_basis();
-        ALTER TABLE tasks DROP CONSTRAINT tasks_time_basis_check,
-          DROP CONSTRAINT tasks_display_version_check, DROP CONSTRAINT tasks_tzdb_version_check,
-          DROP COLUMN time_basis, DROP COLUMN display_version;
-        ALTER TABLE tasks ALTER COLUMN tzdb_version SET NOT NULL;
-        DELETE FROM schema_migrations WHERE version='0024'`);
+      await restoreHistoricalSchema(db, '0023');
       const input = await frozenInput(db);
       await db.query(
         `INSERT INTO tasks(id,owner_id,source_invocation_id,fire_at_utc,wall_time,
@@ -550,27 +565,13 @@ maybe('task creation provenance', () => {
     const upgrade = await createIntegrationDatabase();
     const db = upgrade.pool;
     try {
-      // Restore the actual 0022 task shape inside this isolated fixture only.
-      await db.query(
-        `DROP TRIGGER approvals_null_tzdb_guard ON approvals;
-         DROP FUNCTION approvals_guard_null_tzdb();
-         ALTER TABLE approvals DROP CONSTRAINT approvals_tzdb_version_check;
-         ALTER TABLE approvals ALTER COLUMN tzdb_version SET NOT NULL;
-         DELETE FROM schema_migrations WHERE version='0025';
-         DROP TRIGGER tasks_elapsed_basis_guard ON tasks;
-         DROP FUNCTION tasks_guard_elapsed_basis();
-         ALTER TABLE tasks DROP CONSTRAINT tasks_time_basis_check,
-           DROP CONSTRAINT tasks_display_version_check, DROP CONSTRAINT tasks_tzdb_version_check,
-           DROP COLUMN time_basis, DROP COLUMN display_version;
-         ALTER TABLE tasks ALTER COLUMN tzdb_version SET NOT NULL;
-         DELETE FROM schema_migrations WHERE version='0024';
-         DROP TRIGGER tasks_creation_source_required ON tasks;
-         DROP FUNCTION tasks_require_creation_source();
-         ALTER TABLE tasks DROP CONSTRAINT tasks_source_xor_check;
-         ALTER TABLE tasks DROP COLUMN source_invocation_id;
-         DELETE FROM schema_migrations WHERE version='0023'`,
-      );
-      const legacy = await seedApproval(db, {});
+      await restoreHistoricalSchema(db, '0022');
+      const ownerId = randomUUID();
+      await db.query('INSERT INTO users(id,auth_email) VALUES($1,$2)', [
+        ownerId,
+        `${ownerId}@local.invalid`,
+      ]);
+      const legacy = await seedApproval(db, { ownerId });
       const pending = await seedApproval(db, { ownerId: legacy.ownerId });
       const { detail } = await getApprovalDetail({ pool: db }, legacy.ownerId, legacy.id);
       // The shared implementation requires 0023, so seed the real pre-0023
@@ -610,6 +611,7 @@ maybe('task creation provenance', () => {
       ).toEqual(tasksBefore);
       await db.query(await readFile(elapsedMigrationUrl, 'utf8'));
       await db.query(await readFile(approvalMigrationUrl, 'utf8'));
+      await db.query(await readFile(convergenceMigrationUrl, 'utf8'));
       expect((await db.query('SELECT * FROM approvals ORDER BY id')).rows).toEqual(approvalsBefore);
       await db.query("UPDATE tasks SET state='pending_schedule',state_version=2 WHERE id=$1", [
         unknownId,

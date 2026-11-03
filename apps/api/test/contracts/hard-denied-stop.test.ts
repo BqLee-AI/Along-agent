@@ -14,7 +14,7 @@ import { startConversationRun, executeRun } from '../../src/modules/conversation
 import type { ConversationDeps } from '../../src/modules/conversations/contracts.js';
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
 import { createHarnessModelTransport } from '../../src/modules/conversations/harness-model.js';
-import { seedSession } from '../../src/modules/identity/seed.js';
+import { seedAdmittedSession as seedSession } from '../integration/setup.js';
 import { invokeTool, reserveToolInvocation } from '../../src/modules/tools/gateway.js';
 import type { ToolContext } from '../../src/modules/tools/contracts.js';
 import { loadTimeContext } from '../../src/modules/time/context.js';

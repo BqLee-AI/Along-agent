@@ -60,7 +60,8 @@ import { ensureRunContextPolicy } from './context-policy.js';
 import { insertRoutingPolicy } from './routing-checkpoints.js';
 import { routingRuntimeOf } from './harness-config.js';
 import { acceptReminderDate } from './reminder-date.js';
-import { readUserPreferences } from '../identity/preferences.js';
+import { isActiveOwner, readUserPreferences } from '../identity/preferences.js';
+import { writeAuthorizedEvent } from './stream-authorization.js';
 
 const AGENT_REVISION = 'assistant/r1';
 const BUSINESS_MAX_ITERATIONS = 10;
@@ -161,6 +162,8 @@ export async function startConversationRun(
   };
   try {
     started = await withTransaction(pool, async (client: PoolClient) => {
+      if (!(await isActiveOwner(client, ownerId, { lock: 'share' })))
+        throw forbidden('owner authorization revoked');
       const existing = await findIdempotency(client, ownerId, key);
       if (existing) {
         if (existing.request_hash !== requestHash) {
@@ -794,12 +797,14 @@ export async function executeRun(
   signal?: AbortSignal,
 ): Promise<void> {
   const pool = requirePool(deps);
+  const authorizedWrite: EventWriter = (event) =>
+    writeAuthorizedEvent(pool, context.ownerId, write, event);
   const execution = await withTransaction(
     pool,
     async (client) => (await lockRun(client, context, true, false)).run.execution,
   );
   if (execution === 'harness') {
-    await executeHarness(deps, context, write, signal);
+    await executeHarness(deps, context, authorizedWrite, signal);
     return;
   }
   const session: RunSession = {
@@ -807,17 +812,27 @@ export async function executeRun(
     terminal: false,
   };
   try {
-    await executeBusinessTurn(pool, session, write);
+    await executeBusinessTurn(pool, session, authorizedWrite);
   } catch {
     if (session.terminal) return;
-    // Post-open failures must still end the stream; if even the terminal
-    // checkpoint cannot be written, close without corrupting the JSON path.
+    // Accounting for an already accepted attempt must survive revocation,
+    // but the committed failure is not itself authority to disclose it.
     try {
-      await failWith(pool, session, write, {
-        code: 'INTERNAL_ERROR',
-        message: '内部错误，请稍后重试。',
-        http_status: 500,
+      const failed = await withTransaction(pool, async (client) => {
+        await lockRun(client, context, true, false);
+        return commitTerminal(client, context, 'failed', {
+          conversation_id: context.conversationId,
+          run_id: context.runId,
+          error: {
+            code: 'INTERNAL_ERROR',
+            message: '内部错误，请稍后重试。',
+            http_status: 500,
+          },
+        });
       });
+      session.terminal = true;
+      await withTransaction(pool, (client) => lockRun(client, context, false));
+      await authorizedWrite(failed);
     } catch {
       if (session.terminal) return;
     }

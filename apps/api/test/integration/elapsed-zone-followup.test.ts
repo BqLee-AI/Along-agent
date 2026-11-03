@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { loadTimeContext } from '../../src/modules/time/context.js';
 import type { ToolContext } from '../../src/modules/tools/contracts.js';
 import { invokeTool, reserveToolInvocation } from '../../src/modules/tools/gateway.js';
-import { createIntegrationDatabase, type IntegrationDatabase } from './setup.js';
+import { admitTestUser, createIntegrationDatabase, type IntegrationDatabase } from './setup.js';
 
 const text = '三分钟后提醒我核对报告';
 const args = {
@@ -49,6 +49,7 @@ describe('elapsed reminder frozen timezone authority', () => {
       "INSERT INTO users(id,auth_email,display_name,timezone_id) VALUES($1,$2,'zone tester',$3)",
       [ownerId, `${ownerId}@zone.test`, source === 'explicit' ? null : timezone],
     );
+    await admitTestUser(db.pool, ownerId);
     await db.pool.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
       conversationId,
       ownerId,

@@ -2,7 +2,7 @@
 
 > 状态：既有 task 与 R1 独立文档批准 schema 合同。范围：`approvals`、`approval_revision_requests`、`document_approvals`、`document_approval_decisions`、`tasks`、`task_events`、`outbox`、`notifications`；合同不表示迁移演练或真实模型/用户材料验收已通过。不包含：重复提醒、日历授权、投递对账网关（v1 盒子）。
 
-> 直接创建：tasks 的 `source_invocation_id` 与旧 `source_approval_id` 分别受约束，新写必须恰有一项；0023 保留历史双空来源。0024 前向增加经过时长依据和展示版本，仅严格 UTC 的 elapsed 任务允许空 tzdb 版本；0025 允许其取消批准保留相同空版本，不迁写历史行。事务、append-only 与调度回执门不变。
+> 直接创建：tasks 的 `source_invocation_id` 与旧 `source_approval_id` 分别受约束，新写必须恰有一项；0023 保留历史双空来源。经过时长依据和展示版本允许严格 UTC 的 elapsed 任务保留空 tzdb；0025 允许其取消批准保留相同空版本。两条 0024 历史路径由 0026 收敛，不迁写历史行。事务、append-only 与调度回执门不变。
 
 ## 设计依据
 

@@ -6,7 +6,7 @@ import type { AddressInfo } from 'node:net';
 import type { Pool } from 'pg';
 import { handleRequest, type AppDeps } from '../../src/http/app.js';
 import { loadTimeContext, createTimeContext } from '../../src/modules/time/context.js';
-import { seedSession } from '../../src/modules/identity/seed.js';
+import { seedAdmittedSession as seedSession } from './setup.js';
 import {
   createIntegrationDatabase,
   databaseUrl,

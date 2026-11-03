@@ -21,9 +21,12 @@ import { acceptReminderDate } from '../../src/modules/conversations/reminder-dat
 import type { ConversationDeps } from '../../src/modules/conversations/contracts.js';
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
 import { createHarnessModelTransport } from '../../src/modules/conversations/harness-model.js';
-import { seedSession } from '../../src/modules/identity/seed.js';
 import { loadTimeContext } from '../../src/modules/time/context.js';
-import { createIntegrationDatabase, type IntegrationDatabase } from '../integration/setup.js';
+import {
+  createIntegrationDatabase,
+  seedAdmittedSession as seedSession,
+  type IntegrationDatabase,
+} from '../integration/setup.js';
 import { frames, jsonBody, listen, sendModelSse, started } from '../helpers/harness-consumer.js';
 
 const Body = z.object({ messages: z.array(HarnessModelMessageSchema) });

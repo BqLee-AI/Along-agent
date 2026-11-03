@@ -3,6 +3,7 @@ import type { Pool, PoolClient } from 'pg';
 import { z } from 'zod';
 import { workspaceGrantSchema } from '@along/contracts';
 import { validateWorkspaceGrant } from '../workspaces/service.js';
+import { isActiveOwner } from '../identity/preferences.js';
 import { withTransaction } from '../../db/transaction.js';
 import { forbidden, notFound, stateConflict, HttpError } from '../../http/errors.js';
 import { readFrozenToolApproval } from '../approvals/tool-result.js';
@@ -486,6 +487,16 @@ async function gate(
 ): Promise<ToolOutcome | null> {
   const digest = digestInvocationArgs(input.args);
   if (
+    !(await isActiveOwner(
+      client,
+      ctx.ownerId,
+      row.tool_id === 'create_reminder' ? { lock: 'share' } : {},
+    ))
+  ) {
+    await audit(client, ctx, row, 'denied', denied);
+    return { ...denied, invocationId: row.invocation_id, replayed: false };
+  }
+  if (
     row.tool_id !== input.toolId ||
     row.args_hash !== digest.argsHash ||
     row.args_bytes !== digest.argsBytes
@@ -755,6 +766,7 @@ export async function executeNonTransactionalInvocation(
   return withTransaction(pool, async (client) => {
     const { row, canExecute } = await loadInvocation(client, ctx, input, true);
     const disclose =
+      (await isActiveOwner(client, ctx.ownerId)) &&
       ctx.allowlist.includes(row.tool_id) &&
       workspaceAuthorized(ctx, row) &&
       (!row.tool_id.startsWith('workspace_') || (canExecute && !ctx.signal?.aborted));

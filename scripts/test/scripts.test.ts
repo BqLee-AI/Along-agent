@@ -132,4 +132,25 @@ describe('governance scripts', () => {
       }
     }
   });
+  it('permits only the reviewed invited account migration and rejects duplicate sequences', () => {
+    for (const [names, accepted] of [
+      [['0024_invited_accounts.sql'], true],
+      [['0023_invited_accounts.sql'], false],
+      [['0025_invited_accounts.sql'], false],
+      [['0024_invited_unapproved.sql'], false],
+      [['0024_identity_invited_accounts.sql'], false],
+      [['0023_tasks_direct_creation.sql', '0024_invited_accounts.sql'], true],
+      [['0024_invited_accounts.sql', '0024_commitments_duplicate.sql'], false],
+    ] as const) {
+      const target = mkdtempSync(join(tmpdir(), 'migration-invited-'));
+      try {
+        mkdirSync(join(target, 'infra', 'migrations'), { recursive: true });
+        for (const name of names)
+          writeFileSync(join(target, 'infra', 'migrations', name), 'BEGIN; COMMIT;');
+        expect(run('check-migrations.mjs', target).code === 0).toBe(accepted);
+      } finally {
+        rmSync(target, { recursive: true, force: true });
+      }
+    }
+  });
 });

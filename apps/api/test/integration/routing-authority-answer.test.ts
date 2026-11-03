@@ -6,7 +6,7 @@ import { createContextPolicy } from '../../src/modules/conversations/context-pol
 import { createHarnessSession } from '../../src/modules/conversations/harness-authority.js';
 import { startConversationRun } from '../../src/modules/conversations/service.js';
 import { listRunEvents } from '../../src/modules/conversations/repository.js';
-import { seedSession } from '../../src/modules/identity/seed.js';
+import { seedAdmittedSession as seedSession } from './setup.js';
 import { loadTimeContext } from '../../src/modules/time/context.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 

@@ -1,0 +1,49 @@
+{
+  "version": "0024",
+  "tables": [],
+  "columns": [
+    { "table": "tasks", "name": "time_basis", "type": "jsonb", "required": false, "default": "" },
+    {
+      "table": "tasks",
+      "name": "display_version",
+      "type": "text",
+      "required": false,
+      "default": ""
+    }
+  ],
+  "constraints": [],
+  "additional_checks": [
+    {
+      "table": "tasks",
+      "name": "tasks_time_basis_check",
+      "expression": "((time_basis IS NULL) OR (((jsonb_typeof(time_basis) = 'object'::text) AND (time_basis ?& ARRAY['kind'::text, 'anchor_utc'::text, 'duration_seconds'::text, 'source_message_id'::text, 'revision'::text]) AND ((time_basis - ARRAY['kind'::text, 'anchor_utc'::text, 'duration_seconds'::text, 'source_message_id'::text, 'revision'::text]) = '{}'::jsonb) AND ((time_basis ->> 'kind'::text) = 'elapsed'::text) AND ((time_basis ->> 'revision'::text) = 'elapsed/1'::text) AND (jsonb_typeof((time_basis -> 'anchor_utc'::text)) = 'string'::text) AND ((time_basis ->> 'anchor_utc'::text) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'::text) AND (jsonb_typeof((time_basis -> 'source_message_id'::text)) = 'string'::text) AND ((time_basis ->> 'source_message_id'::text) ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text) AND (jsonb_typeof((time_basis -> 'duration_seconds'::text)) = 'number'::text) AND ((time_basis ->> 'duration_seconds'::text) ~ '^[1-9][0-9]{0,11}$'::text) AND (source_invocation_id IS NOT NULL) AND (source_approval_id IS NULL) AND (display_version = 'elapsed/1'::text) AND (wall_time ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$'::text)) IS TRUE))"
+    },
+    {
+      "table": "tasks",
+      "name": "tasks_display_version_check",
+      "expression": "(((time_basis IS NULL) AND (display_version IS NULL)) OR ((time_basis IS NOT NULL) AND (display_version = 'elapsed/1'::text)))"
+    },
+    {
+      "table": "tasks",
+      "name": "tasks_tzdb_version_check",
+      "expression": "(((tzdb_version IS NOT NULL) AND ((time_basis IS NULL) OR (length(tzdb_version) > 0))) OR ((tzdb_version IS NULL) AND (time_basis IS NOT NULL) AND (timezone_id = 'UTC'::text) AND (fold = 0) AND (resolved_utc_offset_seconds = 0)))"
+    }
+  ],
+  "functions": [
+    {
+      "name": "tasks_guard_elapsed_basis",
+      "arguments": "",
+      "result": "trigger",
+      "volatility": "v",
+      "strict": false
+    }
+  ],
+  "triggers": [
+    {
+      "table": "tasks",
+      "name": "tasks_elapsed_basis_guard",
+      "type": 23,
+      "function": "tasks_guard_elapsed_basis"
+    }
+  ]
+}

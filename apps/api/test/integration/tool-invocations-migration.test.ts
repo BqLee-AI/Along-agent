@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { Pool } from 'pg';
-import { databaseUrl, createIntegrationDatabase } from './setup.js';
+import { admitTestUser, databaseUrl, createIntegrationDatabase } from './setup.js';
 import { loadTimeContext } from '../../src/modules/time/context.js';
 import type { ToolContext } from '../../src/modules/tools/contracts.js';
 import { executeLocalInvocation, reserveInvocation } from '../../src/modules/tools/invocations.js';
@@ -157,6 +157,7 @@ maybe('0014 durable invocation migration stop-write cutover', () => {
         .sort()) {
         await database.pool.query(await readFile(new URL(filename, migrations), 'utf8'));
       }
+      await admitTestUser(database.pool, ctx.ownerId);
       const input = { toolId: 'get_user_prefs', args: {} };
       const { invocationId } = await reserveInvocation(database.pool, ctx, {
         ...input,

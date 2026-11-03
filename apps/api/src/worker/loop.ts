@@ -14,6 +14,7 @@ import { runSendPhase } from '../modules/tasks/scheduler/send.js';
 import { runAckPhase } from '../modules/tasks/scheduler/ack.js';
 import { runMissedPhase } from '../modules/tasks/scheduler/missed.js';
 import { createLocalInAppProvider } from '../modules/notifications/service.js';
+import { runIdentityMailTick } from '../modules/identity/mail.js';
 
 const schedulerTicks = channel('along.scheduler.tick');
 
@@ -41,6 +42,7 @@ export function startWorkerLoop(options: WorkerLoopOptions = {}): WorkerLoopHand
     : null;
   const provider = receivePool ? createLocalInAppProvider(receivePool) : null;
   let activeTick: Promise<void> | null = null;
+  let activeMailTick: Promise<void> | null = null;
   let stopped = false;
   let stopping: Promise<void> | null = null;
 
@@ -73,9 +75,20 @@ export function startWorkerLoop(options: WorkerLoopOptions = {}): WorkerLoopHand
     return activeTick;
   }
 
+  function mailTick(): void {
+    if (!pool || activeMailTick || stopped) return;
+    // Email IO has its own serial guard; it must not stall scheduler deadlines.
+    activeMailTick = runIdentityMailTick(pool)
+      .catch((error: unknown) => onError('identity-mail', error))
+      .finally(() => {
+        activeMailTick = null;
+      });
+  }
+
   // Keep worker-only roles alive even when every PG connection is idle.
   const timer = setInterval(() => {
     void tick();
+    mailTick();
   }, intervalMs);
 
   return {
@@ -85,7 +98,7 @@ export function startWorkerLoop(options: WorkerLoopOptions = {}): WorkerLoopHand
         clearInterval(timer);
         stopping = (async () => {
           try {
-            await activeTick;
+            await Promise.all([activeTick, activeMailTick]);
           } finally {
             await receivePool?.end();
           }

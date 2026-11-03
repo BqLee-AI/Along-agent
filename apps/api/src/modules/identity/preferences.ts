@@ -54,10 +54,20 @@ export async function setUserTimezoneWithinTransaction(
   };
 }
 
-export async function isActiveOwner(client: PoolClient, ownerId: string): Promise<boolean> {
-  const { rows } = await client.query<{ status: string }>(
-    'SELECT status FROM users WHERE id = $1',
+export interface OwnerEligibilityOptions {
+  lock?: 'share';
+}
+
+export async function isActiveOwner(
+  client: PoolClient,
+  ownerId: string,
+  options: OwnerEligibilityOptions = {},
+): Promise<boolean> {
+  const { rows } = await client.query<{ status: string; admitted: boolean }>(
+    `SELECT u.status, EXISTS (
+       SELECT 1 FROM identity_account_admissions a WHERE a.user_id=u.id
+     ) AS admitted FROM users u WHERE u.id=$1${options.lock === 'share' ? ' FOR SHARE OF u' : ''}`,
     [ownerId],
   );
-  return rows[0]?.status === 'active';
+  return rows[0]?.status === 'active' && rows[0].admitted;
 }

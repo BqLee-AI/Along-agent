@@ -1,6 +1,6 @@
 # productize-invited-accounts 任务与证据
 
-> Proposed；P0 是合同/实验准备，不是 #112 完成。勾选只说明对应交付已存在，不代表评审通过或生产能力生效。P1 未实施；外部缺口不冒充绿色。完整真源见 design/21 §1–§9。
+> P0 合同/库实验、P1 实现和真实外部放行分别取证；勾选只说明对应交付与验证已存在，不表示生产验收或 #112 完成。[P1 实现验证](../../../docs/verification/invited-account-implementation-2026-11-03.md)保留测试策略、运行范围和外部缺口，完整合同见 design/21 §1–§9。
 
 ## P0：合同、隔离可行性和外部前置
 
@@ -12,28 +12,30 @@
 - [x] 1.6 [外部前置记录](../../../docs/verification/invited-account-external-prerequisites-2026-11-03.md) 已明确邮件/域名/DNS/受控收件箱/APP_ORIGIN HTTPS/密钥托管和保留批准均无确认取值；未使用原凭据/安装、未发送外部邮件。已完成的是缺口登记，真实外部证据仍受阻，不以此勾选 P1。
 - [x] 1.7 集成负责人执行本次适用检查与 OpenSpec strict，记录实际范围及未跑项，独立合同 PR 仅 Refs #112。
 
-## P1：正式完整切片（全部未实施）
+## P1：正式完整切片
 
-- [ ] 2.1 按明确行为先观察目标缺失 Red，再实现准入及管理员保护；保留空安装门、原 ID/auth_email/credential/secret 和历史 owner，不自动激活旧 owner；新增迁移由集成时分配并同步结构核验/扫描规则。
-- [ ] 2.2 同批实现加密联系邮箱/规范化唯一、本人验证换绑、邀请创建/重发/撤销/接受与持久限流，正式窄名单/共享 DTO/API/页面共同可用，不挂全量库 handler。
-- [ ] 2.3 实现提交后 identity 窄邮件消费者，真实 queued/submitting/submitted/failed/unknown/suppressed、新代/旧代、payload 清理；真实供应商和接受未知不盲重投。
-- [ ] 2.4 实现库改密/恢复、credential revision、用户级锁序及全部会话撤销，提交确认后库 Cookie 发布/清除；本人单个/others/all 会话管理，无 raw token 或完整 IP 泄漏。
-- [ ] 2.5 实现 disabled/deleted_requested、唯一管理员拒绝、resolver/当前资格、scheduler 原子许可与 notifications 独立接收门；保持取消/回执/unknown，identity 不反向写 Run/task 状态。
-- [ ] 2.6 正式 Web/proxy 保留实际 Origin、多 Cookie/流式/有界上传及 no-store；安全链接 fragment/GET 零消费、键盘/粘贴/密码管理器、401 仅只读重登，403/503 不误跳、不重放 POST。
-- [ ] 2.7 本机维护明确选取普通准入账户，合并有限独立登记并保留他人原 ID/root/权限；无 workspace 新用户可完整管理账户/使用真实已配置基础能力，不虚报模型可用。
-- [ ] 2.8 受授权旧安装副本执行前向升级、故障收尾和两次正式 stop/start，原用户/credential/secret/owner/history/登记/root identity/会话固定期限保持；新事实后不回旧写者。
+- [x] 2.1 按明确行为先观察目标缺失 Red，再实现准入及管理员保护；保留空安装门、原 ID/auth_email/credential/secret 和历史 owner，不自动激活旧 owner；新增 `0024` 并同步结构核验/扫描规则。Red/Green 与事后补测分别记录，不把整个切片称为 TDD。
+- [x] 2.2 同批实现加密联系邮箱/规范化唯一、本人验证换绑、邀请创建/重发/撤销/接受与持久限流，正式窄名单/共享 DTO/API/页面共同可用，不挂全量库 handler。
+- [x] 2.3 实现提交后 identity 窄邮件消费者，准确表达 queued/submitting/submitted/failed/unknown/suppressed、新代/旧代与 payload 清理；Resend HTTPS 传输已实现，隔离 loopback 验证不冒充真实供应商验收，接受未知不盲重投。
+- [x] 2.4 实现库改密/恢复、credential revision、用户级锁序及全部会话撤销，提交确认后库 Cookie 发布/清除；本人单个/others/all 会话管理，无 raw token 或完整 IP 泄漏。
+- [x] 2.5 实现 disabled/deleted_requested、唯一管理员拒绝、resolver/当前资格、scheduler 原子许可与 notifications 独立接收门；保持取消/回执/unknown，identity 不反向写 Run/task 状态。撤销后的内部终态记账保留已接受事实，不披露内容。
+- [x] 2.6 正式 Web/proxy 保留实际 Origin、多 Cookie/流式/有界上传及 no-store；安全链接 fragment/GET 零消费、键盘/粘贴/密码管理器属性、401 仅只读重登，403/503 不误跳、不重放 POST。真实浏览器覆盖共享原生POST和同页新fragment回归，HTTPS另验。
+- [x] 2.7 本机维护明确选取普通准入账户，合并有限独立登记并保留他人原 ID/root/权限；无 workspace 新用户可完整管理账户/使用真实已配置基础能力，不虚报模型可用。
+- [x] 2.8 任务独占合法0022旧库副本执行前向升级、故障收尾和两次正式 stop/start；原用户/credential/secret/owner/history/登记/root identity保留，旧session快照与固定期限另有覆盖。路径adapter和预编译Web工件边界见记录，不冒充原用户安装或local:init新构建。
 
-## A/D：最终验收与独立收口（未执行，不以 P0 关闭）
+## A/D：最终验收与独立收口
 
-- [ ] 3.1 D3/D6/D8：真实 PG 双连接覆盖接受/撤销/重发、邮箱唯一竞争、过期/错用途/旧代、逐写点失败全回滚与 COMMIT 未知、丢响应唯一开户，恢复与旧密码登录两种取得锁后屏障顺序；匿名一致性与多进程持久配额具有真实 Red/Green 或诚实替代证据。
+- [x] 3.1 D3/D6/D8：真实 PG 双连接覆盖接受/撤销/重发全部六种锁先后、邮箱唯一竞争、过期/错用途/旧代、六实际写点失败全回滚与 COMMIT 未知、丢HTTP响应唯一开户，恢复与旧密码登录两种取得锁后屏障顺序；匿名一致性与多进程持久配额具有真实 Red/Green 或诚实替代证据。
 - [ ] 3.2 A1/A2/A3、D1/D6/D8：两个真实浏览器 context 经真实邮件/正式 Web/proxy/API/PG 完成原管理员邮箱验证、邀请、新人设密/登录、本人恢复/改密、会话撤销后旧 Cookie 401。互换 tasks/events/approvals/conversations/Run/SSE/tool-results/notifications/workspace 的 ID/parent/游标/幂等键，管理员同样不能越 owner；无 workspace 路径独立可用。
-- [ ] 3.3 A3、D1/D3/D9：真实多连接/进程验证停用先提交无新许可/接收，许可先提交如实在途；独立接收无锁环，取消门/真实回执/unknown 不重发不回归，历史匹配接收只核对。
+- [x] 3.3 A3、D1/D3/D9：真实多连接/进程验证停用先提交无新许可/接收，许可先提交如实在途；独立接收无锁环，取消门/真实回执/unknown 不重发不回归，历史匹配接收只核对。六项资格竞争、32项指定调度/故障及原生撤销终态消费者均通过。
 - [ ] 3.4 D6/D8/D10：真实成功/拒绝/超时/接受未知的邮件状态准确，预览/GET 零消费，日志/URL/浏览器持久存储无秘密；生产域 HTTPS/Secure Cookie 与 localhost 分开取证；403/503 不跳、重登后只有 GET，真实可访问页面/密码管理器属性与键盘粘贴可用。
-- [ ] 3.5 D7/D8：旧副本升级与两次正式启停、前向修复和原事实保留证据齐全；不得以本轮隔离库实验代替旧安装生命周期。
-- [ ] 3.6 集成负责人在最终版本统一执行 `bun run verify`、`bun run test:contracts`、相关 `bun run test:integration`、`bun run test:scheduler`、OpenSpec strict 和 CI 五门，分别关联本地/隔离/生产证据及未覆盖项。
+- [x] 3.5 D7/D8：合法0022旧副本升级、两个坏结构副本拒绝、真实故障后前向重试与两次正式启停、原事实和有限registry保留证据齐全；不是PG reconnect。正式入口/宿主路径适配与复用工件的范围在实现验证中明确。
+- [x] 3.6 集成负责人执行 `bun run verify`、`bun run test:contracts`、相关 `bun run test:integration`、`bun run test:scheduler`、OpenSpec strict，首实现精确head五门CI通过；版本化证据见P1实现验证，最终文档head的同名五门在PR #115核验，不沿用旧head或P0绿色。本地/隔离/生产范围及未覆盖项分列。
 - [ ] 3.7 全部旅程/隔离/旧安装/外部证据与独立评审齐全后才放行邀请入口；独立收口 PR 执行 `openspec archive productize-invited-accounts`、同步有效 specs 与索引，最后关闭 #112。P0 不勾选此项。
 
 ## P0 Verification（2026-11-03）
+
+本节仅保留 P0 基线历史；其中“未实施/未获授权”描述该阶段，不代表 P1 实现状态。P1 的独立证据见[实现验证](../../../docs/verification/invited-account-implementation-2026-11-03.md)。
 
 源码基线 `76f8b78bd334e025fc98b6c75cf4d9c7bb7b19ed`；本 PR 仅合同和证据文档，未修改生产代码/依赖/迁移/安装。纯合同不适用运行时 TDD；库未知先真实实验，不将故障注入或事后覆盖称为 Red→Green。
 

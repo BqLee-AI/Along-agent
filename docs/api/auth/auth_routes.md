@@ -120,9 +120,9 @@ initialize 原子提交 user/credential/session/安装绑定后才发 Cookie。c
 
 账户成功与工作区可用分开：`workspace_binding:pending_local_configuration` 指引部署者通过正式 `local:account` 检查/完成登记，具体操作见[本机使用指南](../../guides/local-lifecycle.md)。程序从已绑定管理员获取 owner，复用 #67 私有配置与重载，不让浏览器/模型选择 owner、不要求手填 ID，不通过 API 写宿主私有文件。已有正确登记由本机核验后保留；文件、配置或重载失败不回滚已提交账户，不重新开户。完整阶段与实验边界见 design/16 §6–§8。
 
-## 5. 受邀账户增量（#112，Proposed／待评审）
+## 5. 受邀账户增量（#112）
 
-本节不改变 §1–§4 的当前生效状态。P1 完整实现及验收后，才以本节替换 §4 的“仅绑定管理员登录”、无邮箱/恢复和管理员默认登记限制；其余固定会话、原 ID/credential、Origin/CSRF、提交后 Cookie、body 与 proxy 边界保持。[design/21 §2–§8](../../design/21-invited-account-access.md) 定义状态、并发与邮件语义；schema 的 #112 Proposed 章节定义存储，不把这些内容描述为当前能力。
+本节定义 #112 的正式实现接口，替换 §4 的“仅绑定管理员登录”、无邮箱/恢复和管理员默认登记限制；其余固定会话、原 ID/credential、Origin/CSRF、确认提交后 Cookie、body 与 proxy 边界保持。[design/21 §2–§8](../../design/21-invited-account-access.md)定义状态、并发与邮件语义；schema 的 #112 章节定义 `0024` 存储。[实现验证](../../verification/invited-account-implementation-2026-11-03.md)与外部入口放行分开取证，不将实现或模拟器成功称为真实送达。
 
 ### 5.1 协议和输入
 
@@ -132,9 +132,9 @@ initialize 原子提交 user/credential/session/安装绑定后才发 Cookie。c
 - token 为 32 随机字节的无 padding base64url（43 字符），只从邮件 fragment 读入内存并 POST；语法错误 400，有效格式但不可消费一律 409 TOKEN_INVALID。GET/预览不带 token query、不消费。邀请接受要求当前无有效 Along 会话，避免错绑；不借清 Cookie 隐式切号。
 - 当前密码错误统一 `401 UNAUTHENTICATED`，不泄漏 credential/邮箱事实；会话仍有效时表单显示验证失败，不把账户操作表单自身 401 递归跳转。
 
-### 5.2 拟议窄路由
+### 5.2 窄路由
 
-下列是必要 API 全集，不是库 handler 通配；P1 同步 `http/app.ts` 与 `identity/routes.ts` 两处名单及共享 DTO。`{}` 为严格空对象。
+下列是必要 API 全集，不是库 handler 通配；`http/app.ts` 与 `identity/routes.ts` 复用同一精确名单并分别执行入口控制，共享 DTO 是输入/输出契约。`{}` 为严格空对象。
 
 | 方法/路径                           | 资格                 | strict body / query                           | 成功 data                                                                     |
 | ----------------------------------- | -------------------- | --------------------------------------------- | ----------------------------------------------------------------------------- |
@@ -231,6 +231,10 @@ type ManagedAccountView = {
 
 邀请 token 已通过用途/代次/期限验证后，用户名冲突才可给 `LOGIN_NAME_UNAVAILABLE`；其他匿名 token 无效统一 TOKEN_INVALID，不泄漏账号状态/邮箱归属。匿名恢复依赖预检、地址/IP 配额与响应形状不依赖账号存在性；不存在、未验证、disabled/deleted_requested 同 202，202 不带 delivery ID。初始限流数值、TTL、密钥和保留见 design/21 §3–§5，不由路由实现猜值。
 
+可信来源 IP 的配额已用尽时，请求直接返回其窗口的 `429`，不再为请求中的新用户名、邮箱或 token 创建主体配额记录；未触及 IP 上限的请求仍按相应主体配额裁决。联系邮箱查找密钥版本与现有有效记录不一致时，邮箱登录、恢复及相关邮箱写入统一返回 `503`，不将查找失败伪装为邮箱不存在。
+
 邀请创建/重发的 key 为 UUID，作用域 `(当前管理员,action,key)`；同规范化输入回原 DTO、同键异参冲突。消费接受/验证/恢复没有通用幂等重放；丢响应先读安全状态或正式登录/恢复，不重复开户、不重写口令、不自动签会话。提交未知统一 503，即使库已生成 Cookie 也不能发布；重试必须先核对实际事实。验证/换绑、邀请、重置及撤销竞争的原子边界见 design/21 §3–§7。
 
 正式 proxy 保留 Origin、多 Cookie、no-store、SSE/abort；生产 HTTPS/Cookie 单独取证。仅受保护请求的 HTTP 401 安全重登，403/429/503/匿名 token 409 留在原页；重登后只 GET，绝不重放上表 POST 或消息/确认/取消/继续。页面 GET、邮件扫描/预览均零消费、不触发自动 POST。
+
+所有含口令/令牌的表单显式使用 POST，即使 JavaScript 尚未 hydration 也不得把字段写进 query；未能执行客户端操作时诚实失败。匿名恢复先统一核验保留 contact 加密 key 可读性，缺 key 对存在/不存在的目标均为 503；恢复配置后再正常受理。代理未配置可信来源 IP 链时，共用实际 peer 配额，不信任入站 `X-Forwarded-For`。
