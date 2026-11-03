@@ -38,6 +38,7 @@ export interface TaskListItem {
   fire_at_local: string;
   timezone_id: string;
   source_approval_id: string | null;
+  source_invocation_id: string | null;
   schedule_receipt: string | null;
 }
 
@@ -49,6 +50,7 @@ export const TaskDetailSchema = z
     fire_at_local: z.string(),
     timezone_id: z.string(),
     source_approval_id: z.string().nullable(),
+    source_invocation_id: z.string().uuid().nullable(),
     schedule_receipt: z.string().nullable(),
     kind: z.string(),
     state_version: z.number(),

@@ -57,6 +57,7 @@ Content 表（`briefs`、`cards`）为 v1 / Deferred，移出 v0 落地顺序（
 [Required]：
 
 - 模块自有 schema，跨模块只传 id，不跨模块建强 FK。允许的逻辑引用：`tasks.source_approval_id → approvals.id`、`task_events.task_id → tasks.id`、`briefs/cards → task_id/approval_id`，落地时本模块内 FK，跨模块仅逻辑引用 + 应用层校验。
+- 直接创建来源是窄例外：`tasks.source_invocation_id → tool_invocations.invocation_id` 使用 `ON DELETE RESTRICT` FK 和唯一约束，保证冻结创建来源不可悬空、同 invocation 不产生第二条任务；不授权 tasks 读取或修改 tools 私有业务状态。旧 approval 来源不回填或改建引用。
 - 历史/审计/事件类表 `on delete restrict` 或禁止删除；主对象删除不级联删历史。
 - 避免双向 nullable 外键与循环 FK。`tasks.recreated_from_task_id` 自引用单向 nullable unique，不建反向引用。
 - `users` 删除：[Proposed] 禁止物理删除用户行（关联账不可断）；注销以状态标记 + 数据清理流程处理（Deferred，P1 后定）。

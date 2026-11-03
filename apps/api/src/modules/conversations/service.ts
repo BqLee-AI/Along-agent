@@ -236,6 +236,7 @@ export async function startConversationRun(
         receivedAtUtc,
         foldChoice: input.fold_choice,
         confirmedTimezone,
+        directCreation: delegation && (allowlist as readonly string[]).includes('create_reminder'),
         ...(input.clarification_of_run_id
           ? { clarificationOfRunId: input.clarification_of_run_id }
           : {}),

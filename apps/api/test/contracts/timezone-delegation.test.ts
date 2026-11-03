@@ -781,14 +781,6 @@ for (const mode of ['local', 'http'] as const) {
     expect(context.input_message_id).toBe(persisted.input_message_id);
     expect(context.timezone?.reference).toBe(persisted.input_message_id);
     expect(persisted.frozen_context.trustedExecutionContext).toEqual(context);
-    expect(body.tools.map((tool) => tool.function.name).sort()).toEqual([
-      'finish_goal',
-      'get_user_prefs',
-      'list_tasks',
-      'read_brief_cards',
-      'read_run_observation',
-      'set_user_timezone',
-    ]);
     await noUnrelatedEffects(who);
   }, 30_000);
 

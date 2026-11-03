@@ -34,7 +34,7 @@ assistant tool-loop -> ToolGateway.invoke({invocationId,toolId,args}, trusted ru
 | `parameters`  | JSON object         | 输入JSON schema；TS仍以对应strict zod校验       |
 | `risk`        | low / medium / high | 读为low，task/文档提议为medium，文档apply为high |
 
-不发布可自报的owner/root/allowlist/执行种类。`execution_kind` 由TS绑定：workspace_list/grep/read及既有只读工具为read_only；task/取消/文档提议为local；workspace_apply_replace为non_transactional。提议只产approval，task仍只能经按钮confirm创建；文档按钮只授权，文件写入须唯一apply。旧task时间输入/批准/取消合同不因新增文档类型改变。
+不发布可自报的owner/root/allowlist/执行种类。`execution_kind` 由TS绑定：workspace_list/grep/read及既有只读工具为read_only；task/取消/文档提议及 `create_reminder` 为local；workspace_apply_replace为non_transactional。legacy 提议只产approval，task 经按钮confirm创建；delegation/1 的新冻结能力可直接创建本人提醒。文档按钮只授权，文件写入须唯一apply。旧task时间输入/批准/取消合同不因新增工具改变。
 
 ## 本人默认时区工具（delegation/1）
 
@@ -42,7 +42,13 @@ assistant tool-loop -> ToolGateway.invoke({invocationId,toolId,args}, trusted ru
 
 成功结果为 `{kind:'timezone_setting',timezone_id,previous_timezone_id,alias_version}`，引用真实 invocation UUID，只证明这次保存或清除。`UNKNOWN_TIMEZONE` / `TZDB_UNAVAILABLE` 是输入/规则拒绝，不写偏好，可交同一模型如实反馈并提交 blocked/partial 结果，不自动重试原动作。`TOOL_FORBIDDEN` / `TOOL_DENIED` 是硬权限拒绝：native 不再预约或调用业务工具，TS 的原 Run/attempt 门也拒绝后续预约及已预约调用的执行；拒绝观察仍可见，`finish_goal` 仍可在原预算内如实终结，不伪造接受回执。unknown 立即停止，legacy 沿原失败合同终结。
 
-此 profile 只开放该设置和既有只读工具；不包含 `propose_task`、提醒直接写入、资料写入或 elapsed 能力。`finish_goal` 是同一 Harness 的控制出口，不是领域工具。TS 验证收据真实归属、成功状态和所有已接受设置均被目标结果列出，工具成功本身不证明整体目标完成。
+新接纳 profile 开放该设置、`create_reminder` 和既有只读工具，不包含 `propose_task`、资料写入或 elapsed 能力。旧 settings-only 冻结集合不扩权。`finish_goal` 是同一 Harness 的控制出口，不是领域工具。TS 验证收据真实归属、成功状态和所有已接受设置/创建均被目标结果列出，工具成功本身不证明整体目标完成。
+
+### 本人明确提醒直接创建
+
+`create_reminder` 使用 strict 输入 `{raw_time_text,note,occurrence:'once',timezone_hint?:string|null}`；模型不得提交 UTC、owner、来源 ID 或效果去重键。time-core 按可信请求锚解析已有 wall/calendar 能力，本次明确时区优先于同 Run 真实新设置，再使用接纳偏好。未知时区、日期/时段缺口、DST 歧义和过窗不猜测或顺延；可信同目标的 time/timezone 澄清通过 `clarification_of_run_id` 关联，保留原锚，补齐后无需按钮。
+
+tasks 公共创建用例在同一事务写 task、created 事件和 schedule outbox；网关在该事务写接受结果和审计。成功结果 `{kind:'task_created',task_id,state:'saved',wall_time,timezone_id,fold,resolved_utc_offset_seconds,tzdb_version,fire_at_utc,original_note}` 只证明保存，GoalResult 引用 invocation UUID。稳定调用重放读取并核对原冻结任务，不重复创建；独立新委托不按文字或参数去重。请求断开停止剩余执行，不回滚既成任务；GET/历史恢复不调用创建。
 
 ## v0 五工具 schema
 

@@ -2,7 +2,11 @@ import type { PoolClient } from 'pg';
 import { GoalResultSchema, type GoalResult } from '@along/contracts';
 import type { ToolContext } from '../tools/contracts.js';
 import { readRunInvocationStates, readInvocationSnapshots } from '../tools/invocations.js';
-import { readRunTimezoneSettings, readRunInterruptionEvidence } from '../tools/query.js';
+import {
+  readRunTimezoneSettings,
+  readRunCreatedReminders,
+  readRunInterruptionEvidence,
+} from '../tools/query.js';
 import { stateConflict } from '../../http/errors.js';
 
 type Binding = Pick<ToolContext, 'ownerId' | 'conversationId' | 'runId'>;
@@ -26,6 +30,15 @@ export async function validateGoalResult(
     )
       throw stateConflict('goal omits an accepted setting effect');
   }
+  const creations = await readRunCreatedReminders(client, context);
+  for (const creation of creations) {
+    if (
+      !goal.outcomes.some(
+        (item) => item.status === 'achieved' && item.receipt_refs.includes(creation.invocation_id),
+      )
+    )
+      throw stateConflict('goal omits an accepted reminder creation');
+  }
   if (
     states.some((row) => row.state === 'unknown') &&
     goal.status !== 'unknown' &&
@@ -47,7 +60,11 @@ export async function interruptedGoalResult(
   binding: Binding,
   status: 'failed' | 'cancelled',
 ): Promise<GoalResult> {
-  const { settings, hasUnknown: unknown } = await readRunInterruptionEvidence(client, binding);
+  const {
+    settings,
+    creations,
+    hasUnknown: unknown,
+  } = await readRunInterruptionEvidence(client, binding);
   const outcomes: GoalResult['outcomes'] = settings.map((setting) => ({
     description:
       setting.timezone_id === null
@@ -56,8 +73,15 @@ export async function interruptedGoalResult(
     status: 'achieved',
     receipt_refs: [setting.invocation_id],
   }));
+  outcomes.push(
+    ...creations.map((creation) => ({
+      description: `已记录提醒：${creation.original_note ?? creation.task_id}`,
+      status: 'achieved' as const,
+      receipt_refs: [creation.invocation_id],
+    })),
+  );
   outcomes.push({
-    description: '本轮剩余目标未完成；不会自动重做已接受设置',
+    description: '本轮剩余目标未完成；不会自动重做已接受效果',
     status: unknown ? 'unknown' : 'not_done',
     receipt_refs: [],
   });
@@ -67,7 +91,7 @@ export async function interruptedGoalResult(
         ? 'cancelled'
         : unknown
           ? 'unknown'
-          : settings.length
+          : settings.length + creations.length
             ? 'partial'
             : 'blocked',
     outcomes,
@@ -77,6 +101,6 @@ export async function interruptedGoalResult(
       .map((item) => item.description)
       .join(
         '；',
-      )}${settings.length ? '。' : ''}本轮执行已中断；已接受的设置不会回滚，刷新或重连不会重做。${unknown ? '存在效果未知的调用，不会自动重试。' : ''}`,
+      )}${settings.length + creations.length ? '。' : ''}本轮执行已中断；已接受的设置和提醒不会回滚，刷新或重连不会重做。${unknown ? '存在效果未知的调用，不会自动重试。' : ''}`,
   });
 }

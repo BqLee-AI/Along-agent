@@ -133,8 +133,8 @@ maybe('0013 approval revision migration deployment boundaries', () => {
         if (dirty === 'cancel-kind') {
           const taskId = randomUUID();
           await client.query(
-            `INSERT INTO tasks(id,owner_id,fire_at_utc,wall_time,timezone_id,resolved_utc_offset_seconds,tzdb_version)
-            SELECT $1,owner_id,fire_at_utc,wall_time,timezone_id,resolved_utc_offset_seconds,tzdb_version FROM approvals WHERE id=$2`,
+            `INSERT INTO tasks(id,owner_id,source_approval_id,fire_at_utc,wall_time,timezone_id,resolved_utc_offset_seconds,tzdb_version)
+            SELECT $1,owner_id,$2,fire_at_utc,wall_time,timezone_id,resolved_utc_offset_seconds,tzdb_version FROM approvals WHERE id=$2`,
             [taskId, child.id],
           );
           await client.query(

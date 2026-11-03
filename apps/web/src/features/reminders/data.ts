@@ -45,6 +45,7 @@ export const TaskListPageSchema = z
           fire_at_local: z.string(),
           timezone_id: z.string(),
           source_approval_id: z.string().nullable(),
+          source_invocation_id: z.string().uuid().nullable(),
           schedule_receipt: z.string().nullable(),
         })
         .strict(),

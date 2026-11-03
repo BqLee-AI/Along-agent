@@ -51,3 +51,11 @@
 - 0022 前向替换结果 CHECK，要求条件 `IS TRUE`，避免缺少授权修订或目标状态时 SQL NULL 被 CHECK 放过；0021 已应用也不回改旧迁移。缺字段、JSON null、非终态和错误修订均不能取得非空结果资格。
 - 原显式 `local:upgrade` 支持已核实0016–0021升级至0022；原目录/账本与只读 baseline 核验保留，历史事实不迁写，漂移仍拒绝。版本账、DDL与新约束同事务提交，失败停写，不删除既成结果或降版。
 - API/native/shared/Web 配套使用 `harness/v6`、snapshot2和新委托 SSE v2，legacy保持冻结范围与严格v1历史。真实 PG 生命周期覆盖逐版本升级、零回填、重启及NULL边界；偏好领域写入、接受结果与审计原子性由工具集成覆盖。
+
+## 0023：直接创建提醒的真实来源
+
+- 新增 `tasks.source_invocation_id`，外键引用 `tool_invocations(invocation_id)`、非空值唯一且 `ON DELETE RESTRICT`。旧 `source_approval_id` 继续可空、保留原有逻辑引用；不伪造批准、不回填或修改旧批准、任务、时间快照与接受结果。
+- `tasks_source_xor_check` 禁止双来源；`tasks_creation_source_required` 在新 INSERT 或显式更新来源列时要求恰好一个来源，并以同名 CHECK 错误拒绝全空。历史无来源行是原 schema 允许的未知来源，不修造来源；读取与仅更新状态/回执仍可正常进行，不能将未知历史当作新的直接创建回执。
+- `tasks/create.ts` 的公共事务用例由 legacy confirm 和直接工具共用，原子写入 saved task、created 事件及 schedule outbox；工具接受结果/审计或旧批准 consumed 由调用方在同一事务提交。写入前后均按数据库实时钟验证冻结触发时刻仍在未来，过窗错误必须逃出外层事务，不重新归一或部分提交。
+- 先停旧写者并备份，显式升级 `0022→0023` 后再部署配套 API/Web；DDL、约束、触发器与版本账同事务提交，失败保留0022原事实。重复执行已记账0023不再做DDL。新接受结果产生后仅停写前滚，不删来源/任务/事件/审计或降级旧写者；旧有效 pending 仍只由原确认门消费。
+- 专用真实 PG 消费者覆盖位于 `apps/api/test/integration/task-creation.test.ts`；legacy owner/hash/过期/consumed 重放继续由 `approvals-confirm.test.ts` 保护。测试代码存在不表示已执行或升级已验收。

@@ -20,6 +20,7 @@ import { readRunInvocationStates } from '../tools/invocations.js';
 import { BUSINESS_TOOL_IDS } from '../tools/contracts.js';
 import { validateWorkspaceGrant, WorkspaceDeniedError } from '../workspaces/service.js';
 import { interruptedGoalResult } from './goal-result.js';
+import { readRunCreatedReminders, readRunReminderTimeErrors } from '../tools/query.js';
 
 export async function appendEvent(
   client: PoolClient,
@@ -219,6 +220,16 @@ export async function viewOf(client: PoolClient, locked: LockedRun): Promise<Run
           authorization_revision: run.frozen_context.authorization_revision,
           execution_lifecycle: run.frozen_context.execution_lifecycle,
           goal_result: run.goal_result,
+          created_reminders: await readRunCreatedReminders(client, {
+            ownerId: run.owner_id,
+            conversationId: run.conversation_id,
+            runId: run.id,
+          }),
+          reminder_time_errors: await readRunReminderTimeErrors(client, {
+            ownerId: run.owner_id,
+            conversationId: run.conversation_id,
+            runId: run.id,
+          }),
         }
       : {}),
     can_resume: canResume,

@@ -14,6 +14,7 @@
   - first/second 的待确认正文须同时展示选中的次数与冻结数值偏移；新 first 使用 v2，既有普通/second/cancel v1 不换模板。已确认显示有误的旧提议作废重来，不改旧快照或已建任务；规则缺失仍可读取并按冻结版本校验正确的新旧提议（design/05 §4、design/06 §2）。
 - [Required · #92] 提醒日期锚归属请求：旧会话的新明确今天/明天使用本轮服务端接纳锚；仅同 owner/conversation、全部未完成候选唯一且紧邻上一 user 消息、原输入/冻结来源可追溯的终态 done/failed 缺时区澄清或歧义失败可继承。整条明确时区别名/规范 ID 可补原缺时区；精确 fold 重提议须原文完全相同、实际候选时区及 `clarification_of_run_id` 指原失败 Run，不是确认。多候选、无关中间目标、旧数据缺来源或其他不明补充要求完整重述，不从模型历史凑日期（design/05 §3、§9.2）。
   - 同日本地 120 秒不报 `DATE_CHANGED`，真正本地午夜 20 秒仍问具体日期；无时区先问，缺日期/时段/事项不建批准。新 Run 冻结 anchor/received 与 `reminderDateSource`，不新建表/迁移、不回填旧 Run；工具重放、批准恢复、历史只沿原冻结，未来时间/确认有效期不变。纯函数、真实 HTTP/隔离 PG、正式 native 与真实模型质量须分别取证，规范采纳或历史运行证据不代替新锚实施验收。
+  - delegation 的直接创建在结构化 time 澄清中只读提供真实规则错误和 DST 候选；first/second 补充沿同 owner/conversation 的唯一前序关系、相同原文和候选时区继承原锚，补齐后直接创建，无新批准。创建回执本身既不证明已排期，也不证明“尚未排期”，实时状态须读取实际记录。
 - [Required] 验收环境：单镜像 all 角色 + compose 冒烟；Postgres 唯一事实源；Redis 缺席不得影响验收（Redis 已延后）。
 - [Required] CI 合并门：`static` 通过后，迁移约束、调度故障、契约双跑与 `compose-smoke` 四条下游只依赖 static、各自隔离并行；static 失败则全部下游不运行。五个 job 必须全部成功才允许合并，人工保护约定与 D1–D10 语义不变；Compose 可在其他下游失败前已消耗资源，但不共享用户数据或可变数据库（见 design/13 §3–§4、ADR 0007）。
 - [Required] 工具链验收遵循 Bun 1.4.2 冻结安装、Oxlint 1.89.0、Oxfmt 0.74.0 与 `bun:test`；`bun run verify` 是本地与 static 的共同阻塞入口。依赖优先构建后串行执行全部 workspace 类型检查，保留源码、测试与 Next route typegen。文件级并行保留隔离及 mock/时钟恢复；只有只读边界 fixture 可最多两个真实 CLI 并行，逐项拒绝断言、绿例两种扫描和清理前等待均须保留。`test:contracts` 包含 API 两种传输及契约包，`test:integration` 覆盖全部真实 PostgreSQL 16 集成文件，`test:scheduler` 保留 D9 指定集。D1/D2 原边界与断言不因工具或调度改变（见 design/01 §5、design/13 §3–§4、ADR 0006、0008）。
@@ -97,11 +98,11 @@
 
 ## 本人目标内委托（#105 目标合同；#107 本人时区切片）
 
-合同真源为 [design/20 §1–§10](../design/20-goal-scoped-delegation.md) 及 [OpenSpec 增量](../../openspec/changes/refactor-assistant-capability-authorization/proposal.md)，总范围为 #104，明确提醒复用 #90。#107 实现本人默认时区保存/NULL清除及配套可信执行/结果切片；下列直接提醒、elapsed、文件自主能力、通用缺口接续和 server-owned 仍是后续目标，不因偏好切片而宣称交付。实现、受控消费者与真实用户路径分别取证，整体 change 随适用实施与真实验收收口。
+合同真源为 [design/20 §1–§10](../design/20-goal-scoped-delegation.md) 及 [OpenSpec 增量](../../openspec/changes/refactor-assistant-capability-authorization/proposal.md)，总范围为 #104。本人默认时区保存/NULL清除及明确 wall/calendar 提醒直接创建采用可信执行/结果切片；elapsed、文件自主能力、通用缺口接续和 server-owned 仍不在此能力范围。实现、受控消费者与真实用户路径分别取证，整体 change 随适用实施与真实验收收口。
 
 - 当前实施边界：Web 普通 Agent 明确发送 `authorization_revision:'delegation/1'`，服务端仅允许无 workspace 的 harness；省略修订和提醒/资料快捷入口保持 legacy，不从部署或 wire 自动升级权限。本人时区写入经 identity 窄用例，与工具接受结果/审计原子提交，不生成批准，不开放任意账户 patch；仅支持实际有限别名/规则，单次提示不保存，清除不保留旧偏好。
 - 配套合同：v6 start 的真实 trusted context 进入 system 层，legacy 显式 null；新委托 SSE v2 与旧 v1 历史严格分读。RunView 展示冻结 request-bound 与持久 GoalResult；0021 只新增根 `agent_runs.goal_result`，旧数据 NULL 不回填。最终 answer、目标结果和 Run/attempt/事件终结原子保存，收据须符合真实接受结果/设置事实，Run done 不能代替目标完成。
-- 本切片的连接验收：初次发送和历史恢复均说明绑定连接、无后台继续；断连/停止后已接受时区仍可见，未完成或未知项不掩盖。GET、刷新、重连、重登只有只读恢复，不自动发消息/批准/继续/取消或重做已接受设置。新 profile 不暴露 elapsed 修订、直接提醒或文件动作；legacy 按原批准/等待合同验收。
+- 本切片的连接验收：初次发送和历史恢复均说明绑定连接、无后台继续；断连/停止后已接受设置和提醒仍可见，未完成或未知项不掩盖。GET、刷新、重连、重登只有只读恢复，不自动发消息/批准/继续/取消或重做已接受效果。新 profile 可用 `create_reminder` 直接创建明确的单次墙上时间提醒，缺口仅补实际信息，可信同目标补齐后不再批准；不暴露 elapsed 修订或文件动作，旧 settings-only 和 legacy 不扩权。
 
 - 正常自主：真实保存/清除本人时区，明确提醒直接创建/唯一取消，受管资料正常编辑/有限创建，多步混合目标零机械批准；明确重写/覆盖/取消不问相同授权。
 - 必要打断：实质歧义只补缺口，新增目标/影响只授新增部分。新profile允许一次精确“授权并继续”，不机械要求第二按钮；决议自身不是写入/保存，拒绝/停止/unknown/迟到或无效等待点不推进，GET/重登不授权/继续。legacy保持原显式继续合同，HTTP次数不预设；跨owner、登记外/链接、缺能力不能按钮突破，零写冲突可自主新读修正。

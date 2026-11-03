@@ -180,68 +180,6 @@ export async function isExpiredByDbClock(client: PoolClient, approvalId: string)
   return rows[0]?.expired ?? false;
 }
 
-export interface ConsumedTaskSeed {
-  taskId: string;
-  ownerId: string;
-  approval: ApprovalRow;
-}
-
-// Single-transaction writes: task(saved v1) + task_events.created +
-// outbox(pending) + approval->consumed. Cross-module writes are the one
-// sanctioned exception (commitments-schema.md: "唯一跨模块事务").
-export async function insertConsumedTask(
-  client: PoolClient,
-  seed: ConsumedTaskSeed,
-): Promise<void> {
-  await client.query(
-    `INSERT INTO tasks (id, owner_id, kind, source_approval_id, fire_at_utc,
-       wall_time, timezone_id, fold, resolved_utc_offset_seconds, tzdb_version,
-       occurrence, state, state_version, original_note)
-     VALUES ($1,$2,'notify_only',$3,$4,$5,$6,$7,$8,$9,'once','saved',1,$10)`,
-    [
-      seed.taskId,
-      seed.ownerId,
-      seed.approval.id,
-      seed.approval.fire_at_utc.toISOString(),
-      seed.approval.wall_time,
-      seed.approval.timezone_id,
-      seed.approval.fold,
-      seed.approval.resolved_utc_offset_seconds,
-      seed.approval.tzdb_version,
-      seed.approval.original_text,
-    ],
-  );
-  await client.query(
-    `INSERT INTO task_events (id, owner_id, task_id, state_version, type, evidence_ref)
-     VALUES (gen_random_uuid(), $1, $2, 1, 'created', 'local')`,
-    [seed.ownerId, seed.taskId],
-  );
-}
-
-export async function insertOutboxSchedule(
-  client: PoolClient,
-  args: { ownerId: string; taskId: string; approval: ApprovalRow; idempotencyKey: string },
-): Promise<void> {
-  await client.query(
-    `INSERT INTO outbox (id, owner_id, task_id, expected_state_version, command,
-       idempotency_key, status)
-     VALUES (gen_random_uuid(), $1, $2, 1, $3, $4, 'pending')`,
-    [
-      args.ownerId,
-      args.taskId,
-      JSON.stringify({
-        kind: 'schedule',
-        task_id: args.taskId,
-        fire_at_utc: args.approval.fire_at_utc.toISOString(),
-        timezone_id: args.approval.timezone_id,
-        expected_state_version: 1,
-        idempotency_key: args.idempotencyKey,
-      }),
-      args.idempotencyKey,
-    ],
-  );
-}
-
 export async function findOutboxTaskByKey(
   client: PoolClient,
   idempotencyKey: string,

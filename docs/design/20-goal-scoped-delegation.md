@@ -15,7 +15,7 @@
 
 授权修订、实际能力和执行生命周期是独立事实：`delegation/1` 只定义目标内自主策略，不证明后台执行已交付。每个新 Run 同时冻结 `execution_lifecycle:'request-bound'|'server-owned'`，由 conversations 持有，并经可信 start、Run 只读投影和 Web 如实呈现。早期设置等完整切片可以采用 request-bound，沿现行请求绑定的断连取消语义，不承诺离开/退出后继续；仅在 §8 所有权与故障验收完成后，新接纳的相应 Run 才可冻结 server-owned。已接纳 Run（包括早期 delegation/1）不随部署升级、当前开关或批准恢复改变生命周期；缺此字段的 legacy 仍沿原合同读取，不回填。这里只增加两种具体生命周期，不建立通用 profile/权限平台。最终重构必须完成 server-owned 订阅解耦及其真实验收，不能以 request-bound 阶段替代收口。
 
-本人默认时区切片采用显式接纳：仅非工作区 Harness 请求的 `authorization_revision:'delegation/1'` 进入该 profile；普通 Web Agent 提交此字段。省略字段的 API 调用、业务提醒和资料快捷入口保留 legacy，不因协议升级而切换。此 profile 只交付本人默认时区保存/清除与既有只读工具，冻结 request-bound、空工作区和 `elapsed_revision:null`。wire 统一为 v6，legacy start 明确传 `trusted_context:null`；存量 snapshot2 和批准不扩权。结构化 GoalResult 的 SSE v2 与 legacy v1 分开解析，Run 只读视图保留实际修订、生命周期和持久目标结果。
+本人委托采用显式接纳：仅非工作区 Harness 请求的 `authorization_revision:'delegation/1'` 进入该 profile；普通 Web Agent 提交此字段。省略字段的 API 调用、业务提醒和资料快捷入口保留 legacy，不因协议升级而切换。新接纳 profile 提供本人默认时区保存/清除、明确单次墙上时间提醒直接创建及既有只读工具，冻结 request-bound、空工作区和 `elapsed_revision:null`。`create_reminder` 与 legacy confirm 共用 tasks 公共事务用例，保存真实 invocation 或 approval 来源；创建不证明排期、触发或通知。旧 settings-only Run、snapshot2 和批准仍按原工具集合执行，不因部署扩权。wire 统一为 v6，legacy start 明确传 `trusted_context:null`；结构化 GoalResult 的 SSE v2 与 legacy v1 分开解析，Run 只读视图保留实际修订、生命周期和持久目标结果。
 
 ## 2. 规则的唯一所有者
 
@@ -97,6 +97,8 @@ wall_time/timezone_id/fold/offset 保持非空。仅有对应 elapsed 依据且 
 复用 conversations 的 #103 来源核验责任，不找“最近任意 Run”，不新增 suspended_input、输入长等待、snapshot3、目标表或可执行 DAG。
 
 新缺口（time/timezone/target_selection/destination）须来自已接受工具结果，或前序 Run 原子保存的结构化目标结果；没有调用不伪造 invocation。接纳事务核对同 owner/conversation、真实原消息、允许的前序终态、实际未解决缺口、唯一且紧邻关系和未被接续。多候选、无关中间目标、无可靠旧来源或新目标不能继承；只问实际关系缺口，不强迫重批全部目标。沿现有 conversations 行接纳锁，在同一事务复验前序终态/无后继并保存唯一关系，防并发两个续办；若需要锁 Run，保持现有 attempt→Run 锁序，不改旧上下文和结果，不另造先查后写协议。
+
+直接创建的 DST 规则错误保留在接受结果中，Run 只读投影将其真实候选交给 Web 原有 first/second 入口。折叠补充须保留前序完整原文、实际候选时区和显式来源；不从模型回答编造候选，也不把改时区/改原文当作原候选选择。来源保留真实错误 invocation，不假造创建回执。
 
 接续带入已接受收据及未完成部分，计入上下文预算；不把旧观察当新读取或重做已完成任务/文件。用户明确新请求即使文字相同也可创建新任务，不按相似度合并。每 Run 保留冻结预算；同 Run 批准恢复累计；明确用户补充创建的新 Run 使用新预算，不承诺跨目标总费用硬上限。系统不得自动开 Run 绕预算。
 

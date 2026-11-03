@@ -36,6 +36,11 @@ export function TaskSummary({ task }: { task: TaskDetail }) {
           >
             查看来源提醒确认
           </Button>
+        ) : task.source_invocation_id ? (
+          <details className="text-sm text-muted-foreground">
+            <summary className="cursor-pointer py-2">本人委托直接创建 · 来源调用</summary>
+            <p className="select-text font-mono">{task.source_invocation_id}</p>
+          </details>
         ) : (
           <p className="text-sm text-muted-foreground">无来源批准引用，不推测关联会话。</p>
         )}

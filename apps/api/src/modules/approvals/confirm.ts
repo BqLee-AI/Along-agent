@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { withTransaction } from '../../db/transaction.js';
 import {
@@ -17,14 +16,13 @@ import {
   findOutboxTaskByKey,
   findSuccessorId,
   getApprovalForUpdate,
-  insertConsumedTask,
-  insertOutboxSchedule,
   markConsumed,
   markRejected,
   persistExpiredIfDue,
 } from './repository.js';
 import { ConfirmBodySchema, RejectBodySchema } from './schemas.js';
 import { cancelTaskWithinTransaction } from '../tasks/cancel.js';
+import { createTaskWithinTransaction } from '../tasks/create.js';
 
 export interface ConfirmDeps {
   pool: Pool | null;
@@ -174,19 +172,23 @@ export async function confirmApproval(
       };
     }
 
-    const taskId = randomUUID();
-    await insertConsumedTask(client, { taskId, ownerId, approval: row });
-    await insertOutboxSchedule(client, {
+    const task = await createTaskWithinTransaction(client, {
       ownerId,
-      taskId,
-      approval: row,
+      source: { approvalId: row.id },
+      fireAtUtc: row.fire_at_utc.toISOString(),
+      wallTime: row.wall_time,
+      timezoneId: row.timezone_id,
+      fold: row.fold === 1 ? 1 : 0,
+      resolvedUtcOffsetSeconds: row.resolved_utc_offset_seconds,
+      tzdbVersion: row.tzdb_version,
+      originalNote: row.original_text,
       idempotencyKey: key,
     });
-    await markConsumed(client, row.id, taskId);
+    await markConsumed(client, row.id, task.task_id);
     return {
       approval_id: row.id,
       status: 'consumed' as const,
-      task_id: taskId,
+      task_id: task.task_id,
       duplicate: false,
     };
   });

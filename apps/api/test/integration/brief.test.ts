@@ -6,7 +6,12 @@ import type { Pool } from 'pg';
 import { handleRequest } from '../../src/http/app.js';
 import { getBrief } from '../../src/modules/brief/service.js';
 import { BriefResponseSchema } from '../../src/modules/brief/schemas.js';
-import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
+import {
+  createIntegrationDatabase,
+  databaseUrl,
+  seedApproval,
+  type IntegrationDatabase,
+} from './setup.js';
 
 const maybe = databaseUrl ? describe : describe.skip;
 const NOW = new Date('2026-10-17T00:00:00Z');
@@ -23,10 +28,13 @@ async function seedTask(
   },
 ): Promise<string> {
   const id = randomUUID();
+  // New rows require exactly one real creation source; a consumed approval
+  // never appears in the pending-approval brief projection.
+  const source = await seedApproval(pool, { ownerId, state: 'consumed' });
   await pool.query(
     `INSERT INTO tasks (id, owner_id, state, fire_at_utc, wall_time, timezone_id,
-       fold, resolved_utc_offset_seconds, tzdb_version, original_note)
-     VALUES ($1,$2,$3,$4,$5,$6,0,28800,'fixture-v1',$7)`,
+       fold, resolved_utc_offset_seconds, tzdb_version, original_note, source_approval_id)
+     VALUES ($1,$2,$3,$4,$5,$6,0,28800,'fixture-v1',$7,$8)`,
     [
       id,
       ownerId,
@@ -35,6 +43,7 @@ async function seedTask(
       args.wallTime,
       args.timezoneId ?? 'Asia/Shanghai',
       args.note,
+      source.id,
     ],
   );
   return id;

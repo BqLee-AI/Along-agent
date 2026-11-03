@@ -31,10 +31,22 @@ maybe('owned tool query-client projections', () => {
     } = {},
   ) {
     const id = randomUUID();
+    // New rows require exactly one real creation source; this fixture approval
+    // lives and rolls back with the caller transaction.
+    const sourceApprovalId = randomUUID();
+    await client.query(
+      `INSERT INTO approvals(id,owner_id,original_text,fire_at_utc,wall_time,timezone_id,
+         fold,resolved_utc_offset_seconds,tzdb_version,occurrence,presentation_hash,
+         presentation_version,state,expires_at)
+       VALUES($1,$2,'fixture source','2035-01-01T00:00:00Z','2035-01-01 00:00',
+         'Asia/Shanghai',0,28800,'fixture-v1','single','fixture-source','v1',
+         'consumed','2035-01-02T00:00:00Z')`,
+      [sourceApprovalId, ownerId],
+    );
     await client.query(
       `INSERT INTO tasks(id,owner_id,state,fire_at_utc,wall_time,timezone_id,fold,
-         resolved_utc_offset_seconds,tzdb_version,original_note,state_version)
-       VALUES($1,$2,$3,$4,$5,$6,1,-18000,'fixture-v1',$7,7)`,
+         resolved_utc_offset_seconds,tzdb_version,original_note,state_version,source_approval_id)
+       VALUES($1,$2,$3,$4,$5,$6,1,-18000,'fixture-v1',$7,7,$8)`,
       [
         id,
         ownerId,
@@ -43,6 +55,7 @@ maybe('owned tool query-client projections', () => {
         input.wallTime ?? '2026-11-02 09:20',
         input.timezoneId ?? 'Asia/Shanghai',
         input.note ?? null,
+        sourceApprovalId,
       ],
     );
     return id;

@@ -507,7 +507,7 @@ async function gate(
     return { ...permissionDenied, invocationId: row.invocation_id, replayed: false };
   }
   if (
-    row.tool_id === 'set_user_timezone' &&
+    ['set_user_timezone', 'create_reminder'].includes(row.tool_id) &&
     (ctx.authorizationRevision !== 'delegation/1' ||
       row.frozen_context.authorizationRevision !== 'delegation/1')
   ) {
