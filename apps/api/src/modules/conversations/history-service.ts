@@ -27,6 +27,16 @@ import {
   listRunHistory,
 } from './history-repository.js';
 import type { HistoryBoundary } from './history-repository.js';
+import { isActiveOwner } from '../identity/preferences.js';
+
+async function requireEligibleHistoryOwner(pool: Pool, ownerId: string): Promise<void> {
+  const client = await pool.connect();
+  try {
+    if (!(await isActiveOwner(client, ownerId))) throw forbidden('owner authorization revoked');
+  } finally {
+    client.release();
+  }
+}
 
 export type HistoryQuery = Record<string, string | string[] | undefined>;
 
@@ -40,6 +50,7 @@ export async function requireHistoryConversation(
   ownerId: string,
   conversationId: string,
 ): Promise<void> {
+  await requireEligibleHistoryOwner(pool, ownerId);
   const parent = await getConversation(pool, conversationId);
   if (!parent) throw notFound('conversation not found');
   if (parent.owner_id !== ownerId) throw forbidden('conversation not found');
@@ -114,6 +125,7 @@ export async function getConversationList(
   if (!parsed.success) throw validationError('invalid conversations query');
   const { limit, cursor: raw } = parsed.data;
   const cursor = cursorOf(raw, 'conversations', ownerId);
+  await requireEligibleHistoryOwner(poolOf(deps), ownerId);
   const rows = await listConversationHistory(poolOf(deps), { ownerId, cursor, limit });
   const items = rows.slice(0, limit).map((row) => ({
     conversation_id: row.conversation_id,

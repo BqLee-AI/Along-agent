@@ -13,7 +13,9 @@ const usage = `本机生命周期（Bun 1.4.2 / Windows + Docker Linux x64）
   bun --no-env-file run local:start [--config <私有 JSON>]
   bun --no-env-file run local:stop [--config <私有 JSON>]
   bun --no-env-file run local:upgrade [--config <私有 JSON>]
-  bun --no-env-file run local:account [--config <私有 JSON>]
+  bun --no-env-file run local:account [--admit | --workspace] [--config <私有 JSON>]
+  --admit：明确选择原普通用户并验证/设置本人凭证后准入，不绑定管理员
+  --workspace：明确选择已准入 owner，有限新增工作区，保留全部原登记
 已有配置时 local:init 只复用，不覆盖；首次 --new/--adopt 通过终端输入。
 未登录、缺模型或工作区均独立提示；启动不自动发模型请求。`;
 
@@ -21,7 +23,7 @@ function options(args) {
   const [action, ...rest] = args;
   if (!['init', 'start', 'stop', 'upgrade', 'account'].includes(action))
     throw failure('ARGUMENT_INVALID');
-  const value = { action, mode: null, file: null, help: false };
+  const value = { action, mode: null, operation: 'administrator', file: null, help: false };
   for (let index = 0; index < rest.length; index++) {
     const flag = rest[index];
     if (flag === '--help' || flag === '-h') value.help = true;
@@ -29,6 +31,12 @@ function options(args) {
       value.file = path.resolve(rest[++index]);
     else if (['--new', '--adopt'].includes(flag) && !value.mode && action === 'init')
       value.mode = flag.slice(2);
+    else if (
+      ['--admit', '--workspace'].includes(flag) &&
+      value.operation === 'administrator' &&
+      action === 'account'
+    )
+      value.operation = flag.slice(2);
     else throw failure('ARGUMENT_INVALID');
   }
   return value;
@@ -192,6 +200,9 @@ const explanations = {
   ACCOUNT_CONFIRMATION_REQUIRED: '未收到明确确认；没有替你选择或授权。',
   ACCOUNT_PASSWORD_MISMATCH: '两次口令不一致；口令未提交。',
   ACCOUNT_INSTALLATION_CHANGED: '安装事实已变化；重新读取并显式维护，不自动重试。',
+  CONFIG_VERSION_CONFLICT: '私有配置字节版本已变化；保持原文件并重新读取，不覆盖并发修改。',
+  IDENTITY_KEYRING_FILE_INVALID:
+    'IDENTITY_KEYRING_FILE 对应的私有 identityKeyringFile 不可读或格式无效；请显式配置独立密钥，不自动生成或沿用 BETTER_AUTH_SECRET。',
   WORKSPACE_REGISTRY_INVALID:
     '登记无效；保留原文件，修复其格式、有限路径或原 root 后重试 local:account。',
   WORKSPACE_REGISTRY_ABSENT: '原配置指定的登记文件缺失；恢复原私有文件，不另建或覆盖原登记。',
@@ -203,7 +214,8 @@ const explanations = {
   WORKSPACE_LOAD_FAILED: '配置已保存但登记未确认加载；账户保留，修复后仅重试 local:account 收尾。',
   UNAUTHENTICATED: '原口令不符或账户不活跃；不会重置口令或激活原用户，请核对原材料。',
   STATE_CONFLICT: '原 credential、登录名或管理员绑定冲突；保留原身份，按维护说明核对，不自动合并。',
-  NOT_READY: '账户依赖或提交结果不可核验；保留原安装，修复后读取真实绑定，不重复开户。',
+  NOT_READY:
+    '账户依赖或提交结果不可核验；核对 IDENTITY_KEYRING_FILE、APP_ORIGIN、IDENTITY_MAIL_PROVIDER、IDENTITY_MAIL_FROM、IDENTITY_MAIL_API_KEY 的显式配置，保留原安装，不重复开户。',
 };
 
 try {
@@ -229,7 +241,7 @@ try {
       const { maintainAccount, createAccountTerminalIO } = await import('./account.mjs');
       const io = createAccountTerminalIO();
       try {
-        await maintainAccount(file, io);
+        await maintainAccount(file, io, {}, { operation: request.operation });
       } finally {
         io.close();
       }

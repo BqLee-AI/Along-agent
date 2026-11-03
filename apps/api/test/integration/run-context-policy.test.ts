@@ -1,3 +1,4 @@
+import { admitTestUser } from './setup.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
@@ -56,6 +57,7 @@ maybe('harness frozen admission context', () => {
       ownerId,
       `${ownerId}@context.test`,
     ]);
+    await admitTestUser(pool, ownerId);
     await pool.query(
       `INSERT INTO conversations(id,owner_id,anchor_received_at_utc) VALUES($1,$2,now())`,
       [conversationId, ownerId],
@@ -84,6 +86,7 @@ maybe('harness frozen admission context', () => {
       ownerId,
       `${ownerId}@context.test`,
     ]);
+    await admitTestUser(pool, ownerId);
     await pool.query(
       `INSERT INTO conversations(id,owner_id,anchor_received_at_utc,confirmed_timezone_id)
       VALUES($1,$2,'2026-10-01T00:00:00Z','Asia/Shanghai')`,
@@ -154,6 +157,7 @@ maybe('harness frozen admission context', () => {
       ownerId,
       `${ownerId}@context.test`,
     ]);
+    await admitTestUser(database.pool, ownerId);
     const body = { execution: 'harness', raw_text: 'frozen policy input' };
     const started = await startConversationRun(
       dependencies(database.pool),
@@ -312,6 +316,7 @@ maybe('harness frozen admission context', () => {
       ownerId,
       `${ownerId}@context.test`,
     ]);
+    await admitTestUser(pool, ownerId);
     await expect(
       startConversationRun(
         dependencies(pool, { ...policy, completion_cap: 0 }),

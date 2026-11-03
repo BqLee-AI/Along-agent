@@ -3,6 +3,7 @@ import { HarnessObservationSchema, workspaceGrantSchema } from '@along/contracts
 import { HttpError, forbidden } from '../../http/errors.js';
 import { assertToolRunBinding } from '../conversations/tool-binding.js';
 import { validateWorkspaceGrant } from '../workspaces/service.js';
+import { isActiveOwner } from '../identity/preferences.js';
 import type { ToolContext } from './contracts.js';
 
 export function contextSourceCorrupt(): HttpError {
@@ -192,6 +193,7 @@ export async function assertContextSourceAuthorized(
   ctx: ToolContext,
   invocationId: string,
 ): Promise<ContextSourceMetadata> {
+  if (!(await isActiveOwner(client, ctx.ownerId))) throw forbidden('owner authorization revoked');
   const row = (await readContextSourceMetadata(client, ctx, [invocationId])).get(invocationId);
   if (!row || row.state !== 'completed') throw forbidden();
   authorizeContextSource(ctx, row);

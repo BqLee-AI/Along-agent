@@ -19,6 +19,7 @@ import {
   listTasksForOwner,
 } from '../../src/modules/tasks/service.js';
 import {
+  admitTestUser,
   createIntegrationDatabase,
   databaseUrl,
   seedApproval,
@@ -28,6 +29,11 @@ import {
 const maybe = databaseUrl ? describe : describe.skip;
 
 async function seedTask(pool: Pool, ownerId: string): Promise<string> {
+  await pool.query('INSERT INTO users(id,auth_email) VALUES($1,$2) ON CONFLICT(id) DO NOTHING', [
+    ownerId,
+    `${ownerId}@fixture.test`,
+  ]);
+  await admitTestUser(pool, ownerId);
   const taskId = randomUUID();
   // New rows require exactly one real creation source.
   const source = await seedApproval(pool, { ownerId, state: 'consumed' });

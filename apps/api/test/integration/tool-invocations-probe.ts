@@ -1,3 +1,4 @@
+import { admitTestUser } from './setup.js';
 import { expect } from 'bun:test';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -27,6 +28,7 @@ export async function seedContext(
     ownerId,
     `${ownerId}@along.test`,
   ]);
+  await admitTestUser(pool, ownerId);
   await pool.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
     conversationId,
     ownerId,

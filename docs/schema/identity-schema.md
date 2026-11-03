@@ -127,7 +127,7 @@ users 1 ── 0..n <全业务表 via owner_id 逻辑引用>
 
 ## Deferred 清单（不猜字段）
 
-- token 明文存储禁止；OAuth、邮件验证/找回与多用户组织模型不在 R1 范围。`token_hash` HMAC 和 credential 合同保持。
+- token 明文存储禁止；OAuth 与多用户组织模型不在本增量范围。联系邮箱验证/找回见下方 #112；`token_hash` HMAC 和 credential 合同保持。
 - 目标市场/计费/推送供应商字段一律不进 v0。
 - 组织/workspace 模型、多用户共享，P1 后定。
 
@@ -159,13 +159,13 @@ users 1 ── 0..n <全业务表 via owner_id 逻辑引用>
 
 管理员 PG 绑定不等于工作区登记完成。Windows 私有登记、registryFile 配置与 API reload 由正式本机维护入口分别发布及核验；API 不直接写宿主配置。收尾失败保留已提交账户，显式补做，不另建用户或改其他 owner；不把文件/重载伪装成同一 PG 事务。
 
-## 受邀账户增量（#112，Proposed／待评审）
+## 受邀账户增量（#112）
 
-本节是拟议模型，不是已实施字段/DDL；仅在 P1 经合同评审、迁移预检和完整验收后生效。旧 `users/sessions/auth_accounts/installation_admin` 及其字段/约束不被本 PR 改动；`auth_email` 永远是不透明库句柄，`primary_email_hash/email_verified` 不充当新恢复事实。行为/锁序见 [design/21 §2–§7](../design/21-invited-account-access.md)，公开 DTO/路由见 auth API §5。
+本节对应前向迁移 `0024_invited_accounts.sql` 与精确结构基线 `scripts/local/baselines/0024-checks.json`。保留旧表原列/行，增加 credential 的 user 唯一约束及下列 identity 自有表；`auth_email` 永远是不透明库句柄，`primary_email_hash/email_verified` 不充当新恢复事实。行为/锁序见 [design/21 §2–§7](../design/21-invited-account-access.md)，公开 DTO/路由见 auth API §5。
 
 ### 基础类型、加密和锁
 
-下表全部为 Proposed identity 自有记录。ID 服务端 UUID，引用 identity 用户/邀请/凭证均 FK `on delete restrict`；时间为 `timestamptz`，事务判断用取锁后的 PG `clock_timestamp()`，不依赖客户端时间。enum 使用 `text + CHECK`。计数/代次为非负或正整数并有对应 CHECK，过期必须晚于创建。新模型不把跨模块 owner 变成可修改 FK。
+下表均为 identity 自有记录。ID 服务端 UUID，引用 identity 用户/邀请/凭证均 FK `on delete restrict`；时间为 `timestamptz`，事务判断用取锁后的 PG `clock_timestamp()`，不依赖客户端时间。enum 使用 `text + CHECK`。计数/代次为非负或正整数并有对应 CHECK，过期必须晚于创建。新模型不把跨模块 owner 变成可修改 FK。
 
 `*_digest` 为用途分离 HMAC-SHA256（固定 32-byte `bytea`），不可枚举普通 SHA 不可代替。`*_ciphertext` 为 AEAD `bytea`，随行保存独立 `*_nonce`（12-byte）、`*_tag`（16-byte）、`encryption_key_id text`；AAD 按 design/21 §3 绑定记录、owner/邀请、用途/代次/key-id。lookup、challenge、rate-limit 的密钥/上下文独立，现有 BETTER_AUTH_SECRET 与 session HMAC 不改。密码/完整邮箱/token 不进 metadata、明文 JSON 或日志；加密 token 仅存在必要邮件 payload。
 
@@ -253,7 +253,7 @@ index `(status,created_at,id)` 支持有限领取，领取用行锁/状态 CAS�
 
 ### `identity_action_keys` 和 `identity_rate_limits`
 
-邀请创建/重发幂等记录：`actor_id uuid FK`、`action text CHECK invite_create/invite_resend`、`key uuid` 作联合 PK；`request_digest bytea`（规范化 action/目标/地址，不含密码的 HMAC）、`invitation_id uuid FK`、`generation bigint`、`delivery_id uuid FK`、`created_at/replay_until timestamptz` 必填。同事务与邀请/代次/投递写齐；不保存原 token、密码或未经脱敏响应。重放读取原记录对应安全 DTO，不能重开被撤销/过期邀请；与当前状态冲突时准确报告，不伪称原 queued 仍会发送。重放资格至少7天，超期保留 key 墓碑、返回 IDEMPOTENCY_EXPIRED；获得留存批准前不自动删除墓碑导致同键复用。
+邀请创建/重发幂等记录：`actor_id uuid FK`、`action text CHECK invite_create/invite_resend`、`key uuid` 作联合 PK；`request_digest bytea`（规范化 action/目标/地址，不含密码的 HMAC）、`request_key_id text`、`response_snapshot jsonb`（原严格脱敏 InvitationView）、`invitation_id uuid FK`、`generation bigint`、`delivery_id uuid FK`、`created_at/replay_until timestamptz` 必填。同事务与邀请/代次/投递写齐；不保存原 token、密码、完整地址或未经脱敏响应。重放用原 key-id 校验请求，返回原快照，不因活动 key 轮换、后续代次、终结或邮件状态改变而重开邀请/重算结果。重放资格至少7天，超期保留 key 墓碑、返回 IDEMPOTENCY_EXPIRED；获得留存批准前不自动删除墓碑导致同键复用。
 
 持久配额记录联合 PK `(action,dimension,subject_digest,window_started_at,window_seconds)`；`subject_key_id text`、`count integer >=0`、`expires_at timestamptz` 必填。dimension 封闭为 identifier/address/ip/actor/token；地址/IP 均 HMAC，action 与窗口由服务端选择，不能请求体覆盖。所有命中的维度在固定窗口内原子检查并增量提交，超限不因后续业务回滚清空计数；先完成独立配额事务再进入身份业务事务。具体阈值见 design/21 §5.2；计数到窗口结束后24h清理，index `(expires_at)`。无账户和无效 token 也按相同输入摘要计数，不产生存在性旁路。
 
@@ -262,4 +262,4 @@ index `(status,created_at,id)` 支持有限领取，领取用行锁/状态 CAS�
 - users/status、installation_admin 和原 auth_email/secret 不迁写。新增 `UNIQUE(auth_accounts.user_id)` 的 credential-only 唯一约束前先扫描旧重复/不一致并停止，不自动删行/改 account_id；本阶段 provider 仍只能 credential。旧合法 credential 原行/哈希不变；只有本人改密/恢复才经锁定库更新密码、递增 admission.credential_revision。
 - 新登录以 user 行锁序列化与重置/停用，验证版本后库创建 session；重置/改密同事务更新唯一 credential、消费/撤销 challenges 并 `UPDATE sessions ... revoked_at ... WHERE user_id=...`。固定七天、软撤销、HMAC、created_at/expires_at 不变。session 列表直接读本人公开投影，不要求 adapter 伪造 raw token。
 - 对恢复/改密/停用的每次失败和 COMMIT 未确认，不发新/清 Cookie；库返回 headers 只是提交前暂存结果。确认提交后才发布。原所有业务 owner/历史不由 identity 更改。
-- 本节不写迁移 SQL、不指定编号。P1 集成再新增迁移、结构核验和扫描规则，使用原安装正式升级停旧写者；异常中止、保留数据、前向修复。新事实写入后不能降回不理解准入/邮件状态的旧写者。公开入口放行需真实双用户/邮件/生产 HTTPS、并发/回滚和旧副本两次启停证据，不能以 schema 文档视为实施完成。
+- `0024` 在正式升级停旧写者后执行预检和事务 DDL，结构核验覆盖全部新列/约束/索引；异常中止、保留原事实、只前向修复。新事实写入后不能降回不理解准入/邮件状态的旧写者。公开入口放行需真实双用户/邮件/生产 HTTPS、并发/回滚和旧副本两次启停证据，不能以 schema 文档视为实施完成。

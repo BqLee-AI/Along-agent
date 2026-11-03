@@ -68,8 +68,7 @@ export async function assertToolRunBinding(
     )
   ).rows[0];
   if (!row) throw forbidden('invalid tool conversation/Run binding');
-  if (row.execution === 'harness' && !(await isActiveOwner(client, binding.ownerId)))
-    throw forbidden('Run authorization revoked');
+  if (!(await isActiveOwner(client, binding.ownerId))) throw forbidden('Run authorization revoked');
   if (
     row.execution === 'harness' &&
     binding.allowlist?.some((tool) => !row.tools_allowlist.includes(tool))
@@ -131,8 +130,8 @@ async function lockToolBinding(
     run.rows[0].status === 'running' &&
     row.status === 'running' &&
     row.attempt_no === latest.rows[0]?.attempt_no;
+  canExecute = canExecute && (await isActiveOwner(client, binding.ownerId));
   if (run.rows[0].execution === 'harness') {
-    canExecute = canExecute && (await isActiveOwner(client, binding.ownerId));
     if (binding.allowlist?.some((tool) => !run.rows[0]!.tools_allowlist.includes(tool))) {
       if (!acceptRevokedFact) throw forbidden('tool scope exceeds frozen Run grant');
       canExecute = false;

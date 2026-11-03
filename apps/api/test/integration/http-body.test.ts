@@ -4,7 +4,7 @@ import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import { randomUUID } from 'node:crypto';
 import { handleRequest } from '../../src/http/app.js';
-import { seedSession } from '../../src/modules/identity/seed.js';
+import { seedAdmittedSession as seedSession } from './setup.js';
 import {
   createIntegrationDatabase,
   databaseUrl,

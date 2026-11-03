@@ -5,7 +5,7 @@
 > 不包含：公开注册、多租户/RBAC、OAuth、邮箱验证/找回、滑动续期、历史发现、全站视觉或 R2。
 > 阶段：R1 日常可用性；承接 [design/15](15-r1-local-lifecycle.md)。
 
-> #112 的邀请制账户增量另见 [design/21](21-invited-account-access.md) 与 `openspec/changes/productize-invited-accounts/`，均为 Proposed（待评审、不生效）；不重写本页 Required，不表示邀请/邮箱恢复或普通账户正式登录已开放。
+> #112 的准入、联系邮箱、邀请/恢复与普通账户维护见 [design/21](21-invited-account-access.md)；本页保留 #68 原身份、库认证、固定会话与本机分步收尾的边界。新增资格与接口以该增量为准，外部入口放行不等于代码实现或独立 change 收口。
 
 ## 1. 结论与证据
 

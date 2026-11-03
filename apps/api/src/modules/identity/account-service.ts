@@ -18,6 +18,14 @@ import { listHistoricalOwners as taskOwners } from '../tasks/owner-history.js';
 import { listHistoricalOwners as notificationOwners } from '../notifications/owner-history.js';
 import { listHistoricalOwners as toolOwners } from '../tools/owner-history.js';
 import { getWorkspaceAccountStatus } from '../workspaces/service.js';
+import {
+  loadIdentityKeyring,
+  lookupDigest,
+  normalizeContactEmail,
+  type IdentityKeyring,
+} from './email-security.js';
+import { consumeIdentityQuota } from './rate-limit.js';
+import { requireLookupKey } from './lookup-key.js';
 
 export interface AccountWorkspaceStatus {
   state: 'unconfigured' | 'loaded' | 'invalid' | 'unreadable';
@@ -27,6 +35,7 @@ export interface AccountServiceOptions {
   secret?: string;
   origin?: string;
   workspaceStatus?: () => Promise<AccountWorkspaceStatus>;
+  keys?: IdentityKeyring;
 }
 export interface BoundAdministrator {
   userId: string;
@@ -65,7 +74,10 @@ export interface AccountService {
     userId: string,
     input: { login_name: string; password: string; confirmed: true },
   ): Promise<AccountSessionResult>;
-  signIn(input: { login_name: string; password: string }): Promise<AccountSessionResult>;
+  signIn(
+    input: { login_name: string; password: string } | { email: string; password: string },
+    ip?: string,
+  ): Promise<AccountSessionResult>;
   signOut(sessionId: string, userId: string, headers: Headers): Promise<AccountSessionResult>;
   getBoundAdministrator(): Promise<BoundAdministrator | null>;
   listMaintenanceCandidates(): Promise<MaintenanceCandidate[]>;
@@ -76,6 +88,19 @@ export interface AccountService {
     password: string;
     displayName?: string;
   }): Promise<{ bound: true }>;
+  admitLocal(input: {
+    selection: string;
+    confirmed: true;
+    loginName: string;
+    password: string;
+  }): Promise<{ admitted: true; userId: string }>;
+  listAdmittedLocalCandidates(): Promise<
+    Array<{ selection: string; displayName: string; status: string; installationAdmin: boolean }>
+  >;
+  resolveAdmittedLocalCandidate(
+    selection: string,
+  ): Promise<{ userId: string; displayName: string }>;
+  getAdmittedLocalOwner(userId: string): Promise<{ userId: string; displayName: string }>;
 }
 export function createAccountService(
   pool: Pool,
@@ -84,13 +109,16 @@ export function createAccountService(
   const secret = options.secret ?? process.env.BETTER_AUTH_SECRET;
   const origin = options.origin ?? process.env.APP_ORIGIN ?? 'http://localhost:3000';
   const selections = new Map<string, string>();
-  async function transaction<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {
+  async function transaction<T>(
+    work: (client: PoolClient) => Promise<T>,
+    installationLock = true,
+  ): Promise<T> {
     let client: PoolClient | undefined;
     try {
       if (!secret) throw notReady('authentication unavailable');
       client = await pool.connect();
       await client.query('BEGIN');
-      await client.query('SELECT pg_advisory_xact_lock(680068, 1)');
+      if (installationLock) await client.query('SELECT pg_advisory_xact_lock(680068, 1)');
       const result = await work(client);
       await client.query('COMMIT');
       return result;
@@ -227,6 +255,10 @@ export function createAccountService(
       userId,
     ]);
     await client.query('INSERT INTO installation_admin(user_id) VALUES($1)', [userId]);
+    await client.query(
+      "INSERT INTO identity_account_admissions(user_id,source,admitted_at) VALUES($1,'installation_admin',clock_timestamp())",
+      [userId],
+    );
     return email;
   }
   async function initialize(input: { login_name: string; password: string; display_name: string }) {
@@ -265,6 +297,10 @@ export function createAccountService(
       });
       const result = await login(client, email, data.password);
       await client.query('INSERT INTO installation_admin(user_id) VALUES($1)', [user.id]);
+      await client.query(
+        "INSERT INTO identity_account_admissions(user_id,source,admitted_at) VALUES($1,'installation_admin',clock_timestamp())",
+        [user.id],
+      );
       return result;
     });
   }
@@ -314,51 +350,81 @@ export function createAccountService(
         const email = await bind(
           client,
           userId,
-          values.data.login_name,
+          'login_name' in values.data ? values.data.login_name : '',
           values.data.password,
           false,
         );
         return login(client, email, values.data.password);
       });
     },
-    async signIn(input) {
+    async signIn(input, ip = 'unknown') {
       const parsed = authSignInSchema.safeParse(input);
       if (!parsed.success) throw validationError('invalid account fields');
+      const data = parsed.data as { login_name?: string; email?: string; password: string };
+      const keys = options.keys ?? loadIdentityKeyring();
+      const address = data.email === undefined ? undefined : normalizeContactEmail(data.email);
+      await consumeIdentityQuota(pool, keys, 'sign_in', {
+        ip,
+        identifier: address ? `email:${address.normalized}` : `username:${data.login_name}`,
+      });
       return transaction(async (client) => {
-        const admin = await binding(client);
-        const email = deriveAuthEmail(parsed.data.login_name, secret);
-        const user = (
-          await client.query<UserRow>(
-            'SELECT id,status,auth_email FROM users WHERE auth_email=$1',
-            [email],
-          )
-        ).rows[0];
+        if (address) await requireLookupKey(client, keys);
+        const user = address
+          ? (
+              await client.query<UserRow>(
+                'SELECT u.id,u.status,u.auth_email FROM users u JOIN identity_contacts c ON c.user_id=u.id WHERE c.lookup_digest=$1 FOR UPDATE OF u',
+                [lookupDigest(keys, address.normalized)],
+              )
+            ).rows[0]
+          : (
+              await client.query<UserRow>(
+                'SELECT id,status,auth_email FROM users WHERE auth_email=$1 FOR UPDATE',
+                [deriveAuthEmail(data.login_name!, secret)],
+              )
+            ).rows[0];
         const accounts = user ? await credentials(client, user.id) : [];
+        const admitted =
+          user &&
+          (
+            await client.query('SELECT 1 FROM identity_account_admissions WHERE user_id=$1', [
+              user.id,
+            ])
+          ).rowCount;
+        const currentContact =
+          !address ||
+          (user &&
+            (
+              await client.query(
+                'SELECT 1 FROM identity_contacts WHERE user_id=$1 AND lookup_digest=$2',
+                [user.id, lookupDigest(keys, address.normalized)],
+              )
+            ).rowCount);
         if (
-          !admin ||
           !user ||
           user.status !== 'active' ||
-          admin.userId !== user.id ||
+          !admitted ||
+          !currentContact ||
           accounts.length !== 1 ||
           accounts[0]?.account_id !== user.id ||
           !accounts[0]?.password_hash
         ) {
           const context = await library(client).$context;
-          await context.password.hash(parsed.data.password);
+          await context.password.hash(data.password);
           throw unauthorized();
         }
-        return login(client, email, parsed.data.password);
-      });
+        return login(client, user.auth_email, data.password);
+      }, false);
     },
     async signOut(sessionId, userId, headers) {
       // Confirm a real PG commit before asking the library to publish clear cookies.
       await transaction(async (client) => {
+        await client.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [userId]);
         const result = await client.query(
           'UPDATE sessions SET revoked_at=COALESCE(revoked_at,now()) WHERE id=$1 AND user_id=$2 RETURNING id',
           [sessionId, userId],
         );
         if (!result.rowCount) throw unauthorized();
-      });
+      }, false);
       try {
         const auth = createAuth(pool, { secret, origin });
         if (!auth) throw notReady();
@@ -406,10 +472,151 @@ export function createAccountService(
       });
       if (!values.success) throw validationError('invalid account fields');
       await transaction((client) =>
-        bind(client, userId, values.data.login_name, values.data.password, true),
+        bind(
+          client,
+          userId,
+          'login_name' in values.data ? values.data.login_name : '',
+          values.data.password,
+          true,
+        ),
       );
       selections.clear();
       return { bound: true };
+    },
+    async admitLocal(input) {
+      if (input.confirmed !== true) throw validationError('explicit confirmation required');
+      const userId = selections.get(input.selection);
+      if (!userId) throw validationError('select an account from current candidates');
+      const parsed = authInitializeSchema.safeParse({
+        login_name: input.loginName,
+        password: input.password,
+        display_name: 'maintenance',
+      });
+      if (!parsed.success) throw validationError('invalid account fields');
+      await transaction(async (client) => {
+        const user = (
+          await client.query<UserRow>(
+            'SELECT id,status,auth_email FROM users WHERE id=$1 FOR UPDATE',
+            [userId],
+          )
+        ).rows[0];
+        if (!user || user.status !== 'active')
+          throw stateConflict('local account maintenance required');
+        const accounts = await credentials(client, userId);
+        const account = accounts[0];
+        if (
+          accounts.length > 1 ||
+          (account &&
+            account.account_id !== userId &&
+            (account.password_hash || account.account_id !== `seed:${userId}`))
+        )
+          throw stateConflict('credential conflict');
+        const context = await library(client).$context;
+        const email = deriveAuthEmail(parsed.data.login_name, secret);
+        if (account?.password_hash) {
+          if (
+            !(await context.password.verify({
+              hash: account.password_hash,
+              password: parsed.data.password,
+            })) ||
+            user.auth_email !== email
+          )
+            throw unauthorized();
+        } else {
+          if (
+            (
+              await client.query('SELECT 1 FROM users WHERE auth_email=$1 AND id<>$2', [
+                email,
+                userId,
+              ])
+            ).rowCount
+          )
+            throw stateConflict('login name unavailable');
+          const hash = await context.password.hash(parsed.data.password);
+          if (account)
+            await context.adapter.update({
+              model: 'account',
+              where: [{ field: 'id', value: account.id }],
+              update: { accountId: userId, password: hash, updatedAt: new Date() },
+            });
+          else
+            await context.adapter.create({
+              model: 'account',
+              data: {
+                userId,
+                providerId: 'credential',
+                accountId: userId,
+                password: hash,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+              },
+            });
+          await client.query(
+            'UPDATE users SET auth_email=$1,updated_at=clock_timestamp() WHERE id=$2',
+            [email, userId],
+          );
+        }
+        await client.query(
+          "INSERT INTO identity_account_admissions(user_id,source,admitted_at) VALUES($1,'local_maintenance',clock_timestamp()) ON CONFLICT(user_id) DO NOTHING",
+          [userId],
+        );
+      }, false);
+      selections.clear();
+      return { admitted: true, userId };
+    },
+    async listAdmittedLocalCandidates() {
+      return transaction(async (client) => {
+        const rows = (
+          await client.query<{
+            id: string;
+            display_name: string;
+            status: string;
+            administrator: boolean;
+          }>(
+            'SELECT u.id,u.display_name,u.status,(a.user_id IS NOT NULL) administrator FROM users u JOIN identity_account_admissions q ON q.user_id=u.id LEFT JOIN installation_admin a ON a.user_id=u.id WHERE u.status=$1 ORDER BY u.created_at,u.id',
+            ['active'],
+          )
+        ).rows;
+        selections.clear();
+        return rows.map((row) => {
+          const selection = randomUUID();
+          selections.set(selection, row.id);
+          return {
+            selection,
+            displayName: row.display_name,
+            status: row.status,
+            installationAdmin: row.administrator,
+          };
+        });
+      }, false);
+    },
+    async resolveAdmittedLocalCandidate(selection) {
+      const userId = selections.get(selection);
+      if (!userId) throw validationError('select an account from current candidates');
+      return transaction(async (client) => {
+        const user = (
+          await client.query<{ id: string; display_name: string }>(
+            "SELECT u.id,u.display_name FROM users u JOIN identity_account_admissions a ON a.user_id=u.id WHERE u.id=$1 AND u.status='active' FOR SHARE OF u",
+            [userId],
+          )
+        ).rows[0];
+        if (!user) throw stateConflict('selected account is no longer eligible');
+        return { userId: user.id, displayName: user.display_name };
+      }, false);
+    },
+    async getAdmittedLocalOwner(userId) {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId))
+        throw validationError('invalid account identifier');
+      return transaction(async (client) => {
+        const user = (
+          await client.query<{ id: string; display_name: string }>(
+            "SELECT u.id,u.display_name FROM users u JOIN identity_account_admissions a ON a.user_id=u.id WHERE u.id=$1 AND u.status='active' FOR SHARE OF u",
+            [userId],
+          )
+        ).rows[0];
+        if (!user) throw stateConflict('selected account is no longer eligible');
+        return { userId: user.id, displayName: user.display_name };
+      }, false);
     },
   };
 }

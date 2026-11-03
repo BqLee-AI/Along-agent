@@ -9,21 +9,40 @@ import {
   loadConfig,
   saveConfig,
   loadPrivateJson,
+  loadPrivateJsonSnapshot,
   savePrivateJson,
   updateConfig,
   validateConfig,
 } from '../local/config.mjs';
 import type { LocalConfig } from '../local/config.mjs';
 import { withInstallationLock } from '../local/lock.mjs';
-import { installationEnvironment } from '../local/compose.mjs';
+import { configuredIdentityKeys, installationEnvironment } from '../local/compose.mjs';
+import { hostEnvironment } from '../local/commands.mjs';
 
 const execute = promisify(execFile);
 const directories: string[] = [];
 const fixture = () => createConfig({ mode: 'new', tzdbVersion: '2025b' });
 async function location() {
-  const directory = await mkdtemp(join(tmpdir(), 'along-config-test-'));
-  directories.push(directory);
-  return { directory, file: join(directory, 'local.json') };
+  // Production locks fail closed on reserved/foreign Windows loopback ports.
+  // Allocate an available isolated fixture; never weaken that ownership check.
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const directory = await mkdtemp(join(tmpdir(), 'along-config-test-'));
+    directories.push(directory);
+    const file = join(directory, 'local.json');
+    try {
+      await withInstallationLock(file, async () => {});
+      return { directory, file };
+    } catch (error) {
+      if (
+        !(error instanceof Error) ||
+        !('code' in error) ||
+        error.code !== 'LOCK_UNAVAILABLE' ||
+        attempt === 7
+      )
+        throw error;
+    }
+  }
+  throw new Error('isolated local configuration lease unavailable');
 }
 afterEach(async () => {
   await Promise.all(
@@ -371,5 +390,116 @@ describe('strict local configuration', () => {
     expect(await readFile(registry)).toEqual(originalRegistry);
     expect(await readFile(file)).toEqual(originalConfig);
     expect((await readdir(directory)).sort()).toEqual(['local.json', 'workspace-registry.json']);
+  }, 60_000);
+
+  it('keeps identity keys and mail unconfigured unless explicitly supplied and scrubs ambient settings', async () => {
+    const original = fixture();
+    expect(original.identityKeyringFile).toBeUndefined();
+    expect(original.identityMail).toBeUndefined();
+    expect(await configuredIdentityKeys(original)).toBeUndefined();
+    const names = [
+      'IDENTITY_KEYRING_FILE',
+      'IDENTITY_MAIL_PROVIDER',
+      'IDENTITY_MAIL_FROM',
+      'IDENTITY_MAIL_API_KEY',
+    ];
+    const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+    try {
+      for (const name of names) process.env[name] = 'ambient-private-value';
+      for (const name of names) expect(hostEnvironment()[name]).toBeUndefined();
+      const environment = installationEnvironment(original);
+      for (const name of names) expect(environment[name]).toBe('');
+      const explicit = createConfig({
+        ...original,
+        identityKeyringFile: join(tmpdir(), 'operator-identity-keyring.json'),
+        identityMail: {
+          provider: 'resend',
+          from: 'authorized@example.invalid',
+          apiKey: 'isolated-fixture-mail-key',
+        },
+      });
+      expect(explicit.authSecret).toBe(original.authSecret);
+      expect(installationEnvironment(explicit)).toMatchObject({
+        IDENTITY_KEYRING_FILE: '/run/along-identity-keyring.json',
+        IDENTITY_MAIL_PROVIDER: 'resend',
+        IDENTITY_MAIL_FROM: 'authorized@example.invalid',
+        IDENTITY_MAIL_API_KEY: 'isolated-fixture-mail-key',
+      });
+      expect(() =>
+        validateConfig({ ...original, identityKeyringFile: 'relative-keyring.json' }),
+      ).toThrow('CONFIG_INVALID');
+      expect(() =>
+        validateConfig({
+          ...original,
+          identityMail: { provider: 'guessed-provider', from: 'x', apiKey: 'secret' },
+        }),
+      ).toThrow('CONFIG_INVALID');
+    } finally {
+      for (const name of names) {
+        if (previous[name] === undefined) delete process.env[name];
+        else process.env[name] = previous[name];
+      }
+    }
+  });
+
+  it('checks configured private keyfile readability and strict keyring shape without generating a key', async () => {
+    const { directory } = await location();
+    const keyringFile = join(directory, 'identity-keyring.json');
+    const config = { ...fixture(), identityKeyringFile: keyringFile };
+    await expect(configuredIdentityKeys(config)).rejects.toMatchObject({
+      code: 'IDENTITY_KEYRING_FILE_INVALID',
+    });
+    await savePrivateJson(keyringFile, { secret: 'must-not-appear' }, { exclusive: true });
+    const error = await configuredIdentityKeys(config).catch((reason: Error) => reason);
+    expect(error).toMatchObject({ code: 'IDENTITY_KEYRING_FILE_INVALID' });
+    expect(String(error)).not.toContain('must-not-appear');
+    expect(await loadPrivateJson(keyringFile)).toEqual({ secret: 'must-not-appear' });
+    await savePrivateJson(keyringFile, {
+      version: 1,
+      lookup: { id: 'lookup-test', key: Buffer.alloc(32, 1).toString('base64') },
+      challenge: {
+        active: 'challenge-test',
+        keys: { 'challenge-test': Buffer.alloc(32, 2).toString('base64') },
+      },
+      encryption: {
+        active: 'encryption-test',
+        keys: { 'encryption-test': Buffer.alloc(32, 3).toString('base64') },
+      },
+      rateLimit: { id: 'rate-test', key: Buffer.alloc(32, 4).toString('base64') },
+    });
+    expect((await configuredIdentityKeys(config))?.lookup.id).toBe('lookup-test');
+  }, 60_000);
+
+  it('compares exact private file byte versions and refuses stale publication including same-JSON whitespace edits', async () => {
+    const { file } = await location();
+    const original = fixture();
+    await saveConfig(file, original);
+    const before = await loadPrivateJsonSnapshot(file);
+    const concurrent = `${JSON.stringify(original)}\n\n`;
+    await writeFile(file, concurrent);
+    await expect(
+      updateConfig(
+        file,
+        (current: LocalConfig) => ({
+          ...current,
+          registryFile: join(tmpdir(), 'new-registry.json'),
+        }),
+        {
+          expectedVersion: before.version,
+        },
+      ),
+    ).rejects.toMatchObject({ code: 'CONFIG_VERSION_CONFLICT' });
+    expect(await readFile(file, 'utf8')).toBe(concurrent);
+    await expect(
+      saveConfig(
+        file,
+        { ...original, registryFile: join(tmpdir(), 'new-registry.json') },
+        {
+          expectedVersion: before.version,
+        },
+      ),
+    ).rejects.toMatchObject({ code: 'CONFIG_VERSION_CONFLICT' });
+    expect(await readFile(file, 'utf8')).toBe(concurrent);
+    expect((await loadPrivateJsonSnapshot(file)).version).not.toBe(before.version);
   }, 60_000);
 });

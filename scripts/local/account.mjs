@@ -4,7 +4,13 @@ import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline/promises';
 import { Writable } from 'node:stream';
 import pg from 'pg';
-import { loadConfig, updateConfig, loadPrivateJson, savePrivateJson } from './config.mjs';
+import {
+  loadConfig,
+  updateConfig,
+  loadPrivateJson,
+  loadPrivateJsonSnapshot,
+  savePrivateJson,
+} from './config.mjs';
 import { withInstallationLock } from './lock.mjs';
 import { DeploymentDatabase, hostDatabaseUrl } from './database.mjs';
 import { preparedArtifact } from './artifacts.mjs';
@@ -16,6 +22,7 @@ import {
   checkDependencies,
   compose,
   installationDirectory,
+  configuredIdentityKeys,
   projectContainers,
   verifyVolumes,
 } from './compose.mjs';
@@ -81,7 +88,7 @@ async function prepare(file, config) {
     await database.acquireLease();
     const state = await database.classify();
     if (state.kind !== 'supported') throw failure('DATABASE_UNSUPPORTED');
-    if (state.version !== database.targetVersion || state.version < '0017')
+    if (state.version !== database.targetVersion || state.version < '0024')
       throw failure('UPGRADE_REQUIRED');
   } finally {
     await database.close();
@@ -115,6 +122,7 @@ async function openIdentity(config, context, workspaceStatus) {
       secret: config.authSecret,
       origin: config.origin,
       workspaceStatus,
+      keys: await configuredIdentityKeys(config, context.artifact.source),
     }),
     close: () => pool.end(),
   };
@@ -156,7 +164,7 @@ async function registryFact(file, config, context, dependencies) {
   return { ...result, input };
 }
 
-async function selectLegacy(service, io) {
+async function selectLegacy(service, io, ordinary = false) {
   const candidates = await service.listMaintenanceCandidates();
   if (!candidates.length) {
     stateReport(io, 'account_unconfigured');
@@ -185,8 +193,39 @@ async function selectLegacy(service, io) {
     password !== (await io.ask('再次输入新口令（隐藏）', { secret: true }))
   )
     throw failure('ACCOUNT_PASSWORD_MISMATCH');
+  if (ordinary) {
+    const result = await service.admitLocal({
+      selection: candidate.selection,
+      confirmed: true,
+      loginName,
+      password,
+    });
+    return { userId: result.userId, displayName: candidate.displayName };
+  }
   await service.bindLocal({ selection: candidate.selection, confirmed: true, loginName, password });
   return service.getBoundAdministrator();
+}
+
+async function selectAdmitted(service, io) {
+  const candidates = await service.listAdmittedLocalCandidates();
+  candidates.forEach((item, index) =>
+    io.write(
+      `${index + 1}. ${JSON.stringify(item.displayName)} | ${JSON.stringify(item.status)} | ${item.installationAdmin ? '管理员' : '普通账户'}`,
+    ),
+  );
+  const answer = await io.ask('明确选择已准入工作区 owner 序号（无默认值；留空退出）');
+  if (!answer) return null;
+  if (!/^[1-9][0-9]*$/.test(answer) || !candidates[Number(answer) - 1])
+    throw failure('ACCOUNT_SELECTION_INVALID');
+  const candidate = candidates[Number(answer) - 1];
+  if (
+    (await io.ask(`确认只为该原用户新增有限工作区；输入 CONFIRM ${answer}`)) !== `CONFIRM ${answer}`
+  )
+    throw failure('ACCOUNT_CONFIRMATION_REQUIRED');
+  return {
+    ...(await service.resolveAdmittedLocalCandidate(candidate.selection)),
+    selection: candidate.selection,
+  };
 }
 
 async function requestRegistration(ownerId, config, io) {
@@ -232,7 +271,12 @@ async function requestRegistration(ownerId, config, io) {
 }
 
 /** One-shot maintenance. IO/dependencies are injectable for isolated acceptance; no argv secrets. */
-export async function maintainAccount(file, io, injected = {}) {
+export async function maintainAccount(
+  file,
+  io,
+  injected = {},
+  { operation = 'administrator' } = {},
+) {
   const dependencies = {
     lock: withInstallationLock,
     loadConfig,
@@ -243,31 +287,54 @@ export async function maintainAccount(file, io, injected = {}) {
     publishRegistry: savePrivateJson,
     verifyRegistry,
     reload: reloadInstallation,
+    async fileVersion(target, expected) {
+      const current = await loadPrivateJsonSnapshot(target);
+      if (!same(current.value, expected)) throw failure('ACCOUNT_INSTALLATION_CHANGED');
+      return current.version;
+    },
     ...injected,
   };
   assertExternalConfiguration(file);
+  if (!['administrator', 'admit', 'workspace'].includes(operation))
+    throw failure('ARGUMENT_INVALID');
   let committed = false,
     saved = false,
     bound,
     snapshot,
+    configVersion,
+    originalRegistry,
     context,
     registryFile,
+    registryVersion,
     verified;
   try {
     const prepared = await dependencies.lock(file, async () => {
       snapshot = await dependencies.loadConfig(file);
+      configVersion = await dependencies.fileVersion(file, snapshot);
       context = await dependencies.prepare(file, snapshot);
       const original = await registryFact(snapshot.registryFile, snapshot, context, dependencies);
+      originalRegistry = { ...original, file: snapshot.registryFile };
+      if (original.input !== null) {
+        original.version = await dependencies.fileVersion(snapshot.registryFile, original.input);
+        originalRegistry.version = original.version;
+      }
       const identity = await dependencies.openIdentity(snapshot, context, async () => ({
         ...original,
         state: original.state === 'absent' ? 'unreadable' : original.state,
       }));
       try {
-        bound = await identity.service.getBoundAdministrator();
-        if (!bound) bound = await selectLegacy(identity.service, io);
+        bound =
+          operation === 'workspace'
+            ? await selectAdmitted(identity.service, io)
+            : operation === 'admit'
+              ? await selectLegacy(identity.service, io, true)
+              : await identity.service.getBoundAdministrator();
+        if (!bound && operation === 'administrator')
+          bound = await selectLegacy(identity.service, io);
         if (!bound) return false;
         committed = true;
         stateReport(io, 'account_committed');
+        if (operation === 'admit') return false;
       } finally {
         await identity.close();
       }
@@ -289,14 +356,34 @@ export async function maintainAccount(file, io, injected = {}) {
         stateReport(io, `registry_${fact.state}`);
         throw failure(`WORKSPACE_REGISTRY_${fact.state.toUpperCase()}`);
       }
-      if (fact.state === 'loaded' && fact.ownerIds.includes(bound.userId)) {
+      if (fact.input !== null && fact.version === undefined)
+        fact.version = await dependencies.fileVersion(registryFile, fact.input);
+      if (originalRegistry.input === null && fact.input !== null)
+        originalRegistry = { ...fact, file: registryFile };
+      let workspaceChoice;
+      if (
+        operation === 'workspace' &&
+        fact.state === 'loaded' &&
+        fact.ownerIds.includes(bound.userId)
+      ) {
+        workspaceChoice = await io.ask(
+          '该原用户已有登记：输入 LOAD 只核验并重载；输入 ADD 明确另增有限工作区；留空退出',
+        );
+        if (!['ADD', 'LOAD'].includes(workspaceChoice)) return false;
+      }
+      if (
+        fact.state === 'loaded' &&
+        fact.ownerIds.includes(bound.userId) &&
+        (operation !== 'workspace' || workspaceChoice === 'LOAD')
+      ) {
         verified = fact;
+        registryVersion = fact.version;
         io.write(
           '原管理员登记已核验；保留文件字节、workspace_id、root、物理身份及有限权限，其他 owner 不变。',
         );
       } else {
         stateReport(io, 'account_committed_workspace_unconfigured');
-        if (fact.input !== null) {
+        if (operation !== 'workspace' && fact.input !== null) {
           // Never rewrite an existing registry, including one belonging to another owner.
           io.write(
             '原登记不属于已绑定管理员；保留原文件和所有 owner。请先核对原登记来源，不自动增补或改归属。',
@@ -304,15 +391,49 @@ export async function maintainAccount(file, io, injected = {}) {
           throw failure('WORKSPACE_OWNER_MISSING');
         }
         if (
-          (await io.ask('创建新有限路径登记？输入 CONFIGURE；留空保持账户已配置')) !== 'CONFIGURE'
+          workspaceChoice !== 'ADD' &&
+          (await io.ask(
+            operation === 'workspace'
+              ? '明确新增有限路径登记并保留全部原登记？输入 ADD；留空退出'
+              : '创建新有限路径登记？输入 CONFIGURE；留空保持账户已配置',
+          )) !== (operation === 'workspace' ? 'ADD' : 'CONFIGURE')
         )
           return false;
-        const input = await requestRegistration(bound.userId, snapshot, io);
+        const additions = await requestRegistration(bound.userId, snapshot, io);
+        const input = [...(fact.input ?? []), ...additions];
         verified = { ...(await dependencies.verifyRegistry(snapshot, context, input)), input };
         if (verified.state !== 'loaded' || !verified.ownerIds.includes(bound.userId))
           throw failure('WORKSPACE_REGISTRY_INVALID');
+        if (
+          fact.input !== null &&
+          !same(
+            verified.grants.filter((grant) =>
+              fact.grants.some((old) => old.workspace_id === grant.workspace_id),
+            ),
+            fact.grants,
+          )
+        )
+          throw failure('WORKSPACE_IDENTITY_CHANGED');
+        if (fact.input !== null) {
+          const current = await registryFact(registryFile, snapshot, context, dependencies);
+          if (
+            current.state !== 'loaded' ||
+            !same(current.grants, fact.grants) ||
+            (await dependencies.fileVersion(registryFile, fact.input)) !== fact.version
+          )
+            throw failure('WORKSPACE_IDENTITY_CHANGED');
+          // Publish a new immutable registry version, never overwrite the current source.
+          registryFile = path.join(
+            path.dirname(registryFile),
+            `workspace-registry.${randomUUID()}.json`,
+          );
+        }
         await dependencies.publishRegistry(registryFile, input, { exclusive: true });
         stateReport(io, 'registry_published');
+        io.write(
+          `私有登记版本：${registryFile}；配置保存失败时保留此文件，核对后显式选用，不自动覆盖旧来源。`,
+        );
+        registryVersion = await dependencies.fileVersion(registryFile, input);
       }
       return true;
     });
@@ -320,19 +441,35 @@ export async function maintainAccount(file, io, injected = {}) {
       return { account: committed ? 'committed' : 'unconfigured', workspace: 'unconfigured' };
     // updateConfig and reloadInstallation each acquire their own lock; never nest them.
     if (snapshot.registryFile !== registryFile) {
-      snapshot = await dependencies.updateConfig(file, (current) => {
-        if (!same(current, snapshot)) throw failure('ACCOUNT_INSTALLATION_CHANGED');
-        return { ...current, registryFile };
-      });
+      snapshot = await dependencies.updateConfig(
+        file,
+        async (current) => {
+          if (!same(current, snapshot)) throw failure('ACCOUNT_INSTALLATION_CHANGED');
+          if (
+            originalRegistry.input !== null &&
+            (await dependencies.fileVersion(originalRegistry.file, originalRegistry.input)) !==
+              originalRegistry.version
+          )
+            throw failure('WORKSPACE_IDENTITY_CHANGED');
+          return { ...current, registryFile };
+        },
+        { expectedVersion: configVersion },
+      );
+      configVersion = await dependencies.fileVersion(file, snapshot);
     }
     saved = true;
     stateReport(io, 'config_saved');
     await dependencies.lock(file, async () => {
       const current = await dependencies.loadConfig(file);
       if (!same(current, snapshot)) throw failure('ACCOUNT_INSTALLATION_CHANGED');
+      if ((await dependencies.fileVersion(file, current)) !== configVersion)
+        throw failure('CONFIG_VERSION_CONFLICT');
       const identity = await dependencies.openIdentity(current, context, async () => verified);
       try {
-        if (!same(await identity.service.getBoundAdministrator(), bound))
+        if (operation === 'workspace') {
+          const owner = await identity.service.getAdmittedLocalOwner(bound.userId);
+          if (owner.userId !== bound.userId) throw failure('ACCOUNT_INSTALLATION_CHANGED');
+        } else if (!same(await identity.service.getBoundAdministrator(), bound))
           throw failure('ACCOUNT_INSTALLATION_CHANGED');
       } finally {
         await identity.close();
@@ -340,8 +477,13 @@ export async function maintainAccount(file, io, injected = {}) {
       const latest = await registryFact(registryFile, current, context, dependencies);
       if (latest.state !== 'loaded' || !same(latest.grants, verified.grants))
         throw failure('WORKSPACE_IDENTITY_CHANGED');
+      if ((await dependencies.fileVersion(registryFile, verified.input)) !== registryVersion)
+        throw failure('WORKSPACE_IDENTITY_CHANGED');
     });
-    const result = await dependencies.reload(file, { expectedConfig: snapshot });
+    const result = await dependencies.reload(file, {
+      expectedConfig: snapshot,
+      expectedConfigVersion: configVersion,
+    });
     const loaded = await registryFact(registryFile, snapshot, context, dependencies);
     if (
       result.workspace?.state !== 'loaded' ||

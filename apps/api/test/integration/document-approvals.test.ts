@@ -34,7 +34,7 @@ import {
   reserveInvocation,
 } from '../../src/modules/tools/invocations.js';
 import { readRunDocumentEvidence } from '../../src/modules/tools/query.js';
-import { seedSession } from '../../src/modules/identity/seed.js';
+import { seedAdmittedSession as seedSession } from './setup.js';
 import { startConversationRun } from '../../src/modules/conversations/service.js';
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
 import { loadTimeContext } from '../../src/modules/time/context.js';

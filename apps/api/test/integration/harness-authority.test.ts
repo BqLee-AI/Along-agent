@@ -44,7 +44,7 @@ import { getApprovalDetail } from '../../src/modules/approvals/service.js';
 import { loadTimeContext } from '../../src/modules/time/context.js';
 import { confirmDocumentApproval } from '../../src/modules/approvals/document-actions.js';
 import { readDocumentApprovalDetail } from '../../src/modules/approvals/document-service.js';
-import { seedSession } from '../../src/modules/identity/seed.js';
+import { seedAdmittedSession as seedSession } from './setup.js';
 import type { SeededSession } from '../../src/modules/identity/seed.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 import {

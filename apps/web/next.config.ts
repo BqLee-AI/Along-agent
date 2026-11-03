@@ -6,6 +6,26 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   typedRoutes: false,
   agentRules: false,
+  async headers() {
+    return [
+      '/account',
+      '/login',
+      '/logout',
+      '/setup',
+      '/claim',
+      '/invite',
+      '/reset-password',
+      '/verify-contact',
+      '/forgot-password',
+    ].map((source) => ({
+      source,
+      headers: [
+        { key: 'Cache-Control', value: 'no-store' },
+        { key: 'Referrer-Policy', value: 'no-referrer' },
+        { key: 'X-Robots-Tag', value: 'noindex, nofollow' },
+      ],
+    }));
+  },
 };
 
 export default nextConfig;

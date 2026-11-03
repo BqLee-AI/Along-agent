@@ -501,6 +501,28 @@ export class DeploymentDatabase {
               (verify.additional_checks !== undefined && !Array.isArray(verify.additional_checks))
             )
               fail('migration_inventory_invalid');
+            // Manifests may carry forward unchanged facts from earlier versions.
+            // Runtime checks operate on each migration's delta so a prior object
+            // is neither mistaken for an unstamped future object nor counted twice.
+            for (const key of [
+              'tables',
+              'columns',
+              'constraints',
+              'additional_checks',
+              'functions',
+              'triggers',
+              'indexes',
+            ]) {
+              if (!Array.isArray(verify[key])) continue;
+              const prior = new Set(
+                migrations.flatMap((migration) =>
+                  typeof migration.verify === 'object' && migration.verify !== null
+                    ? (migration.verify[key] ?? []).map((fact) => JSON.stringify(fact))
+                    : [],
+                ),
+              );
+              verify[key] = verify[key].filter((fact) => !prior.has(JSON.stringify(fact)));
+            }
           } catch (error) {
             if (error.code !== 'ENOENT') throw error;
             // Existing isolated upgrade fixtures and future SQL verifiers remain supported.
@@ -758,7 +780,8 @@ export class DeploymentDatabase {
     for (const expected of manifest.indexes ?? []) {
       const actual = (
         await this.#query(
-          `SELECT i.indisvalid AS valid,i.indisready AS ready,i.indisunique AS unique,
+          `SELECT i.indisvalid AS valid,i.indisready AS ready,i.indislive AS live,i.indisunique AS unique,
+          i.indoption::smallint[] AS options,
           am.amname AS method,pg_get_expr(i.indpred,i.indrelid) AS predicate,
           ARRAY(SELECT pg_get_indexdef(i.indexrelid,n,true)
             FROM generate_series(1,i.indnkeyatts) n) AS keys
@@ -772,9 +795,12 @@ export class DeploymentDatabase {
         !actual ||
         !actual.valid ||
         !actual.ready ||
+        !actual.live ||
         actual.unique !== expected.unique ||
         actual.method !== expected.method ||
         actual.keys.join(',') !== expected.keys.join(',') ||
+        (expected.options !== undefined &&
+          actual.options.join(',') !== expected.options.join(',')) ||
         actual.predicate !== expected.predicate
       )
         fail('baseline_additional_indexes_mismatch');

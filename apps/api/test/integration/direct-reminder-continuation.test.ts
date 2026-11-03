@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { acceptReminderDate } from '../../src/modules/conversations/reminder-date.js';
-import { createIntegrationDatabase, type IntegrationDatabase } from './setup.js';
+import { admitTestUser, createIntegrationDatabase, type IntegrationDatabase } from './setup.js';
 import { reserveToolInvocation, invokeTool } from '../../src/modules/tools/gateway.js';
 import { loadTimeContext } from '../../src/modules/time/context.js';
 let db: IntegrationDatabase;
@@ -28,6 +28,7 @@ test('explicit same-goal time clarification inherits only the accepted unresolve
     "INSERT INTO users(id,auth_email,display_name) VALUES($1,$2,'clarification tester')",
     [ownerId, `${ownerId}@clarification.test`],
   );
+  await admitTestUser(db.pool, ownerId);
   await db.pool.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
     conversationId,
     ownerId,
@@ -167,6 +168,7 @@ test('timezone-only clarification preserves each selected reminder time and its 
     "INSERT INTO users(id,auth_email,display_name) VALUES($1,$2,'multi clarification')",
     [ownerId, `${ownerId}@clarification.test`],
   );
+  await admitTestUser(db.pool, ownerId);
   await db.pool.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
     conversationId,
     ownerId,

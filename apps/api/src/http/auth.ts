@@ -21,7 +21,14 @@ export interface Actor {
   timezoneId: string | null;
 }
 
-export type ActorResolver = (req: IncomingMessage) => Promise<Actor | null>;
+export interface ActorResolutionContext {
+  allowLegacyClaim?: boolean;
+}
+
+export type ActorResolver = (
+  req: IncomingMessage,
+  context?: ActorResolutionContext,
+) => Promise<Actor | null>;
 
 export interface ResolverDeps {
   pool: Pool | null;
@@ -62,7 +69,11 @@ interface SessionRow {
   timezone_id: string | null;
 }
 
-async function resolveSession(pool: Pool, signed: string): Promise<SessionRow | null> {
+async function resolveSession(
+  pool: Pool,
+  signed: string,
+  allowLegacyClaim: boolean,
+): Promise<SessionRow | null> {
   let tokenHash: string;
   try {
     // Cookie carries `<token>.<signature>` (Better Auth signed-cookie
@@ -80,8 +91,14 @@ async function resolveSession(pool: Pool, signed: string): Promise<SessionRow | 
         AND s.expires_at > now()
         AND s.revoked_at IS NULL
         AND u.status = 'active'
+        AND (EXISTS (SELECT 1 FROM identity_account_admissions a WHERE a.user_id=u.id)
+          OR ($2::boolean
+            AND NOT EXISTS (SELECT 1 FROM installation_admin)
+            AND (SELECT count(*) FROM auth_accounts a WHERE a.user_id=u.id) <= 1
+            AND NOT EXISTS (SELECT 1 FROM auth_accounts a WHERE a.user_id=u.id
+              AND (a.password_hash IS NOT NULL OR a.account_id NOT IN (u.id::text,'seed:' || u.id::text)))))
       LIMIT 1`,
-    [tokenHash],
+    [tokenHash, allowLegacyClaim],
   );
   return rows[0] ?? null;
 }
@@ -89,8 +106,9 @@ async function resolveSession(pool: Pool, signed: string): Promise<SessionRow | 
 export function createActorResolver(deps: ResolverDeps = { pool: null }): ActorResolver {
   const allowDevAuth = process.env.ALLOW_DEV_AUTH === '1';
   const devOwnerId = process.env.DEV_OWNER_ID;
-  return async (req: IncomingMessage) => {
+  return async (req: IncomingMessage, context?: ActorResolutionContext) => {
     if (allowDevAuth && devOwnerId) {
+      if (!deps.pool) throw notReady('session dependency unavailable');
       // Local dev bridge: still read the seeded user's display name/timezone so
       // brief/agent routes exercise the same timezone semantics as production.
       let displayName = '';
@@ -99,7 +117,12 @@ export function createActorResolver(deps: ResolverDeps = { pool: null }): ActorR
         const { rows } = await deps.pool.query<{
           display_name: string;
           timezone_id: string | null;
-        }>('SELECT display_name, timezone_id FROM users WHERE id = $1', [devOwnerId]);
+        }>(
+          `SELECT display_name, timezone_id FROM users u WHERE id=$1 AND status='active'
+            AND EXISTS (SELECT 1 FROM identity_account_admissions a WHERE a.user_id=u.id)`,
+          [devOwnerId],
+        );
+        if (!rows[0]) return null;
         displayName = rows[0]?.display_name ?? '';
         timezoneId = rows[0]?.timezone_id ?? null;
       }
@@ -111,7 +134,11 @@ export function createActorResolver(deps: ResolverDeps = { pool: null }): ActorR
     if (!pool || !process.env.BETTER_AUTH_SECRET) throw notReady('session dependency unavailable');
     let row: SessionRow | null;
     try {
-      row = await resolveSession(pool, token);
+      const pathname = new URL(req.url ?? '/', 'http://localhost').pathname;
+      const allowLegacyClaim =
+        context?.allowLegacyClaim === true &&
+        (pathname === '/api/v1/auth/status' || pathname === '/api/v1/auth/claim');
+      row = await resolveSession(pool, token, allowLegacyClaim);
     } catch {
       throw notReady('session dependency unavailable');
     }

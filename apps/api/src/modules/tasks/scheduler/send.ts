@@ -4,6 +4,7 @@ import { ACK_CHECK_DELAYS_MS, isPastFireWindow } from '@along/scheduler-core';
 import type { Pool, PoolClient } from 'pg';
 import { withTransaction } from '../../../db/transaction.js';
 import { deliverInApp, type InAppProvider } from '../../notifications/service.js';
+import { isActiveOwner } from '../../identity/preferences.js';
 import {
   bindCurrentSend,
   publishDeliveryCheckpoint,
@@ -68,6 +69,10 @@ export async function runSendPhase(
       const binding = bindCurrentSend(task, row);
       if (!binding || !task) {
         await markOutboxSuperseded(client, row.id);
+        return 'superseded';
+      }
+      if (!(await isActiveOwner(client, binding.ownerId, { lock: 'share' }))) {
+        await markOutboxSuperseded(client, row.id, 'owner_ineligible');
         return 'superseded';
       }
       const gateNow = nowMs ?? Date.now();

@@ -92,7 +92,7 @@ export async function lockRun(
   if (executable && (run.status !== 'running' || attempt.status !== 'running')) {
     throw stateConflict('Run attempt cannot execute', { status: run.status });
   }
-  if (authorize && run.execution === 'harness' && !(await isActiveOwner(client, run.owner_id))) {
+  if (authorize && !(await isActiveOwner(client, run.owner_id))) {
     throw forbidden('Run authorization revoked');
   }
   return { run, attempt };

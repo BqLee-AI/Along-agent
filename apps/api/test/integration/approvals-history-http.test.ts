@@ -6,7 +6,7 @@ import type { Server } from 'node:http';
 import type { Pool } from 'pg';
 import { ApprovalDetailSchema, EnvelopeSchema } from '@along/contracts';
 import { handleRequest } from '../../src/http/app.js';
-import { seedSession } from '../../src/modules/identity/seed.js';
+import { seedAdmittedSession as seedSession } from './setup.js';
 import { confirmApproval } from '../../src/modules/approvals/confirm.js';
 import { getApprovalDetail } from '../../src/modules/approvals/service.js';
 import { createIntegrationDatabase, databaseUrl, seedApproval } from './setup.js';

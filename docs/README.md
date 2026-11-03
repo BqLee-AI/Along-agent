@@ -41,7 +41,7 @@
 | 18   | [R2-A 单 Run 有界上下文](design/18-r2a-harness-context.md)               | #83 四种额度、可信计量与未知输入的后验超额边界、不可变策略、来源投影/分页回取及有界批准恢复；实现、受控消费者、真实模型分级取证         |
 | 19   | [R2-B 有限只读意图路由](design/19-r2b-readonly-intent-routing.md)        | #88：BGE INT8、三类只读、仓颉首轮决议、默认关闭、来源/资产/落盘原子性与逐意图验证；当前配套 v6 保留 legacy 路由合同，不自动接管         |
 | 20   | [本人目标内委托与授权](design/20-goal-scoped-delegation.md)              | 本人时区保存/清除与明确墙上提醒直接创建、冻结实际能力、v6 可信上下文、SSE v2/GoalResult 与 request-bound；elapsed/文件/后台仍为目标合同 |
-| 21   | [受邀账户准入与恢复](design/21-invited-account-access.md)                | Proposed：#112 业务准入/安装资格、加密联系人、邀请/恢复/会话与前向升级；合同和隔离库证据不开放入口                                      |
+| 21   | [受邀账户准入与恢复](design/21-invited-account-access.md)                | #112 显式准入/有限管理、停用后的流式披露边界、邀请/恢复/会话与前向升级；隔离实现证据与真实外部放行分列                                  |
 
 活动列表为空与历史创建事实、批量请求部分完成及标题序号的证据边界见[design/09 §5](design/09-agent-runtime-and-checkpoint.md#5-toolgateway-交互required)。
 
@@ -109,7 +109,7 @@ R2-B 的完整目标及多轮自主查询边界见[design/19 §4、§6](design/1
 | 2    | [time-core 黄金用例](demo/time-core-golden-cases.md) | 4 基准+DST+50 表达；第14条区分新请求/可信澄清锚、同日等待与真实午夜，纯函数不代替消费者验收 |
 | 3    | [故障注入 smoke](demo/fault-injection-smoke.md)      | 真实强杀、取消竞争及规则故障；分别计数实际调用与持久结果                                    |
 
-## 九、历史验收与实验记录（14 篇）
+## 九、历史验收与实验记录（15 篇）
 
 这些记录绑定各自日期、源码、环境与实际覆盖范围，不代替现行规范，也不证明新版本或 Proposed 方案已验收。
 
@@ -129,6 +129,7 @@ R2-B 的完整目标及多轮自主查询边界见[design/19 §4、§6](design/1
 | 12   | [2026-11-02 对话内提醒确认验收](verification/inline-reminder-verification-2026-11-02.md)         | #91 分版本证据、正式文档独立授权/继续、真实并发后继与 15/19 表只读核对                              |
 | 13   | [2026-11-03 受邀账户库可行性](verification/invited-account-feasibility-2026-11-03.md)            | #112 锁定 Better Auth/隔离 PG16 的普通 credential、改密、撤销和事务/Cookie 接缝；不证明 P1 产品可用 |
 | 14   | [2026-11-03 受邀账户外部前置](verification/invited-account-external-prerequisites-2026-11-03.md) | 邮件公开兼容性与真实通道、域名/HTTPS、受控邮箱、密钥托管和隐私缺口；没有外部发送或部署              |
+| 15   | [2026-11-03 受邀账户实现验证](verification/invited-account-implementation-2026-11-03.md)         | #112 正式 API/隔离 PG、原生消费者、Web 与旧副本生命周期；真实邮件和生产 HTTPS 仍单独验收            |
 
 ## 十、References（3 篇）
 
@@ -148,7 +149,7 @@ R2-B 的完整目标及多轮自主查询边界见[design/19 §4、§6](design/1
 - [R1 文档任务合同（#62）](design/14-r1-document-task-loop.md) 定义 Web 选择工作区、真实 TS MCP 检索、文档批准、写入与回读；行为真源为 [workspaces](../openspec/specs/workspaces/spec.md)、[agent-runtime](../openspec/specs/agent-runtime/spec.md) 和 [tool-gateway](../openspec/specs/tool-gateway/spec.md)。[归档记录](../openspec/changes/archive/2026-10-26-define-r1-document-task-loop/tasks.md) 分列正式消费者、真实模型与受管资料副本验收，不把 #45–#47 的底座证据或混合模型的成功矩阵扩大为单模型可靠性证明。
 - [R1 本地生命周期合同（#67）](design/15-r1-local-lifecycle.md) 的行为真源为 [local-lifecycle](../openspec/specs/local-lifecycle/spec.md)；[归档记录](../openspec/changes/archive/2026-10-27-close-r1-local-lifecycle/tasks.md)与[验证记录](verification/local-lifecycle-verification-2026-10-27.md)分列生命周期、受控合同和真实模型证据。[本机使用指南](guides/local-lifecycle.md)覆盖四入口、私有配置、原部署接入及停写维护，不将隔离身份验收冒充正式登录能力。
 - [R1 账户合同（#68）](design/16-r1-account-access.md) 的行为真源为 [identity](../openspec/specs/identity/spec.md)；[归档清单](../openspec/changes/archive/2026-10-27-close-r1-account-access/tasks.md)与[验证记录](verification/account-access-verification-2026-10-27.md)分列库实验、行为覆盖、真实 Web/PG、本机登记和独立静态审阅。原身份保留、正式认证与本机收尾共同交付，不将账户验收扩大为 #66 全路径验收。
-- [受邀账户（#112）](design/21-invited-account-access.md)与 [change](../openspec/changes/productize-invited-accounts/proposal.md)是 Proposed 增量，保留 #68 现行有效合同与原身份。准入不等于安装管理权，真实邮箱独立加密，邀请/恢复一次凭证与会话撤销同事务；[PRD](prd/04-acceptance-open-questions.md#受邀账户112proposed)、[API](api/auth/auth_routes.md)、[schema](schema/identity-schema.md)同步。P0 库/PG 实验、公开邮件资料与 P1 双用户/真实邮件/旧安装/生产 HTTPS 验收分别举证；不启用端点、不归档、不关闭 #112，也不接管执行重构或飞书连接。
+- [受邀账户（#112）](design/21-invited-account-access.md)与独立 [change](../openspec/changes/productize-invited-accounts/proposal.md)定义显式准入、加密联系邮箱、邀请/恢复和本人会话撤销；保留 #68 原身份与库认证，安装管理权不授予他人业务读取权。[PRD](prd/04-acceptance-open-questions.md#受邀账户112)、[API](api/auth/auth_routes.md)、[schema](schema/identity-schema.md)与[实现验证](verification/invited-account-implementation-2026-11-03.md)同步。代码/隔离浏览器、真实邮件、旧副本与生产 HTTPS 分层取证；外部材料不齐不放行真实邀请，不归档、不关闭 #112，也不接管执行重构或飞书连接。
 - [R1 会话历史（#69）](design/17-r1-conversation-history.md) 的行为真源为 [conversations](../openspec/specs/conversations/spec.md)，覆盖服务端发现、可见原文/回复、全部批准和结果、旧深链与只读重登；[使用说明](guides/local-lifecycle.md#找回会话run-和真实结果)、[验证记录](verification/conversation-history-verification-2026-10-28.md)和[归档清单](../openspec/changes/archive/2026-10-28-close-r1-conversation-history/tasks.md)分别记录使用、版本化运行证据与六项验收。`0018` 四个非唯一查询索引含旧原话回退查找，新增索引和单次事件聚合有独立补证；不改变执行/工作区/身份主规格，不替代 #66 全路径验收。
 - [对话内提醒确认（#91）](design/17-r1-conversation-history.md#7-web路由与登录衔接) 的行为真源为 [conversations](../openspec/specs/conversations/spec.md)；[收口计划](plans/inline-reminder-closeout-plan.md)、[验收记录](verification/inline-reminder-verification-2026-11-02.md)和[归档清单](../openspec/changes/archive/2026-11-02-confirm-reminders-inline/tasks.md)区分历史证据与当前隔离 Web/API/native/PG 补验。提醒确认只继续原等待点，文档与后继独立授权，business 保留独立批准页；不扩展免批准或 R2-B 接管。
 - [R1 个人助理](design/01-tech-stack-and-repo-structure.md#6-r1-web个人助理与职责边界) 与[页面 PRD](prd/02-core-loop-and-pages.md#r1-个人助理)记录分组顶部导航、对话首页、简洁登录、LumenUI/Base UI/Tailwind v4、React 职责、精确批准和原 Run 显式继续；[Web 使用说明](../apps/web/README.md)与[本机任务流程](guides/local-lifecycle.md#开始任务与审阅文档)说明实际操作与原安装边界。[版本化验证记录](verification/web-task-experience-verification-2026-10-28.md)区分各轮源码、生产页面、受控交互与原安装实际验收，不把旧 CI 或页面示例当作新增迁移已验证。
