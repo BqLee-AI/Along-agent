@@ -172,11 +172,13 @@ $$;
 -- GREEN: cancel_task approval round trip; RED: bad kind + bad target pair.
 -- A cancel_task approval needs a real task row: create one under the seeded
 -- user (notify_only, saved) so target_task_id has a RESTRICT-valid referent.
+-- New task rows require exactly one real creation source; the seeded
+-- propose_task invocation above is reused as that source.
 INSERT INTO tasks (id, owner_id, fire_at_utc, wall_time, timezone_id, fold,
-  resolved_utc_offset_seconds, tzdb_version, occurrence, state)
+  resolved_utc_offset_seconds, tzdb_version, occurrence, state, source_invocation_id)
 VALUES ('20000000-0000-0000-0000-000000000071', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
   now() + interval '2 hours', '2099-01-01 10:00', 'Asia/Shanghai', 0, 28800,
-  'fixture-v1', 'once', 'saved');
+  'fixture-v1', 'once', 'saved', '20000000-0000-0000-0000-000000000071');
 
 INSERT INTO approvals (id, owner_id, conversation_id, original_text, fire_at_utc,
   wall_time, timezone_id, fold, resolved_utc_offset_seconds, tzdb_version,
