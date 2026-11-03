@@ -397,7 +397,7 @@ maybe('persistent tool invocation identity and local results', () => {
     const ctx = await fresh();
     const prefs = await reserve(ctx, 'prefs/1', 'get_user_prefs', {});
     const firstPrefs = await invokeTool(pool, ctx, prefs);
-    await pool.query("UPDATE users SET timezone_id='Europe/Paris' WHERE id=$1", [ctx.ownerId]);
+    await pool.query("UPDATE users SET timezone_id='America/New_York' WHERE id=$1", [ctx.ownerId]);
     expect(await invokeTool(pool, ctx, prefs)).toEqual({ ...firstPrefs, replayed: true });
     const nextPrefs = await invokeTool(
       pool,
@@ -406,7 +406,7 @@ maybe('persistent tool invocation identity and local results', () => {
     );
     expect(nextPrefs).toMatchObject({
       status: 'ok',
-      result: { kind: 'prefs', timezone_id: 'Europe/Paris' },
+      result: { kind: 'prefs', timezone_id: 'America/New_York' },
     });
     const invalid = await invokeTool(
       pool,
@@ -421,7 +421,7 @@ maybe('persistent tool invocation identity and local results', () => {
     const source = await seedApproval(pool, { ownerId: ctx.ownerId, state: 'consumed' });
     await pool.query(
       `INSERT INTO tasks(id,owner_id,original_note,fire_at_utc,wall_time,timezone_id,fold,resolved_utc_offset_seconds,tzdb_version,occurrence,state,state_version,source_approval_id)
-      VALUES($1,$2,'新提醒','2026-11-02T01:20:00Z','2026-11-02 09:20','Asia/Shanghai',0,28800,'fixture-v1','once','saved',1,$3)`,
+      VALUES($1,$2,'新提醒','2026-11-02T08:20:00Z','2026-11-02 16:20','Asia/Shanghai',0,28800,'fixture-v1','once','saved',1,$3)`,
       [randomUUID(), ctx.ownerId, source.id],
     );
     expect(await invokeTool(pool, ctx, list)).toEqual({ ...firstList, replayed: true });

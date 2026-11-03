@@ -859,6 +859,9 @@ maybe('routing authority durable consumer behavior', () => {
         }),
       });
       if (intent === 'brief_cards_read') {
+        await database.pool.query('UPDATE users SET timezone_id=NULL WHERE id=$1', [
+          f.actor.userId,
+        ]);
         const original = f.deps.routing!.facts;
         f.deps.routing!.facts = (...args) => {
           const facts = original(...args);
