@@ -59,3 +59,8 @@
 - `tasks/create.ts` 的公共事务用例由 legacy confirm 和直接工具共用，原子写入 saved task、created 事件及 schedule outbox；工具接受结果/审计或旧批准 consumed 由调用方在同一事务提交。写入前后均按数据库实时钟验证冻结触发时刻仍在未来，过窗错误必须逃出外层事务，不重新归一或部分提交。
 - 先停旧写者并备份，显式升级 `0022→0023` 后再部署配套 API/Web；DDL、约束、触发器与版本账同事务提交，失败保留0022原事实。重复执行已记账0023不再做DDL。新接受结果产生后仅停写前滚，不删来源/任务/事件/审计或降级旧写者；旧有效 pending 仍只由原确认门消费。
 - 专用真实 PG 消费者覆盖位于 `apps/api/test/integration/task-creation.test.ts`；legacy owner/hash/过期/consumed 重放继续由 `approvals-confirm.test.ts` 保护。测试代码存在不表示已执行或升级已验收。
+
+## 0025：严格 UTC 提醒的取消批准
+
+- 取消批准保留目标任务真实的空 `tzdb_version`；仅同 owner、冻结时间一致的严格 UTC elapsed 目标可使用空版本。创建批准和其他取消批准仍须有原规则版本。
+- 迁移不改写历史批准或 hash。确认消费、取消命令和撤销回执继续遵循原事务及状态机；升级后不应重新启用不能处理空版本的旧写者。

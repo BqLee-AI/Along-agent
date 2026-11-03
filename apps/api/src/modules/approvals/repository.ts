@@ -5,7 +5,7 @@ import type { PoolClient } from 'pg';
 // fire_at_utc has passed is *projected* as `expired` (read-only; persistence
 // of the expiry happens on confirm/reject paths in PR2).
 
-export interface ApprovalRow {
+interface ApprovalRowFields {
   id: string;
   owner_id: string;
   conversation_id: string | null;
@@ -15,7 +15,6 @@ export interface ApprovalRow {
   timezone_id: string;
   fold: number;
   resolved_utc_offset_seconds: number;
-  tzdb_version: string;
   occurrence: string;
   presentation_hash: string;
   presentation_version: string;
@@ -25,10 +24,17 @@ export interface ApprovalRow {
   consumed_task_id: string | null;
   supersedes_approval_id: string | null;
   // 0011 (#9): create_task (default, pre-0011 rows) or cancel_task.
-  kind: 'create_task' | 'cancel_task';
   target_task_id: string | null;
   expected_state_version: number | null;
 }
+
+// Create approvals always retain their wall-time rules; only cancellation of
+// a UTC elapsed task can carry a null tzdb version.
+export type ApprovalRow = ApprovalRowFields &
+  (
+    | { kind: 'create_task'; tzdb_version: string }
+    | { kind: 'cancel_task'; tzdb_version: string | null }
+  );
 
 export type EffectiveStatus = 'pending' | 'expired';
 
@@ -107,10 +113,10 @@ export async function getApproval(
   return { found: true, forbidden: false, row };
 }
 
-export interface ApprovalReadRow extends ApprovalRow {
+export type ApprovalReadRow = ApprovalRow & {
   effective_now: Date;
   successor_approval_id: string | null;
-}
+};
 
 // One statement snapshot binds the stored status, result and successor together.
 // The clock is captured once for the public projection; no expiry is persisted.

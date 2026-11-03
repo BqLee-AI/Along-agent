@@ -40,6 +40,7 @@
 - `execution`：可选 `business | harness`，省略为兼容的确定性业务。harness 明确进入正式仓颉，`mode=chat` 不作隐式分派；缺实际依赖在任何新写入/SSE 前503 `HARNESS_UNAVAILABLE`，不自动改走 TS/fixture。
 - Web 的默认 Agent 对话显式传 `execution:'harness',authorization_revision:'delegation/1'`，不带 `workspace_id`；提醒快捷入口仍显式传 `business`，资料快捷入口传 `harness` 和显式工作区，两者均省略授权修订而保持 legacy。HTTP 省略 execution 的默认值不变，不新增执行种类。
 - `authorization_revision`：可选，唯一值 `delegation/1`；必须同时显式 `execution:'harness'` 且省略 `workspace_id`，否则400。省略仍按原 legacy 权限与批准合同执行，不能从当前部署、wire 版本或对话历史推断升级。委托工具包含本人偏好、只读任务/简报、观察回取与明确的直接提醒；严格 elapsed 使用 Run 冻结的可信锚和能力修订，不接受模型提供的 UTC，不生成偏好或直接提醒批准。
+- 严格 elapsed 的有效时区按工具显式提示、同 Run 已接受设置、接纳时冻结时区的顺序选择。有效时区来自本人明确指定时，规则不可用或无法转换须返回时间错误，不能静默换成 UTC；只有默认偏好或无时区且无明确本地要求时可采用真实 UTC 展示。
 - 新 Harness Run 在接纳事务内冻结同 owner、同 conversation 最新63条可见 user/assistant 消息引用并按 `created_at/id` 排序，随后追加本轮完整用户输入一次，总计最多64条。执行和批准恢复按冻结引用读原文，不混入后来消息、其他会话或 system 消息，不把旧 tool_calls 作为待执行动作。该窗口不是永久记忆；完整窗口、工具定义与观察超1MiB时明确失败 `HARNESS_CONTEXT_LIMIT`，不截断当前输入。缺跨轮引用的旧 Run 保持仅原输入的上下文。
 - 入站幂等仍为同 owner/key：business 沿历史 hash 材料；无 workspace 的 harness 保持 `harness/v1\0` 域，带 workspace 则用 `harness/workspace/v2\0`，将 `workspace_id` 追加到原规范数组后计算 SHA-256。提供 `clarification_of_run_id` 时追加该来源 Run 引用；提供 `authorization_revision` 时再追加该修订，省略均不追加，保留旧请求 hash。请求 hash 域不是执行协议版本（当前执行为 `harness/v6`）。同键换 execution、workspace、授权修订、来源引用或其他绑定输入为409，不重复创建另一 Run；冻结 owner、工具范围和可信上下文由服务端取得。
 - `workspace_id`：可选非空字符串，仅允许显式 `execution=harness`，business/省略 execution 时携带为400。新 Run 从当前本人有效部署登记取得精确授权，并冻结安全摘要；省略不授 workspace 工具。选择与新动作授权、历史展示的区别见 §5。

@@ -328,9 +328,16 @@ async function runCreateReminder(
   ).rows[0]!.now;
   if ('time_kind' in input) {
     const frozen = (
-      await client.query<{ revision: string | null; anchor: string | null }>(
+      await client.query<{
+        revision: string | null;
+        anchor: string | null;
+        timezone_id: string | null;
+        timezone_source: string | null;
+      }>(
         `SELECT frozen_context->'trustedExecutionContext'->'time_capabilities'->>'elapsed_revision' AS revision,
-                frozen_context->'trustedExecutionContext'->>'request_anchor_utc' AS anchor
+                frozen_context->'trustedExecutionContext'->>'request_anchor_utc' AS anchor,
+                frozen_context->'trustedExecutionContext'->'timezone'->>'timezone_id' AS timezone_id,
+                frozen_context->'trustedExecutionContext'->'timezone'->>'source' AS timezone_source
          FROM agent_runs WHERE id=$1 AND owner_id=$2 AND conversation_id=$3`,
         [ctx.runId, ctx.ownerId, ctx.conversationId],
       )
@@ -344,6 +351,14 @@ async function runCreateReminder(
         status: 'denied',
         error: { code: 'TOOL_FORBIDDEN', message: '此运行未冻结该时间能力或来源不可信。' },
       };
+    const elapsedTimezone =
+      input.timezone_hint ??
+      (settings.length
+        ? settings[settings.length - 1]!.timezone_id
+        : (frozen.timezone_id ?? ctx.confirmedTimezone));
+    const explicitTimezone =
+      input.timezone_hint != null ||
+      (!settings.length && frozen.timezone_source === 'explicit' && frozen.timezone_id != null);
     const fireAtUtc = addElapsed(ctx.anchorReceivedAtUtc, input.duration_seconds);
     if (!fireAtUtc || fireAtUtc <= now)
       return {
@@ -360,9 +375,9 @@ async function runCreateReminder(
     let offset = 0;
     let fold: 0 | 1 = 0;
     let tzdbVersion: string | null = null;
-    if (timezone && timezone !== 'UTC') {
+    if (elapsedTimezone && elapsedTimezone !== 'UTC') {
       if (!ctx.timeContext.available) {
-        if (input.timezone_hint)
+        if (explicitTimezone)
           return {
             status: 'ok',
             result: {
@@ -371,10 +386,10 @@ async function runCreateReminder(
             },
           };
       } else {
-        const zone = ctx.timeContext.aliases.aliases[timezone] ?? timezone;
+        const zone = ctx.timeContext.aliases.aliases[elapsedTimezone] ?? elapsedTimezone;
         const local = utcToLocal(fireAtUtc, zone, ctx.timeContext.ruleset);
         if (local.kind === 'error') {
-          if (input.timezone_hint)
+          if (explicitTimezone)
             return {
               status: 'ok',
               result: {
