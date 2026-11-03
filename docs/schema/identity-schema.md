@@ -6,6 +6,8 @@
 
 > Proposed 演进：本人默认时区保存/清除复用 identity 真实字段与公共用例，与工具接受结果原子提交，见 [design/20 §4.1、§6.1、§8](../design/20-goal-scoped-delegation.md)。单次时区不保存；普通退出/会话到期与账户禁用的执行资格分开，不新增任意账户patch，本规范不改当前表或会话实现。
 
+> #112 Proposed 增量见末节与 [design/21](../design/21-invited-account-access.md)：待评审、不生效，以下既有 Required 字段/迁移保持；新增准入、加密联系邮箱、一次凭证和邮件记录尚不存在，不能按文档推断数据库已升级。
+
 ## 设计依据
 
 - B03 会话/用户归 TS 侧，仓颉与 CangjieMagic 永不直连业务库 [B03]。
@@ -154,3 +156,108 @@ users 1 ── 0..n <全业务表 via owner_id 逻辑引用>
 ### 数据库与文件边界
 
 管理员 PG 绑定不等于工作区登记完成。Windows 私有登记、registryFile 配置与 API reload 由正式本机维护入口分别发布及核验；API 不直接写宿主配置。收尾失败保留已提交账户，显式补做，不另建用户或改其他 owner；不把文件/重载伪装成同一 PG 事务。
+
+## 受邀账户增量（#112，Proposed／待评审）
+
+本节是拟议模型，不是已实施字段/DDL；仅在 P1 经合同评审、迁移预检和完整验收后生效。旧 `users/sessions/auth_accounts/installation_admin` 及其字段/约束不被本 PR 改动；`auth_email` 永远是不透明库句柄，`primary_email_hash/email_verified` 不充当新恢复事实。行为/锁序见 [design/21 §2–§7](../design/21-invited-account-access.md)，公开 DTO/路由见 auth API §5。
+
+### 基础类型、加密和锁
+
+下表全部为 Proposed identity 自有记录。ID 服务端 UUID，引用 identity 用户/邀请/凭证均 FK `on delete restrict`；时间为 `timestamptz`，事务判断用取锁后的 PG `clock_timestamp()`，不依赖客户端时间。enum 使用 `text + CHECK`。计数/代次为非负或正整数并有对应 CHECK，过期必须晚于创建。新模型不把跨模块 owner 变成可修改 FK。
+
+`*_digest` 为用途分离 HMAC-SHA256（固定 32-byte `bytea`），不可枚举普通 SHA 不可代替。`*_ciphertext` 为 AEAD `bytea`，随行保存独立 `*_nonce`（12-byte）、`*_tag`（16-byte）、`encryption_key_id text`；AAD 按 design/21 §3 绑定记录、owner/邀请、用途/代次/key-id。lookup、challenge、rate-limit 的密钥/上下文独立，现有 BETTER_AUTH_SECRET 与 session HMAC 不改。密码/完整邮箱/token 不进 metadata、明文 JSON 或日志；加密 token 仅存在必要邮件 payload。
+
+地址相关写入统一先取从完整 contact lookup digest 派生的 PG 事务 advisory lock（64-bit 截断仅用作互斥，最终相等性/唯一仍比完整 digest；碰撞只导致额外串行），再锁 users（多 user 按 UUID 排序）→ invitation/challenge → credential/session/delivery。只持一个地址锁；换绑不必取旧地址锁，旧联系方式在同一 user 锁下撤销，涉及另一 user 的地址争用由完整 digest 唯一约束裁决。安装初始化沿原独立全局锁，普通操作不用它。管理员管理写入需锁并复验发起管理员及目标的用户资格，不先锁 invitation 再回头锁 user。停用不反向取得 task/Run 锁；scheduler/通知只通过 identity 公共资格函数持 user SHARE 锁，细节见 design/21 §7。
+
+### `identity_account_admissions`：业务准入
+
+| 字段                  | 类型/约束                                                    | 含义                                  |
+| --------------------- | ------------------------------------------------------------ | ------------------------------------- |
+| `user_id`             | uuid PK/FK users                                             | 显式获准的原业务身份，不是角色表      |
+| `source`              | text CHECK `installation_admin/invitation/local_maintenance` | 准入依据                              |
+| `invitation_id`       | uuid nullable UNIQUE/FK invitations                          | invitation 来源必须非空，其他来源为空 |
+| `admitted_at`         | timestamptz not null                                         | 获准时刻                              |
+| `credential_revision` | bigint not null default 1，>=1                               | 登录/改密/恢复/停用竞争的复核版本     |
+| `reset_generation`    | bigint not null default 0，>=0                               | 当前恢复代次                          |
+| `contact_generation`  | bigint not null default 0，>=0                               | 当前联系方式申请代次                  |
+
+users.status 继续是 active/disabled/deleted_requested 的唯一状态事实；准入存在不等于 active。迁移仅从有效 installation_admin 明确补一条，其他历史 user 不回填。source/invitation_id 的互相依赖可用同一迁移中的约束完成，不需要先建空引用或预占迁移号。新邀请原子建立 user、credential、admission、contact，并设置邀请 accepted_user_id；互相引用在事务内写齐后验证，不留半开户事实。
+
+### `identity_contacts`：唯一已验证联系方式
+
+| 字段                                  | 类型/约束                      | 含义                                             |
+| ------------------------------------- | ------------------------------ | ------------------------------------------------ |
+| `id`                                  | uuid PK                        | contact 记录身份                                 |
+| `user_id`                             | uuid not null UNIQUE/FK users  | 每 user 一个当前已验证地址                       |
+| `lookup_digest`                       | bytea not null UNIQUE，32-byte | 对规范邮箱的 contact lookup HMAC                 |
+| `lookup_key_id`                       | text not null                  | 当前 lookup key 版本，不纳入 unique 的分区键     |
+| `address_ciphertext` 及 AEAD 伴随字段 | bytea/text not null            | 可投递原地址，仅在发信/授权换绑/密钥迁写边界解密 |
+| `masked_email`                        | text not null                  | 输入规范化时生成的脱敏展示值，不参与查找/唯一性  |
+| `revision`                            | bigint not null >=1            | 换绑时在原 user 下递增；绑定恢复凭证             |
+| `verified_at/created_at/updated_at`   | timestamptz not null           | 验证与维护时刻                                   |
+
+只存已验证地址，未验证候选在 challenge，不能长期预占唯一地址。同 digest 的验证/接受竞争在地址锁与数据库唯一约束下最多一个 owner。换绑需更新 AEAD/AAD、递增 revision 并撤销旧 revision 的恢复资格；不改 users.auth_email/email_verified。HMAC lookup 轮换必须先停相关写入、全量核验唯一后切换，不能因不同 key-id 给同地址建两条。邮箱/密钥恢复失败是依赖故障，不返回空联系人。
+
+### `identity_invitations`：邀请与代次
+
+| 字段                                      | 类型/约束                                              | 含义                                                         |
+| ----------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------ |
+| `id`                                      | uuid PK                                                | 邀请身份                                                     |
+| `created_by`                              | uuid not null/FK users                                 | 发起管理员，只用于窄管理事实                                 |
+| `lookup_digest/lookup_key_id`             | bytea/text not null                                    | 与 contact 共用规范地址 namespace                            |
+| `address_ciphertext` 及 AEAD 伴随字段     | nullable bytea/text 组；pending 必填                   | 邀请收件地址；终结后依批准留存擦除时整组为空                 |
+| `masked_email`                            | text not null                                          | 管理列表的脱敏展示值，不需解密原地址                         |
+| `state`                                   | text not null CHECK `pending/accepted/revoked/expired` | 显式生命周期，不用时间表达 partial unique                    |
+| `generation`                              | bigint not null >=1                                    | 重发递增；旧代失效                                           |
+| `expires_at/created_at/updated_at`        | timestamptz not null                                   | 当前代严格 48h；时间在创建事务确定                           |
+| `accepted_user_id/accepted_at/revoked_at` | uuid FK/timestamptz nullable                           | accepted 必须有 user/time；revoked 必须有 time，其余不得伪填 |
+
+partial UNIQUE `(lookup_digest) WHERE state='pending'`；持地址锁先把到期 pending 终结再创建，不能在索引谓词用 now()。已验证 contact 不允许另建 pending 邀请。index `(created_by,created_at DESC,id DESC)` 支持管理列表，index `(state,expires_at)` 支持到期收尾；到期维护/GET 不消费 token。accepted 唯一对应一个新账户，撤销不能删除 user 或更改 owner。
+
+### `identity_challenges`：三个互斥用途的一次凭证
+
+| 字段                                    | 类型/约束                                             | 含义                                                                                                    |
+| --------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `id`                                    | uuid PK                                               | 凭证记录身份                                                                                            |
+| `purpose`                               | text CHECK `invitation/verify_contact/reset_password` | 必须与实际消费用例相同                                                                                  |
+| `token_digest/token_key_id`             | bytea UNIQUE/text not null                            | `HMAC(K_challenge, purpose + 分隔符 + raw_token)`；仅摘要用于消费                                       |
+| `user_id/invitation_id`                 | uuid nullable/FK                                      | invitation 仅绑定邀请；另两种仅绑定 user，CHECK 互斥                                                    |
+| `lookup_digest/lookup_key_id`           | bytea/text not null                                   | 固定目标地址摘要，不能从消费请求改收件人                                                                |
+| `generation`                            | bigint not null >=1                                   | 对应邀请或 admission 的该用途当前代次                                                                   |
+| `contact_revision`                      | bigint nullable                                       | reset 必填且匹配当前已验证 contact；verify 候选不借旧地址取得恢复权                                     |
+| `candidate_ciphertext` 及 AEAD 伴随字段 | nullable bytea/text 组                                | 仅 verify_contact 的待验证地址；验证成功立即擦除，否则最迟到期后24h整组擦除，其他用途不复制原地址/token |
+| `masked_email`                          | text nullable；verify_contact 必填                    | 候选地址脱敏展示值，其他用途无需复制                                                                    |
+| `created_at/expires_at`                 | timestamptz not null                                  | 邀请48h；验证/恢复30min，严格取锁后判断                                                                 |
+| `consumed_at/revoked_at`                | timestamptz nullable                                  | 最多一次消费；撤销/消费均不可复活                                                                       |
+
+UNIQUE `(purpose,invitation_id,generation)` 对邀请生效；UNIQUE `(purpose,user_id,generation)` 对本人用途生效。index `(user_id,purpose,generation)`、`(invitation_id,generation)` 和 `(expires_at)` 支持当前代和维护。消费条件同时要求当前代、正确用途/地址 revision、未消费/撤销、未到期及当前资格；一个原子事务条件更新并建立完整业务结果。失败回滚也回滚 consumed_at，不允许先标消费后异步开户/改密。
+
+### `identity_mail_deliveries`：提交后可靠边界
+
+| 字段                                         | 类型/约束                                                          | 含义                                                                  |
+| -------------------------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------- |
+| `id`                                         | uuid PK                                                            | 稳定 delivery/供应商幂等身份                                          |
+| `challenge_id`                               | uuid not null UNIQUE/FK challenges                                 | 一个凭证一封逻辑邮件，重发用新代/新记录                               |
+| `generation/purpose`                         | bigint/text not null                                               | 领取时与 challenge 再核验，不赋予另一个用途                           |
+| `status`                                     | text CHECK `queued/submitting/submitted/failed/unknown/suppressed` | submitted 仅接受；unknown 不盲重发                                    |
+| `payload_ciphertext` 及 AEAD 伴随字段        | nullable bytea/text 组                                             | 收件地址、固定模板数据、链接 raw token 的加密最小载荷；擦除后整体为空 |
+| `provider_request_id/acceptance_id`          | nullable text                                                      | 脱敏受控供应商标识，不存含地址/凭证的响应体                           |
+| `attempt_count`                              | integer not null default 0，>=0                                    | 只计真实领取/尝试，不是可无限重试的授权                               |
+| `created_at/updated_at`                      | timestamptz not null                                               | queued 持久化与状态更新时间                                           |
+| `submitted_at/finished_at/payload_erased_at` | nullable timestamptz                                               | 真实边界及擦除事实；未知不能伪填 submitted                            |
+| `failure_code`                               | nullable text                                                      | 封闭内部脱敏分类，不记原响应/邮箱                                     |
+
+index `(status,created_at,id)` 支持有限领取，领取用行锁/状态 CAS；业务事务写 queued，提交确认后才可发送。submitting 在网络前提交；超时/重启不确定一律 unknown，只有可信未接受证据才可收敛为 failed，不自动重投。queued 的旧代/过期凭证可 suppressed。终态立即擦除 payload、其余最迟到期后24h；其余摘要30天的拟议上限及外部保留批准见 design/21 §5/PRD。加密并不授权无限保留。
+
+### `identity_action_keys` 和 `identity_rate_limits`
+
+邀请创建/重发幂等记录：`actor_id uuid FK`、`action text CHECK invite_create/invite_resend`、`key uuid` 作联合 PK；`request_digest bytea`（规范化 action/目标/地址，不含密码的 HMAC）、`invitation_id uuid FK`、`generation bigint`、`delivery_id uuid FK`、`created_at/replay_until timestamptz` 必填。同事务与邀请/代次/投递写齐；不保存原 token、密码或未经脱敏响应。重放读取原记录对应安全 DTO，不能重开被撤销/过期邀请；与当前状态冲突时准确报告，不伪称原 queued 仍会发送。重放资格至少7天，超期保留 key 墓碑、返回 IDEMPOTENCY_EXPIRED；获得留存批准前不自动删除墓碑导致同键复用。
+
+持久配额记录联合 PK `(action,dimension,subject_digest,window_started_at,window_seconds)`；`subject_key_id text`、`count integer >=0`、`expires_at timestamptz` 必填。dimension 封闭为 identifier/address/ip/actor/token；地址/IP 均 HMAC，action 与窗口由服务端选择，不能请求体覆盖。所有命中的维度在固定窗口内原子检查并增量提交，超限不因后续业务回滚清空计数；先完成独立配额事务再进入身份业务事务。具体阈值见 design/21 §5.2；计数到窗口结束后24h清理，index `(expires_at)`。无账户和无效 token 也按相同输入摘要计数，不产生存在性旁路。
+
+### 既有 credential/session 及发布约束
+
+- users/status、installation_admin 和原 auth_email/secret 不迁写。新增 `UNIQUE(auth_accounts.user_id)` 的 credential-only 唯一约束前先扫描旧重复/不一致并停止，不自动删行/改 account_id；本阶段 provider 仍只能 credential。旧合法 credential 原行/哈希不变；只有本人改密/恢复才经锁定库更新密码、递增 admission.credential_revision。
+- 新登录以 user 行锁序列化与重置/停用，验证版本后库创建 session；重置/改密同事务更新唯一 credential、消费/撤销 challenges 并 `UPDATE sessions ... revoked_at ... WHERE user_id=...`。固定七天、软撤销、HMAC、created_at/expires_at 不变。session 列表直接读本人公开投影，不要求 adapter 伪造 raw token。
+- 对恢复/改密/停用的每次失败和 COMMIT 未确认，不发新/清 Cookie；库返回 headers 只是提交前暂存结果。确认提交后才发布。原所有业务 owner/历史不由 identity 更改。
+- 本节不写迁移 SQL、不指定编号。P1 集成再新增迁移、结构核验和扫描规则，使用原安装正式升级停旧写者；异常中止、保留数据、前向修复。新事实写入后不能降回不理解准入/邮件状态的旧写者。公开入口放行需真实双用户/邮件/生产 HTTPS、并发/回滚和旧副本两次启停证据，不能以 schema 文档视为实施完成。

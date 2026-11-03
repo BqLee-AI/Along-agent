@@ -5,6 +5,8 @@
 > 不包含：公开注册、多租户/RBAC、OAuth、邮箱验证/找回、滑动续期、历史发现、全站视觉或 R2。
 > 阶段：R1 日常可用性；承接 [design/15](15-r1-local-lifecycle.md)。
 
+> #112 的邀请制账户增量另见 [design/21](21-invited-account-access.md) 与 `openspec/changes/productize-invited-accounts/`，均为 Proposed（待评审、不生效）；不重写本页 Required，不表示邀请/邮箱恢复或普通账户正式登录已开放。
+
 ## 1. 结论与证据
 
 identity 拥有安装管理员绑定、credential 和会话；复用锁定 Better Auth 1.7.10 的密码哈希/验证、Cookie 及现有 resolver，不挂载库的全量 handler。正式交付是 API、数据库、账户页面与本机维护的完整切片，不是登录表单或临时 Cookie 桥。
