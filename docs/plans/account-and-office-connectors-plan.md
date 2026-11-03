@@ -5,6 +5,8 @@
 > 不包含：业务实现、部署、用户安装或凭据变更、远端 issue/PR、commit/push；不扩展短信、计费、多组织/RBAC、办公写入、自动同步、向量库或连接器市场。
 > 阶段：独立后端演进方向；代码观察基线 `3ac1b27`，与 #104 主线通过公共接口协作。
 
+> 账户 P0 合同入口：[design/21](../design/21-invited-account-access.md) 与 [productize-invited-accounts](../../openspec/changes/productize-invited-accounts/proposal.md)将账户方向细化为独立 Proposed 增量；[库实验](../verification/invited-account-feasibility-2026-11-03.md)和[外部前置](../verification/invited-account-external-prerequisites-2026-11-03.md)独立取证。本规划的原始范围声明不代替 #112 的后续授权；P0 不开放 P1 邀请入口，也不启动飞书连接。
+
 ## 1. 结论与交付顺序
 
 推荐顺序是：**邀请制账户产品化及真实双用户隔离 → 飞书单文档只读连接**。账户不是先加一个注册表单，连接也不是先放一排供应商图标：本阶段分别要交付“被邀请的人能独立、安全地使用自己的账户”和“本人能授权并读取一份有权访问的办公文档”。
