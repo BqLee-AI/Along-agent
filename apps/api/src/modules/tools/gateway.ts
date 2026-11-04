@@ -43,6 +43,8 @@ import { readRunTimezoneSettings } from './query.js';
 import { readCancellationScopeInput } from '../conversations/target-continuation.js';
 import {
   cancellationScopeIncludes,
+  candidatesInCancellationRequest,
+  isBoundedCancellationForNote,
   renderCancellationClarification,
 } from './reminder-cancel-scope.js';
 
@@ -731,38 +733,46 @@ async function runCancelReminder(
     await lockTaskCreationScope(client, ctx.ownerId);
     const candidates = await readActiveSameNoteTasks(client, ctx.ownerId, task.original_note);
     const batch =
-      scope.original === null
-        ? /^(?:请|帮我|请帮我)?取消名称以[“"‘']([^“”"'‘’]+)[”"’']开头的(?:全部|所有)未来提醒(?:，别的提醒不要取消)?[。！!]?$/u.exec(
-            scope.current.trim(),
-          )
-        : null;
-    const allFuture =
-      scope.original === null &&
-      /^(?:请|帮我|请帮我)?取消(?:全部|所有)未来提醒[。！!]?$/u.test(scope.current.trim());
+      /^(?:请|帮我|请帮我)?取消名称以[“"‘']([^“”"'‘’]+)[”"’']开头的(?:全部|所有)未来提醒(?:，别的提醒不要取消)?[。！!]?$/u.exec(
+        scope.current.trim(),
+      );
+    const allFuture = /^(?:请|帮我|请帮我)?取消(?:全部|所有)未来提醒[。！!]?$/u.test(
+      scope.current.trim(),
+    );
     const batchIncludes =
       (allFuture ||
         (batch !== null &&
           task.original_note !== null &&
           task.original_note.startsWith(batch[1]!))) &&
       task.fire_at_utc.getTime() > new Date(ctx.anchorReceivedAtUtc).getTime();
-    if (
-      !batchIncludes &&
-      !cancellationScopeIncludes(
-        scope.current,
-        scope.original,
-        task.original_note,
-        candidates,
-        task.id,
-        scope.shownCandidates,
-      )
-    ) {
+    const scopeIncludes =
+      batch !== null || allFuture
+        ? batchIncludes
+        : cancellationScopeIncludes(
+            scope.current,
+            scope.original,
+            task.original_note,
+            candidates,
+            task.id,
+            scope.shownCandidates,
+          );
+    if (!scopeIncludes) {
       return {
         status: 'ok',
         result: {
           kind: 'clarify',
           reason: 'TARGET_SCOPE_UNCLEAR',
           phrase_key: 'TARGET_SCOPE_UNCLEAR',
-          text: renderCancellationClarification(candidates),
+          text: renderCancellationClarification(
+            task.original_note &&
+              isBoundedCancellationForNote(scope.original ?? scope.current, task.original_note)
+              ? candidatesInCancellationRequest(
+                  scope.original ?? scope.current,
+                  task.original_note,
+                  candidates,
+                )
+              : candidates,
+          ),
         },
       };
     }

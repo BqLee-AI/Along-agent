@@ -192,8 +192,8 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
   it('initializes an empty database at the converged version', async () => {
     await isolated(async (url) => {
       await deployment(url, async (db) => {
-        expect((await db.initialize()).version).toBe('0026');
-        expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0026' });
+        expect((await db.initialize()).version).toBe('0027');
+        expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0027' });
       });
       await sql(url, async (client) => {
         expect(
@@ -205,7 +205,7 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
               "SELECT version FROM schema_migrations WHERE version >= '0024' ORDER BY version",
             )
           ).rows.map((row) => row.version),
-        ).toEqual(['0024', '0025', '0026']);
+        ).toEqual(['0024', '0025', '0026', '0027']);
       });
     });
   }, 30000);
@@ -223,7 +223,7 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
           await expect(db.initialize()).rejects.toMatchObject({
             code: 'explicit_upgrade_required',
           });
-          expect((await db.upgrade()).version).toBe('0026');
+          expect((await db.upgrade()).version).toBe('0027');
         });
         await sql(url, async (client) => {
           expect(await facts(client, history)).toEqual(before);
@@ -247,11 +247,11 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
                 "SELECT version FROM schema_migrations WHERE version >= '0024' ORDER BY version",
               )
             ).rows.map((row) => row.version),
-          ).toEqual(['0024', '0025', '0026']);
+          ).toEqual(['0024', '0025', '0026', '0027']);
         });
         await deployment(url, async (db) => {
-          expect((await db.initialize()).version).toBe('0026');
-          expect((await db.upgrade()).version).toBe('0026');
+          expect((await db.initialize()).version).toBe('0027');
+          expect((await db.upgrade()).version).toBe('0027');
         });
       });
     }, 30000);
@@ -289,7 +289,7 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
             url,
             async (db) => {
               expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0025' });
-              expect((await db.upgrade()).version).toBe('0026');
+              expect((await db.upgrade()).version).toBe('0027');
             },
             directory,
           );
@@ -330,13 +330,21 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
         };
       });
       await deployment(url, async (db) => {
-        expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0026' });
-        expect((await db.upgrade()).version).toBe('0026');
+        expect(await db.classify()).toMatchObject({
+          kind: 'supported',
+          version: '0026',
+          reason: 'explicit_upgrade_required',
+        });
+        expect((await db.upgrade()).version).toBe('0027');
       });
       await sql(url, async (client) => {
         expect(await facts(client, 'legacy')).toEqual(before.facts);
         expect(
-          (await client.query('SELECT * FROM schema_migrations ORDER BY version')).rows,
+          (
+            await client.query(
+              "SELECT * FROM schema_migrations WHERE version <= '0026' ORDER BY version",
+            )
+          ).rows,
         ).toEqual(before.ledger);
         expect(
           (await client.query('SELECT * FROM identity_account_admissions ORDER BY user_id')).rows,
@@ -437,7 +445,7 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
           ).toBe('0');
         });
         await deployment(url, async (db) => {
-          expect((await db.upgrade()).version).toBe('0026');
+          expect((await db.upgrade()).version).toBe('0027');
         });
         await sql(url, async (client) => expect(await facts(client, 'legacy')).toEqual(before));
       } finally {

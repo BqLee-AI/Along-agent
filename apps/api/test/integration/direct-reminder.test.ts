@@ -61,7 +61,12 @@ describe('direct reminder accepted facts', () => {
   async function fresh(
     tools = ['create_reminder', 'set_user_timezone'],
     request = text,
-    options: { anchor?: string; elapsedRevision?: 'elapsed/1'; legacyScope?: boolean } = {},
+    options: {
+      anchor?: string;
+      elapsedRevision?: 'elapsed/1';
+      legacyScope?: boolean;
+      original?: string;
+    } = {},
   ): Promise<ToolContext> {
     const ownerId = randomUUID(),
       conversationId = randomUUID(),
@@ -93,11 +98,18 @@ describe('direct reminder accepted facts', () => {
           authorization_revision: 'delegation/1',
           execution_lifecycle: 'request-bound',
           ...(!options.legacyScope ? { cancellationScopeRevision: 'scope/1' } : {}),
-          ...(options.elapsedRevision
+          ...(options.elapsedRevision || options.original
             ? {
                 trustedExecutionContext: {
-                  request_anchor_utc: anchor,
-                  time_capabilities: { elapsed_revision: options.elapsedRevision },
+                  ...(options.elapsedRevision
+                    ? {
+                        request_anchor_utc: anchor,
+                        time_capabilities: { elapsed_revision: options.elapsedRevision },
+                      }
+                    : {}),
+                  ...(options.original
+                    ? { continuation: { original_text: options.original } }
+                    : {}),
                 },
               }
             : {}),
@@ -223,10 +235,16 @@ describe('direct reminder accepted facts', () => {
     ['请取消名称以“批量”开头的全部未来提醒，别的提醒不要取消。', '批量过期', false],
     ['请取消全部未来提醒。', '另一条', true],
     ['请取消全部未来提醒。', '批量过期', false],
+    ['请取消全部未来提醒。', '全部未来提醒', false],
+    [
+      '请取消名称以“批量”开头的全部未来提醒，别的提醒不要取消。',
+      '名称以“批量”开头的全部未来提醒，别的提醒不要取消',
+      false,
+    ],
   ] as const) {
     it(`verifies unique and batch cancellation scope: ${request} / ${note}`, async () => {
       const ctx = await fresh(['cancel_reminder'], request, {
-        ...(note === '批量过期' ? { anchor: '2027-11-05T00:00:00Z' } : {}),
+        ...(['批量过期', '全部未来提醒'].includes(note) ? { anchor: '2027-11-05T00:00:00Z' } : {}),
       });
       const id = randomUUID();
       const source = await seedApproval(db.pool, { ownerId: ctx.ownerId, state: 'consumed' });
@@ -243,6 +261,32 @@ describe('direct reminder accepted facts', () => {
         result: { kind: allowed ? 'reminder_cancelled' : 'clarify' },
       });
       if (!allowed) expect(await counts(ctx)).toEqual(before);
+    });
+  }
+  for (const [request, note, anchor] of [
+    ['取消全部未来提醒。', '全部未来提醒', '2027-11-05T00:00:00Z'],
+    [
+      '取消名称以“批量”开头的全部未来提醒，别的提醒不要取消。',
+      '名称以“批量”开头的全部未来提醒，别的提醒不要取消',
+      '2027-11-03T00:00:00Z',
+    ],
+  ] as const) {
+    it(`keeps batch scope exclusive in a continuation: ${request}`, async () => {
+      const ctx = await fresh(['cancel_reminder'], request, { anchor, original: request });
+      const id = randomUUID();
+      const source = await seedApproval(db.pool, { ownerId: ctx.ownerId, state: 'consumed' });
+      await db.pool.query(
+        `INSERT INTO tasks(id,owner_id,original_note,fire_at_utc,wall_time,timezone_id,fold,
+          resolved_utc_offset_seconds,tzdb_version,occurrence,state,state_version,source_approval_id)
+         VALUES($1,$2,$3,'2027-11-04T01:20:00Z','2027-11-04 09:20','Asia/Shanghai',0,28800,'fixture-v1','once','scheduled',1,$4)`,
+        [id, ctx.ownerId, note, source.id],
+      );
+      const before = await counts(ctx);
+      expect(
+        (await call(ctx, 'cancel/continuation-batch', await cancelInput(id), 'cancel_reminder'))
+          .outcome,
+      ).toMatchObject({ status: 'ok', result: { kind: 'clarify' } });
+      expect(await counts(ctx)).toEqual(before);
     });
   }
   it('waits for a concurrent same-name creation before checking ambiguity', async () => {

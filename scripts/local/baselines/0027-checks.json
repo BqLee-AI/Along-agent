@@ -1,0 +1,14 @@
+{
+  "version": "0027",
+  "tables": [],
+  "columns": [
+    {
+      "table": "agent_runs",
+      "name": "cancellation_scope_candidates",
+      "type": "jsonb",
+      "required": false,
+      "default": ""
+    }
+  ],
+  "constraints": []
+}

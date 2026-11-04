@@ -46,6 +46,16 @@ describe('independent cancellation scope', () => {
     ).toBe(false);
     expect(
       cancellationScopeIncludes('取消第一条', '不要取消', '提醒', [candidate], candidate.id, shown),
+    ).toBe(false);
+    expect(
+      cancellationScopeIncludes(
+        '第一条',
+        '取消“提醒”11月4日那条',
+        '提醒',
+        [candidate],
+        candidate.id,
+        shown,
+      ),
     ).toBe(true);
     expect(
       cancellationScopeIncludes(
@@ -56,6 +66,29 @@ describe('independent cancellation scope', () => {
         candidate.id,
         shown,
       ),
+    ).toBe(false);
+  });
+
+  test('a shown ordinal must remain inside the original dated target scope', () => {
+    const shown = [
+      { id: 'first', wall_time: '2027-11-05 09:00', timezone_id: 'Asia/Shanghai' },
+      { id: 'second', wall_time: '2027-11-05 10:00', timezone_id: 'Asia/Shanghai' },
+    ];
+    expect(
+      cancellationScopeIncludes('第二条', '取消“喝水”11月5日那条', '喝水', shown, 'second', shown),
+    ).toBe(true);
+    expect(
+      cancellationScopeIncludes(
+        '取消第二条',
+        '取消“喝水”11月5日那条',
+        '吃药',
+        shown,
+        'second',
+        shown,
+      ),
+    ).toBe(false);
+    expect(
+      cancellationScopeIncludes('第二条', '取消“喝水”11月4日那条', '喝水', shown, 'second', shown),
     ).toBe(false);
   });
 

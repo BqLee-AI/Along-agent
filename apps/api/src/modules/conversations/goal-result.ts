@@ -12,7 +12,8 @@ import { readCancellationScopeInput, readContinuationReceipts } from './target-c
 import { stateConflict } from '../../http/errors.js';
 import { readActiveSameNoteTasks, readRepeatedNotesMentioned } from '../tasks/tool-query.js';
 import {
-  isUnspecifiedSameNoteCancellation,
+  candidatesInCancellationRequest,
+  isBoundedCancellationForNote,
   renderCancellationClarification,
 } from '../tools/reminder-cancel-scope.js';
 
@@ -172,11 +173,21 @@ export async function validateGoalResult(
       );
       if (
         notes.length === 1 &&
-        isUnspecifiedSameNoteCancellation(scope.original ?? scope.current, notes[0]!)
+        isBoundedCancellationForNote(scope.original ?? scope.current, notes[0]!)
       ) {
         const candidates = await readActiveSameNoteTasks(client, context.ownerId, notes[0]!);
         if (candidates.length > 1) {
-          const question = renderCancellationClarification(candidates);
+          const question = renderCancellationClarification(
+            candidatesInCancellationRequest(scope.original ?? scope.current, notes[0]!, candidates),
+          );
+          await client.query(
+            `UPDATE agent_runs SET cancellation_scope_candidates=$3::jsonb WHERE id=$1 AND owner_id=$2`,
+            [
+              context.runId,
+              context.ownerId,
+              JSON.stringify({ original: scope.original ?? scope.current, question }),
+            ],
+          );
           return {
             ...goal,
             clarification: { kind: 'target_selection', question },

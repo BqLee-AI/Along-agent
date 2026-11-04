@@ -71,6 +71,13 @@ export function isUnspecifiedSameNoteCancellation(text: string, note: string): b
   );
 }
 
+export function isBoundedCancellationForNote(text: string, note: string): boolean {
+  const marked = markNote(text, note);
+  return (
+    isUnspecifiedSameNoteCancellation(text, note) || (marked !== null && directDate.test(marked))
+  );
+}
+
 // Only complete, independently verifiable forms are accepted; a model's
 // proposed task metadata is not evidence of the user's selection.
 export function cancellationScopeIncludes(
@@ -120,12 +127,9 @@ export function cancellationScopeIncludes(
     const position = chinese[ordinal[1]!] ?? Number(ordinal[1]);
     const shown = shownCandidates[position - 1];
     return (
-      (previousWasTargetRequest ||
-        (original !== null &&
-          /^(?:请|帮我|请帮我|麻烦)?(?:取消|删除|删掉)第/u.test(
-            current.replace(/[\s。！!，,、]/gu, ''),
-          ))) &&
       shown?.id === targetId &&
+      original !== null &&
+      cancellationScopeIncludes(original, null, note, [shown], targetId) &&
       candidates.some(
         (candidate) =>
           candidate.id === shown.id &&
@@ -181,4 +185,14 @@ export function cancellationScopeIncludes(
     );
   });
   return matching.length === 1 && matching[0]!.id === targetId;
+}
+
+export function candidatesInCancellationRequest(
+  original: string,
+  note: string,
+  candidates: CancellationCandidate[],
+): CancellationCandidate[] {
+  return candidates.filter((candidate) =>
+    cancellationScopeIncludes(original, null, note, [candidate], candidate.id),
+  );
 }

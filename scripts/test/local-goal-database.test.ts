@@ -67,9 +67,10 @@ databaseTests('trusted goal schema lifecycle admission against PG16', () => {
     '0023',
     '0024',
     '0025-elapsed',
+    '0026',
   ]) {
     const version = source.slice(0, 4);
-    it(`explicitly upgrades original ${source} to 0026 without rewriting existing identity or Run facts`, async () => {
+    it(`explicitly upgrades original ${source} to 0027 without rewriting existing identity or Run facts`, async () => {
       const directory = await mkdtemp(join(tmpdir(), `goal-${version}-`));
       const migrations = new URL('../../infra/migrations/', import.meta.url);
       try {
@@ -133,7 +134,7 @@ databaseTests('trusted goal schema lifecycle admission against PG16', () => {
             ).rows[0].value;
           });
           await deployment(url, async (database) => {
-            expect(database.targetVersion).toBe('0026');
+            expect(database.targetVersion).toBe('0027');
             expect(await database.classify()).toMatchObject({
               kind: 'supported',
               version,
@@ -142,7 +143,7 @@ databaseTests('trusted goal schema lifecycle admission against PG16', () => {
             await expect(database.initialize()).rejects.toMatchObject({
               code: 'explicit_upgrade_required',
             });
-            expect((await database.upgrade()).version).toBe('0026');
+            expect((await database.upgrade()).version).toBe('0027');
           });
           await sql(url, async (client) => {
             expect(
@@ -150,15 +151,19 @@ databaseTests('trusted goal schema lifecycle admission against PG16', () => {
                 await client.query(
                   `SELECT jsonb_build_object(
               'identity',(SELECT to_jsonb(u) FROM users u WHERE id=$1),
-              'run',(SELECT to_jsonb(r)-'goal_result' FROM agent_runs r WHERE id=$2)) AS value`,
+              'run',(SELECT to_jsonb(r)-'goal_result'-'cancellation_scope_candidates' FROM agent_runs r WHERE id=$2)) AS value`,
                   [ownerId, runId],
                 )
               ).rows[0].value,
             ).toEqual(original);
             expect(
-              (await client.query('SELECT goal_result FROM agent_runs WHERE id=$1', [runId]))
-                .rows[0],
-            ).toEqual({ goal_result: null });
+              (
+                await client.query(
+                  'SELECT goal_result,cancellation_scope_candidates FROM agent_runs WHERE id=$1',
+                  [runId],
+                )
+              ).rows[0],
+            ).toEqual({ goal_result: null, cancellation_scope_candidates: null });
             await client.query(`CREATE FUNCTION goal_reject_restart_ddl() RETURNS event_trigger LANGUAGE plpgsql AS $$
               BEGIN RAISE EXCEPTION 'read-only goal restart attempted DDL'; END; $$;
               CREATE EVENT TRIGGER goal_restart_readonly ON ddl_command_start EXECUTE FUNCTION goal_reject_restart_ddl()`);
@@ -167,10 +172,10 @@ databaseTests('trusted goal schema lifecycle admission against PG16', () => {
             await deployment(url, async (database) => {
               expect(await database.classify()).toMatchObject({
                 kind: 'supported',
-                version: '0026',
+                version: '0027',
               });
-              expect((await database.initialize()).version).toBe('0026');
-              expect((await database.upgrade()).version).toBe('0026');
+              expect((await database.initialize()).version).toBe('0027');
+              expect((await database.upgrade()).version).toBe('0027');
             });
           }
         });
@@ -183,7 +188,7 @@ databaseTests('trusted goal schema lifecycle admission against PG16', () => {
   it('requires true delegated terminal facts rather than SQL NULL from missing legacy or goal keys', async () => {
     await isolated(async (url) => {
       await deployment(url, async (database) => {
-        expect((await database.initialize()).version).toBe('0026');
+        expect((await database.initialize()).version).toBe('0027');
       });
       await sql(url, async (client) => {
         const ownerId = randomUUID();
@@ -246,12 +251,21 @@ databaseTests('trusted goal schema lifecycle admission against PG16', () => {
       "ALTER TABLE agent_runs ALTER COLUMN goal_result SET DEFAULT '{}'::jsonb",
     ],
     ['unstamped result schema', "DELETE FROM schema_migrations WHERE version='0022'"],
+    [
+      'missing candidate evidence column',
+      'ALTER TABLE agent_runs DROP COLUMN cancellation_scope_candidates',
+    ],
+    [
+      'required candidate evidence column',
+      'ALTER TABLE agent_runs ALTER COLUMN cancellation_scope_candidates SET NOT NULL',
+    ],
+    ['unstamped candidate evidence', "DELETE FROM schema_migrations WHERE version='0027'"],
   ])(
     'refuses %s without repair or ledger rewriting',
     async (_name, mutation) => {
       await isolated(async (url) => {
         await deployment(url, async (database) => {
-          expect((await database.initialize()).version).toBe('0026');
+          expect((await database.initialize()).version).toBe('0027');
         });
         let before: unknown;
         const snapshot = `SELECT jsonb_build_object(

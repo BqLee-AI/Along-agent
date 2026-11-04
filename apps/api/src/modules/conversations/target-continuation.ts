@@ -147,12 +147,18 @@ export async function readCancellationScopeInput(
       original: string | null;
       revision: string | null;
       goal: unknown;
+      snapshot_original: string | null;
+      snapshot_question: string | null;
     }>(
       `SELECT m.content AS current,
         r.frozen_context->'trustedExecutionContext'->'continuation'->>'original_text' AS original,
         r.frozen_context->>'cancellationScopeRevision' AS revision,
-        r.frozen_context->'trustedExecutionContext'->'continuation'->'goal_result' AS goal
+        r.frozen_context->'trustedExecutionContext'->'continuation'->'goal_result' AS goal,
+        source.cancellation_scope_candidates->>'original' AS snapshot_original,
+        source.cancellation_scope_candidates->>'question' AS snapshot_question
        FROM agent_runs r JOIN messages m ON m.id=r.input_message_id
+       LEFT JOIN agent_runs source ON source.id::text=r.frozen_context->'trustedExecutionContext'->'continuation'->>'run_id'
+         AND source.owner_id=r.owner_id AND source.conversation_id=r.conversation_id
        WHERE r.id=$1 AND r.owner_id=$2 AND r.conversation_id=$3
          AND m.owner_id=$2 AND m.conversation_id=$3 AND m.role='user'`,
       [binding.runId, binding.ownerId, binding.conversationId],
@@ -161,8 +167,13 @@ export async function readCancellationScopeInput(
   if (!row) throw stateConflict('cancellation input missing');
   const goal = GoalResultSchema.safeParse(row.goal);
   const shownCandidates =
-    goal.success && goal.data.clarification?.kind === 'target_selection'
-      ? readShownCancellationCandidates(goal.data.answer)
+    row.original &&
+    row.original === row.snapshot_original &&
+    row.snapshot_question &&
+    goal.success &&
+    goal.data.clarification?.kind === 'target_selection' &&
+    goal.data.answer === row.snapshot_question
+      ? readShownCancellationCandidates(row.snapshot_question)
       : [];
   return { current: row.current, original: row.original, revision: row.revision, shownCandidates };
 }
