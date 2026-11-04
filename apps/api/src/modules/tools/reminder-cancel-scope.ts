@@ -65,7 +65,7 @@ export function isUnspecifiedSameNoteCancellation(text: string, note: string): b
   const marked = markNote(text, note);
   return (
     marked !== null &&
-    /^(?:请|帮我|请帮我|麻烦)?(?:取消|删除|删掉)(?:名叫|名称为|名为)?\0(?:的)?(?:这条|那条|一个)?(?:提醒|事项)?$/u.test(
+    /^(?:请|帮我|请帮我|麻烦)?(?:取消|删除|删掉)(?:提醒|事项)?(?:名叫|名称为|名为)?\0(?:的)?(?:这条|那条|一个)?(?:提醒|事项)?$/u.test(
       marked,
     )
   );

@@ -498,6 +498,38 @@ test('conversation admission lock permits only one successor of a real target ga
   });
 });
 
+test('an older unanswered target gap prevents an ambiguous continuation', async () => {
+  const f = await fixture();
+  const oldMessageId = randomUUID();
+  await db.pool.query(
+    "INSERT INTO messages(id,owner_id,conversation_id,role,content,created_at) VALUES($1,$2,$3,'user','另一个问题',clock_timestamp()-interval '2 minutes')",
+    [oldMessageId, f.ownerId, f.conversationId],
+  );
+  await db.pool.query(
+    `INSERT INTO agent_runs(id,owner_id,conversation_id,agent_revision,mode,status,budget_max_iterations,budget_max_tokens,execution,tools_allowlist,frozen_context,input_message_id,goal_result)
+     SELECT $1,owner_id,conversation_id,agent_revision,mode,status,budget_max_iterations,budget_max_tokens,execution,tools_allowlist,frozen_context,$2,goal_result
+     FROM agent_runs WHERE id=$3`,
+    [randomUUID(), oldMessageId, f.runId],
+  );
+  const inputMessageId = randomUUID();
+  await db.pool.query(
+    "INSERT INTO messages(id,owner_id,conversation_id,role,content) VALUES($1,$2,$3,'user','第一个')",
+    [inputMessageId, f.ownerId, f.conversationId],
+  );
+  const client = await db.pool.connect();
+  try {
+    const continuation = await acceptTargetContinuation(client, {
+      ...f,
+      inputMessageId,
+      sourceRunId: f.runId,
+      timeContext,
+    });
+    expect(continuation).toBeNull();
+  } finally {
+    client.release();
+  }
+});
+
 test('old profiles and unrelated intervening inputs cannot authorize a continuation', async () => {
   for (const old of [true, false]) {
     const f = await fixture(old ? ['list_tasks'] : ['get_task', 'cancel_reminder']);

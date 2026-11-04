@@ -33,6 +33,21 @@ describe('independent cancellation scope', () => {
     );
   });
 
+  test('a named reminder before the title is unique only with one live candidate', () => {
+    expect(
+      cancellationScopeIncludes(
+        '请取消提醒“同名提醒”。',
+        null,
+        '同名提醒',
+        [candidates[0]!],
+        'first',
+      ),
+    ).toBe(true);
+    expect(
+      cancellationScopeIncludes('请取消提醒“同名提醒”。', null, '同名提醒', candidates, 'first'),
+    ).toBe(false);
+  });
+
   test('an explicit cancellation can resolve the single candidate shown in a clarification', () => {
     const candidate = {
       id: '12345678-1234-4234-8234-123456789abc',
