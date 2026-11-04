@@ -30,6 +30,40 @@ export async function readCancelTaskCandidate(
   return rows[0] ?? null;
 }
 
+// Include pending revocations so a multi-target request cannot become
+// artificially unique as earlier cancellation requests are accepted.
+export async function readActiveSameNoteTasks(
+  client: PoolClient,
+  ownerId: string,
+  note: string | null,
+): Promise<{ id: string; wall_time: string; timezone_id: string }[]> {
+  return (
+    await client.query<{ id: string; wall_time: string; timezone_id: string }>(
+      `SELECT id, wall_time, timezone_id FROM tasks
+       WHERE owner_id=$1 AND original_note IS NOT DISTINCT FROM $2
+         AND state IN ('saved','pending_schedule','scheduled','cancel_pending')
+       ORDER BY fire_at_utc,id`,
+      [ownerId, note],
+    )
+  ).rows;
+}
+
+export async function readRepeatedNotesMentioned(
+  client: PoolClient,
+  ownerId: string,
+  input: string,
+): Promise<string[]> {
+  const { rows } = await client.query<{ original_note: string }>(
+    `SELECT original_note FROM tasks
+     WHERE owner_id=$1 AND original_note IS NOT NULL AND original_note<>''
+       AND strpos($2,original_note)>0
+       AND state IN ('saved','pending_schedule','scheduled','cancel_pending')
+     GROUP BY original_note HAVING count(*)>1 LIMIT 2`,
+    [ownerId, input],
+  );
+  return rows.map((row) => row.original_note);
+}
+
 export interface ToolTaskList {
   tasks: {
     task_id: string;

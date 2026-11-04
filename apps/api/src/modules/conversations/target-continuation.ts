@@ -8,6 +8,10 @@ import {
   type InvocationSnapshot,
 } from '../tools/invocations.js';
 import { stateConflict } from '../../http/errors.js';
+import {
+  readShownCancellationCandidates,
+  type CancellationCandidate,
+} from '../tools/reminder-cancel-scope.js';
 
 type Binding = { ownerId: string; conversationId: string };
 type Frozen = {
@@ -124,6 +128,43 @@ export async function acceptTargetContinuation(
     },
     anchor: run.frozen_context.anchorReceivedAtUtc,
   };
+}
+
+// Read only the admitted user input and server-frozen predecessor, never a
+// model-provided quote. The predecessor text does not itself select a target.
+export async function readCancellationScopeInput(
+  client: PoolClient,
+  binding: Binding & { runId: string },
+): Promise<{
+  current: string;
+  original: string | null;
+  revision: string | null;
+  shownCandidates: CancellationCandidate[];
+}> {
+  const row = (
+    await client.query<{
+      current: string;
+      original: string | null;
+      revision: string | null;
+      goal: unknown;
+    }>(
+      `SELECT m.content AS current,
+        r.frozen_context->'trustedExecutionContext'->'continuation'->>'original_text' AS original,
+        r.frozen_context->>'cancellationScopeRevision' AS revision,
+        r.frozen_context->'trustedExecutionContext'->'continuation'->'goal_result' AS goal
+       FROM agent_runs r JOIN messages m ON m.id=r.input_message_id
+       WHERE r.id=$1 AND r.owner_id=$2 AND r.conversation_id=$3
+         AND m.owner_id=$2 AND m.conversation_id=$3 AND m.role='user'`,
+      [binding.runId, binding.ownerId, binding.conversationId],
+    )
+  ).rows[0];
+  if (!row) throw stateConflict('cancellation input missing');
+  const goal = GoalResultSchema.safeParse(row.goal);
+  const shownCandidates =
+    goal.success && goal.data.clarification?.kind === 'target_selection'
+      ? readShownCancellationCandidates(goal.data.answer)
+      : [];
+  return { current: row.current, original: row.original, revision: row.revision, shownCandidates };
 }
 
 // Walk only the frozen, already-admitted predecessor chain. Historical receipts

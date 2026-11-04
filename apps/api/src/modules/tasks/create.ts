@@ -53,6 +53,14 @@ async function requireFutureFireTime(client: PoolClient, fireAtUtc: string): Pro
   }
 }
 
+// Serialize task insertion with cancellation target discovery for one owner.
+// The transaction owns the lock, including any later task/event/outbox writes.
+export async function lockTaskCreationScope(client: PoolClient, ownerId: string): Promise<void> {
+  await client.query("SELECT pg_advisory_xact_lock(hashtextextended('task-scope:' || $1, 0))", [
+    ownerId,
+  ]);
+}
+
 /**
  * Caller owns the transaction and validates its source's owner/authorization.
  * Frozen time-core facts are copied, never recalculated. Any error must escape
@@ -62,6 +70,7 @@ export async function createTaskWithinTransaction(
   client: PoolClient,
   input: CreateTaskInput,
 ): Promise<CreatedTaskReceipt> {
+  await lockTaskCreationScope(client, input.ownerId);
   await requireFutureFireTime(client, input.fireAtUtc);
   const taskId = randomUUID();
   const { rows } = await client.query<{ fire_at_utc: Date }>(

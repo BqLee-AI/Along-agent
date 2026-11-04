@@ -170,7 +170,7 @@ export const DELEGATION_TOOL_DEFINITIONS = [
   {
     name: 'cancel_reminder',
     description:
-      '取消本人明确委托的提醒。先确定用户目标，再提供同一任务的 ID、完整名称、冻结本地时间和时区；各字段必须来自同一条记录，名称被截断时先用 get_task。若身份不匹配，重新读取并自行修正，不向用户重复索权。cancel_pending 只是已提交并等待撤销回执，不代表已经取消；逐项报告实际结果。',
+      '取消本人明确委托的提醒。先确定用户目标，再提供同一任务的 ID、完整名称、冻结本地时间和时区；各字段必须来自同一条记录，名称被截断时先用 get_task。若身份不匹配，重新读取并自行修正，不向用户重复索权。若返回 TARGET_SCOPE_UNCLEAR，未取消；将工具返回的完整 text 原样作为回答和目标澄清问题，以便用户按展示序号选择。cancel_pending 只是已提交并等待撤销回执，不代表已经取消；逐项报告实际结果。',
     risk: 'medium' as const,
     parameters: workspaceParameters(
       {

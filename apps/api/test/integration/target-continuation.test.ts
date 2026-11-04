@@ -1,13 +1,20 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
+import type { GoalResult } from '@along/contracts';
 import { acceptTargetContinuation } from '../../src/modules/conversations/target-continuation.js';
 import { acceptReminderDate } from '../../src/modules/conversations/reminder-date.js';
 import { loadTimeContext } from '../../src/modules/time/context.js';
-import { admitTestUser, createIntegrationDatabase, type IntegrationDatabase } from './setup.js';
+import {
+  admitTestUser,
+  createIntegrationDatabase,
+  seedApproval,
+  type IntegrationDatabase,
+} from './setup.js';
 import { invokeTool, reserveToolInvocation } from '../../src/modules/tools/gateway.js';
 import { validateGoalResult } from '../../src/modules/conversations/goal-result.js';
 import { startConversationRun } from '../../src/modules/conversations/service.js';
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
+import { readShownCancellationCandidates } from '../../src/modules/tools/reminder-cancel-scope.js';
 
 let db: IntegrationDatabase;
 beforeAll(async () => {
@@ -19,7 +26,7 @@ afterAll(async () => {
 
 async function fixture(
   allowlist = ['get_task', 'cancel_reminder'],
-  options: { running?: boolean; noGoal?: boolean } = {},
+  options: { running?: boolean; noGoal?: boolean; scope?: boolean; text?: string } = {},
 ) {
   const ownerId = randomUUID(),
     conversationId = randomUUID(),
@@ -35,8 +42,8 @@ async function fixture(
     ownerId,
   ]);
   await db.pool.query(
-    "INSERT INTO messages(id,owner_id,conversation_id,role,content,created_at) VALUES($1,$2,$3,'user','取消提醒',clock_timestamp()-interval '1 minute')",
-    [messageId, ownerId, conversationId],
+    "INSERT INTO messages(id,owner_id,conversation_id,role,content,created_at) VALUES($1,$2,$3,'user',$4,clock_timestamp()-interval '1 minute')",
+    [messageId, ownerId, conversationId, options.text ?? '取消提醒'],
   );
   const goal = {
     status: 'blocked',
@@ -53,6 +60,7 @@ async function fixture(
       JSON.stringify(allowlist),
       JSON.stringify({
         authorization_revision: 'delegation/1',
+        ...(options.scope ? { cancellationScopeRevision: 'scope/1' } : {}),
         anchorReceivedAtUtc: '2026-11-03T00:00:00Z',
         reminderDateSource: { version: 1, kind: 'new', inputMessageId: messageId },
       }),
@@ -64,6 +72,218 @@ async function fixture(
   return { ownerId, conversationId, runId, messageId };
 }
 const timeContext = loadTimeContext('fixture-v1');
+
+test.each([
+  { scope: true, text: '帮我取消“同名提醒”这条提醒。', normalized: true },
+  { scope: false, text: '帮我取消“同名提醒”这条提醒。', normalized: false },
+  { scope: true, text: '查询“同名提醒”有几条。', normalized: false },
+])(
+  'normalizes only a new same-name cancellation clarification: $text',
+  async ({ scope, text, normalized }) => {
+    const f = await fixture(undefined, {
+      running: true,
+      scope,
+      text,
+    });
+    const ids = [randomUUID(), randomUUID()];
+    for (const [index, id] of ids.entries()) {
+      const source = await seedApproval(db.pool, { ownerId: f.ownerId, state: 'consumed' });
+      const day = index === 0 ? '04' : '05';
+      await db.pool.query(
+        `INSERT INTO tasks(id,owner_id,original_note,fire_at_utc,wall_time,timezone_id,fold,
+        resolved_utc_offset_seconds,tzdb_version,occurrence,state,state_version,source_approval_id)
+       VALUES($1,$2,'同名提醒',$3,$4,'Asia/Shanghai',0,28800,'fixture-v1','once','scheduled',1,$5)`,
+        [id, f.ownerId, `2027-11-${day}T01:20:00Z`, `2027-11-${day} 09:20`, source.id],
+      );
+    }
+    const attemptId = randomUUID();
+    await db.pool.query(
+      'INSERT INTO run_attempts(id,owner_id,run_id,attempt_no) VALUES($1,$2,$3,1)',
+      [attemptId, f.ownerId, f.runId],
+    );
+    const context = {
+      ...f,
+      attemptId,
+      requestId: randomUUID(),
+      allowlist: ['get_task', 'cancel_reminder'],
+      authorizationRevision: 'delegation/1' as const,
+      confirmedTimezone: 'Asia/Shanghai',
+      anchorReceivedAtUtc: '2026-11-03T00:00:00Z',
+      receivedAtUtc: '2026-11-03T00:00:00Z',
+      foldChoice: 'none' as const,
+      timeContext,
+    };
+    const supplied: GoalResult = {
+      status: 'blocked',
+      outcomes: [{ description: '取消提醒', status: 'blocked', receipt_refs: [] }],
+      clarification: { kind: 'target_selection', question: '选哪条？' },
+      answer: '请选择提醒。',
+    };
+    const client = await db.pool.connect();
+    try {
+      const goal = await validateGoalResult(client, context, supplied);
+      if (normalized) {
+        expect(
+          readShownCancellationCandidates(goal.answer).map((candidate) => candidate.id),
+        ).toEqual(ids);
+        expect(goal.clarification?.question).toBe(goal.answer);
+      } else {
+        expect(goal).toEqual(supplied);
+      }
+    } finally {
+      client.release();
+    }
+  },
+);
+
+test.each([true, false])(
+  'ordinal requires the exact displayed clarification: %s',
+  async (verbatim) => {
+    const f = await fixture(undefined, {
+      running: true,
+      scope: true,
+      text: '帮我取消“同名提醒”这条提醒。',
+    });
+    const ids = [randomUUID(), randomUUID()];
+    for (const [index, id] of ids.entries()) {
+      const source = await seedApproval(db.pool, { ownerId: f.ownerId, state: 'consumed' });
+      const day = index === 0 ? '04' : '05';
+      await db.pool.query(
+        `INSERT INTO tasks(id,owner_id,original_note,fire_at_utc,wall_time,timezone_id,fold,
+        resolved_utc_offset_seconds,tzdb_version,occurrence,state,state_version,source_approval_id)
+       VALUES($1,$2,'同名提醒',$3,$4,'Asia/Shanghai',0,28800,'fixture-v1','once','scheduled',1,$5)`,
+        [id, f.ownerId, `2027-11-${day}T01:20:00Z`, `2027-11-${day} 09:20`, source.id],
+      );
+    }
+    const attemptId = randomUUID();
+    await db.pool.query(
+      'INSERT INTO run_attempts(id,owner_id,run_id,attempt_no) VALUES($1,$2,$3,1)',
+      [attemptId, f.ownerId, f.runId],
+    );
+    const context = {
+      ...f,
+      attemptId,
+      requestId: randomUUID(),
+      allowlist: ['get_task', 'cancel_reminder'],
+      authorizationRevision: 'delegation/1' as const,
+      confirmedTimezone: 'Asia/Shanghai',
+      anchorReceivedAtUtc: '2026-11-03T00:00:00Z',
+      receivedAtUtc: '2026-11-03T00:00:00Z',
+      foldChoice: 'none' as const,
+      timeContext,
+    };
+    const args = (index: number) => ({
+      task_id: ids[index]!,
+      expected_note: '同名提醒',
+      expected_wall_time: `2027-11-0${index + 4} 09:20`,
+      expected_timezone_id: 'Asia/Shanghai',
+    });
+    const toolId = 'cancel_reminder';
+    const firstBinding = await reserveToolInvocation(db.pool, context, {
+      callKey: 'ambiguous',
+      toolId,
+      args: args(1),
+    });
+    const first = await invokeTool(db.pool, context, { ...firstBinding, toolId, args: args(1) });
+    if (first.status !== 'ok' || first.result.kind !== 'clarify')
+      throw new Error('expected clarification');
+    expect(first.result.reason).toBe('TARGET_SCOPE_UNCLEAR');
+    const goal = {
+      status: 'blocked',
+      outcomes: [{ description: '取消提醒', status: 'blocked', receipt_refs: [] }],
+      clarification: { kind: 'target_selection', question: first.result.text },
+      answer: verbatim ? first.result.text : '请选择第二条或者第一条。',
+    };
+    await db.pool.query("UPDATE agent_runs SET status='done',goal_result=$2::jsonb WHERE id=$1", [
+      f.runId,
+      JSON.stringify(goal),
+    ]);
+    const messageId = randomUUID(),
+      runId = randomUUID(),
+      nextAttempt = randomUUID();
+    await db.pool.query(
+      "INSERT INTO messages(id,owner_id,conversation_id,role,content) VALUES($1,$2,$3,'user','第二条')",
+      [messageId, f.ownerId, f.conversationId],
+    );
+    const client = await db.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('SELECT id FROM conversations WHERE id=$1 FOR UPDATE', [f.conversationId]);
+      const accepted = await acceptTargetContinuation(client, {
+        ...f,
+        inputMessageId: messageId,
+        sourceRunId: f.runId,
+        timeContext,
+      });
+      expect(accepted?.continuation.source_result).toBeNull();
+      await client.query(
+        `INSERT INTO agent_runs(id,owner_id,conversation_id,agent_revision,mode,budget_max_iterations,budget_max_tokens,execution,tools_allowlist,frozen_context,input_message_id)
+       VALUES($1,$2,$3,'test','chat',16,4096,'harness',$4::jsonb,$5::jsonb,$6)`,
+        [
+          runId,
+          f.ownerId,
+          f.conversationId,
+          JSON.stringify(context.allowlist),
+          JSON.stringify({
+            authorization_revision: 'delegation/1',
+            cancellationScopeRevision: 'scope/1',
+            trustedExecutionContext: { continuation: accepted!.continuation },
+          }),
+          messageId,
+        ],
+      );
+      await client.query(
+        'INSERT INTO run_attempts(id,owner_id,run_id,attempt_no) VALUES($1,$2,$3,1)',
+        [nextAttempt, f.ownerId, runId],
+      );
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+    const next = { ...context, runId, attemptId: nextAttempt };
+    const wrongBinding = await reserveToolInvocation(db.pool, next, {
+      callKey: 'wrong',
+      toolId,
+      args: args(0),
+    });
+    expect(
+      await invokeTool(db.pool, next, { ...wrongBinding, toolId, args: args(0) }),
+    ).toMatchObject({ status: 'ok', result: { kind: 'clarify' } });
+    const rightBinding = await reserveToolInvocation(db.pool, next, {
+      callKey: 'right',
+      toolId,
+      args: args(1),
+    });
+    const right = await invokeTool(db.pool, next, { ...rightBinding, toolId, args: args(1) });
+    if (verbatim) {
+      expect(right).toMatchObject({
+        status: 'ok',
+        result: { kind: 'reminder_cancelled', task_id: ids[1], state: 'cancel_pending' },
+      });
+      expect(
+        await invokeTool(db.pool, next, { ...rightBinding, toolId, args: args(1) }),
+      ).toMatchObject({
+        status: 'ok',
+        replayed: true,
+        result: { kind: 'reminder_cancelled', task_id: ids[1] },
+      });
+    } else {
+      expect(right).toMatchObject({ status: 'ok', result: { kind: 'clarify' } });
+    }
+    const states = await db.pool.query('SELECT id,state FROM tasks WHERE id=ANY($1::uuid[])', [
+      ids,
+    ]);
+    expect(new Map(states.rows.map((row) => [row.id, row.state]))).toEqual(
+      new Map([
+        [ids[0], 'scheduled'],
+        [ids[1], verbatim ? 'cancel_pending' : 'scheduled'],
+      ]),
+    );
+  },
+);
 
 test('unverifiable source asks for the relationship without admitting an effect', async () => {
   const f = await fixture(undefined, { noGoal: true });

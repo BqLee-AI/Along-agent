@@ -365,6 +365,9 @@ export async function startConversationRun(
         tzdbVersion: deps.timeContext.tzdb_version,
         aliasVersion: deps.timeContext.available ? deps.timeContext.aliases.version : null,
         reminderDateSource: reminderDate.source,
+        ...(delegation && (allowlist as readonly string[]).includes('cancel_reminder')
+          ? { cancellationScopeRevision: 'scope/1' as const }
+          : {}),
         ...(messageRefs ? { messageRefs } : {}),
         ...(workspaceGrant ? { workspaceGrant, workspaceSummary } : {}),
         ...(trustedExecutionContext

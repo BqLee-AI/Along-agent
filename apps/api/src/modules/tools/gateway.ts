@@ -11,7 +11,11 @@ import {
   shortNoOf,
   type PresentationSnapshot,
 } from '../approvals/presentation.js';
-import { readCancelTaskCandidate, readToolTaskList } from '../tasks/tool-query.js';
+import {
+  readActiveSameNoteTasks,
+  readCancelTaskCandidate,
+  readToolTaskList,
+} from '../tasks/tool-query.js';
 import { cancelTaskWithinTransaction } from '../tasks/cancel.js';
 import { readToolBriefCards } from '../brief/tool-query.js';
 import { readUserPreferences, setUserTimezoneWithinTransaction } from '../identity/preferences.js';
@@ -34,8 +38,13 @@ import { utf8Bytes, WorkspaceDeniedError } from '../workspaces/service.js';
 import { callWorkspaceMcp, type WorkspaceReadTool } from './mcp-workspace.js';
 import { readRunDocumentEvidence } from './query.js';
 import { readObservationPage } from './observation-page.js';
-import { createTaskWithinTransaction } from '../tasks/create.js';
+import { createTaskWithinTransaction, lockTaskCreationScope } from '../tasks/create.js';
 import { readRunTimezoneSettings } from './query.js';
+import { readCancellationScopeInput } from '../conversations/target-continuation.js';
+import {
+  cancellationScopeIncludes,
+  renderCancellationClarification,
+} from './reminder-cancel-scope.js';
 
 const workspaceDenied = (): ToolResult => ({
   status: 'denied',
@@ -716,6 +725,47 @@ async function runCancelReminder(
         text: '任务标识与目标名称、时间或时区未完整对应；未取消。请重新读取任务并核对，不必询问用户。',
       },
     };
+  }
+  const scope = await readCancellationScopeInput(client, ctx);
+  if (scope.revision === 'scope/1') {
+    await lockTaskCreationScope(client, ctx.ownerId);
+    const candidates = await readActiveSameNoteTasks(client, ctx.ownerId, task.original_note);
+    const batch =
+      scope.original === null
+        ? /^(?:请|帮我|请帮我)?取消名称以[“"‘']([^“”"'‘’]+)[”"’']开头的(?:全部|所有)未来提醒(?:，别的提醒不要取消)?[。！!]?$/u.exec(
+            scope.current.trim(),
+          )
+        : null;
+    const allFuture =
+      scope.original === null &&
+      /^(?:请|帮我|请帮我)?取消(?:全部|所有)未来提醒[。！!]?$/u.test(scope.current.trim());
+    const batchIncludes =
+      (allFuture ||
+        (batch !== null &&
+          task.original_note !== null &&
+          task.original_note.startsWith(batch[1]!))) &&
+      task.fire_at_utc.getTime() > new Date(ctx.anchorReceivedAtUtc).getTime();
+    if (
+      !batchIncludes &&
+      !cancellationScopeIncludes(
+        scope.current,
+        scope.original,
+        task.original_note,
+        candidates,
+        task.id,
+        scope.shownCandidates,
+      )
+    ) {
+      return {
+        status: 'ok',
+        result: {
+          kind: 'clarify',
+          reason: 'TARGET_SCOPE_UNCLEAR',
+          phrase_key: 'TARGET_SCOPE_UNCLEAR',
+          text: renderCancellationClarification(candidates),
+        },
+      };
+    }
   }
   await client.query('SAVEPOINT cancel_reminder');
   try {

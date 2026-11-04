@@ -8,12 +8,18 @@ import {
 } from '../../src/modules/tools/query.js';
 import type { ToolContext, ToolOutcome } from '../../src/modules/tools/contracts.js';
 import { loadTimeContext } from '../../src/modules/time/context.js';
-import { admitTestUser, createIntegrationDatabase, type IntegrationDatabase } from './setup.js';
+import {
+  admitTestUser,
+  createIntegrationDatabase,
+  seedApproval,
+  type IntegrationDatabase,
+} from './setup.js';
 import {
   interruptedGoalResult,
   validateGoalResult,
 } from '../../src/modules/conversations/goal-result.js';
 import { acceptTargetContinuation } from '../../src/modules/conversations/target-continuation.js';
+import { createTaskWithinTransaction } from '../../src/modules/tasks/create.js';
 
 describe('direct reminder accepted facts', () => {
   let db: IntegrationDatabase;
@@ -55,7 +61,7 @@ describe('direct reminder accepted facts', () => {
   async function fresh(
     tools = ['create_reminder', 'set_user_timezone'],
     request = text,
-    options: { anchor?: string; elapsedRevision?: 'elapsed/1' } = {},
+    options: { anchor?: string; elapsedRevision?: 'elapsed/1'; legacyScope?: boolean } = {},
   ): Promise<ToolContext> {
     const ownerId = randomUUID(),
       conversationId = randomUUID(),
@@ -86,6 +92,7 @@ describe('direct reminder accepted facts', () => {
         JSON.stringify({
           authorization_revision: 'delegation/1',
           execution_lifecycle: 'request-bound',
+          ...(!options.legacyScope ? { cancellationScopeRevision: 'scope/1' } : {}),
           ...(options.elapsedRevision
             ? {
                 trustedExecutionContext: {
@@ -155,6 +162,143 @@ describe('direct reminder accepted facts', () => {
       expected_timezone_id: task.timezone_id,
     };
   }
+  for (const [request, allowed] of [
+    ['帮我取消“同名提醒”这条提醒。', false],
+    ['取消“同名提醒”11月5日那条。', true],
+    ['取消“同名提醒”的全部提醒。', true],
+    ['不要取消“同名提醒”11月5日那条。', false],
+  ] as const) {
+    it(`checks the user's actual same-name scope: ${request}`, async () => {
+      const ctx = await fresh(['cancel_reminder'], request);
+      const ids = [randomUUID(), randomUUID()];
+      for (const [index, id] of ids.entries()) {
+        const source = await seedApproval(db.pool, { ownerId: ctx.ownerId, state: 'consumed' });
+        const day = index === 0 ? '04' : '05';
+        await db.pool.query(
+          `INSERT INTO tasks(id,owner_id,original_note,fire_at_utc,wall_time,timezone_id,fold,
+            resolved_utc_offset_seconds,tzdb_version,occurrence,state,state_version,source_approval_id)
+           VALUES($1,$2,'同名提醒',$3,$4,'Asia/Shanghai',0,28800,'fixture-v1','once','scheduled',1,$5)`,
+          [id, ctx.ownerId, `2027-11-${day}T01:20:00Z`, `2027-11-${day} 09:20`, source.id],
+        );
+      }
+      const before = await counts(ctx);
+      const result = await call(ctx, 'cancel/scope', await cancelInput(ids[1]!), 'cancel_reminder');
+      expect(result.outcome).toMatchObject({
+        status: 'ok',
+        result: { kind: allowed ? 'reminder_cancelled' : 'clarify' },
+      });
+      const states = await db.pool.query('SELECT id,state FROM tasks WHERE id=ANY($1::uuid[])', [
+        ids,
+      ]);
+      const byId = new Map(states.rows.map((row) => [row.id, row.state]));
+      expect(byId.get(ids[0])).toBe('scheduled');
+      expect(byId.get(ids[1])).toBe(allowed ? 'cancel_pending' : 'scheduled');
+      if (!allowed) expect(await counts(ctx)).toEqual(before);
+      if (request === '取消“同名提醒”的全部提醒。') {
+        const other = await call(
+          ctx,
+          'cancel/all-other',
+          await cancelInput(ids[0]!),
+          'cancel_reminder',
+        );
+        expect(other.outcome).toMatchObject({
+          status: 'ok',
+          result: { kind: 'reminder_cancelled', task_id: ids[0], state: 'cancel_pending' },
+        });
+        const completed = await db.pool.query(
+          "SELECT count(*)::int n FROM tasks WHERE id=ANY($1::uuid[]) AND state='cancel_pending'",
+          [ids],
+        );
+        expect(completed.rows[0].n).toBe(2);
+      }
+    });
+  }
+  for (const [request, note, allowed] of [
+    ['不要取消“另一条”提醒。', '另一条', false],
+    ['帮我取消“同名提醒”这条提醒。', '另一条', false],
+    ['帮我取消“另一条”这条提醒。', '另一条', true],
+    ['请只取消“另一条”这条2027年11月4日09:20上海时间的提醒。', '另一条', true],
+    ['请取消名称以“批量”开头的全部未来提醒，别的提醒不要取消。', '批量甲', true],
+    ['请取消名称以“批量”开头的全部未来提醒，别的提醒不要取消。', '其他', false],
+    ['请取消名称以“批量”开头的全部未来提醒，别的提醒不要取消。', '批量过期', false],
+    ['请取消全部未来提醒。', '另一条', true],
+    ['请取消全部未来提醒。', '批量过期', false],
+  ] as const) {
+    it(`verifies unique and batch cancellation scope: ${request} / ${note}`, async () => {
+      const ctx = await fresh(['cancel_reminder'], request, {
+        ...(note === '批量过期' ? { anchor: '2027-11-05T00:00:00Z' } : {}),
+      });
+      const id = randomUUID();
+      const source = await seedApproval(db.pool, { ownerId: ctx.ownerId, state: 'consumed' });
+      await db.pool.query(
+        `INSERT INTO tasks(id,owner_id,original_note,fire_at_utc,wall_time,timezone_id,fold,
+          resolved_utc_offset_seconds,tzdb_version,occurrence,state,state_version,source_approval_id)
+         VALUES($1,$2,$3,'2027-11-04T01:20:00Z','2027-11-04 09:20','Asia/Shanghai',0,28800,'fixture-v1','once','scheduled',1,$4)`,
+        [id, ctx.ownerId, note, source.id],
+      );
+      const before = await counts(ctx);
+      const result = await call(ctx, 'cancel/single', await cancelInput(id), 'cancel_reminder');
+      expect(result.outcome).toMatchObject({
+        status: 'ok',
+        result: { kind: allowed ? 'reminder_cancelled' : 'clarify' },
+      });
+      if (!allowed) expect(await counts(ctx)).toEqual(before);
+    });
+  }
+  it('waits for a concurrent same-name creation before checking ambiguity', async () => {
+    const ctx = await fresh(['cancel_reminder'], '帮我取消“同名提醒”这条提醒。');
+    const oldId = randomUUID();
+    const oldSource = await seedApproval(db.pool, { ownerId: ctx.ownerId, state: 'consumed' });
+    await db.pool.query(
+      `INSERT INTO tasks(id,owner_id,original_note,fire_at_utc,wall_time,timezone_id,fold,
+        resolved_utc_offset_seconds,tzdb_version,occurrence,state,state_version,source_approval_id)
+       VALUES($1,$2,'同名提醒','2027-11-04T01:20:00Z','2027-11-04 09:20','Asia/Shanghai',0,28800,'fixture-v1','once','scheduled',1,$3)`,
+      [oldId, ctx.ownerId, oldSource.id],
+    );
+    const source = await seedApproval(db.pool, { ownerId: ctx.ownerId, state: 'consumed' });
+    const creator = await db.pool.connect();
+    let pending: Promise<{ outcome: ToolOutcome }> | undefined;
+    try {
+      await creator.query('BEGIN');
+      const pid = (await creator.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+      await createTaskWithinTransaction(creator, {
+        ownerId: ctx.ownerId,
+        source: { approvalId: source.id },
+        fireAtUtc: '2027-11-05T01:20:00Z',
+        wallTime: '2027-11-05 09:20',
+        timezoneId: 'Asia/Shanghai',
+        fold: 0,
+        resolvedUtcOffsetSeconds: 28800,
+        tzdbVersion: 'fixture-v1',
+        originalNote: '同名提醒',
+        idempotencyKey: randomUUID(),
+      });
+      pending = call(ctx, 'cancel/concurrent-create', await cancelInput(oldId), 'cancel_reminder');
+      let blocked = false;
+      for (let attempt = 0; attempt < 500 && !blocked; attempt++) {
+        blocked = (
+          await db.pool.query(
+            'SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid))) AS blocked',
+            [pid],
+          )
+        ).rows[0].blocked;
+      }
+      expect(blocked).toBe(true);
+      await creator.query('COMMIT');
+      expect((await pending).outcome).toMatchObject({
+        status: 'ok',
+        result: { kind: 'clarify', reason: 'TARGET_SCOPE_UNCLEAR' },
+      });
+      const states = await db.pool.query('SELECT state FROM tasks WHERE owner_id=$1', [
+        ctx.ownerId,
+      ]);
+      expect(states.rows.map((row) => row.state).sort()).toEqual(['saved', 'scheduled']);
+    } finally {
+      await creator.query('ROLLBACK');
+      creator.release();
+      if (pending) await pending.catch(() => undefined);
+    }
+  });
   it('does not cancel a task identified only by a model-selected ID', async () => {
     const ctx = await fresh(['create_reminder', 'cancel_reminder']);
     const created = await call(ctx, 'create/target');
@@ -172,7 +316,7 @@ describe('direct reminder accepted facts', () => {
     expect(task.rows[0].state).toBe('saved');
   });
   it('rejects an ID paired with another target and can cancel the intended task', async () => {
-    const ctx = await fresh(['create_reminder', 'cancel_reminder']);
+    const ctx = await fresh(['create_reminder', 'cancel_reminder'], text, { legacyScope: true });
     const intended = await call(ctx, 'create/intended');
     const other = await call(ctx, 'create/other', { ...args, note: '另一条提醒' });
     if (
@@ -230,7 +374,13 @@ describe('direct reminder accepted facts', () => {
     ).toBe('saved');
   });
   it('reads full owned task and cancels once with stable accepted state', async () => {
-    const ctx = await fresh(['create_reminder', 'list_tasks', 'get_task', 'cancel_reminder']);
+    const ctx = await fresh(
+      ['create_reminder', 'list_tasks', 'get_task', 'cancel_reminder'],
+      text,
+      {
+        legacyScope: true,
+      },
+    );
     const created = await call(ctx, 'create/1');
     if (created.outcome.status !== 'ok' || created.outcome.result.kind !== 'task_created')
       throw new Error('expected task creation');
@@ -393,7 +543,7 @@ describe('direct reminder accepted facts', () => {
     ).toBe('saved');
   });
   it('rolls back cancellation when accepted result persistence fails', async () => {
-    const ctx = await fresh(['create_reminder', 'cancel_reminder']);
+    const ctx = await fresh(['create_reminder', 'cancel_reminder'], text, { legacyScope: true });
     const created = await call(ctx, 'create/1');
     if (created.outcome.status !== 'ok' || created.outcome.result.kind !== 'task_created')
       throw new Error('expected task creation');

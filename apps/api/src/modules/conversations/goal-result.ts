@@ -8,8 +8,13 @@ import {
   readRunCancelledReminders,
   readRunInterruptionEvidence,
 } from '../tools/query.js';
-import { readContinuationReceipts } from './target-continuation.js';
+import { readCancellationScopeInput, readContinuationReceipts } from './target-continuation.js';
 import { stateConflict } from '../../http/errors.js';
+import { readActiveSameNoteTasks, readRepeatedNotesMentioned } from '../tasks/tool-query.js';
+import {
+  isUnspecifiedSameNoteCancellation,
+  renderCancellationClarification,
+} from '../tools/reminder-cancel-scope.js';
 
 type Binding = Pick<ToolContext, 'ownerId' | 'conversationId' | 'runId'>;
 async function inheritedGoal(
@@ -149,6 +154,38 @@ export async function validateGoalResult(
     states.some((row) => row.state !== 'completed' || row.outcome_kind !== 'success')
   )
     throw stateConflict('goal completion has unresolved or rejected actions');
+  if (
+    goal.status === 'blocked' &&
+    goal.clarification?.kind === 'target_selection' &&
+    cancellations.length === 0 &&
+    creations.length === 0 &&
+    settings.length === 0 &&
+    inheritedRefs.size === 0 &&
+    inheritedCancellations.size === 0
+  ) {
+    const scope = await readCancellationScopeInput(client, context);
+    if (scope.revision === 'scope/1') {
+      const notes = await readRepeatedNotesMentioned(
+        client,
+        context.ownerId,
+        scope.original ?? scope.current,
+      );
+      if (
+        notes.length === 1 &&
+        isUnspecifiedSameNoteCancellation(scope.original ?? scope.current, notes[0]!)
+      ) {
+        const candidates = await readActiveSameNoteTasks(client, context.ownerId, notes[0]!);
+        if (candidates.length > 1) {
+          const question = renderCancellationClarification(candidates);
+          return {
+            ...goal,
+            clarification: { kind: 'target_selection', question },
+            answer: question,
+          };
+        }
+      }
+    }
+  }
   return goal;
 }
 
