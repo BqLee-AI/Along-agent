@@ -25,6 +25,8 @@ export const DELEGATION_TOOL_IDS = [
   'set_user_timezone',
   'create_reminder',
   'list_tasks',
+  'get_task',
+  'cancel_reminder',
   'read_brief_cards',
   'read_run_observation',
 ] as const;
@@ -84,6 +86,23 @@ export interface ListTasksPayload {
     state: string;
   }[];
   has_more: boolean;
+  next_cursor?: string | null;
+}
+export interface TaskDetailPayload {
+  kind: 'task_detail';
+  task: {
+    task_id: string;
+    note: string | null;
+    fire_at_local_text: string;
+    timezone_id: string;
+    state: string;
+  };
+}
+export interface ReminderCancelledPayload {
+  kind: 'reminder_cancelled';
+  task_id: string;
+  state: string;
+  duplicate: boolean;
 }
 export interface BriefPayload {
   kind: 'brief';
@@ -141,6 +160,8 @@ export type ToolPayload =
   | ClarifyPayload
   | TimeErrorPayload
   | ListTasksPayload
+  | TaskDetailPayload
+  | ReminderCancelledPayload
   | BriefPayload
   | PrefsPayload
   | TimezoneSettingPayload

@@ -310,6 +310,12 @@ async function audit(
   );
 }
 
+export interface InvocationSnapshot {
+  invocation_id: string;
+  tool_id: string;
+  result: ToolResult;
+}
+
 // Bootstrap reads accepted facts only. No invocation/attempt/Run locks are
 // acquired here: callers may already hold attempt → Run locks, and historical
 // reads remain valid after suspension or completion.
@@ -317,7 +323,7 @@ export async function readInvocationSnapshots(
   client: PoolClient,
   ctx: ToolContext,
   invocationIds: readonly string[],
-): Promise<Array<{ invocation_id: string; tool_id: string; result: ToolResult }>> {
+): Promise<InvocationSnapshot[]> {
   await assertToolRunBinding(client, ctx);
   if (invocationIds.length === 0) return [];
   const { rows } = await client.query(
@@ -332,7 +338,7 @@ export async function readInvocationSnapshots(
       return [parsed.invocation_id, parsed] as const;
     }),
   );
-  const snapshots: Array<{ invocation_id: string; tool_id: string; result: ToolResult }> = [];
+  const snapshots: InvocationSnapshot[] = [];
   for (const invocationId of invocationIds) {
     const row = invocations.get(invocationId);
     if (!row) throw notFound('tool invocation not found');
@@ -490,7 +496,7 @@ async function gate(
     !(await isActiveOwner(
       client,
       ctx.ownerId,
-      row.tool_id === 'create_reminder' ? { lock: 'share' } : {},
+      ['create_reminder', 'cancel_reminder'].includes(row.tool_id) ? { lock: 'share' } : {},
     ))
   ) {
     await audit(client, ctx, row, 'denied', denied);
@@ -518,7 +524,7 @@ async function gate(
     return { ...permissionDenied, invocationId: row.invocation_id, replayed: false };
   }
   if (
-    ['set_user_timezone', 'create_reminder'].includes(row.tool_id) &&
+    ['set_user_timezone', 'create_reminder', 'get_task', 'cancel_reminder'].includes(row.tool_id) &&
     (ctx.authorizationRevision !== 'delegation/1' ||
       row.frozen_context.authorizationRevision !== 'delegation/1')
   ) {

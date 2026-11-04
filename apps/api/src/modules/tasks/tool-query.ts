@@ -39,6 +39,7 @@ export interface ToolTaskList {
     state: string;
   }[];
   has_more: boolean;
+  next_cursor?: string | null;
 }
 
 const ACTIVE_STATES = ['saved', 'pending_schedule', 'scheduled', 'cancel_pending'] as const;
@@ -46,9 +47,22 @@ const ACTIVE_STATES = ['saved', 'pending_schedule', 'scheduled', 'cancel_pending
 export async function readToolTaskList(
   client: PoolClient,
   ownerId: string,
-  input: { state?: string | null; limit: number },
+  input: {
+    state?: string | null;
+    limit: number;
+    paginate?: boolean;
+    after_task_id?: string;
+    future_after?: string;
+  },
 ): Promise<ToolTaskList> {
   const states = input.state ? [input.state] : [...ACTIVE_STATES];
+  if (input.after_task_id) {
+    const cursor = await client.query('SELECT id FROM tasks WHERE owner_id = $1 AND id = $2', [
+      ownerId,
+      input.after_task_id,
+    ]);
+    if (!cursor.rows.length) throw new Error('invalid task cursor');
+  }
   const { rows } = await client.query<{
     id: string;
     original_note: string | null;
@@ -58,8 +72,11 @@ export async function readToolTaskList(
   }>(
     `SELECT id, original_note, wall_time, timezone_id, state FROM tasks
      WHERE owner_id = $1 AND state = ANY($2::text[])
-     ORDER BY fire_at_utc ASC LIMIT $3`,
-    [ownerId, states, input.limit + 1],
+       AND ($5::timestamptz IS NULL OR fire_at_utc > $5::timestamptz)
+       AND ($4::uuid IS NULL OR (fire_at_utc, id) >
+         (SELECT fire_at_utc, id FROM tasks WHERE owner_id = $1 AND id = $4))
+     ORDER BY fire_at_utc ASC, id ASC LIMIT $3`,
+    [ownerId, states, input.limit + 1, input.after_task_id ?? null, input.future_after ?? null],
   );
   return {
     tasks: rows.slice(0, input.limit).map((row) => ({
@@ -70,5 +87,8 @@ export async function readToolTaskList(
       state: row.state,
     })),
     has_more: rows.length > input.limit,
+    ...(input.paginate
+      ? { next_cursor: rows.length > input.limit ? rows[input.limit - 1]!.id : null }
+      : {}),
   };
 }

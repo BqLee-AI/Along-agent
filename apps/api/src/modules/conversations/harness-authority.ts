@@ -258,7 +258,12 @@ function buildHarnessStart(
       : routingPolicy,
     eligible_phase: context.authorizationRevision ? 'disabled' : eligiblePhase,
     tools: (context.authorizationRevision
-      ? DELEGATION_TOOL_DEFINITIONS
+      ? DELEGATION_TOOL_DEFINITIONS.map((tool) =>
+          tool.name === 'list_tasks' &&
+          !(context.allowlist.includes('get_task') && context.allowlist.includes('cancel_reminder'))
+            ? HARNESS_TOOL_DEFINITIONS.find((legacy) => legacy.name === 'list_tasks')!
+            : tool,
+        )
       : HARNESS_TOOL_DEFINITIONS
     ).filter((tool) => context.allowlist.includes(tool.name)),
     budget: { max_iterations: context.maxIterations, max_tokens: context.maxTokens },

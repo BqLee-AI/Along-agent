@@ -25,6 +25,25 @@ export function taskAdmission(intent: TaskIntent): {
     : { execution: intent === 'reminder' ? 'business' : 'harness' };
 }
 
+export function clarificationReplyReference(
+  run: RunView | null,
+  intent: TaskIntent,
+  selected: boolean,
+): string | undefined {
+  if (
+    !selected ||
+    intent !== 'chat' ||
+    run?.status !== 'done' ||
+    run.authorization_revision !== 'delegation/1' ||
+    !run.goal_result ||
+    !['blocked', 'partial'].includes(run.goal_result.status) ||
+    !run.goal_result.clarification ||
+    !['time', 'timezone', 'target_selection'].includes(run.goal_result.clarification.kind)
+  )
+    return undefined;
+  return run.run_id;
+}
+
 export function taskSendEligibility({
   intent,
   text,

@@ -4,7 +4,9 @@
 >
 > 蓝图引用：B06（R 状态机 saved→pending_schedule→scheduled→fired|missed→cancel 路；超 15min 标 missed 不补发；取消后触发数=0 一级指标；06 喝水 task.kind=notify_only 不走 LLM 先验调度）。
 
-> 直接创建由委托的 `create_reminder` 工具进入 tasks 公共事务，legacy confirm 复用同一用例；不增加另一条创建路由或伪造批准。列表/详情/通知识别真实 `source_invocation_id`，旧冻结不回填。严格经过时长任务保存可信请求锚、秒数、来源和冻结展示版本；直接取消仍按原合同处理，见 [design/20 §4.3、§5–§6](../../design/20-goal-scoped-delegation.md)。created、排期、取消中和撤销回执分别呈现。
+> 直接创建由委托的 `create_reminder` 工具进入 tasks 公共事务，legacy confirm 复用同一用例；不增加另一条创建路由或伪造批准。列表/详情/通知识别真实 `source_invocation_id`，旧冻结不回填。严格经过时长任务保存可信请求锚、秒数、来源和冻结展示版本，见 [design/20 §4.3、§5–§6](../../design/20-goal-scoped-delegation.md)。created、排期、取消中和撤销回执分别呈现。
+>
+> 新接纳的合格委托可通过 `list_tasks` 游标完整读取本人任务、用 `get_task` 读取完整事项，再用 `cancel_reminder` 调用现有取消事务。取消时同时提供目标 ID、完整事项、冻结本地时间和时区；服务端在写入前核对这些字段属于同一任务，不匹配时不取消，由助理重新读取并修正。该核对防止目标资料与 ID 串用，并不独立证明模型对用户意图的理解正确。明确取消全部未来提醒时逐页定位并逐项报告，不承诺全局原子或覆盖读取后新增的任务。`cancel_pending` 表示取消请求已接受，只有真实撤销回执支持 `cancelled`；旧冻结工具目录和交互不扩权。补充真实澄清时可选择关联上一个问题，已接受效果作为历史收据保留，不重做。
 
 ## 1. 路由
 

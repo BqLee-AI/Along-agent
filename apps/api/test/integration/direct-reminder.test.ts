@@ -9,6 +9,11 @@ import {
 import type { ToolContext, ToolOutcome } from '../../src/modules/tools/contracts.js';
 import { loadTimeContext } from '../../src/modules/time/context.js';
 import { admitTestUser, createIntegrationDatabase, type IntegrationDatabase } from './setup.js';
+import {
+  interruptedGoalResult,
+  validateGoalResult,
+} from '../../src/modules/conversations/goal-result.js';
+import { acceptTargetContinuation } from '../../src/modules/conversations/target-continuation.js';
 
 describe('direct reminder accepted facts', () => {
   let db: IntegrationDatabase;
@@ -137,6 +142,333 @@ describe('direct reminder accepted facts', () => {
       ).rows[0].n;
     return values;
   }
+  async function cancelInput(taskId: string) {
+    const { rows } = await db.pool.query(
+      'SELECT original_note, wall_time, timezone_id FROM tasks WHERE id=$1',
+      [taskId],
+    );
+    const task = rows[0];
+    return {
+      task_id: taskId,
+      expected_note: task.original_note,
+      expected_wall_time: task.wall_time,
+      expected_timezone_id: task.timezone_id,
+    };
+  }
+  it('does not cancel a task identified only by a model-selected ID', async () => {
+    const ctx = await fresh(['create_reminder', 'cancel_reminder']);
+    const created = await call(ctx, 'create/target');
+    if (created.outcome.status !== 'ok' || created.outcome.result.kind !== 'task_created')
+      throw new Error('expected task creation');
+    const taskId = created.outcome.result.task_id;
+    const before = await counts(ctx);
+    const cancel = await call(ctx, 'cancel/unverified', { task_id: taskId }, 'cancel_reminder');
+    expect(cancel.outcome).toMatchObject({
+      status: 'ok',
+      result: { kind: 'clarify', reason: 'TARGET_IDENTITY_REQUIRED' },
+    });
+    expect(await counts(ctx)).toEqual(before);
+    const task = await db.pool.query('SELECT state FROM tasks WHERE id=$1', [taskId]);
+    expect(task.rows[0].state).toBe('saved');
+  });
+  it('rejects an ID paired with another target and can cancel the intended task', async () => {
+    const ctx = await fresh(['create_reminder', 'cancel_reminder']);
+    const intended = await call(ctx, 'create/intended');
+    const other = await call(ctx, 'create/other', { ...args, note: '另一条提醒' });
+    if (
+      intended.outcome.status !== 'ok' ||
+      intended.outcome.result.kind !== 'task_created' ||
+      other.outcome.status !== 'ok' ||
+      other.outcome.result.kind !== 'task_created'
+    )
+      throw new Error('expected task creation');
+    const intendedId = intended.outcome.result.task_id;
+    const otherId = other.outcome.result.task_id;
+    const identity = await cancelInput(intendedId);
+    const before = await counts(ctx);
+    const wrong = await call(
+      ctx,
+      'cancel/wrong',
+      { ...identity, task_id: otherId },
+      'cancel_reminder',
+    );
+    expect(wrong.outcome).toMatchObject({
+      status: 'ok',
+      result: { kind: 'clarify', reason: 'TARGET_IDENTITY_REQUIRED' },
+    });
+    expect(await counts(ctx)).toEqual(before);
+    expect(
+      (await db.pool.query('SELECT state FROM tasks WHERE id=$1', [otherId])).rows[0].state,
+    ).toBe('saved');
+    const correct = await call(ctx, 'cancel/correct', identity, 'cancel_reminder');
+    expect(correct.outcome).toMatchObject({
+      status: 'ok',
+      result: { kind: 'reminder_cancelled', task_id: intendedId, state: 'cancel_pending' },
+    });
+  });
+  it('does not cancel when the expected time or timezone belongs to another target', async () => {
+    const ctx = await fresh(['create_reminder', 'cancel_reminder']);
+    const created = await call(ctx, 'create/target');
+    if (created.outcome.status !== 'ok' || created.outcome.result.kind !== 'task_created')
+      throw new Error('expected task creation');
+    const taskId = created.outcome.result.task_id;
+    const identity = await cancelInput(taskId);
+    const before = await counts(ctx);
+    for (const [key, input] of [
+      ['time', { ...identity, expected_wall_time: '2027-11-04 15:01' }],
+      ['timezone', { ...identity, expected_timezone_id: 'Asia/Tokyo' }],
+    ] as const) {
+      const result = await call(ctx, `cancel/${key}`, input, 'cancel_reminder');
+      expect(result.outcome).toMatchObject({
+        status: 'ok',
+        result: { kind: 'clarify', reason: 'TARGET_IDENTITY_REQUIRED' },
+      });
+    }
+    expect(await counts(ctx)).toEqual(before);
+    expect(
+      (await db.pool.query('SELECT state FROM tasks WHERE id=$1', [taskId])).rows[0].state,
+    ).toBe('saved');
+  });
+  it('reads full owned task and cancels once with stable accepted state', async () => {
+    const ctx = await fresh(['create_reminder', 'list_tasks', 'get_task', 'cancel_reminder']);
+    const created = await call(ctx, 'create/1');
+    if (created.outcome.status !== 'ok' || created.outcome.result.kind !== 'task_created')
+      throw new Error('expected task creation');
+    const taskId = created.outcome.result.task_id;
+    const detail = await call(ctx, 'detail/1', { task_id: taskId }, 'get_task');
+    expect(detail.outcome).toMatchObject({
+      status: 'ok',
+      result: {
+        kind: 'task_detail',
+        task: { task_id: taskId, note: args.note, state: 'saved' },
+      },
+    });
+    const list = await call(ctx, 'list/1', { limit: 1 }, 'list_tasks');
+    expect(list.outcome).toMatchObject({
+      status: 'ok',
+      result: {
+        kind: 'list_tasks',
+        tasks: [{ task_id: taskId }],
+        has_more: false,
+        next_cursor: null,
+      },
+    });
+    const input = await cancelInput(taskId);
+    const cancel = await call(ctx, 'cancel/1', input, 'cancel_reminder');
+    expect(cancel.outcome).toMatchObject({
+      status: 'ok',
+      result: {
+        kind: 'reminder_cancelled',
+        task_id: taskId,
+        state: 'cancel_pending',
+        duplicate: false,
+      },
+    });
+    const pendingGoal = {
+      status: 'partial' as const,
+      outcomes: [
+        {
+          description: '已记录提醒',
+          status: 'achieved' as const,
+          receipt_refs: [created.binding.invocationId],
+        },
+        {
+          description: '取消请求已接受，等待撤销回执',
+          status: 'blocked' as const,
+          receipt_refs: [cancel.binding.invocationId],
+        },
+      ],
+      clarification: null,
+      answer: '取消请求已接受，等待撤销回执。',
+    };
+    const client = await db.pool.connect();
+    try {
+      expect(await validateGoalResult(client, ctx, pendingGoal)).toEqual(pendingGoal);
+      await expect(
+        validateGoalResult(client, ctx, {
+          ...pendingGoal,
+          outcomes: [pendingGoal.outcomes[0]!],
+        }),
+      ).rejects.toThrow();
+    } finally {
+      client.release();
+    }
+    const replay = await invokeTool(db.pool, ctx, {
+      ...cancel.binding,
+      toolId: 'cancel_reminder',
+      args: input,
+    });
+    expect(replay).toEqual({ ...cancel.outcome, replayed: true });
+    expect(
+      await invokeTool(db.pool, ctx, {
+        ...cancel.binding,
+        toolId: 'cancel_reminder',
+        args: { task_id: randomUUID() },
+      }),
+    ).toMatchObject({ status: 'denied', error: { code: 'STATE_CONFLICT' } });
+    const persisted = await db.pool.query('SELECT state FROM tasks WHERE id=$1', [taskId]);
+    expect(persisted.rows[0].state).toBe('cancel_pending');
+    expect((await counts(ctx)).approvals).toBe(0);
+    const sourceGoal = {
+      ...pendingGoal,
+      clarification: { kind: 'target_selection', question: '另一个目标是哪条？' },
+    };
+    await db.pool.query('UPDATE agent_runs SET status=$2, goal_result=$3::jsonb WHERE id=$1', [
+      ctx.runId,
+      'done',
+      JSON.stringify(sourceGoal),
+    ]);
+    const nextMessageId = randomUUID(),
+      nextRunId = randomUUID();
+    await db.pool.query(
+      "INSERT INTO messages(id,owner_id,conversation_id,role,content) VALUES($1,$2,$3,'user','另一个')",
+      [nextMessageId, ctx.ownerId, ctx.conversationId],
+    );
+    const nextClient = await db.pool.connect();
+    try {
+      const continuation = await acceptTargetContinuation(nextClient, {
+        ownerId: ctx.ownerId,
+        conversationId: ctx.conversationId,
+        sourceRunId: ctx.runId,
+        inputMessageId: nextMessageId,
+        timeContext: ctx.timeContext,
+      });
+      expect(continuation?.continuation.receipts.map((item) => item.invocation_id)).toContain(
+        cancel.binding.invocationId,
+      );
+      await nextClient.query(
+        `INSERT INTO agent_runs(id,owner_id,conversation_id,agent_revision,mode,budget_max_iterations,budget_max_tokens,execution,tools_allowlist,frozen_context,input_message_id)
+        VALUES($1,$2,$3,'direct-test','chat',16,4096,'harness',$4::jsonb,$5::jsonb,$6)`,
+        [
+          nextRunId,
+          ctx.ownerId,
+          ctx.conversationId,
+          JSON.stringify(ctx.allowlist),
+          JSON.stringify({
+            authorization_revision: 'delegation/1',
+            trustedExecutionContext: { continuation: continuation!.continuation },
+          }),
+          nextMessageId,
+        ],
+      );
+      const nextContext = { ...ctx, runId: nextRunId };
+      expect(await validateGoalResult(nextClient, nextContext, pendingGoal)).toEqual(pendingGoal);
+      await expect(
+        validateGoalResult(nextClient, nextContext, {
+          ...pendingGoal,
+          outcomes: [pendingGoal.outcomes[0]!],
+        }),
+      ).rejects.toThrow();
+      const interrupted = await interruptedGoalResult(nextClient, nextContext, 'failed');
+      expect(interrupted.outcomes).toContainEqual(
+        expect.objectContaining({
+          receipt_refs: [cancel.binding.invocationId],
+          status: 'achieved',
+        }),
+      );
+      expect(interrupted.answer).toContain('等待撤销回执');
+    } finally {
+      nextClient.release();
+    }
+  });
+
+  it('does not expose another owner task through detail or cancellation', async () => {
+    const owner = await fresh(['create_reminder']);
+    const created = await call(owner, 'create/1');
+    if (created.outcome.status !== 'ok' || created.outcome.result.kind !== 'task_created')
+      throw new Error('expected task creation');
+    const taskId = created.outcome.result.task_id;
+    const other = await fresh(['get_task', 'cancel_reminder']);
+    const detail = await call(other, 'detail/1', { task_id: taskId }, 'get_task');
+    expect(detail.outcome.status).toBe('denied');
+    const cancel = await call(
+      await fresh(['get_task', 'cancel_reminder']),
+      'cancel/1',
+      { task_id: taskId },
+      'cancel_reminder',
+    );
+    expect(cancel.outcome.status).toBe('denied');
+    expect(
+      (await db.pool.query('SELECT state FROM tasks WHERE id=$1', [taskId])).rows[0].state,
+    ).toBe('saved');
+  });
+  it('rolls back cancellation when accepted result persistence fails', async () => {
+    const ctx = await fresh(['create_reminder', 'cancel_reminder']);
+    const created = await call(ctx, 'create/1');
+    if (created.outcome.status !== 'ok' || created.outcome.result.kind !== 'task_created')
+      throw new Error('expected task creation');
+    const taskId = created.outcome.result.task_id;
+    const input = await cancelInput(taskId);
+    const binding = await reserveToolInvocation(db.pool, ctx, {
+      callKey: 'cancel/1',
+      toolId: 'cancel_reminder',
+      args: input,
+    });
+    const fn = `fail_cancel_${ctx.ownerId.replaceAll('-', '')}`;
+    await db.pool.query(`
+      CREATE FUNCTION ${fn}() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN RAISE EXCEPTION 'fixture persistence fault'; END $$;
+      CREATE TRIGGER ${fn} BEFORE UPDATE ON tool_invocations
+      FOR EACH ROW WHEN (NEW.invocation_id='${binding.invocationId}'::uuid)
+      EXECUTE FUNCTION ${fn}();
+    `);
+    try {
+      await expect(
+        invokeTool(db.pool, ctx, {
+          ...binding,
+          toolId: 'cancel_reminder',
+          args: input,
+        }),
+      ).rejects.toMatchObject({ code: 'P0001' });
+      expect(
+        (await db.pool.query('SELECT state FROM tasks WHERE id=$1', [taskId])).rows[0].state,
+      ).toBe('saved');
+      expect(
+        (
+          await db.pool.query(
+            "SELECT count(*)::int n FROM outbox WHERE task_id=$1 AND command->>'kind'='cancel'",
+            [taskId],
+          )
+        ).rows[0].n,
+      ).toBe(0);
+    } finally {
+      await db.pool.query(`DROP TRIGGER ${fn} ON tool_invocations; DROP FUNCTION ${fn}()`);
+    }
+    expect(
+      await invokeTool(db.pool, ctx, {
+        ...binding,
+        toolId: 'cancel_reminder',
+        args: input,
+      }),
+    ).toMatchObject({
+      status: 'ok',
+      result: { kind: 'reminder_cancelled', state: 'cancel_pending' },
+    });
+  });
+  it('does not cancel after the owner is disabled', async () => {
+    const ctx = await fresh(['create_reminder', 'cancel_reminder']);
+    const created = await call(ctx, 'create/1');
+    if (created.outcome.status !== 'ok' || created.outcome.result.kind !== 'task_created')
+      throw new Error('expected task creation');
+    const taskId = created.outcome.result.task_id;
+    const input = await cancelInput(taskId);
+    const binding = await reserveToolInvocation(db.pool, ctx, {
+      callKey: 'cancel/1',
+      toolId: 'cancel_reminder',
+      args: input,
+    });
+    await db.pool.query("UPDATE users SET status='disabled' WHERE id=$1", [ctx.ownerId]);
+    expect(
+      await invokeTool(db.pool, ctx, {
+        ...binding,
+        toolId: 'cancel_reminder',
+        args: input,
+      }),
+    ).toMatchObject({ status: 'denied' });
+    expect(
+      (await db.pool.query('SELECT state FROM tasks WHERE id=$1', [taskId])).rows[0].state,
+    ).toBe('saved');
+  });
   const elapsedText = '三分钟后提醒我核对报告';
   const elapsedArgs = {
     raw_time_text: elapsedText,

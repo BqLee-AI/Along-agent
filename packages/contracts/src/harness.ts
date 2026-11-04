@@ -165,6 +165,29 @@ export const HarnessToolPayloadSchema = z.union([
         )
         .max(50),
       has_more: z.boolean(),
+      next_cursor: uuid.nullable().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('task_detail'),
+      task: z
+        .object({
+          task_id: uuid,
+          note: payloadText.nullable(),
+          fire_at_local_text: small,
+          timezone_id: small,
+          state: small,
+        })
+        .strict(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('reminder_cancelled'),
+      task_id: uuid,
+      state: z.enum(['cancel_pending', 'cancelled']),
+      duplicate: z.boolean(),
     })
     .strict(),
   z
@@ -377,7 +400,7 @@ export const HarnessModelReplySchema = z
     message: z
       .object({
         content: text.nullable(),
-        tool_calls: z.array(modelToolCallSchema).max(1),
+        tool_calls: z.array(modelToolCallSchema).max(64),
       })
       .strict(),
     usage: z.object({ total_tokens: z.number().int().nonnegative() }).strict().nullable(),

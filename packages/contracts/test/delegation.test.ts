@@ -1,5 +1,9 @@
 import { expect, test } from 'bun:test';
-import { HarnessStartSchema, HarnessRequestSchema } from '../src/harness.js';
+import {
+  HarnessStartSchema,
+  HarnessRequestSchema,
+  HarnessToolPayloadSchema,
+} from '../src/harness.js';
 const id = '00000000-0000-4000-8000-000000000001';
 const trusted = {
   version: 1,
@@ -92,6 +96,96 @@ test('finish_goal carries outcomes and receipts, not a plain Run done', () => {
         ...request.goal_result,
         outcomes: [{ description: '保存时区', status: 'achieved', receipt_refs: ['invented'] }],
       },
+    }).success,
+  ).toBe(false);
+});
+
+test('task observations preserve complete pagination and actual cancellation state', () => {
+  expect(
+    HarnessToolPayloadSchema.safeParse({
+      kind: 'list_tasks',
+      tasks: [],
+      has_more: true,
+      next_cursor: id,
+    }).success,
+  ).toBe(true);
+  expect(
+    HarnessToolPayloadSchema.safeParse({
+      kind: 'task_detail',
+      task: {
+        task_id: id,
+        note: '完整提醒',
+        fire_at_local_text: '2035-01-01 09:00',
+        timezone_id: 'Asia/Shanghai',
+        state: 'scheduled',
+      },
+    }).success,
+  ).toBe(true);
+  expect(
+    HarnessToolPayloadSchema.safeParse({
+      kind: 'reminder_cancelled',
+      task_id: id,
+      state: 'cancel_pending',
+      duplicate: false,
+    }).success,
+  ).toBe(true);
+  expect(
+    HarnessToolPayloadSchema.safeParse({
+      kind: 'reminder_cancelled',
+      task_id: id,
+      state: 'scheduled',
+      duplicate: false,
+    }).success,
+  ).toBe(false);
+});
+
+test('trusted continuation retains a structured unresolved goal without fabricating an invocation', () => {
+  const continuation = {
+    run_id: id,
+    invocation_id: null,
+    original_input_message_id: id,
+    original_text: '取消喝水提醒',
+    goal_result: {
+      status: 'blocked',
+      outcomes: [{ description: '取消提醒', status: 'not_done', receipt_refs: [] }],
+      clarification: { kind: 'target_selection', question: '请选择提醒' },
+      answer: '需要确认目标。',
+    },
+    receipts: [],
+    source_result: null,
+  };
+  expect(
+    HarnessStartSchema.safeParse({
+      ...start,
+      trusted_context: { ...trusted, continuation },
+    }).success,
+  ).toBe(true);
+  expect(
+    HarnessStartSchema.safeParse({
+      ...start,
+      trusted_context: {
+        ...trusted,
+        continuation: {
+          ...continuation,
+          invocation_id: id,
+          goal_result: null,
+          receipts: [],
+          source_result: {
+            invocation_id: id,
+            tool_id: 'list_tasks',
+            result: {
+              status: 'ok',
+              result: { kind: 'clarify', reason: 'TARGET', phrase_key: 'TARGET', text: '请选择' },
+            },
+          },
+        },
+      },
+    }).success,
+  ).toBe(true);
+  expect(
+    HarnessStartSchema.safeParse({
+      ...start,
+      trusted_context: { ...trusted, continuation: { ...continuation, original_text: undefined } },
     }).success,
   ).toBe(false);
 });

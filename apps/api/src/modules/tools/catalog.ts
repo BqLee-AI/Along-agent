@@ -145,7 +145,43 @@ export const HARNESS_TOOL_DEFINITIONS = [
 
 // A separate profile: the legacy catalog and its approval semantics stay intact.
 export const DELEGATION_TOOL_DEFINITIONS = [
-  ...HARNESS_TOOL_DEFINITIONS.filter((tool) => DELEGATION_TOOL_IDS.some((id) => id === tool.name)),
+  ...HARNESS_TOOL_DEFINITIONS.filter((tool) =>
+    DELEGATION_TOOL_IDS.some((id) => id === tool.name),
+  ).map((tool) =>
+    tool.name === 'list_tasks'
+      ? {
+          ...tool,
+          description: `${tool.description} 按 next_cursor 继续读取全部所需页；仅在用户明确限定未来提醒时传 future_only=true，按本轮可信接纳时间筛选。取消全部只覆盖实际读取的范围。`,
+          parameters: workspaceParameters({
+            state: { type: ['string', 'null'], enum: [...TASK_STATES, null] },
+            limit: { type: 'integer', minimum: 1, maximum: 50 },
+            after_task_id: { type: 'string', format: 'uuid' },
+            future_only: { type: 'boolean' },
+          }),
+        }
+      : tool,
+  ),
+  {
+    name: 'get_task',
+    description: '读取当前用户提醒的完整内容以定位目标。',
+    risk: 'low' as const,
+    parameters: workspaceParameters({ task_id: { type: 'string', format: 'uuid' } }, ['task_id']),
+  },
+  {
+    name: 'cancel_reminder',
+    description:
+      '取消本人明确委托的提醒。先确定用户目标，再提供同一任务的 ID、完整名称、冻结本地时间和时区；各字段必须来自同一条记录，名称被截断时先用 get_task。若身份不匹配，重新读取并自行修正，不向用户重复索权。cancel_pending 只是已提交并等待撤销回执，不代表已经取消；逐项报告实际结果。',
+    risk: 'medium' as const,
+    parameters: workspaceParameters(
+      {
+        task_id: { type: 'string', format: 'uuid' },
+        expected_note: { type: ['string', 'null'] },
+        expected_wall_time: { type: 'string' },
+        expected_timezone_id: { type: 'string' },
+      },
+      ['task_id', 'expected_note', 'expected_wall_time', 'expected_timezone_id'],
+    ),
+  },
   {
     name: 'create_reminder',
     description:

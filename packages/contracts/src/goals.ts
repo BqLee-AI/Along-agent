@@ -66,6 +66,14 @@ export const GoalResultSchema = z
         message: 'goal clarification or unknown status contradicts outcomes',
       });
   });
+const continuationResultSchema = z
+  .object({
+    invocation_id: uuid,
+    tool_id: z.string().min(1).max(128),
+    result: z.record(z.unknown()),
+  })
+  .strict();
+
 export const TrustedExecutionContextSchema = z
   .object({
     version: z.literal(1),
@@ -74,7 +82,22 @@ export const TrustedExecutionContextSchema = z
     input_message_id: uuid,
     received_at_utc: z.string().datetime({ precision: 0 }),
     request_anchor_utc: z.string().datetime({ precision: 0 }),
-    continuation: z.object({ run_id: uuid, invocation_id: uuid.nullable() }).strict().nullable(),
+    continuation: z
+      .union([
+        z.object({ run_id: uuid, invocation_id: uuid.nullable() }).strict(),
+        z
+          .object({
+            run_id: uuid,
+            invocation_id: uuid.nullable(),
+            original_input_message_id: uuid,
+            original_text: z.string().min(1).max(20000),
+            goal_result: GoalResultSchema.nullable(),
+            receipts: z.array(continuationResultSchema).max(4096),
+            source_result: continuationResultSchema.nullable(),
+          })
+          .strict(),
+      ])
+      .nullable(),
     timezone: z
       .object({
         timezone_id: z.string().min(1).max(512),

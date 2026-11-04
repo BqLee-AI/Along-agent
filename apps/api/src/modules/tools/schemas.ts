@@ -47,6 +47,16 @@ export const ListTasksInputSchema = z
   .strict();
 
 export type ListTasksInput = z.infer<typeof ListTasksInputSchema>;
+export const PaginatedListTasksInputSchema = ListTasksInputSchema.extend({
+  after_task_id: z.string().uuid().optional(),
+  future_only: z.boolean().optional(),
+});
+export const TaskIdInputSchema = z.object({ task_id: z.string().uuid() }).strict();
+export const CancelReminderInputSchema = TaskIdInputSchema.extend({
+  expected_note: z.string().max(1000).nullable().optional(),
+  expected_wall_time: z.string().min(1).max(64).optional(),
+  expected_timezone_id: z.string().min(1).max(100).optional(),
+});
 
 export const ReadBriefCardsInputSchema = z
   .object({
@@ -98,6 +108,8 @@ export const TOOL_INPUT_SCHEMAS = {
   create_reminder: CreateReminderInputSchema,
   request_cancel_task: RequestCancelTaskInputSchema,
   list_tasks: ListTasksInputSchema,
+  get_task: TaskIdInputSchema,
+  cancel_reminder: CancelReminderInputSchema,
   read_brief_cards: ReadBriefCardsInputSchema,
   get_user_prefs: GetUserPrefsInputSchema,
   set_user_timezone: SetUserTimezoneInputSchema,
