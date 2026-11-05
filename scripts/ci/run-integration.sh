@@ -11,7 +11,7 @@ run_database_checks() (
   trap 'docker rm -f "$postgres" >/dev/null 2>&1 || true' EXIT
   local ready=false
   for _ in {1..60}; do
-    if docker exec "$postgres" pg_isready -U along -d along >/dev/null 2>&1; then
+    if docker exec "$postgres" pg_isready -h 127.0.0.1 -U along -d along >/dev/null 2>&1; then
       ready=true
       break
     fi
