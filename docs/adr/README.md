@@ -22,6 +22,6 @@
 | 0004                                            | spec / design 权威关系             | Accepted                     | docs/README.md；openspec/config.yaml；design/13                                     |
 | 0005                                            | S0 冻结                            | Accepted                     | AGENTS.md S0 条款；design/07、10、06、03；design/13 D10                             |
 | [0006](0006-bun-ox-toolchain.md)                | Bun + Ox 工具链                    | Accepted                     | design/01 §1、§5；design/13 §3–§4；#13                                              |
-| [0007](0007-ci-critical-path.md)                | CI 关键路径局部修订                | Accepted                     | 仅局部修订 0006 的 CI 编排/失败传播；Bun/Ox 选型不变；design/13 §4；#21             |
-| [0008](0008-static-scheduling.md)               | static 内部调度                    | Accepted                     | 局部修订 0007 的内部并发边界；构建拓扑、五门与 D1–D10 不变；design/13 §4；#24       |
+| [0007](0007-ci-critical-path.md)                | CI 关键路径局部修订                | 历史编排                     | Bun/Ox 选型及构建复用保留；当前 CI 调度见 design/13 §4；#21                         |
+| [0008](0008-static-scheduling.md)               | static 内部调度                    | Accepted（编排已修订）       | 内部并发边界和构建拓扑保留；当前 CI 分类见 design/13 §4；#24                        |
 | [0009](0009-cangjie-harness-ts-capabilities.md) | 仓颉唯一 Harness / TS 长期能力     | Accepted                     | 局部修订 0003 的调用/事务范围；design/02/04/09/11；不改业务、安全 spec 或 CI        |

@@ -142,7 +142,7 @@ tasks 公共创建用例在同一事务写 task、created 事件和 schedule out
 ## 与 design/04 的一致性
 
 - 本篇白名单+zod+风险分级+审计即 design/04 ToolGateway 节的 Agent 侧投影；接口签名以 design 为准。
-- v0确定性turn与TS网关为同进程模块；仓颉仍是唯一模型/工具循环。正式消费者与contracts-dual归design/09/11，R1文件/MCP/文档等待归design/14；D8只对实际生产者消费者证据限定范围enforced，不把healthz双跑、unknown核心探针或受控模型结果当完整真实产品验收（design/13 §4.2）。
+- v0 确定性 turn 与 TS 网关为同进程模块；仓颉仍是唯一模型/工具循环。正式消费者与 `test:contracts` 归 design/09/11，R1 文件/MCP/文档等待归 design/14；D8 只对实际生产者消费者证据限定范围 enforced，不把 healthz 双跑、unknown 核心探针或受控模型结果当完整真实产品验收（design/13 §4.2）。
 
 ## R2-A 来源回取工具（#83）
 

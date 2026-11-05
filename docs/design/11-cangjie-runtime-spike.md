@@ -71,7 +71,7 @@ TS 事实与只追加事件 → SSE / GET 补读 → Web
 
 ### 跨语言消费者门（#47）
 
-沿用五个 required checks，不新增门。根 `test:contracts` 与既有 `contracts-dual` 从当前树构建正式生产镜像，在相同 Bun/native runtime 和隔离 PG16 上运行真实生产者/消费者的本地与签名 HTTP 成功、拒绝合同；本次报告逐项验证必需消费者实际通过，不能用旧报告或跳过补足。省略构建/消费者执行、真实结果纳入或资格裁决分别有对应失败证据。D8 只按实测 Run/工具/有限批准恢复范围 enforced；unknown 核心→native 子合同不证明 HTTP 外部工具或跨请求恢复，更不能据此制造生产 unknown 恢复快照。其余范围继续 partial/Deferred，最小 healthz 双跑本身仍只证明 partial；具体入口、隔离和证据规则见 [design/13 §4.2](13-p0-bootstrap-and-ci-rules.md#42-d8-正式-harness-消费者合同required)。
+根 `test:contracts` 与 CI 完整范围的 `integration` 从当前树构建正式生产镜像，在相同 Bun/native runtime 和隔离 PG16 上运行真实生产者/消费者的本地与签名 HTTP 成功、拒绝合同；本次报告逐项验证必需消费者实际通过，不能用旧报告或跳过补足。省略构建/消费者执行、真实结果纳入或资格裁决分别有对应失败证据。D8 只按实测 Run/工具/有限批准恢复范围 enforced；unknown 核心→native 子合同不证明 HTTP 外部工具或跨请求恢复，更不能据此制造生产 unknown 恢复快照。其余范围继续 partial/Deferred，最小 healthz 双跑本身仍只证明 partial；具体入口、隔离和证据规则见 [design/13 §4.2](13-p0-bootstrap-and-ci-rules.md#42-d8-正式-harness-消费者合同required)。
 
 ### 完整 R1 与后续恢复
 

@@ -29,8 +29,8 @@ for (const [gate, entry] of Object.entries(manifest.gates ?? {})) {
   }
 }
 
-// Optional runtime evidence is consumed by the same root contracts entrypoint.
-// static calls this without a report and only checks declaration locations.
+// A supplied current report is the only runtime evidence checked here.
+// Without one, this validates declarations and evidence file locations only.
 if (process.argv[3] !== undefined) {
   try {
     const ids = assertD8Report(readFileSync(process.argv[3], 'utf8'), manifest.gates?.D8);
@@ -44,4 +44,6 @@ if (failures.length > 0) {
   console.error(failures.join('\n'));
   process.exit(1);
 }
-console.log(`gates executable ok (${enforced} gates)`);
+console.log(
+  `gate declarations ok (${enforced} gates; runtime evidence ${process.argv[3] === undefined ? 'not checked' : 'checked for D8 only'})`,
+);

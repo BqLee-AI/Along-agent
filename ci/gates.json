@@ -6,7 +6,7 @@
       "scope": "time-core zero outgoing deps; shared-package declared dependencies; API cross-module repository/schema isolation; Web/API source isolation; real depcruise positive/negative fixtures; reverse-clock fixture; /readyz TZDB_UNAVAILABLE without TZDB_VERSION",
       "owner": "#3, #14",
       "enforced_by": {
-        "job": "static",
+        "job": "checks",
         "evidence": [
           ".dependency-cruiser.cjs",
           "scripts/test/boundaries.test.ts",
@@ -26,7 +26,7 @@
       "scope": "apps/web display layer: only frozen fields (fire_at_local/echo_text); no new Date/Date.now (Oxlint AST selectors) and fire_at_utc mutation leaves rendered output unchanged (apps/web/test/presentation.test.ts)",
       "owner": "#10",
       "enforced_by": {
-        "job": "static",
+        "job": "checks",
         "evidence": [
           ".oxlintrc.json",
           "scripts/lint-rules.mjs",
@@ -40,7 +40,7 @@
       "scope": "UNIQUE(id, fire_at_utc) on tasks (Contract UNIQUE(task_id, fire_at) mapping); pg_constraint definition assertion + two-session concurrent dual-write 23505 (scripts/db/d3-concurrent.test.sh)",
       "owner": "#7",
       "enforced_by": {
-        "job": "migration-scan",
+        "job": "integration",
         "evidence": [
           "scripts/check-migrations.mjs",
           "scripts/db/verify-constraints.sql",
@@ -54,7 +54,7 @@
       "scope": "UNIQUE(recreated_from_task_id) on tasks (one successor per old task); second-successor dual-write 23505",
       "owner": "#7",
       "enforced_by": {
-        "job": "migration-scan",
+        "job": "integration",
         "evidence": [
           "scripts/check-migrations.mjs",
           "scripts/db/verify-constraints.sql",
@@ -67,7 +67,7 @@
       "scope": "task_events append-only: BEFORE UPDATE OR DELETE trigger rejects; seven-word closed type set",
       "owner": "#7",
       "enforced_by": {
-        "job": "migration-scan",
+        "job": "integration",
         "evidence": [
           "scripts/check-migrations.mjs",
           "scripts/db/verify-constraints.sql",
@@ -80,7 +80,7 @@
       "scope": "agent_revisions/prompt_versions immutability + run_checkpoints append-only; BEFORE UPDATE OR DELETE triggers reject with P0001; tool_calls audit table owned by ToolGateway (#9) must reuse the same trigger when it lands",
       "owner": "#7",
       "enforced_by": {
-        "job": "migration-scan",
+        "job": "integration",
         "evidence": [
           "scripts/check-migrations.mjs",
           "scripts/db/verify-constraints.sql",
@@ -92,7 +92,7 @@
     "D7": {
       "status": "enforced",
       "scope": "compose smoke on fresh volume",
-      "enforced_by": { "job": "compose-smoke", "evidence": ["scripts/compose-smoke.sh"] }
+      "enforced_by": { "job": "integration", "evidence": ["scripts/compose-smoke.sh"] }
     },
     "D8": {
       "status": "enforced",
@@ -103,7 +103,7 @@
         "scope": "other external tool/connector seams; real-provider task quality, arbitrary crash recovery and generic external exactly-once"
       },
       "enforced_by": {
-        "job": "contracts-dual",
+        "job": "integration",
         "evidence": [
           "scripts/test-contracts.sh",
           "scripts/d8-contracts.mjs",
@@ -178,14 +178,14 @@
       "scope": "scheduler fault injection: cancel-after-commit firing-window trigger count = 0 + security_events cancel_breach ledger (apps/api/test/integration/scheduler-fault.test.ts)",
       "owner": "#8",
       "enforced_by": {
-        "job": "scheduler-fault",
+        "job": "integration",
         "evidence": ["apps/api/test/integration/scheduler-fault.test.ts"]
       }
     },
     "D10": {
       "status": "enforced",
       "scope": "copy-claim scan gate",
-      "enforced_by": { "job": "static", "evidence": ["scripts/scan-copy-claims.mjs"] }
+      "enforced_by": { "job": "checks", "evidence": ["scripts/scan-copy-claims.mjs"] }
     }
   }
 }

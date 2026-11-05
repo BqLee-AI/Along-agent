@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-10-20
 - **Deciders**: issue #24（static 调度优化）
-- **Supersedes**: [0007](0007-ci-critical-path.md) 中不改变 typecheck 或用例并发的边界；其五门编排、构建复用和失败传播继续有效
+- **Supersedes**: [0007](0007-ci-critical-path.md) 中不改变 typecheck 或用例并发的边界；构建复用继续有效，CI job 编排以 [design/13 §4](../design/13-p0-bootstrap-and-ci-rules.md#4-ci-布局required) 为准
 
 ## Context
 

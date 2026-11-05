@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 jobs:
-  static:
+  checks:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -21,104 +21,38 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
-          fetch-depth: 1
+          fetch-depth: 0
           persist-credentials: false
+      - name: Select checks
+        id: scope
+        run: node scripts/ci/select-scope.mjs
       - uses: ./.github/actions/setup
-      - run: bun run verify
+      - name: Check documentation
+        if: steps.scope.outputs.scope == 'docs'
+        run: |
+          bun scripts/scan-copy-claims.mjs
+          bunx --bun --no-install openspec validate --all --strict
+          bun run format:check
+      - name: Verify code
+        if: steps.scope.outputs.scope != 'docs'
+        run: bun run verify
+      - name: Build Web
+        if: steps.scope.outputs.scope == 'web'
+        run: bun run --bun --filter @along/web build
 
-  migration-scan:
+  integration:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    needs: static
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: along
-          POSTGRES_PASSWORD: along
-          POSTGRES_DB: along
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U along -d along"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
-    env:
-      DATABASE_URL: postgresql://along:along@localhost:5432/along
-      BETTER_AUTH_SECRET: ci-only-secret-for-identity-tests
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
-          fetch-depth: 1
+          fetch-depth: 0
           persist-credentials: false
+      - name: Select checks
+        id: scope
+        run: node scripts/ci/select-scope.mjs
       - uses: ./.github/actions/setup
-      - run: sh scripts/db/apply.sh
-      - run: bun scripts/check-migrations.mjs
-      - run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/db/verify-constraints.sql
-      - name: Verify readonly routing upgrade and schema drift refusal
-        run: bun --no-env-file test scripts/test/local-routing-database.test.ts
-      - name: Verify account and reminder migration convergence
-        run: bun --no-env-file test scripts/test/local-goal-database.test.ts scripts/test/local-direct-reminder-database.test.ts scripts/test/local-invited-database.test.ts scripts/test/local-116-convergence.test.ts
-      - run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/db/verify-conversation.sql
-      - run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/db/d3-d5.test.sql
-      - run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/db/conversation.test.sql
-      - run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/db/verify-agent-support.sql
-      - run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/db/agent-support.test.sql
-      - run: sh scripts/db/d3-concurrent.test.sh
-      - run: bun run build
-      - run: bun run --filter @along/api test:integration
-
-  scheduler-fault:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    needs: static
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: along
-          POSTGRES_PASSWORD: along
-          POSTGRES_DB: along
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U along -d along"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
-    env:
-      DATABASE_URL: postgresql://along:along@localhost:5432/along
-      BETTER_AUTH_SECRET: ci-only-secret-for-identity-tests
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-        with:
-          fetch-depth: 1
-          persist-credentials: false
-      - uses: ./.github/actions/setup
-      - run: sh scripts/db/apply.sh
-      - run: bun run test:scheduler
-
-  contracts-dual:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: static
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-        with:
-          fetch-depth: 1
-          persist-credentials: false
-      - uses: ./.github/actions/setup
-      - name: Build current native and run isolated production consumers
-        run: bun run test:contracts
-
-  compose-smoke:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: static
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-        with:
-          fetch-depth: 1
-          persist-credentials: false
-      - run: sh scripts/compose-smoke.sh
+        if: steps.scope.outputs.scope == 'full'
+      - name: Run database, contract and Compose checks
+        if: steps.scope.outputs.scope == 'full'
+        run: bash scripts/ci/run-integration.sh
