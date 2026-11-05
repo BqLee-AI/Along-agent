@@ -1948,6 +1948,83 @@ maybe('harness durable authority against PostgreSQL', () => {
       await rm(f.root, { recursive: true, force: true });
     }
   });
+  it('binds delegated invocation grants to the complete frozen collection and current registration', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'along-delegated-scope-'));
+    const roots = await Promise.all(
+      ['first-', 'second-', 'later-'].map((prefix) => mkdtemp(join(directory, prefix))),
+    );
+    const actor = await seedSession(database.pool, {});
+    const registrations = roots.map((root, index) => ({
+      workspace_id: ['first', 'second', 'later'][index]!,
+      label: `Workspace ${index}`,
+      owner_id: actor.userId,
+      root,
+      readable_paths: ['brief.txt'],
+      writable_paths: ['brief.txt'],
+    }));
+    try {
+      await configureWorkspaceRegistry(registrations.slice(0, 2));
+      const started = await startConversationRun(
+        deps,
+        actor.userId,
+        randomUUID(),
+        {
+          execution: 'harness',
+          authorization_revision: 'delegation/1',
+          raw_text: 'Read my documents.',
+          idempotency_key: randomUUID(),
+        },
+        null,
+      );
+      const context = started.context!;
+      const first = getWorkspaceGrant(actor.userId, 'first');
+      const second = getWorkspaceGrant(actor.userId, 'second');
+      expect(context.workspaceGrants).toEqual([first, second]);
+      const session = await createHarnessSession(
+        deps,
+        context,
+        async () => true,
+        new AbortController().signal,
+      );
+      expect(session.start.tools.map((tool) => tool.name)).toContain('workspace_read');
+      expect(session.start.tools.map((tool) => tool.name)).toContain('workspace_replace');
+      expect(
+        session.start.trusted_context?.workspaces.map((workspace) => workspace.workspace_id),
+      ).toEqual(['first', 'second']);
+      expect(JSON.stringify(session.start)).not.toContain(directory);
+      await session.close();
+      await configureWorkspaceRegistry(registrations);
+      const later = getWorkspaceGrant(actor.userId, 'later');
+      const client = await database.pool.connect();
+      try {
+        await assertToolRunBinding(client, { ...context, workspaceGrant: first });
+        await assertToolRunBinding(client, { ...context, workspaceGrant: second });
+        await expect(
+          assertToolRunBinding(client, { ...context, workspaceGrant: later }),
+        ).rejects.toMatchObject({ httpStatus: 403 });
+        await expect(
+          assertToolRunBinding(client, { ...context, workspaceGrants: [first] }),
+        ).rejects.toMatchObject({ httpStatus: 403 });
+        await expect(
+          assertToolRunBinding(client, {
+            ...context,
+            workspaceGrant: { ...first, registration_digest: second.registration_digest },
+          }),
+        ).rejects.toMatchObject({ httpStatus: 403 });
+        await configureWorkspaceRegistry(registrations.slice(1));
+        await expect(
+          assertToolRunBinding(client, { ...context, workspaceGrant: first }),
+        ).rejects.toThrow();
+        await assertToolRunBinding(client, { ...context, workspaceGrant: second });
+        await assertToolRunBinding(client, context);
+      } finally {
+        client.release();
+      }
+    } finally {
+      await configureWorkspaceRegistry([]);
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
   it('freezes the owner registry grant, exposes only its safe summary, and binds new workspace hashes without changing old requests', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'along-run-workspace-'));
     const firstRoot = await mkdtemp(join(directory, 'first-'));

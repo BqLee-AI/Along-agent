@@ -5,7 +5,7 @@
 > 不包含：功能实现、运行验收记录、通用 MCP 平台、任意宿主路径或外部 exactly-once。
 > 阶段：R1；关联 #62。行为以 OpenSpec 为准，字段、接口、所有权和一致性以本设计为准。
 
-> 授权作用域：本文用户先选单工作区、精确文档按钮及冲突后重新批准适用于现行/legacy。新 profile 的冻结登记集合、正常委托直接编辑/有限创建与零写冲突自主修正见 [design/20 §3、§7](20-goal-scoped-delegation.md)（Proposed）。真实全文基线、对象/版本绑定、一次许可、新回读及 unknown 不重写保留，不模拟批准、不开放全盘；本次不改实现。
+> 授权作用域：本文单工作区选择、逐项文档按钮及冲突后重新批准适用于 legacy。新 delegation 的本人登记集合、正常直接编辑、新增影响精确授权及零写冲突边界见 [design/20 §3、§7](20-goal-scoped-delegation.md)；两者共享真实全文基线、对象/版本绑定、一次许可、新回读和 unknown 边界，不模拟批准、不开放全盘。有限创建和 server-owned 不属于当前编辑合同；设计不等于已验收。
 
 ## 1. 结论与范围
 
@@ -46,9 +46,9 @@ root 是专用持久目录，明确交付给应用的资料和简报就是本能
 
 GET /api/v1/workspaces：本人会话认证、只读/no-store，返回 items[{workspace_id,label,readable_paths,writable_paths}]；不返回 root、宿主目录或其他 owner 项。
 
-既有 POST /api/v1/conversations/messages 增加 workspace_id?，仅 execution=harness 可携带。Web 在 Agent 模式展示服务端工作区下拉及可读/可写范围；用户选择的是登记项，而不是上传 root。没有选择时保持原五工具能力；选择后冻结本 Run 的 workspace 能力。business 携带 workspace_id 拒绝，未知/他人/已撤销项在新写入/SSE 前拒绝。新消息 hash 绑定 workspace 选择；同 owner/key 换工作区409。
+legacy 的 POST /api/v1/conversations/messages 可携 `workspace_id`，仅显式 execution=harness 可用；Web 选择登记项而非宿主路径。新 delegation 使用可选 `workspace_ids` 收窄本人登记集合，省略则冻结本人有效登记；两个字段互斥，不默认首项。business、未知/他人/撤销项及越界选择按请求合同拒绝；同 owner/key 的既有 Run 先按原请求重放，不重新冻结资源。
 
-RunView 增加可选的安全 workspace 摘要，供刷新后显示原选择，不使 UI 重新选择成为既有 Run 的授权。省略 workspace 的旧请求 hash 材料不变；仅带 workspace 的新请求采用明确的新版本域。GET 和同键补读仍只读，不执行或重新登记。
+RunView 的 legacy `workspace` 与新 delegation `workspaces` 为各自接纳时的安全摘要，不是动态授权。显式集合进入请求幂等绑定；旧请求 hash 材料不因新合同迁写。GET 和同键补读只读，不执行或重新登记。
 
 ### 3.3 有限路径与 OS 边界
 

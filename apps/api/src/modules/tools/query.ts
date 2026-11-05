@@ -27,6 +27,29 @@ import {
   readContextSourceMetadata,
 } from './context-source.js';
 import { HttpError, stateConflict } from '../../http/errors.js';
+import {
+  documentEvidenceLater,
+  isDocumentApplied,
+  isDocumentConflict,
+  matchingDocumentApply,
+  verifiedDocumentRead,
+} from '../approvals/document-rules.js';
+import { listDocumentApprovals } from '../approvals/document-query.js';
+
+export interface RunGoalDocumentEffect {
+  workspace_id: string;
+  path: string;
+  invocation_id: string;
+  read_invocation_id: string | null;
+  version: string | null;
+  status: 'applied' | 'verified' | 'conflict' | 'unknown';
+  superseded: boolean;
+}
+export interface RunGoalDocumentEvidence {
+  effects: RunGoalDocumentEffect[];
+  hasPendingApproval: boolean;
+  resolvedApprovalInvocationIds: string[];
+}
 
 type RunBinding = Pick<ToolContext, 'ownerId' | 'conversationId' | 'runId'>;
 
@@ -129,7 +152,8 @@ export async function readRunInterruptionEvidence(client: PoolClient, binding: R
   const settings = await readTimezoneSettings(client, binding);
   const creations = await readCreatedReminders(client, binding);
   const cancellations = await readCancelledReminders(client, binding);
-  return { hasUnknown: rows[0]!.has_unknown, settings, creations, cancellations };
+  const documents = (await readRunGoalDocumentEvidence(client, binding)).effects;
+  return { hasUnknown: rows[0]!.has_unknown, settings, creations, cancellations, documents };
 }
 
 async function readTimezoneSettings(
@@ -180,6 +204,13 @@ export async function readRunDocumentEvidence(
   binding: RunBinding,
 ): Promise<DocumentRunEvidence> {
   await assertToolRunBinding(client, binding);
+  return readDocumentEvidence(client, binding);
+}
+
+async function readDocumentEvidence(
+  client: PoolClient,
+  binding: RunBinding,
+): Promise<DocumentRunEvidence> {
   const { rows } = await client.query<{
     invocation_id: string;
     owner_id: string;
@@ -188,7 +219,11 @@ export async function readRunDocumentEvidence(
     tool_id: string;
     state: 'reserved' | 'unknown' | 'completed';
     approval_id: string | null;
-    frozen_context: { workspaceGrant?: unknown; documentApprovalId?: string };
+    frozen_context: {
+      workspaceGrant?: unknown;
+      documentApprovalId?: string;
+      authorizationRevision?: string;
+    };
     accepted_result: unknown;
     created_at: string;
     accepted_at: string;
@@ -220,6 +255,13 @@ export async function readRunDocumentEvidence(
     if (row.tool_id === 'workspace_read') {
       if (row.state !== 'completed') continue;
       const accepted = parseResult(row.accepted_result);
+      if (
+        accepted.status === 'ok' &&
+        accepted.result.kind === 'read' &&
+        row.frozen_context.authorizationRevision === 'delegation/1' &&
+        accepted.result.workspace_id !== grant.workspace_id
+      )
+        throw stateConflict('document read workspace differs from frozen grant');
       if (accepted.status === 'ok' && accepted.result.kind === 'read')
         reads.push({
           ...identity,
@@ -248,6 +290,224 @@ export async function readRunDocumentEvidence(
     });
   }
   return { reads, applies };
+}
+
+// Historical projection only: it does not reacquire a revoked execution grant.
+export async function readRunGoalDocumentEvidence(
+  client: PoolClient,
+  binding: RunBinding,
+): Promise<RunGoalDocumentEvidence> {
+  await assertToolRunInterruptionBinding(client, binding);
+  const { rows } = await client.query<{
+    invocation_id: string;
+    tool_id: string;
+    state: string;
+    args_hash: string;
+    approval_id: string | null;
+    frozen_context: {
+      authorizationRevision?: string;
+      workspaceGrant?: unknown;
+      documentEdit?: NonNullable<ToolContext['documentEdit']>;
+    };
+    accepted_result: unknown;
+    accepted_at: string;
+  }>(
+    `SELECT invocation_id,tool_id,state,args_hash,approval_id,frozen_context,accepted_result,
+      coalesce(to_char(accepted_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),'') accepted_at
+      FROM tool_invocations WHERE owner_id=$1 AND conversation_id=$2 AND run_id=$3
+      AND tool_id IN ('workspace_replace','workspace_propose_replace','workspace_apply_replace')
+      ORDER BY created_at,invocation_id`,
+    [binding.ownerId, binding.conversationId, binding.runId],
+  );
+  const delegated = rows.filter(
+    (row) => row.frozen_context.authorizationRevision === 'delegation/1',
+  );
+  if (!delegated.length)
+    return { effects: [], hasPendingApproval: false, resolvedApprovalInvocationIds: [] };
+  const evidence = await readDocumentEvidence(client, binding);
+  const approvals = await listDocumentApprovals(
+    client,
+    binding.ownerId,
+    binding.conversationId,
+    binding.runId,
+  );
+  const effects: RunGoalDocumentEffect[] = [];
+  for (const row of delegated.filter((item) => item.tool_id === 'workspace_replace')) {
+    const grant = workspaceGrantSchema.parse(row.frozen_context.workspaceGrant);
+    const edit = row.frozen_context.documentEdit;
+    if (!edit) continue;
+    const common = {
+      workspace_id: grant.workspace_id,
+      path: edit.relative_path,
+      invocation_id: row.invocation_id,
+      read_invocation_id: null,
+      version: null,
+      superseded: false,
+    };
+    if (row.state === 'unknown') {
+      effects.push({ ...common, status: 'unknown' });
+      continue;
+    }
+    if (row.state !== 'completed') continue;
+    const accepted = parseResult(row.accepted_result);
+    if (accepted.status !== 'ok') continue;
+    const result = accepted.result;
+    if (result.kind !== 'edit_applied' && result.kind !== 'edit_conflict') continue;
+    if (
+      result.invocation_id !== row.invocation_id ||
+      result.args_hash !== row.args_hash ||
+      result.workspace_id !== grant.workspace_id ||
+      result.path !== edit.relative_path ||
+      result.base_version !== edit.base_version
+    )
+      throw stateConflict('invalid document effect binding');
+    if (result.kind === 'edit_conflict') {
+      effects.push({ ...common, status: 'conflict' });
+      continue;
+    }
+    if (
+      result.version !== edit.new_version ||
+      result.byte_length !== Buffer.byteLength(edit.exact_new_content ?? '', 'utf8')
+    )
+      throw stateConflict('invalid document edit bytes');
+    const read = evidence.reads.find(
+      (item) =>
+        item.workspace_id === grant.workspace_id &&
+        item.registration_digest === grant.registration_digest &&
+        item.relative_path === edit.relative_path &&
+        item.invocation_id !== edit.base_read_invocation_id &&
+        item.result.version === edit.new_version &&
+        item.result.content === edit.exact_new_content &&
+        item.result.byte_length === result.byte_length &&
+        documentEvidenceLater(item.created_at, row.accepted_at) &&
+        documentEvidenceLater(item.accepted_at, row.accepted_at),
+    );
+    effects.push({
+      ...common,
+      status: read ? 'verified' : 'applied',
+      read_invocation_id: read?.invocation_id ?? null,
+      version: result.version,
+    });
+  }
+  const resolvedApprovalInvocationIds: string[] = [];
+  for (const approval of approvals) {
+    const apply = matchingDocumentApply(approval, evidence.applies);
+    if (!apply || !delegated.some((row) => row.invocation_id === apply.invocation_id)) continue;
+    if (apply.state === 'unknown') {
+      effects.push({
+        workspace_id: approval.workspace_id,
+        path: approval.relative_path,
+        invocation_id: apply.invocation_id,
+        read_invocation_id: null,
+        version: null,
+        status: 'unknown',
+        superseded: false,
+      });
+    } else if (isDocumentConflict(approval, apply)) {
+      effects.push({
+        workspace_id: approval.workspace_id,
+        path: approval.relative_path,
+        invocation_id: apply.invocation_id,
+        read_invocation_id: null,
+        version: null,
+        status: 'conflict',
+        superseded: false,
+      });
+    } else if (isDocumentApplied(approval, apply)) {
+      const read = verifiedDocumentRead(approval, apply, evidence.reads);
+      effects.push({
+        workspace_id: approval.workspace_id,
+        path: approval.relative_path,
+        invocation_id: apply.invocation_id,
+        read_invocation_id: read?.invocation_id ?? null,
+        version: apply.result.version,
+        status: read ? 'verified' : 'applied',
+        superseded: false,
+      });
+      if (read) {
+        const proposal = delegated.find(
+          (row) =>
+            row.tool_id === 'workspace_propose_replace' &&
+            row.state === 'completed' &&
+            row.approval_id === approval.id,
+        );
+        if (proposal) resolvedApprovalInvocationIds.push(proposal.invocation_id);
+      }
+    }
+  }
+  // Only a unique chain ending in an independently verified write resolves a
+  // zero-write conflict. A reserved, failed or unverified successor is not proof.
+  const successorIds = (id: string): string[] => {
+    const direct = delegated.filter(
+      (row) => row.frozen_context.documentEdit?.replaces_invocation_id === id,
+    );
+    const ids = direct.map((row) => {
+      if (row.tool_id !== 'workspace_propose_replace') return row.invocation_id;
+      return (
+        approvals.find((approval) => approval.id === row.approval_id)?.apply_invocation_id ??
+        row.invocation_id
+      );
+    });
+    const previousApproval = approvals.find((approval) => approval.apply_invocation_id === id);
+    if (previousApproval) {
+      for (const approval of approvals.filter(
+        (item) => item.replaces_approval_id === previousApproval.id,
+      ))
+        ids.push(approval.apply_invocation_id ?? approval.id);
+    }
+    return [...new Set(ids)];
+  };
+  const reachesVerified = (effect: RunGoalDocumentEffect, visited: Set<string>): boolean => {
+    if (effect.status === 'verified') return true;
+    if (effect.status !== 'conflict' || visited.has(effect.invocation_id)) return false;
+    const row = delegated.find((item) => item.invocation_id === effect.invocation_id);
+    if (!row || row.state !== 'completed') return false;
+    const result = parseResult(row.accepted_result);
+    if (
+      result.status !== 'ok' ||
+      !(
+        (result.result.kind === 'conflict' && result.result.zero_write) ||
+        (result.result.kind === 'edit_conflict' &&
+          result.result.zero_write &&
+          result.result.reason === 'version_changed')
+      )
+    )
+      return false;
+    const successors = successorIds(effect.invocation_id);
+    if (successors.length !== 1) return false;
+    const next = effects.find(
+      (item) =>
+        item.invocation_id === successors[0] &&
+        item.workspace_id === effect.workspace_id &&
+        item.path === effect.path,
+    );
+    if (!next) return false;
+    visited.add(effect.invocation_id);
+    return reachesVerified(next, visited);
+  };
+  for (const effect of effects) {
+    if (effect.status === 'conflict') effect.superseded = reachesVerified(effect, new Set());
+  }
+  for (const approval of approvals) {
+    const effect = effects.find((item) => item.invocation_id === approval.apply_invocation_id);
+    if (!effect || !(effect.status === 'verified' || effect.superseded)) continue;
+    const proposal = delegated.find(
+      (row) =>
+        row.tool_id === 'workspace_propose_replace' &&
+        row.state === 'completed' &&
+        row.approval_id === approval.id,
+    );
+    if (proposal && !resolvedApprovalInvocationIds.includes(proposal.invocation_id))
+      resolvedApprovalInvocationIds.push(proposal.invocation_id);
+  }
+  return {
+    effects,
+    hasPendingApproval: approvals.some(
+      (item) =>
+        item.state === 'pending' || (item.state === 'approved' && !item.apply_invocation_id),
+    ),
+    resolvedApprovalInvocationIds,
+  };
 }
 
 // Metadata is fetched/projected in PostgreSQL before any large body is read.

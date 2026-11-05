@@ -4,7 +4,7 @@
 | ---------------------------- | ----------------------------------------------------- | -------------------------------------------------------- | -------------------------- |
 | 跟随 design/09/11 的运行合同 | ID、执行归属、预算、task/document 批准等待与补读/恢复 | 实际供应商选型、完整 R1 真模型验收结论、无人值守通用恢复 | 正式仓颉核心与 TS 长期能力 |
 
-> profile 作用域：单 grant/原批准恢复描述 legacy；wire 统一为严格 v6，不代表权限升级。普通 Web Agent 显式接纳 delegation/1，仅交付本人默认时区和只读工具，冻结 request-bound。可信上下文、结构化目标结果与生命周期由 [design/20 §1、§4–§9](../design/20-goal-scoped-delegation.md) 定义；直接提醒、资料写入、elapsed 和 server-owned 是独立能力，不能从修订推断上线。
+> profile 作用域：单 grant/原批准恢复描述 legacy；wire v6 不代表权限升级。普通 Web Agent 显式接纳 delegation/1，实际工具与本人登记集合随 Run 冻结，生命周期为 request-bound。可信上下文、结构化目标结果见 [design/20 §1、§4–§9](../design/20-goal-scoped-delegation.md)；有限新文件创建与 server-owned 尚未实现，不能从修订推断上线。
 
 ## ID 边界
 
@@ -31,7 +31,7 @@
 - delegation/1 使用 `finish_goal` 提交目标结果，SSE v2 和 RunView 保存逐项目标事实；最终答复、GoalResult、terminal 事件、attempt 与 Run 同事务，异常/取消按同一终结事务保留既成效果。纯正文或工具 completed 不代替目标完成。输入/规则拒绝可交同一模型反馈；`TOOL_FORBIDDEN` / `TOOL_DENIED` 只允许结果说明与 `finish_goal`，native 和 TS 均停止该 Run 后续业务动作；failed/unknown 不继续。请求断开按取消收尾，不回滚已接受偏好；导航、刷新、重登和 GET 只读，不启动新 attempt 或重做设置。
 - `finish_goal` 的模型参数与 pipe 帧错误分开处理：JSON、字段、状态聚合或收据资格不合法时，native 返回配对的 `accepted:false / INVALID_GOAL_RESULT` 控制观察，不接纳目标、不伪造成功；此后只允许提交修正后的目标结果，不再预约或执行业务工具。修正使用原模型迭代/token预算，耗尽按原预算错误终结；既成领域结果与收据保留。pipe/传输故障仍按原协议失败，不捕获为可继续的业务观察。普通用户无需知道或输入控制工具名。
 - owner 在途 disabled 时拒绝后续动作；内部失败追账只核验 owner/conversation/run、冻结 profile 与既成接受结果完整性，不重新索取已撤销的执行资格，因此仍能原子保存唯一终态。该内部投影不是公开读取或执行入口；普通工具/GET仍要求有效身份，撤权后的原连接也不披露包含目标结果或收据的终结内容。恢复有效身份后只读原持久事实，不自动重做。
-- 有限 workspace 仅提供 `workspace_list/workspace_grep/workspace_read/workspace_propose_replace/workspace_apply_replace` 五工具；前三个经 TS 薄只读 MCP，提案绑定本 Run 的真实全文 read。工具顺序由仓颉决定，TS 不隐藏另一套 Agent 或固定代跑链。
+- legacy 有限 workspace 使用五个工具；合格新 delegation 另可使用 `workspace_replace` 直接编辑，读取工具显式指定冻结集合中的 workspace。前三个读取经 TS 薄只读 MCP，提案和直接编辑均绑定同 Run 真实全文 read；写后独立新读才可 verified。工具顺序由仓颉决定，TS 不隐藏另一套 Agent 或固定代跑链。
 
 ## 预算
 

@@ -19,7 +19,12 @@ import {
 import { cancelTaskWithinTransaction } from '../tasks/cancel.js';
 import { readToolBriefCards } from '../brief/tool-query.js';
 import { readUserPreferences, setUserTimezoneWithinTransaction } from '../identity/preferences.js';
-import { PaginatedListTasksInputSchema, TOOL_INPUT_SCHEMAS } from './schemas.js';
+import {
+  PaginatedListTasksInputSchema,
+  TOOL_INPUT_SCHEMAS,
+  DELEGATED_WORKSPACE_READ_SCHEMAS,
+  DelegatedWorkspaceProposeInputSchema,
+} from './schemas.js';
 import type { ToolContext, ToolOutcome, ToolPayload, ToolResult } from './contracts.js';
 import {
   executeLocalInvocation,
@@ -33,7 +38,11 @@ import {
   validateDocumentApprovalApply,
   DocumentProposalOperationError,
 } from '../approvals/document-service.js';
-import { applyWorkspaceReplace, type ApprovedWorkspaceTarget } from '../workspaces/replace.js';
+import {
+  applyWorkspaceReplace,
+  publishWorkspaceReplace,
+  type ApprovedWorkspaceTarget,
+} from '../workspaces/replace.js';
 import { utf8Bytes, WorkspaceDeniedError } from '../workspaces/service.js';
 import { callWorkspaceMcp, type WorkspaceReadTool } from './mcp-workspace.js';
 import { readRunDocumentEvidence } from './query.js';
@@ -58,19 +67,24 @@ async function runWorkspaceProposal(
   ctx: ToolContext,
   args: unknown,
 ): Promise<ToolResult> {
-  const parsed = TOOL_INPUT_SCHEMAS.workspace_propose_replace.safeParse(args);
+  const parsed =
+    ctx.authorizationRevision === 'delegation/1'
+      ? DelegatedWorkspaceProposeInputSchema.safeParse(args)
+      : TOOL_INPUT_SCHEMAS.workspace_propose_replace.safeParse(args);
   if (!parsed.success || !ctx.workspaceGrant) return workspaceDenied();
   let path = '';
   try {
-    utf8Bytes(parsed.data.old_text);
-    utf8Bytes(parsed.data.new_text);
+    if ('old_text' in parsed.data) {
+      utf8Bytes(parsed.data.old_text);
+      utf8Bytes(parsed.data.new_text);
+    }
     const evidence = await readRunDocumentEvidence(client, ctx);
     const baseRead = evidence.reads.find(
       (read) => read.invocation_id === parsed.data.read_invocation_id,
     );
     if (!baseRead) return workspaceDenied();
     path = baseRead.relative_path;
-    if (parsed.data.old_text === parsed.data.new_text)
+    if ('old_text' in parsed.data && parsed.data.old_text === parsed.data.new_text)
       return { status: 'ok', result: { kind: 'operation_error', path, reason: 'unchanged' } };
     const approval = await createDocumentApproval(client, {
       ownerId: ctx.ownerId,
@@ -79,8 +93,9 @@ async function runWorkspaceProposal(
       workspaceGrant: ctx.workspaceGrant,
       relativePath: path,
       baseRead,
-      oldText: parsed.data.old_text,
-      newText: parsed.data.new_text,
+      ...('change' in parsed.data
+        ? { change: parsed.data.change }
+        : { oldText: parsed.data.old_text, newText: parsed.data.new_text }),
       evidence,
     });
     return { status: 'ok', result: { kind: 'document_approval', approval } };
@@ -140,6 +155,83 @@ function invokeWorkspaceApply(
               ? result.evidence_ref
               : `workspace-conflict:${binding.invocationId}`,
           result: { status: 'ok', result },
+        };
+      } finally {
+        client.release();
+      }
+    },
+  });
+}
+
+function invokeWorkspaceReplace(
+  pool: Pool,
+  ctx: ToolContext,
+  input: { invocationId: string; toolId: string; args: unknown },
+): Promise<ToolOutcome> {
+  let frozen: ToolContext | undefined;
+  return executeNonTransactionalInvocation(pool, ctx, input, {
+    validateDispatch: async (_client, context) => {
+      if (!context.workspaceGrant || !context.documentEdit) throw new WorkspaceDeniedError();
+      frozen = context;
+    },
+    execute: async (binding) => {
+      const grant = frozen?.workspaceGrant;
+      const edit = frozen?.documentEdit;
+      if (!frozen || !grant || !edit) throw new Error('missing frozen document edit');
+      if (edit.operation_error)
+        return {
+          ...binding,
+          evidenceRef: `workspace-operation:${binding.invocationId}`,
+          result: {
+            status: 'ok',
+            result: {
+              kind: 'operation_error',
+              path: edit.relative_path,
+              reason: edit.operation_error,
+            },
+          },
+        };
+      if (edit.exact_new_content === undefined || !edit.new_version)
+        throw new Error('missing exact document bytes');
+      frozen.signal?.throwIfAborted();
+      const client = await pool.connect();
+      try {
+        const result = await publishWorkspaceReplace(client, frozen.ownerId, grant, {
+          path: edit.relative_path,
+          base_version: edit.base_version,
+          exact_new_content: edit.exact_new_content,
+          new_version: edit.new_version,
+        });
+        const common = {
+          workspace_id: grant.workspace_id,
+          path: edit.relative_path,
+          invocation_id: binding.invocationId,
+          args_hash: binding.argsHash,
+          base_version: edit.base_version,
+        };
+        const evidenceRef = `workspace-edit:${binding.invocationId}`;
+        return {
+          ...binding,
+          evidenceRef,
+          result: {
+            status: 'ok',
+            result:
+              result.kind === 'applied'
+                ? {
+                    kind: 'edit_applied',
+                    ...common,
+                    version: result.version,
+                    byte_length: result.byte_length,
+                    evidence_ref: evidenceRef,
+                  }
+                : {
+                    kind: 'edit_conflict',
+                    ...common,
+                    actual_version: result.actual_version,
+                    reason: result.reason,
+                    zero_write: true,
+                  },
+          },
         };
       } finally {
         client.release();
@@ -901,7 +993,7 @@ export function reserveToolInvocation(
   return reserveInvocation(pool, ctx, {
     ...input,
     executionKind:
-      input.toolId === 'workspace_apply_replace'
+      input.toolId === 'workspace_apply_replace' || input.toolId === 'workspace_replace'
         ? 'non_transactional'
         : readOnly
           ? 'read_only'
@@ -915,6 +1007,7 @@ export function invokeTool(
   input: { invocationId: string; toolId: string; args: unknown },
 ): Promise<ToolOutcome> {
   if (input.toolId === 'workspace_apply_replace') return invokeWorkspaceApply(pool, ctx, input);
+  if (input.toolId === 'workspace_replace') return invokeWorkspaceReplace(pool, ctx, input);
   if (input.toolId === 'read_run_observation') {
     return executeReadOnlyInvocation(pool, ctx, input, async (frozen) => {
       const parsed = TOOL_INPUT_SCHEMAS.read_run_observation.safeParse(input.args);
@@ -937,10 +1030,25 @@ export function invokeTool(
   if (['workspace_list', 'workspace_grep', 'workspace_read'].includes(input.toolId)) {
     const toolId = input.toolId as WorkspaceReadTool;
     return executeReadOnlyInvocation(pool, ctx, input, async (frozen) => {
-      const parsed = TOOL_INPUT_SCHEMAS[toolId].safeParse(input.args);
+      const parsed =
+        frozen.authorizationRevision === 'delegation/1'
+          ? DELEGATED_WORKSPACE_READ_SCHEMAS[toolId].safeParse(input.args)
+          : TOOL_INPUT_SCHEMAS[toolId].safeParse(input.args);
       if (!parsed.success) return workspaceDenied();
       try {
-        return { status: 'ok', result: await callWorkspaceMcp(frozen, toolId, parsed.data) };
+        const { path } = parsed.data;
+        const mcpArgs =
+          'literal' in parsed.data && typeof parsed.data.literal === 'string'
+            ? { path, literal: parsed.data.literal }
+            : { path };
+        const result = await callWorkspaceMcp(frozen, toolId, mcpArgs);
+        return {
+          status: 'ok',
+          result:
+            frozen.authorizationRevision === 'delegation/1'
+              ? { ...result, workspace_id: frozen.workspaceGrant!.workspace_id }
+              : result,
+        };
       } catch (error) {
         if (error instanceof WorkspaceDeniedError) return workspaceDenied();
         throw error;

@@ -38,7 +38,9 @@ export function clarificationReplyReference(
     !run.goal_result ||
     !['blocked', 'partial'].includes(run.goal_result.status) ||
     !run.goal_result.clarification ||
-    !['time', 'timezone', 'target_selection'].includes(run.goal_result.clarification.kind)
+    !['time', 'timezone', 'target_selection', 'destination'].includes(
+      run.goal_result.clarification.kind,
+    )
   )
     return undefined;
   return run.run_id;

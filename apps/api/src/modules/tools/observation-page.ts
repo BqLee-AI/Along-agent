@@ -33,6 +33,9 @@ export async function readObservationPage(
     source_invocation_id: args.source_invocation_id,
     source_tool_id: metadata.tool_id,
     source_result_version: 1 as const,
+    ...('workspace_id' in result && result.workspace_id
+      ? { workspace_id: result.workspace_id }
+      : {}),
     offset: args.offset,
   };
   let total: number;

@@ -17,6 +17,7 @@ import {
   validateDocumentApprovalApply,
   validateDocumentApprovalsDone,
 } from '../../src/modules/approvals/document-service.js';
+import { hasRejectedDocumentApproval } from '../../src/modules/approvals/document-query.js';
 import {
   readDocumentApprovalDecision,
   readDocumentApprovalReceipt,
@@ -222,6 +223,121 @@ maybe('document approval PostgreSQL authority and frozen content', () => {
         idempotency_key: randomUUID(),
       }),
     ).rejects.toMatchObject({ httpStatus: 409 });
+  });
+  it('freezes and confirms a full-content proposal against the accepted read without changing the file', async () => {
+    const f = await fresh('\uFEFFold\r\n内容\n');
+    const base = f.input;
+    const receipt = await withTransaction(pool, (client) =>
+      createDocumentApproval(client, {
+        ...base,
+        change: { kind: 'full', new_content: '新内容\r\n' },
+      }),
+    );
+    expect(receipt.preview.before).toBe('\uFEFFold\r\n内容\n');
+    expect(receipt.preview.after).toBe('新内容\r\n');
+    expect(receipt.exact_new_content).toBe('新内容\r\n');
+    expect(receipt.base_read_invocation_id).toBe(f.input.baseRead.invocation_id);
+    await expect(
+      confirmDocumentApproval({ pool }, f.ctx.ownerId, receipt.approval_id, {
+        ...confirmBody(receipt),
+        seen_content: receipt.preview.body + ' ',
+      }),
+    ).rejects.toMatchObject({ errorCode: 'PRESENTATION_MISMATCH' });
+    await expect(
+      confirmDocumentApproval({ pool }, f.ctx.ownerId, receipt.approval_id, confirmBody(receipt)),
+    ).resolves.toMatchObject({ status: 'approved' });
+    expect(await readFile(join(f.root, 'memo.txt'), 'utf8')).toBe('\uFEFFold\r\n内容\n');
+  });
+  it('uses the same literal rules and exact-text validation for change proposals', async () => {
+    const f = await fresh('old old');
+    const base = f.input;
+    await expect(
+      withTransaction(pool, (client) =>
+        createDocumentApproval(client, {
+          ...base,
+          change: { kind: 'literal', old_text: 'old', new_text: 'new' },
+        }),
+      ),
+    ).rejects.toMatchObject({ reason: 'literal_not_unique' });
+    await expect(
+      withTransaction(pool, (client) =>
+        createDocumentApproval(client, {
+          ...base,
+          change: { kind: 'full', new_content: 'invalid\0text' },
+        }),
+      ),
+    ).rejects.toThrow();
+    const receipt = await withTransaction(pool, (client) =>
+      createDocumentApproval(client, {
+        ...base,
+        change: { kind: 'literal', old_text: 'old old', new_text: 'new' },
+      }),
+    );
+    expect(receipt.exact_new_content).toBe('new');
+    expect(receipt.preview.before).toBe('old old');
+  });
+  it('rejects an unchanged full proposal and a forged full-read source without creating approvals', async () => {
+    const f = await fresh('');
+    const base = f.input;
+    await expect(
+      withTransaction(pool, (client) =>
+        createDocumentApproval(client, {
+          ...base,
+          change: { kind: 'full', new_content: '' },
+        }),
+      ),
+    ).rejects.toMatchObject({ reason: 'unchanged' });
+    await expect(
+      withTransaction(pool, (client) =>
+        createDocumentApproval(client, {
+          ...base,
+          baseRead: { ...base.baseRead, run_id: randomUUID() },
+          change: { kind: 'full', new_content: 'replacement' },
+        }),
+      ),
+    ).rejects.toThrow();
+    expect(
+      (
+        await pool.query('SELECT count(*)::int AS n FROM document_approvals WHERE run_id=$1', [
+          f.ctx.runId,
+        ])
+      ).rows[0]?.n,
+    ).toBe(0);
+    const receipt = await withTransaction(pool, (client) =>
+      createDocumentApproval(client, {
+        ...base,
+        change: { kind: 'full', new_content: 'replacement' },
+      }),
+    );
+    expect(receipt.preview.before).toBe('');
+    expect(receipt.preview.after).toBe('replacement');
+  });
+  it('reports rejected approvals only for the bound owner, conversation and Run', async () => {
+    const f = await fresh();
+    const binding = {
+      ownerId: f.ctx.ownerId,
+      conversationId: f.ctx.conversationId,
+      runId: f.ctx.runId,
+    };
+    const rejected = () =>
+      withTransaction(pool, (client) => hasRejectedDocumentApproval(client, binding));
+    expect(await rejected()).toBe(false);
+    const receipt = await f.propose();
+    expect(await rejected()).toBe(false);
+    await rejectDocumentApproval({ pool }, f.ctx.ownerId, receipt.approval_id, {
+      idempotency_key: randomUUID(),
+    });
+    expect(await rejected()).toBe(true);
+    expect(
+      await withTransaction(pool, (client) =>
+        hasRejectedDocumentApproval(client, { ...binding, runId: randomUUID() }),
+      ),
+    ).toBe(false);
+    expect(
+      await withTransaction(pool, (client) =>
+        hasRejectedDocumentApproval(client, { ...binding, ownerId: randomUUID() }),
+      ),
+    ).toBe(false);
   });
   it('rejects a quote-heavy proposal whose serialized confirmation exceeds the HTTP body bound before persisting approval or suspension', async () => {
     const content = '"'.repeat(36_000);

@@ -9,7 +9,7 @@ import type {
 import { forbidden, notFound, stateConflict } from '../../http/errors.js';
 import { effectiveStatus, readApprovalFacts } from './repository.js';
 import type { ApprovalReadRow } from './repository.js';
-import { getDocumentApproval } from './document-repository.js';
+import { getDocumentApproval } from './document-query.js';
 import { documentReceipt } from './document-rules.js';
 
 export interface ApprovalReadProjection {

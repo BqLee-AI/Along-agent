@@ -48,6 +48,7 @@ export interface FrozenContext {
   messageRefs?: string[];
   workspaceGrant?: WorkspaceGrant | null;
   workspaceSummary?: WorkspaceSummary | null;
+  workspaceGrants?: WorkspaceGrant[];
   authorization_revision?: 'delegation/1';
   execution_lifecycle?: 'request-bound';
   trustedExecutionContext?: TrustedExecutionContext;

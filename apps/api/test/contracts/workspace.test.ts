@@ -49,12 +49,20 @@ interface Scenario {
   initial: string;
   requests: ModelMessage[][];
   omitReadBack: boolean;
+  delegated?: boolean;
+  noWorkspace?: boolean;
+  conflict?: boolean;
+  conflictInjected?: boolean;
+  fullRewrite?: boolean;
+  invalidLiteral?: boolean;
+  offeredTools?: string[][];
 }
 const ModelBody = z.object({
   messages: z.array(HarnessModelMessageSchema),
   stream: z.literal(true),
   stream_options: z.object({ include_usage: z.literal(true) }),
   parallel_tool_calls: z.boolean().optional(),
+  tools: z.array(z.object({ function: z.object({ name: z.string() }) })).optional(),
 });
 const ToolObservation = z.object({
   invocation_id: z.string().uuid(),
@@ -226,6 +234,101 @@ function modelReply(messages: ModelMessage[], scenario: Scenario): HarnessModelR
   };
 }
 
+async function delegatedReply(
+  messages: ModelMessage[],
+  scenario: Scenario,
+): Promise<HarnessModelReply> {
+  const accepted = observations(values(messages));
+  if (scenario.noWorkspace) {
+    return tool('finish_goal', {
+      status: 'completed',
+      outcomes: [
+        { description: 'No workspace was available', status: 'achieved', receipt_refs: [] },
+      ],
+      clarification: null,
+      answer: 'No managed workspace is available.',
+    });
+  }
+  const workspace_id = scenario.workspaceId;
+  if (!latest(accepted, (value) => value.result.kind === 'list')) {
+    return tool('workspace_list', { workspace_id, path: '' });
+  }
+  const search = latest(accepted, (value) => value.result.kind === 'search');
+  if (!search || search.result.kind !== 'search') {
+    return tool('workspace_grep', { workspace_id, path: 'sources', literal: 'Decision' });
+  }
+  const sourcePath = search.result.matches[0]?.path;
+  if (!sourcePath) throw new Error('real MCP search did not expose the authorized source');
+  const source = latest(
+    accepted,
+    (value) => value.result.kind === 'read' && value.result.path === sourcePath,
+  );
+  if (!source || source.result.kind !== 'read')
+    return tool('workspace_read', { workspace_id, path: sourcePath });
+  const target = latest(
+    accepted,
+    (value) => value.result.kind === 'read' && value.result.path === 'brief.md',
+  );
+  if (!target || target.result.kind !== 'read')
+    return tool('workspace_read', { workspace_id, path: 'brief.md' });
+  const operationError = latest(accepted, (value) => value.result.kind === 'operation_error');
+  if (operationError) {
+    return tool('finish_goal', {
+      status: 'blocked',
+      outcomes: [
+        {
+          description: 'The requested edit could not be compiled',
+          status: 'blocked',
+          receipt_refs: [],
+        },
+      ],
+      clarification: null,
+      answer: 'The file was not changed.',
+    });
+  }
+  const edit = latest(
+    accepted,
+    (value) => value.result.kind === 'edit_applied' || value.result.kind === 'edit_conflict',
+  );
+  if (edit?.result.kind === 'edit_conflict' && target.index < edit.index) {
+    return tool('workspace_read', { workspace_id, path: 'brief.md' });
+  }
+  if (!edit || edit.result.kind === 'edit_conflict') {
+    if (scenario.conflict && !scenario.conflictInjected) {
+      scenario.conflictInjected = true;
+      await writeFile(join(scenario.root, 'brief.md'), `External header\r\n${scenario.initial}`);
+    }
+    return tool('workspace_replace', {
+      read_invocation_id: target.invocationId,
+      change: scenario.fullRewrite
+        ? { kind: 'full', new_content: `Rewritten: ${source.result.content.trim()}\r\n` }
+        : {
+            kind: 'literal',
+            old_text: scenario.invalidLiteral ? 'ABSENT' : 'PENDING',
+            new_text: `Summary: ${source.result.content.trim()}`,
+          },
+    });
+  }
+  if (edit.result.kind !== 'edit_applied') throw new Error('unexpected delegated edit');
+  if (!scenario.omitReadBack && target.index < edit.index) {
+    return tool('workspace_read', { workspace_id, path: 'brief.md' });
+  }
+  return tool('finish_goal', {
+    status: 'completed',
+    outcomes: [
+      {
+        description: 'The document was saved and independently verified',
+        status: 'achieved',
+        receipt_refs: scenario.omitReadBack
+          ? [edit.invocationId]
+          : [edit.invocationId, target.invocationId],
+      },
+    ],
+    clarification: null,
+    answer: 'Saved the document.',
+  });
+}
+
 beforeAll(async () => {
   fixture = await createHarnessConsumer();
   modelServer = createServer((req, res) => {
@@ -236,8 +339,15 @@ beforeAll(async () => {
       const scenario = marker ? scenarios.get(marker[1]!) : undefined;
       if (!scenario) throw new Error('missing workspace fixture identity');
       scenario.requests.push(body.messages);
+      scenario.offeredTools ??= [];
+      scenario.offeredTools.push((body.tools ?? []).map((entry) => entry.function.name));
       if (body.parallel_tool_calls === false) {
-        sendModelSse(res, modelReply(body.messages, scenario));
+        sendModelSse(
+          res,
+          scenario.delegated
+            ? await delegatedReply(body.messages, scenario)
+            : modelReply(body.messages, scenario),
+        );
       } else {
         // This provider defaults to parallel proposals, as the real file task
         // endpoint did. Native must negotiate sequential calls, not discard one.
@@ -448,6 +558,7 @@ async function savesDocument(mode: ConsumerMode, conflict: boolean) {
     read_invocation_id: expect.any(String),
   });
   expect(verified.effect.read_invocation_id).not.toBe(verified.effect.apply_invocation_id);
+  expect(scenario.offeredTools?.every((names) => !names.includes('workspace_replace'))).toBe(true);
   if (!conflict) expect(scenario.requests).toHaveLength(8);
   const frozen = await documentFacts(actor.ownerId);
   expect(frozen.tasks).toEqual([]);
@@ -583,3 +694,212 @@ test('D8.workspace-unknown.http', async () => {
     );
   }
 }, 30_000);
+
+async function setupDelegated(mode: ConsumerMode) {
+  const { actor, scenario } = await setup(mode, false);
+  scenario.delegated = true;
+  return {
+    actor,
+    scenario,
+    body: {
+      execution: 'harness',
+      authorization_revision: 'delegation/1',
+      raw_text: `workspaceCase:${scenario.id} Find the decision and update the existing brief, preserving other bytes; independently read it back.`,
+      idempotency_key: randomUUID(),
+    },
+  };
+}
+
+async function delegatedSave(mode: ConsumerMode, conflict: boolean, fullRewrite = false) {
+  const { actor, scenario, body } = await setupDelegated(mode);
+  scenario.conflict = conflict;
+  scenario.fullRewrite = fullRewrite;
+  if (fullRewrite)
+    body.raw_text = `workspaceCase:${scenario.id} Fully rewrite brief.md using the decision, then independently read it back.`;
+  const events = await (await actor.message(body)).events;
+  const run = started(events);
+  expect(events.some((event) => event.type === 'thread.failed')).toBe(false);
+  expect(events.filter((event) => event.type === 'thread.completed')).toHaveLength(1);
+  const expected = fullRewrite
+    ? `Rewritten: ${scenario.source.trim()}\r\n`
+    : `${conflict ? 'External header\r\n' : ''}${scenario.initial}`.replace(
+        'PENDING',
+        `Summary: ${scenario.source.trim()}`,
+      );
+  expect(await readFile(join(scenario.root, 'brief.md'))).toEqual(Buffer.from(expected));
+  expect(await readFile(join(scenario.root, 'sources/deadline.md'), 'utf8')).toBe(scenario.source);
+  const accepted = observations(values(scenario.requests.at(-1) ?? []));
+  for (const kind of ['list', 'search', 'read'] as const) {
+    expect(
+      accepted.some(
+        (value) => value.result.kind === kind && value.result.workspace_id === scenario.workspaceId,
+      ),
+    ).toBe(true);
+  }
+  const applied = accepted.filter((value) => value.result.kind === 'edit_applied');
+  const conflicts = accepted.filter((value) => value.result.kind === 'edit_conflict');
+  expect(applied).toHaveLength(1);
+  expect(conflicts).toHaveLength(conflict ? 1 : 0);
+  if (conflict)
+    expect(conflicts[0]!.result).toMatchObject({ reason: 'version_changed', zero_write: true });
+  const fresh = latest(
+    accepted,
+    (value) =>
+      value.index > applied[0]!.index &&
+      value.result.kind === 'read' &&
+      value.result.path === 'brief.md',
+  );
+  expect(fresh?.result).toMatchObject({ workspace_id: scenario.workspaceId, content: expected });
+  expect(fresh?.invocationId).not.toBe(applied[0]!.invocationId);
+  if (applied[0]!.result.kind !== 'edit_applied' || fresh?.result.kind !== 'read') {
+    throw new Error('missing accepted edit or independent read');
+  }
+  expect(fresh.result.version).toBe(applied[0]!.result.version);
+  expect(fresh.result.byte_length).toBe(Buffer.byteLength(expected));
+  const view = await actor.view(run.conversation_id, run.run_id);
+  expect(view).toMatchObject({
+    status: 'done',
+    workspaces: [expect.objectContaining({ workspace_id: scenario.workspaceId })],
+    document_effects: expect.arrayContaining([
+      expect.objectContaining({
+        workspace_id: scenario.workspaceId,
+        path: 'brief.md',
+        invocation_id: applied[0]!.invocationId,
+        read_invocation_id: fresh!.invocationId,
+        status: 'verified',
+      }),
+    ]),
+  });
+  expect(scenario.offeredTools?.[0]).toContain('workspace_replace');
+  const facts = await documentFacts(actor.ownerId);
+  expect(facts.document_approvals).toEqual([]);
+  expect(facts.document_approval_decisions).toEqual([]);
+  const requests = scenario.requests.length;
+  await (
+    await actor.message(body)
+  ).events;
+  expect(await documentFacts(actor.ownerId)).toEqual(facts);
+  expect(scenario.requests).toHaveLength(requests);
+  expect(await readFile(join(scenario.root, 'brief.md'))).toEqual(Buffer.from(expected));
+}
+
+for (const mode of ['local', 'http'] as const) {
+  test(`D8.delegated-workspace.${mode}`, () => delegatedSave(mode, false), 60_000);
+  test(`D8.delegated-workspace-conflict.${mode}`, () => delegatedSave(mode, true), 60_000);
+  test(`D8.delegated-workspace-full.${mode}`, () => delegatedSave(mode, false, true), 60_000);
+  test(`D8.delegated-workspace-invalid-literal.${mode}`, async () => {
+    const { actor, scenario, body } = await setupDelegated(mode);
+    scenario.invalidLiteral = true;
+    const events = await (await actor.message(body)).events;
+    const run = started(events);
+    const accepted = observations(values(scenario.requests.at(-1) ?? []));
+    expect(
+      accepted.some(
+        (value) =>
+          value.result.kind === 'operation_error' && value.result.reason === 'literal_not_found',
+      ),
+    ).toBe(true);
+    expect(await readFile(join(scenario.root, 'brief.md'), 'utf8')).toBe(scenario.initial);
+    expect((await actor.view(run.conversation_id, run.run_id)).goal_result?.status).toBe('blocked');
+    expect((await documentFacts(actor.ownerId)).document_approvals).toEqual([]);
+  }, 60_000);
+  test(`D8.delegated-workspace-empty.${mode}`, async () => {
+    const { actor, scenario, body } = await setupDelegated(mode);
+    scenario.noWorkspace = true;
+    await configureWorkspaceRegistry(
+      registrations.filter((item) => item.workspace_id !== scenario.workspaceId),
+    );
+    const events = await (await actor.message(body)).events;
+    const run = started(events);
+    expect(events.some((event) => event.type === 'thread.completed')).toBe(true);
+    expect(await actor.view(run.conversation_id, run.run_id)).toMatchObject({
+      status: 'done',
+      workspaces: [],
+    });
+    expect(scenario.offeredTools?.[0]?.some((name) => name.startsWith('workspace_'))).toBe(false);
+    expect(await readFile(join(scenario.root, 'brief.md'), 'utf8')).toBe(scenario.initial);
+  }, 60_000);
+}
+
+test('D8.delegated-workspace-no-reread.http', async () => {
+  const { actor, scenario, body } = await setupDelegated('http');
+  scenario.omitReadBack = true;
+  const events = await (await actor.message(body)).events;
+  const run = started(events);
+  expect(events.some((event) => event.type === 'thread.completed')).toBe(false);
+  const view = await actor.view(run.conversation_id, run.run_id);
+  expect(view.document_effects).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ path: 'brief.md', status: 'applied', read_invocation_id: null }),
+    ]),
+  );
+  expect(await readFile(join(scenario.root, 'brief.md'), 'utf8')).toBe(
+    scenario.initial.replace('PENDING', `Summary: ${scenario.source.trim()}`),
+  );
+  const accepted = observations(values(scenario.requests.at(-1) ?? []));
+  const applied = latest(accepted, (value) => value.result.kind === 'edit_applied');
+  expect(applied).toBeDefined();
+  expect(
+    accepted.some(
+      (value) =>
+        value.index > applied!.index &&
+        value.result.kind === 'read' &&
+        value.result.path === 'brief.md',
+    ),
+  ).toBe(false);
+}, 60_000);
+
+test('D8.delegated-workspace-unknown.http', async () => {
+  const { actor, scenario, body } = await setupDelegated('http');
+  const name = `delegated_unknown_${randomUUID().replaceAll('-', '')}`;
+  await fixture.database.pool
+    .query(`CREATE FUNCTION ${name}() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      IF NEW.owner_id='${actor.ownerId}'::uuid AND NEW.tool_id='workspace_replace' AND NEW.state='completed' THEN
+        RAISE EXCEPTION 'fixture_reject_acceptance';
+      END IF;
+      RETURN NEW;
+    END; $$;
+    CREATE TRIGGER ${name} BEFORE UPDATE ON tool_invocations FOR EACH ROW EXECUTE FUNCTION ${name}()`);
+  try {
+    const events = await (await actor.message(body)).events;
+    const run = started(events);
+    expect(events.find((event) => event.type === 'thread.failed')).toMatchObject({
+      payload: { error: { code: 'TOOL_EFFECT_UNKNOWN' } },
+    });
+    expect(events.some((event) => event.type === 'thread.completed')).toBe(false);
+    expect(await readFile(join(scenario.root, 'brief.md'), 'utf8')).toBe(
+      scenario.initial.replace('PENDING', `Summary: ${scenario.source.trim()}`),
+    );
+    const rows = (
+      await fixture.database.pool.query(
+        `SELECT state,accepted_result FROM tool_invocations WHERE owner_id=$1 AND tool_id='workspace_replace'`,
+        [actor.ownerId],
+      )
+    ).rows;
+    expect(rows).toEqual([{ state: 'unknown', accepted_result: null }]);
+    const view = await actor.view(run.conversation_id, run.run_id);
+    expect(view.can_resume).toBe(false);
+    expect(view.document_effects).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          workspace_id: scenario.workspaceId,
+          path: 'brief.md',
+          status: 'unknown',
+        }),
+      ]),
+    );
+    const facts = await documentFacts(actor.ownerId);
+    expect(facts.document_approvals).toEqual([]);
+    const requests = scenario.requests.length;
+    await (
+      await actor.message(body)
+    ).events;
+    expect(await documentFacts(actor.ownerId)).toEqual(facts);
+    expect(scenario.requests).toHaveLength(requests);
+  } finally {
+    await fixture.database.pool.query(
+      `DROP TRIGGER ${name} ON tool_invocations; DROP FUNCTION ${name}()`,
+    );
+  }
+}, 60_000);

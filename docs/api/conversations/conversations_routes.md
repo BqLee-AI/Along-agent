@@ -6,7 +6,7 @@
 >
 > 时间失败、有限真实规则与 Web 候选选择按 #30 合同；安全 spec Scenario 1.2 的 typed failed 不得改成 completed。合同与实际验收记录分开。
 
-> 本人委托：Web 普通 Agent 显式请求 `authorization_revision:'delegation/1'`，仅接受无工作区的 `harness`。可信上下文、GoalResult、`harness/v6` 与 SSE `v2` 配套；省略授权修订仍为 legacy。新接纳能力包含本人时区保存/清除及明确单次 wall、严格 elapsed 提醒直接创建，旧冻结集合不扩权。生命周期为 `request-bound`，不承诺后台继续；文件自主写入及 server-owned 不在此能力范围，见 [design/20](../../design/20-goal-scoped-delegation.md)。
+> 本人委托：Web 普通 Agent 显式请求 `authorization_revision:'delegation/1'` 的 `harness`；合格新 Run 冻结本人登记集合，允许可选子集，具体工具由实际冻结 profile 决定。可信上下文、GoalResult、`harness/v6` 与 SSE `v2` 配套；省略授权修订仍为 legacy。生命周期为 `request-bound`，不承诺后台继续；有限新文件创建和 server-owned 均未实现，见 [design/20](../../design/20-goal-scoped-delegation.md)。合同不代表真实路径已验收。
 
 ## 1. 路由
 
@@ -38,12 +38,13 @@
 - `card_ref`：可选，围绕某卡片追问时带；服务端只做关联，不做授权旁路。
 - `raw_text`：用户原话，按不可信输入解析，原样进回显引用。
 - `execution`：可选 `business | harness`，省略为兼容的确定性业务。harness 明确进入正式仓颉，`mode=chat` 不作隐式分派；缺实际依赖在任何新写入/SSE 前503 `HARNESS_UNAVAILABLE`，不自动改走 TS/fixture。
-- Web 的默认 Agent 对话显式传 `execution:'harness',authorization_revision:'delegation/1'`，不带 `workspace_id`；提醒快捷入口仍显式传 `business`，资料快捷入口传 `harness` 和显式工作区，两者均省略授权修订而保持 legacy。HTTP 省略 execution 的默认值不变，不新增执行种类。
-- `authorization_revision`：可选，唯一值 `delegation/1`；必须同时显式 `execution:'harness'` 且省略 `workspace_id`，否则400。省略仍按原 legacy 权限与批准合同执行，不能从当前部署、wire 版本或对话历史推断升级。委托工具包含本人偏好、只读任务/简报、观察回取与明确的直接提醒；严格 elapsed 使用 Run 冻结的可信锚和能力修订，不接受模型提供的 UTC，不生成偏好或直接提醒批准。
+- Web 默认 Agent 对话显式传 `execution:'harness',authorization_revision:'delegation/1'`；提醒快捷入口仍为 business，资料快捷入口传 harness 与显式 `workspace_id`，均保持 legacy。HTTP 省略 execution 的默认值不变。
+- `authorization_revision`：可选，唯一值 `delegation/1`；必须显式 `execution:'harness'` 且省略单数 `workspace_id`，否则400。省略按 legacy 合同执行，不能从部署、wire 或历史推断升级。实际工具以该 Run 冻结 allowlist 和资源为准。
 - 严格 elapsed 的有效时区按工具显式提示、同 Run 已接受设置、接纳时冻结时区的顺序选择。有效时区来自本人明确指定时，规则不可用或无法转换须返回时间错误，不能静默换成 UTC；只有默认偏好或无时区且无明确本地要求时可采用真实 UTC 展示。
 - 新 Harness Run 在接纳事务内冻结同 owner、同 conversation 最新63条可见 user/assistant 消息引用并按 `created_at/id` 排序，随后追加本轮完整用户输入一次，总计最多64条。执行和批准恢复按冻结引用读原文，不混入后来消息、其他会话或 system 消息，不把旧 tool_calls 作为待执行动作。该窗口不是永久记忆；完整窗口、工具定义与观察超1MiB时明确失败 `HARNESS_CONTEXT_LIMIT`，不截断当前输入。缺跨轮引用的旧 Run 保持仅原输入的上下文。
-- 入站幂等仍为同 owner/key：business 沿历史 hash 材料；无 workspace 的 harness 保持 `harness/v1\0` 域，带 workspace 则用 `harness/workspace/v2\0`，将 `workspace_id` 追加到原规范数组后计算 SHA-256。提供 `clarification_of_run_id` 时追加该来源 Run 引用；提供 `authorization_revision` 时再追加该修订，省略均不追加，保留旧请求 hash。请求 hash 域不是执行协议版本（当前执行为 `harness/v6`）。同键换 execution、workspace、授权修订、来源引用或其他绑定输入为409，不重复创建另一 Run；冻结 owner、工具范围和可信上下文由服务端取得。
-- `workspace_id`：可选非空字符串，仅允许显式 `execution=harness`，business/省略 execution 时携带为400。新 Run 从当前本人有效部署登记取得精确授权，并冻结安全摘要；省略不授 workspace 工具。选择与新动作授权、历史展示的区别见 §5。
+- 入站幂等为同 owner/key：legacy 的原 hash 域及材料保持不变；显式 `workspace_ids` 规范排序后绑定新请求材料，顺序变化不扩大权限。同键异绑定输入为409；已存同键先补读原 Run，不随当前登记变化重新解析或扩权。实际冻结集合不是客户端自报的身份或路径。
+- `workspace_id`：可选非空字符串，仅 legacy 显式 `execution=harness` 可携带，选择一个本人有效登记；business、缺省 execution 或与 delegation 共用均为400。
+- `workspace_ids`：可选非空且去重的 ID 数组，仅显式 delegation harness 可携带，与 `workspace_id` 互斥；省略表示接纳时本人全部有效登记，显式值只能收窄。未知、他人、撤销或不符合原目标范围的项不得获得授权；无登记保留空集合，不阻断其他能力。集合超出上下文容量时明确失败，不静默截断。
 - `confirmed_timezone` / `confirmed_timezone_id`：schema 均已有、可空，取 `confirmed_timezone_id ?? confirmed_timezone`。legacy 保留原文明确时区 > 本轮确认值 > 会话先前明确值的归一/澄清合同，详见 design/05 §9.2。新 delegation 的本轮明确提示优先，否则接纳时读取 identity 已保存偏好，不回退会话旧时区；Web 不把缓存 `/me` 偏好自动作为本轮明确提示。保存/清除偏好仅经真实工具用例，单次时区提示不自动保存。
 - `fold_choice`：`first | second | none`，默认 `none`；只有结构化字段决定选择，原话“第一次/第二次”不自动覆盖。歧义未选为 `AMBIGUOUS_LOCAL_TIME`；候选字段仍是 fold_choice，成功的现有归一结果与快照 `fold` 为 `0 | 1`，不混为字符串列。
 - `clarification_of_run_id`：可选 UUID，精确 fold 候选重提议必填，指向原 `AMBIGUOUS_LOCAL_TIME` 失败 Run。必须同 owner/conversation、全会话唯一尚未完成候选、紧邻上一 user 消息且有实际已接受失败及冻结来源；原文完全相同、请求所选时区等于实际候选并带结构化 first/second 才可继承原锚。它不是批准、resume、任意 Run 复制或客户端时钟授权；无效/关系不明只要求完整重述，不任挑锚。
@@ -90,7 +91,8 @@ data: {"protocol_version":"v1","seq":12,"type":"approval_required","payload":{"c
 - `run_id/conversation_id/execution/status/attempt_id/attempt_no`；
 - `waiting=null | {checkpoint_id,invocation_id,approval_id}`；文档等待额外带 `approval_kind:"document"`，旧 task 等待不加此字段。`can_resume` 表示当前是否可显式继续，不泄漏凭据/内部推理；
 - 可选 `workspace={workspace_id,label,readable_paths,writable_paths}` 为接纳 Run 时冻结的安全摘要，不是当前登记的动态替代，也不返回 root/物理 identity/登记摘要。历史缺摘要不从当前登记补造；
-- 新 delegation 另有可选 `authorization_revision:'delegation/1'`、`execution_lifecycle:'request-bound'` 和 `goal_result:GoalResult|null`；来自该 Run 冻结事实及终结结果，不按当前开关补造。legacy 缺这些字段仍沿原合同读取。Web 在初始接纳和历史视图显示连接限制，并分别展示目标状态、逐项结果、回执和最终答复；Run done 只表示执行结束。
+- 新 delegation 可投影 `workspaces:[{workspace_id,label,readable_paths,writable_paths}]`、`authorization_revision:'delegation/1'`、`execution_lifecycle:'request-bound'` 和 `goal_result:GoalResult|null`；均来自原 Run 冻结事实，不公开 owner、root、digest 或 root identity，不按当前登记补造。legacy 的 `workspace` 和历史 shape 不变。
+- `document_effects` 可选只读数组：每项含 `workspace_id,path,invocation_id,read_invocation_id,version,status`，其中 `read_invocation_id` 和 `version` 可空；状态为 `applied|verified|conflict|unknown`。applied 不是 verified；后者须同目标的独立新全文读取证据。此投影不是动作入口，Run done 也不等于目标完成。
 - `created_reminders` 为新 delegation 的可选只读数组，每项为真实 `task_created` 冻结结果加 `invocation_id`，包含 task ID、保存状态、原墙上时间/时区/fold/偏移/规则身份/UTC和备注。读取核对真实任务与接受结果，不读取模型自报事实。Web 提供任务详情链接和创建回执；此数组不声明实时排期、触发或通知状态。
 - `reminder_time_errors` 为该 delegation Run 的可选只读数组，每项含真实 `create_reminder` 接受结果中的 `invocation_id/error`，不表示成功创建。遇到已持久 time 澄清且实际 DST 候选唯一时，Web 复用 first/second 选择，保留原文及真实候选时区并显式关联前序 Run；提交的是用户选择，不是批准或前端计算的 UTC。不同候选来源不自动合并。
 - owner-scoped，不存在或他人 Run 返回404。读取不执行，不因状态可继续而自动唤醒。
@@ -106,9 +108,9 @@ strict body `{checkpoint_id,idempotency_key}`，仅 harness Run 的最后有效�
 - consumed：同 Run 新递增 attempt，将原 invocation/批准和真实 task ID 交给 native，原接受结果不改写、不重执行；
 - rejected/expired/superseded：将决议交给 native 停止原动作，不追 successor/同义绕拒绝；
 - 同等待点唯一有效恢复。并发、同键回答丢失重交或换键不得分配第二进程；已恢复且仍运行时409，已结束同键只补读原恢复 attempt 的帧。
-- 恢复决议按可信提议结果区分 `kind=task|document`，不是让客户端指定查表。task consumed 仍携真实 `task_id`；document 仅 `pending|approved|rejected`，approved 带原 `apply_invocation_id|null`，只授权后续唯一 apply，不能伪装 consumed 或 task 结果。文档 rejected 停止原动作，不生成同义后继；批准/拒绝可早于 suspend，仍按同一等待点恢复。
+- 恢复决议按可信提议结果区分 `kind=task|document`，不是客户端指定查表。document 的 approved 仅授权原冻结目标的唯一 apply，不等于保存；新 delegation 的 rejected 不得开启后续业务动作或绕拒绝，legacy 按原恢复合同处理。
 
-Web 批准链接保留原 conversation/Run，并明确打开新标签页；在批准到达但 native 等待点尚未提交时也保留原会话和在途流，普通断连取消规则不变。确认/拒绝/修改沿原冻结按钮合同，之后读取原运行并明确继续；刷新或重试恢复不重做确认、不发新消息、不创建新 Run。
+新 delegation 对真实新增影响提供完整冻结预览及一次明确“授权并继续”；只有原 Run 的有效等待点、当前资格、预算和决议均满足才继续。早于挂起的确认可保存决议，但没有有效等待点时不得排队自动继续；停止、撤权、终态或 unknown 不得复活。legacy 独立文档页仍需返回原 Run 显式继续；GET、刷新和重登都不授权或恢复。
 
 ## 4. 错误（HTTP 建连层 + 流内层）
 
@@ -126,9 +128,9 @@ Web 批准链接保留原 conversation/Run，并明确打开新标签页；在�
 路由、DTO 与确认 body 的规范详情见 [API 索引 §8](../README.md#8-r1-工作区与文档批准-required)，行为见 [design/14](../../design/14-r1-document-task-loop.md)。
 
 - 本人只读 `GET /api/v1/workspaces` 返回 `{items:[{workspace_id,label,readable_paths,writable_paths}]}`；无有效登记返回空列表，不披露宿主 root 或开放任意目录。普通用户只选已登记工作区，不配置 provider/BYOK。
-- 新 Run 在既有 `frozen_context` 冻结精确 grant（workspace/owner/registration_digest/root_identity）及独立安全摘要；同入站键补读、历史 Run 查询、取消和冻结文档批准详情仍按 owner 可读，不因撤销登记而失败。`can_resume` 遇撤销/登记变更为 false；新批准/拒绝、新恢复和工具动作仍验当前登记与原精确 grant，不能凭历史展示恢复权限。
-- 独立文档页使用 `GET /document-approvals/{id}` 和 `actions/confirm|reject`；确认仅记录授权，不写文件、不建 task、不产生调度事件/outbox。仍用既有 `approval_required`（带 `approval_kind:"document"`）跳页，不发文档 `card.proposed` 或假时间卡片，不增加 SSE 事件词。
-- 详情将授权 `state` 与实际 `effect` 分开；`approved` 不等于已写，`applied` 仍须 apply 接受之后创建且接受的新 `workspace_read` 才能为 `verified`。只在可信零写 conflict 后，按更新后的真实全文读生成唯一后继并重新批准；拒绝、unknown 或未执行不能走此路径。
+- legacy Run 冻结单个 grant 与安全摘要；新 delegation 冻结本人 grant 集合，每次调用只选择集合中的一个并复验当前 owner、登记摘要和 root 身份。历史摘要及已存结果不是当前动作资格；登记新增、变更或撤销不扩权原 Run。
+- 独立文档页使用 `GET /document-approvals/{id}` 和 `actions/confirm|reject`；确认仅记录授权，不写文件、不建 task。新 delegation 的正常编辑不生成批准，真实新增影响才走精确预览；legacy 保持冻结所见/hash、唯一 apply 和原显式恢复。
+- `approved` 不等于已写，`applied` 仍须接受之后创建且接受的同 Run 独立完整 `workspace_read`，内容、版本和字节数均匹配才为 `verified`。只有已接受的真实零写版本冲突可新读重算；legacy 需新批准。拒绝、unknown 或未执行不能借其他工具绕过。
 - `unknown` 正常以 `TOOL_EFFECT_UNKNOWN` 失败终结，保留既有事实，不重写、不凭相同文件 hash 补报成功、不制造可恢复 unknown checkpoint。GET/入站重放和已完成文档决议重放均不是执行恢复。
 - HTTP 原始 JSON 累计上限仍为131072字节，工具接受结果应用限额为240000字节（不是240KiB）。提议还须保证完整确认 body（含再次 JSON 转义的 `seen_content=preview.body`、hash、UUID键）不超过131072字节；不能只按改后文本或 receipt 大小判断。详见 design/14 与 API 索引。
 

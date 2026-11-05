@@ -161,6 +161,72 @@ export const DELEGATION_TOOL_DEFINITIONS = [
         }
       : tool,
   ),
+  ...WORKSPACE_TOOL_DEFINITIONS.slice(0, 3).map((tool) => ({
+    ...tool,
+    description: `${tool.description} workspace_id 必须来自本 Run 冻结的资料集合。`,
+    parameters: {
+      ...tool.parameters,
+      properties: { ...(tool.parameters.properties as object), workspace_id: { type: 'string' } },
+      required: [...(tool.parameters.required as string[]), 'workspace_id'],
+    },
+  })),
+  {
+    name: 'workspace_replace',
+    description:
+      '引用本 Run 接受的完整读取，直接精确编辑现有文件；冲突仅在零写后重新读取，未知不得重试，成功须独立新读取核验。',
+    risk: 'high' as const,
+    parameters: workspaceParameters(
+      {
+        read_invocation_id: { type: 'string', format: 'uuid' },
+        change: {
+          oneOf: [
+            workspaceParameters(
+              {
+                kind: { const: 'literal' },
+                old_text: { type: 'string', minLength: 1 },
+                new_text: { type: 'string' },
+              },
+              ['kind', 'old_text', 'new_text'],
+            ),
+            workspaceParameters({ kind: { const: 'full' }, new_content: { type: 'string' } }, [
+              'kind',
+              'new_content',
+            ]),
+          ],
+        },
+      },
+      ['read_invocation_id', 'change'],
+    ),
+  },
+  {
+    name: 'workspace_propose_replace',
+    description:
+      '仅当修改引入用户未授权的新增影响时，引用全文提出精确替换，等待批准；批准不是写入。',
+    risk: 'medium' as const,
+    parameters: workspaceParameters(
+      {
+        read_invocation_id: { type: 'string', format: 'uuid' },
+        change: {
+          oneOf: [
+            workspaceParameters(
+              {
+                kind: { const: 'literal' },
+                old_text: { type: 'string', minLength: 1 },
+                new_text: { type: 'string' },
+              },
+              ['kind', 'old_text', 'new_text'],
+            ),
+            workspaceParameters({ kind: { const: 'full' }, new_content: { type: 'string' } }, [
+              'kind',
+              'new_content',
+            ]),
+          ],
+        },
+      },
+      ['read_invocation_id', 'change'],
+    ),
+  },
+  WORKSPACE_TOOL_DEFINITIONS[4]!,
   {
     name: 'get_task',
     description: '读取当前用户提醒的完整内容以定位目标。',

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { workspaceSummarySchema } from './workspaces.js';
 
 const uuid = z.string().uuid();
 const text = z.string().min(1).max(8192);
@@ -119,7 +120,7 @@ export const TrustedExecutionContextSchema = z
           .nullable(),
       })
       .strict(),
-    workspaces: z.array(z.never()).max(0),
+    workspaces: z.array(workspaceSummarySchema),
   })
   .strict();
 export type GoalResult = z.infer<typeof GoalResultSchema>;

@@ -16,9 +16,15 @@ import {
   BUSINESS_TOOL_IDS,
   HARNESS_BASE_TOOL_IDS,
   DELEGATION_TOOL_IDS,
+  DELEGATION_WORKSPACE_READ_TOOL_IDS,
+  DELEGATION_WORKSPACE_WRITE_TOOL_IDS,
   TOOL_IDS,
 } from '../tools/contracts.js';
-import { getWorkspaceGrant, validateWorkspaceGrant } from '../workspaces/service.js';
+import {
+  getWorkspaceGrant,
+  resolveWorkspaceGrants,
+  validateWorkspaceGrant,
+} from '../workspaces/service.js';
 import { findReminderDirective } from '@along/time-core';
 import { requireTimeContext } from '../time/context.js';
 import { THREAD_PROTOCOL_VERSION, type ThreadEvent } from '@along/stream-protocol';
@@ -98,21 +104,30 @@ function requestHashOf(input: {
   fold: string;
   execution: ExecutionKind;
   workspaceId?: string;
+  workspaceIds?: string[];
   clarificationOfRunId?: string;
   authorizationRevision?: 'delegation/1';
 }): string {
-  const material = [input.conversationId ?? null, input.text, input.timezone, input.fold];
+  const material: unknown[] = [
+    input.conversationId ?? null,
+    input.text,
+    input.timezone,
+    input.fold,
+  ];
   if (input.workspaceId !== undefined) material.push(input.workspaceId);
+  if (input.workspaceIds !== undefined) material.push([...input.workspaceIds].sort());
   if (input.clarificationOfRunId !== undefined) material.push(input.clarificationOfRunId);
   if (input.authorizationRevision) material.push(input.authorizationRevision);
   const canonical = JSON.stringify(material);
   return createHash('sha256')
     .update(
-      input.workspaceId !== undefined
-        ? 'harness/workspace/v2\0'
-        : input.execution === 'harness'
-          ? 'harness/v1\0'
-          : '',
+      input.workspaceIds !== undefined
+        ? 'harness/workspace-set/v1\0'
+        : input.workspaceId !== undefined
+          ? 'harness/workspace/v2\0'
+          : input.execution === 'harness'
+            ? 'harness/v1\0'
+            : '',
     )
     .update(canonical, 'utf8')
     .digest('hex');
@@ -149,6 +164,7 @@ export async function startConversationRun(
       ? { authorizationRevision: input.authorization_revision }
       : {}),
     ...(input.workspace_id !== undefined ? { workspaceId: input.workspace_id } : {}),
+    ...(input.workspace_ids !== undefined ? { workspaceIds: input.workspace_ids } : {}),
     ...(input.clarification_of_run_id
       ? { clarificationOfRunId: input.clarification_of_run_id }
       : {}),
@@ -185,12 +201,21 @@ export async function startConversationRun(
         ? validateWorkspaceGrant(ownerId, workspaceGrant)
         : null;
       const delegation = input.authorization_revision === 'delegation/1';
-      const allowlist =
+      let workspaceSet = delegation
+        ? resolveWorkspaceGrants(ownerId, input.workspace_ids)
+        : { grants: [], summaries: [] };
+      let allowlist: readonly string[] =
         execution === 'harness'
           ? workspaceGrant
             ? TOOL_IDS
             : delegation
-              ? DELEGATION_TOOL_IDS
+              ? [
+                  ...DELEGATION_TOOL_IDS,
+                  ...(workspaceSet.grants.length ? DELEGATION_WORKSPACE_READ_TOOL_IDS : []),
+                  ...(workspaceSet.summaries.some((summary) => summary.writable_paths.length)
+                    ? DELEGATION_WORKSPACE_WRITE_TOOL_IDS
+                    : []),
+                ]
               : HARNESS_BASE_TOOL_IDS
           : BUSINESS_TOOL_IDS;
 
@@ -238,14 +263,37 @@ export async function startConversationRun(
         input.clarification_of_run_id &&
         (allowlist as readonly string[]).includes('get_task') &&
         (allowlist as readonly string[]).includes('cancel_reminder')
-          ? await acceptTargetContinuation(client, {
+          ? ((await acceptTargetContinuation(client, {
               ownerId,
               conversationId: conversation.id,
               inputMessageId: userMessageId,
               sourceRunId: input.clarification_of_run_id,
               timeContext: deps.timeContext,
-            })
+            })) ??
+            (await acceptTargetContinuation(client, {
+              ownerId,
+              conversationId: conversation.id,
+              inputMessageId: userMessageId,
+              sourceRunId: input.clarification_of_run_id,
+              timeContext: deps.timeContext,
+              kind: 'destination',
+            })))
           : null;
+      if (targetContinuation?.workspaceGrants) {
+        const priorIds = new Set(
+          targetContinuation.workspaceGrants.map((grant) => grant.workspace_id),
+        );
+        if (input.workspace_ids?.some((id) => !priorIds.has(id)))
+          throw validationError('workspace selection exceeds the original goal scope');
+        workspaceSet = resolveWorkspaceGrants(ownerId, input.workspace_ids ?? [...priorIds]);
+        allowlist = [
+          ...DELEGATION_TOOL_IDS,
+          ...(workspaceSet.grants.length ? DELEGATION_WORKSPACE_READ_TOOL_IDS : []),
+          ...(workspaceSet.summaries.some((summary) => summary.writable_paths.length)
+            ? DELEGATION_WORKSPACE_WRITE_TOOL_IDS
+            : []),
+        ];
+      }
       const reminderDate = await acceptReminderDate(client, {
         ownerId,
         conversationId: conversation.id,
@@ -353,7 +401,7 @@ export async function startConversationRun(
                   }
                 : null,
             },
-            workspaces: [],
+            workspaces: workspaceSet.summaries,
           })
         : undefined;
       const frozenContext = {
@@ -370,6 +418,7 @@ export async function startConversationRun(
           : {}),
         ...(messageRefs ? { messageRefs } : {}),
         ...(workspaceGrant ? { workspaceGrant, workspaceSummary } : {}),
+        ...(delegation ? { workspaceGrants: workspaceSet.grants } : {}),
         ...(trustedExecutionContext
           ? {
               authorization_revision: 'delegation/1' as const,
@@ -441,6 +490,7 @@ export async function startConversationRun(
           ...(messageRefs ? { messageRefs } : {}),
           ...(contextPolicy ? { contextPolicy } : {}),
           ...(workspaceGrant ? { workspaceGrant } : {}),
+          ...(delegation ? { workspaceGrants: workspaceSet.grants } : {}),
           ...(trustedExecutionContext
             ? { authorizationRevision: 'delegation/1' as const, trustedExecutionContext }
             : {}),

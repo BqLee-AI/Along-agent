@@ -3,6 +3,7 @@ import { forbidden } from '../../http/errors.js';
 import { isActiveOwner } from '../identity/preferences.js';
 import { workspaceGrantSchema, type WorkspaceGrant } from '@along/contracts';
 import { validateWorkspaceGrant, WorkspaceDeniedError } from '../workspaces/service.js';
+import { hasRejectedDocumentApproval } from '../approvals/document-query.js';
 import { latestAttemptId, lockRun } from './repository.js';
 
 export interface ToolRunBinding {
@@ -15,12 +16,17 @@ export interface ToolRunBinding {
 type ToolScope = {
   allowlist?: readonly string[];
   workspaceGrant?: WorkspaceGrant | null;
+  workspaceGrants?: WorkspaceGrant[];
   authorizationRevision?: 'delegation/1';
 };
 
 function validateFrozenWorkspace(
   ownerId: string,
-  frozenContext: { workspaceGrant?: unknown; authorization_revision?: unknown } | null,
+  frozenContext: {
+    workspaceGrant?: unknown;
+    workspaceGrants?: unknown;
+    authorization_revision?: unknown;
+  } | null,
   binding: ToolScope,
   acceptRevokedFact = false,
 ): boolean {
@@ -33,6 +39,28 @@ function validateFrozenWorkspace(
     frozenContext?.workspaceGrant == null
       ? null
       : workspaceGrantSchema.parse(frozenContext.workspaceGrant);
+  const grants =
+    frozenContext?.workspaceGrants == null
+      ? null
+      : workspaceGrantSchema.array().parse(frozenContext.workspaceGrants);
+  if (grants !== null) {
+    if ('allowlist' in binding || 'workspaceGrants' in binding) {
+      const supplied = workspaceGrantSchema.array().parse(binding.workspaceGrants ?? []);
+      if (JSON.stringify(supplied) !== JSON.stringify(grants))
+        throw forbidden('workspace scope differs from frozen Run grants');
+    }
+    const selected =
+      binding.workspaceGrant == null ? null : workspaceGrantSchema.parse(binding.workspaceGrant);
+    if (selected && !grants.some((grant) => JSON.stringify(grant) === JSON.stringify(selected)))
+      throw forbidden('workspace grant is not a frozen Run member');
+    try {
+      if (selected) validateWorkspaceGrant(ownerId, selected);
+    } catch (error) {
+      if (acceptRevokedFact && error instanceof WorkspaceDeniedError) return false;
+      throw error;
+    }
+    return true;
+  }
   // This boundary is for execution scopes. History-only projections authorize
   // the owner/Run relationship without resolving current workspace authority.
   if ('allowlist' in binding || 'workspaceGrant' in binding) {
@@ -60,7 +88,11 @@ export async function assertToolRunBinding(
     await client.query<{
       execution: string;
       tools_allowlist: string[];
-      frozen_context: { workspaceGrant?: unknown; authorization_revision?: unknown } | null;
+      frozen_context: {
+        workspaceGrant?: unknown;
+        workspaceGrants?: unknown;
+        authorization_revision?: unknown;
+      } | null;
     }>(
       `SELECT r.execution,r.tools_allowlist,r.frozen_context FROM agent_runs r JOIN conversations c ON c.id=r.conversation_id
       WHERE r.id=$1 AND r.owner_id=$2 AND c.owner_id=$2 AND r.conversation_id=$3`,
@@ -74,7 +106,7 @@ export async function assertToolRunBinding(
     binding.allowlist?.some((tool) => !row.tools_allowlist.includes(tool))
   )
     throw forbidden('tool scope exceeds frozen Run grant');
-  if ('allowlist' in binding || 'workspaceGrant' in binding)
+  if ('allowlist' in binding || 'workspaceGrant' in binding || 'workspaceGrants' in binding)
     validateFrozenWorkspace(binding.ownerId, row.frozen_context, binding);
 }
 
@@ -113,7 +145,11 @@ async function lockToolBinding(
     status: string;
     execution: string;
     tools_allowlist: string[];
-    frozen_context: { workspaceGrant?: unknown; authorization_revision?: unknown } | null;
+    frozen_context: {
+      workspaceGrant?: unknown;
+      workspaceGrants?: unknown;
+      authorization_revision?: unknown;
+    } | null;
   }>(
     `SELECT r.status,r.execution,r.tools_allowlist,r.frozen_context FROM agent_runs r
      WHERE r.id = $1 AND r.owner_id = $2 AND r.conversation_id = $3
@@ -144,6 +180,8 @@ async function lockToolBinding(
     acceptRevokedFact,
   );
   canExecute = canExecute && workspaceAuthorized;
+  if (canExecute && binding.authorizationRevision === 'delegation/1')
+    canExecute = !(await hasRejectedDocumentApproval(client, binding));
   return { canExecute };
 }
 
@@ -168,7 +206,9 @@ export function lockToolEffectAcceptanceBinding(
 // before approvals takes its own proposal/approval locks.
 export async function lockDocumentApprovalRun(
   client: PoolClient,
-  binding: Pick<ToolRunBinding, 'ownerId' | 'conversationId' | 'runId'>,
+  binding: Pick<ToolRunBinding, 'ownerId' | 'conversationId' | 'runId'> & {
+    workspaceGrant?: WorkspaceGrant;
+  },
 ): Promise<{ canAuthorize: boolean }> {
   const attemptId = await latestAttemptId(client, binding.ownerId, binding.runId);
   const { run } = await lockRun(client, { ...binding, attemptId }, false, false);
@@ -176,6 +216,6 @@ export async function lockDocumentApprovalRun(
     run.execution === 'harness' &&
     (run.status === 'running' || run.status === 'suspended_approval') &&
     (await isActiveOwner(client, binding.ownerId));
-  if (canAuthorize) validateFrozenWorkspace(binding.ownerId, run.frozen_context, {});
+  if (canAuthorize) validateFrozenWorkspace(binding.ownerId, run.frozen_context, binding);
   return { canAuthorize };
 }

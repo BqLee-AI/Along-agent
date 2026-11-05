@@ -22,6 +22,7 @@ export const workspaceOperationErrorSchema = z
   .object({
     kind: z.literal('operation_error'),
     path: z.string(),
+    workspace_id: z.string().min(1).optional(),
     reason: z.enum([
       'not_found',
       'unreadable',
@@ -38,6 +39,7 @@ export const workspaceOperationErrorSchema = z
 export const workspaceReadResultSchema = z
   .object({
     kind: z.literal('read'),
+    workspace_id: z.string().min(1).optional(),
     path: z.string(),
     version: z.string().regex(/^[a-f0-9]{64}$/),
     byte_length: z.number().int().nonnegative(),
@@ -47,6 +49,7 @@ export const workspaceReadResultSchema = z
 export const workspaceListResultSchema = z
   .object({
     kind: z.literal('list'),
+    workspace_id: z.string().min(1).optional(),
     path: z.string(),
     entries: z.array(z.object({ path: z.string(), kind: z.enum(['file', 'directory']) }).strict()),
     failures: z.array(workspaceOperationErrorSchema),
@@ -55,6 +58,7 @@ export const workspaceListResultSchema = z
 export const workspaceSearchResultSchema = z
   .object({
     kind: z.literal('search'),
+    workspace_id: z.string().min(1).optional(),
     path: z.string(),
     matches: z.array(
       z
@@ -98,11 +102,19 @@ export const workspaceConflictResultSchema = z
   })
   .strict();
 
+export const workspaceEditAppliedResultSchema = workspaceAppliedResultSchema
+  .omit({ approval_id: true, kind: true })
+  .extend({ kind: z.literal('edit_applied') });
+export const workspaceEditConflictResultSchema = workspaceConflictResultSchema
+  .omit({ approval_id: true, kind: true })
+  .extend({ kind: z.literal('edit_conflict') });
+
 const contextIndex = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const contextSliceIdentity = {
   kind: z.literal('context_slice'),
   source_invocation_id: z.string().uuid(),
   source_tool_id: z.string().min(1),
+  workspace_id: z.string().min(1).optional(),
   source_result_version: z.literal(1),
   offset: contextIndex,
   end: contextIndex,
@@ -176,6 +188,8 @@ export const workspaceResultSchema = z.union([
   workspaceAppliedResultSchema,
   workspaceOperationErrorSchema,
   workspaceConflictResultSchema,
+  workspaceEditAppliedResultSchema,
+  workspaceEditConflictResultSchema,
   contextSliceResultSchema,
 ]);
 export type WorkspaceReadResult = z.infer<typeof workspaceReadResultSchema>;
