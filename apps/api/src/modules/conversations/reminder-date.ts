@@ -48,6 +48,9 @@ export async function acceptReminderDate(
     },
   };
   const unresolved = { ...fresh, source: { ...fresh.source, kind: 'unresolved' as const } };
+  // New delegation messages are independent unless the sender explicitly
+  // references a clarification. Legacy date follow-ups retain #103 behavior.
+  if (input.directCreation && !input.clarificationOfRunId) return fresh;
   // The predecessor only scopes the search. Its input, actual single tool
   // outcome, terminal state and versioned date source must all prove the relation.
   const { rows } = await client.query<{

@@ -1074,3 +1074,363 @@ test('legacy start cannot advertise the delegation-only create_reminder capabili
     }),
   ).toEqual([]);
 });
+
+const taskTools = [
+  {
+    name: 'list_tasks',
+    description: 'Read a page of personal tasks.',
+    risk: 'low',
+    parameters: { type: 'object', properties: { after_task_id: { type: 'string' } } },
+  },
+  ...['get_task', 'cancel_reminder'].map((name) => ({
+    name,
+    description: 'Read or cancel one personal task.',
+    risk: 'low',
+    parameters: {
+      type: 'object',
+      properties: { task_id: { type: 'string' } },
+      required: ['task_id'],
+    },
+  })),
+];
+
+test('native carries paginated task facts and the actual pending cancellation through the model protocol', async () => {
+  const first = randomUUID();
+  const target = randomUUID();
+  let cancelRef = '';
+  const task = {
+    task_id: target,
+    note: '第二页提醒',
+    fire_at_local_text: '2026-11-05 12:00',
+    timezone_id: 'Asia/Shanghai',
+    state: 'scheduled',
+  };
+  const blocked = () => ({
+    status: 'blocked',
+    outcomes: [{ description: '撤销待完成', status: 'blocked', receipt_refs: [cancelRef] }],
+    clarification: null,
+    answer: '已提交取消，撤销仍在等待。',
+  });
+  const requests = await nativeCase({
+    start: { tools: taskTools },
+    model: (request, index) => {
+      const messages = request.messages as { role: string; content: string }[];
+      if (index === 0) {
+        expect(
+          messages.some((m) => m.role === 'system' && m.content.includes('after_task_id')),
+        ).toBe(true);
+        return call('list_tasks', {});
+      }
+      if (index === 1) {
+        expect(messages.some((m) => m.role === 'tool' && m.content.includes(first))).toBe(true);
+        return call('list_tasks', { after_task_id: first });
+      }
+      if (index === 2) return call('get_task', { task_id: target });
+      if (index === 3) {
+        expect(messages.some((m) => m.role === 'tool' && m.content.includes(task.note))).toBe(true);
+        return call('cancel_reminder', {
+          task_id: target,
+          expected_note: task.note,
+          expected_wall_time: task.fire_at_local_text,
+          expected_timezone_id: task.timezone_id,
+        });
+      }
+      expect(messages.some((m) => m.role === 'tool' && m.content.includes('cancel_pending'))).toBe(
+        true,
+      );
+      return call('finish_goal', blocked());
+    },
+    invoke: (request) => {
+      let result: unknown;
+      if (request.tool_id === 'list_tasks') {
+        const args = request.args as { after_task_id?: string };
+        result = args.after_task_id
+          ? {
+              kind: 'list_tasks',
+              tasks: [
+                {
+                  task_id: target,
+                  note_preview: task.note,
+                  fire_at_local_text: task.fire_at_local_text,
+                  timezone_id: task.timezone_id,
+                  state: task.state,
+                },
+              ],
+              has_more: false,
+              next_cursor: null,
+            }
+          : {
+              kind: 'list_tasks',
+              tasks: [
+                {
+                  task_id: first,
+                  note_preview: '另一条提醒',
+                  fire_at_local_text: task.fire_at_local_text,
+                  timezone_id: task.timezone_id,
+                  state: task.state,
+                },
+              ],
+              has_more: true,
+              next_cursor: first,
+            };
+      } else if (request.tool_id === 'get_task') {
+        result = { kind: 'task_detail', task };
+      } else {
+        cancelRef = request.invocation_id as string;
+        result = {
+          kind: 'reminder_cancelled',
+          task_id: target,
+          state: 'cancel_pending',
+          duplicate: false,
+        };
+      }
+      return { status: 'ok', invocationId: request.invocation_id, replayed: false, result };
+    },
+  });
+  expect(requests.filter((r) => r.type === 'invoke').map((r) => [r.tool_id, r.args])).toEqual([
+    ['list_tasks', {}],
+    ['list_tasks', { after_task_id: first }],
+    ['get_task', { task_id: target }],
+    [
+      'cancel_reminder',
+      {
+        task_id: target,
+        expected_note: task.note,
+        expected_wall_time: task.fire_at_local_text,
+        expected_timezone_id: task.timezone_id,
+      },
+    ],
+  ]);
+  expect(requests.at(-1)).toMatchObject({ type: 'finish_goal', goal_result: blocked() });
+});
+
+for (const name of ['get_task', 'cancel_reminder']) {
+  test(`frozen old tools cannot dispatch ${name}, and legacy cannot advertise it`, async () => {
+    const denied = await nativeCase({ model: () => call(name, { task_id: randomUUID() }) });
+    expect(denied.filter((r) => r.type === 'reserve' || r.type === 'invoke')).toEqual([]);
+    expect(denied.at(-1)).toMatchObject({ type: 'finish', error: { code: 'TOOL_DENIED' } });
+    const tool = taskTools.find((candidate) => candidate.name === name)!;
+    expect(
+      await nativeCase({ start: { trusted_context: null, tools: [tool] }, expectedExit: 2 }),
+    ).toEqual([]);
+  });
+}
+
+test('unknown cancellation stops without retrying or issuing a completion receipt', async () => {
+  const requests = await nativeCase({
+    start: { tools: taskTools },
+    model: () => call('cancel_reminder', { task_id: randomUUID() }),
+    invoke: (request) => ({
+      status: 'unknown',
+      invocationId: request.invocation_id,
+      replayed: false,
+      error: { code: 'TOOL_EFFECT_UNKNOWN', message: 'Cancellation outcome is unknown.' },
+    }),
+  });
+  expect(requests.filter((r) => r.type === 'invoke')).toHaveLength(1);
+  expect(requests.filter((r) => r.type === 'finish_goal' || r.type === 'snapshot')).toEqual([]);
+  expect(requests.at(-1)).toMatchObject({ type: 'finish', error: { code: 'TOOL_EFFECT_UNKNOWN' } });
+});
+
+test('older delegated tool snapshots do not receive new cancellation instructions', async () => {
+  const requests = await nativeCase({
+    start: { tools: [taskTools[0]] },
+    model: () => call('finish_goal', goal()),
+  });
+  const model = requests.find((r) => r.type === 'model')!;
+  const messages = model.messages as { role: string; content: string }[];
+  expect(messages.some((m) => m.role === 'system' && m.content.includes('after_task_id'))).toBe(
+    false,
+  );
+});
+
+test('trusted continuation exposes historical text as untrusted data and preserves only achieved receipt references', async () => {
+  const achieved = randomUUID();
+  const notAchieved = randomUUID();
+  const originalText = 'original-user-data-unique';
+  const priorAnswer = 'prior-model-data-unique';
+  const continuation = {
+    run_id: randomUUID(),
+    invocation_id: null,
+    original_input_message_id: randomUUID(),
+    original_text: originalText,
+    receipts: [
+      {
+        invocation_id: achieved,
+        tool_id: 'cancel_reminder',
+        result: {
+          status: 'ok',
+          result: {
+            kind: 'reminder_cancelled',
+            task_id: randomUUID(),
+            state: 'cancelled',
+            duplicate: false,
+          },
+        },
+      },
+    ],
+    source_result: null,
+    goal_result: {
+      status: 'partial',
+      outcomes: [
+        { description: 'Completed earlier', status: 'achieved', receipt_refs: [achieved] },
+        { description: 'Still missing', status: 'blocked', receipt_refs: [notAchieved] },
+      ],
+      clarification: { kind: 'target_selection', question: 'Which one?' },
+      answer: priorAnswer,
+    },
+  };
+  const requests = await nativeCase({
+    start: { trusted_context: { ...trusted, continuation }, tools: taskTools },
+    model: (request, index) => {
+      const messages = request.messages as { role: string; content: string }[];
+      const system = messages
+        .filter((m) => m.role === 'system')
+        .map((m) => m.content)
+        .join('\n');
+      expect(system).not.toContain(originalText);
+      expect(system).not.toContain(priorAnswer);
+      const source = messages.find(
+        (m) => m.role === 'assistant' && m.content.includes(originalText),
+      );
+      expect(source?.content).toContain(priorAnswer);
+      if (index === 0) return call('finish_goal', goal([notAchieved]));
+      return call('finish_goal', goal([achieved]));
+    },
+  });
+  expect(requests.filter((r) => r.type === 'invoke' || r.type === 'reserve')).toEqual([]);
+  expect(requests.at(-1)).toMatchObject({ type: 'finish_goal', goal_result: goal([achieved]) });
+});
+
+test('a historical pending cancellation remains a usable receipt without claiming revocation', async () => {
+  const pending = randomUUID();
+  const previous = {
+    run_id: randomUUID(),
+    invocation_id: null,
+    original_input_message_id: randomUUID(),
+    original_text: '取消两条提醒',
+    receipts: [
+      {
+        invocation_id: pending,
+        tool_id: 'cancel_reminder',
+        result: {
+          status: 'ok',
+          result: {
+            kind: 'reminder_cancelled',
+            task_id: randomUUID(),
+            state: 'cancel_pending',
+            duplicate: false,
+          },
+        },
+      },
+    ],
+    source_result: null,
+    goal_result: {
+      status: 'blocked',
+      outcomes: [
+        { description: '取消请求已接受，等待撤销回执', status: 'blocked', receipt_refs: [pending] },
+      ],
+      clarification: { kind: 'target_selection', question: '另一条是哪条？' },
+      answer: '取消请求已接受；请选择另一条。',
+    },
+  };
+  const result = {
+    status: 'blocked',
+    outcomes: [
+      { description: '取消请求已接受，等待撤销回执', status: 'blocked', receipt_refs: [pending] },
+    ],
+    clarification: null,
+    answer: '取消请求已接受，等待撤销回执。',
+  };
+  const requests = await nativeCase({
+    start: { trusted_context: { ...trusted, continuation: previous }, tools: taskTools },
+    model: () => call('finish_goal', result),
+  });
+  expect(requests.filter((r) => r.type === 'invoke' || r.type === 'reserve')).toEqual([]);
+  expect(requests.at(-1)).toMatchObject({ type: 'finish_goal', goal_result: result });
+});
+
+test('old continuation remains accepted without new evidence fields', async () => {
+  const continuation = { run_id: randomUUID(), invocation_id: randomUUID() };
+  const requests = await nativeCase({
+    start: { trusted_context: { ...trusted, continuation } },
+    model: (request) => {
+      const messages = request.messages as { role: string; content: string }[];
+      expect(
+        messages.some((m) => m.role === 'system' && m.content.includes(continuation.run_id)),
+      ).toBe(true);
+      return call('finish_goal', goal());
+    },
+  });
+  expect(requests.at(-1)).toMatchObject({ type: 'finish_goal' });
+});
+
+test('tool-only continuation exposes the actual source without inventing or accepting a receipt', async () => {
+  const sourceId = randomUUID();
+  const sourceText = 'historical-source-error-unique';
+  const continuation = {
+    run_id: randomUUID(),
+    invocation_id: sourceId,
+    original_input_message_id: randomUUID(),
+    original_text: 'Earlier request',
+    goal_result: null,
+    receipts: [],
+    source_result: {
+      invocation_id: sourceId,
+      tool_id: 'create_reminder',
+      result: { status: 'denied', error: { code: 'UNKNOWN_TIMEZONE', message: sourceText } },
+    },
+  };
+  const requests = await nativeCase({
+    start: { trusted_context: { ...trusted, continuation }, tools: taskTools },
+    model: (request, index) => {
+      const messages = request.messages as { role: string; content: string }[];
+      expect(messages.some((m) => m.role === 'system' && m.content.includes(sourceText))).toBe(
+        false,
+      );
+      expect(messages.some((m) => m.role === 'assistant' && m.content.includes(sourceText))).toBe(
+        true,
+      );
+      return call('finish_goal', index === 0 ? goal([sourceId]) : goal());
+    },
+  });
+  expect(requests.filter((r) => r.type === 'invoke' || r.type === 'reserve')).toEqual([]);
+  expect(requests.at(-1)).toMatchObject({ type: 'finish_goal', goal_result: goal() });
+});
+
+test('parallel proposals have no effects and the model can continue one action at a time', async () => {
+  const refs: string[] = [];
+  const requests = await nativeCase({
+    model: (_request, index) => {
+      if (index === 0) {
+        return {
+          content: null,
+          tool_calls: [
+            ...call('set_user_timezone', { timezone_id: 'Asia/Shanghai' }).tool_calls,
+            ...call('set_user_timezone', { timezone_id: null }).tool_calls,
+          ],
+        };
+      }
+      if (index === 1) return call('set_user_timezone', { timezone_id: 'Asia/Shanghai' });
+      if (index === 2) return call('set_user_timezone', { timezone_id: null });
+      return call('finish_goal', goal(refs));
+    },
+    invoke: (request) => {
+      refs.push(request.invocation_id as string);
+      return {
+        status: 'ok',
+        invocationId: request.invocation_id,
+        replayed: false,
+        result: {
+          kind: 'timezone_setting',
+          timezone_id: refs.length === 1 ? 'Asia/Shanghai' : null,
+          previous_timezone_id: refs.length === 1 ? null : 'Asia/Shanghai',
+          alias_version: 'controlled/1',
+        },
+      };
+    },
+  });
+  expect(requests.filter((request) => request.type === 'model')).toHaveLength(4);
+  expect(requests.filter((request) => request.type === 'invoke')).toHaveLength(2);
+  expect(requests.at(-1)).toMatchObject({ type: 'finish_goal', goal_result: goal(refs) });
+});

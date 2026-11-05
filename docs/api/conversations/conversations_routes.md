@@ -48,6 +48,7 @@
 - `fold_choice`：`first | second | none`，默认 `none`；只有结构化字段决定选择，原话“第一次/第二次”不自动覆盖。歧义未选为 `AMBIGUOUS_LOCAL_TIME`；候选字段仍是 fold_choice，成功的现有归一结果与快照 `fold` 为 `0 | 1`，不混为字符串列。
 - `clarification_of_run_id`：可选 UUID，精确 fold 候选重提议必填，指向原 `AMBIGUOUS_LOCAL_TIME` 失败 Run。必须同 owner/conversation、全会话唯一尚未完成候选、紧邻上一 user 消息且有实际已接受失败及冻结来源；原文完全相同、请求所选时区等于实际候选并带结构化 first/second 才可继承原锚。它不是批准、resume、任意 Run 复制或客户端时钟授权；无效/关系不明只要求完整重述，不任挑锚。
 - 只补时区支持整条明确别名/规范 ID 回复；仅可接续上述同归属、唯一、紧邻、终态 done/failed 且实际 `TIMEZONE_MISSING` 的原请求。多个候选、无关中间 user 目标、旧数据缺来源及其他不明补充要求完整重述日期、时刻、时区和事项；不能只按“前一 Run”或模型历史猜关系。
+- 新接纳、具备任务定位能力的 `delegation/1` Run 可用 `clarification_of_run_id` 接续实际保存的目标选择缺口：在接纳事务中验证同 owner、同会话、紧邻前一用户消息、前序终态与结构化未解决缺口，并保证唯一有效后继。已接受回执作为历史事实保留，不当作新读取，不重复执行；无效来源不获得接续授权。Web 显式选择补充上一个问题，未选择时按新请求处理。
 - “明天”锚定：新明确日期请求用本轮 DB `clock_timestamp()` 接纳时刻；可信澄清保留原 anchor，本轮 received 仍单独冻结。同日本地 120 秒不报跨日，真正本地午夜 20 秒仍问具体日期。新 Run 在既有不可变 `frozen_context` 写 `reminderDateSource`，旧 Run/工具重放/批准恢复/历史不回填或重算；字段与归属见 schema，时间纯层及未来时间/有效期规则见 design/05 §3。
 
 响应：`Content-Type: text/event-stream`，`200` 建连；新消息首事件 `thread.started` 含 conversation/Run。终结事件为 completed/failed/cancelled；harness 在批准等待时只结束该段流，不发 completed。显式 resume 不重放旧 started/delta。每行 `data: {protocol_version,seq,type,payload,request_id}`，`seq` 是不透明全局游标；内部 snapshot 产生间隙合法，不能要求连续。具体七词 schema 以 `packages/stream-protocol` 为准：

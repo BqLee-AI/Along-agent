@@ -125,6 +125,56 @@ maybe('owned tool query-client projections', () => {
     expect((await pool.query('SELECT id FROM users WHERE id=$1', [ownerId])).rows).toEqual([]);
   });
 
+  it('retrieves every owned task across pages with equal fire times', async () => {
+    const ownerId = randomUUID();
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const ids: string[] = [];
+      for (let i = 0; i < 5; i++) {
+        ids.push(await task(client, ownerId, { fireAt: '2035-01-01T00:00:00Z' }));
+      }
+      await task(client, randomUUID(), { fireAt: '2035-01-01T00:00:00Z' });
+      const found: string[] = [];
+      let afterTaskId: string | undefined;
+      do {
+        const page = await readToolTaskList(client, ownerId, {
+          limit: 2,
+          paginate: true,
+          after_task_id: afterTaskId,
+        });
+        found.push(...page.tasks.map((row) => row.task_id));
+        afterTaskId = page.next_cursor ?? undefined;
+        expect(page.has_more).toBe(afterTaskId !== undefined);
+      } while (afterTaskId);
+      expect(found).toEqual([...ids].sort());
+    } finally {
+      await client.query('ROLLBACK');
+      client.release();
+    }
+  });
+
+  it('filters future reminders against the trusted cutoff before pagination', async () => {
+    const ownerId = randomUUID();
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await task(client, ownerId, { fireAt: '2030-01-01T00:00:00Z' });
+      await task(client, ownerId, { fireAt: '2030-01-02T00:00:00Z' });
+      const future = await task(client, ownerId, { fireAt: '2030-01-03T00:00:00Z' });
+      const page = await readToolTaskList(client, ownerId, {
+        limit: 1,
+        paginate: true,
+        future_after: '2030-01-02T00:00:00Z',
+      });
+      expect(page.tasks.map((item) => item.task_id)).toEqual([future]);
+      expect(page.has_more).toBe(false);
+    } finally {
+      await client.query('ROLLBACK');
+      client.release();
+    }
+  });
+
   it('retains active-state defaults, explicit terminal-state filters, UTC ordering and limit-plus-one pagination', async () => {
     const ownerId = randomUUID();
     const client = await pool.connect();

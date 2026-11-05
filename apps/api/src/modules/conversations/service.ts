@@ -60,6 +60,7 @@ import { ensureRunContextPolicy } from './context-policy.js';
 import { insertRoutingPolicy } from './routing-checkpoints.js';
 import { routingRuntimeOf } from './harness-config.js';
 import { acceptReminderDate } from './reminder-date.js';
+import { acceptTargetContinuation } from './target-continuation.js';
 import { isActiveOwner, readUserPreferences } from '../identity/preferences.js';
 import { writeAuthorizedEvent } from './stream-authorization.js';
 
@@ -231,6 +232,20 @@ export async function startConversationRun(
         content: text,
         requestId,
       });
+      let targetContinuation =
+        delegation &&
+        execution === 'harness' &&
+        input.clarification_of_run_id &&
+        (allowlist as readonly string[]).includes('get_task') &&
+        (allowlist as readonly string[]).includes('cancel_reminder')
+          ? await acceptTargetContinuation(client, {
+              ownerId,
+              conversationId: conversation.id,
+              inputMessageId: userMessageId,
+              sourceRunId: input.clarification_of_run_id,
+              timeContext: deps.timeContext,
+            })
+          : null;
       const reminderDate = await acceptReminderDate(client, {
         ownerId,
         conversationId: conversation.id,
@@ -244,6 +259,36 @@ export async function startConversationRun(
           ? { clarificationOfRunId: input.clarification_of_run_id }
           : {}),
       });
+      if (
+        !targetContinuation &&
+        delegation &&
+        execution === 'harness' &&
+        reminderDate.source.kind === 'clarification' &&
+        reminderDate.source.sourceRunId &&
+        (allowlist as readonly string[]).includes('get_task') &&
+        (allowlist as readonly string[]).includes('cancel_reminder')
+      ) {
+        const sourceInput = {
+          ownerId,
+          conversationId: conversation.id,
+          inputMessageId: userMessageId,
+          sourceRunId: reminderDate.source.sourceRunId,
+          sourceInvocationId: reminderDate.source.sourceInvocationId,
+          timeContext: deps.timeContext,
+        };
+        targetContinuation =
+          (await acceptTargetContinuation(client, { ...sourceInput, kind: 'time' })) ??
+          (await acceptTargetContinuation(client, { ...sourceInput, kind: 'timezone' }));
+      }
+      if (
+        delegation &&
+        input.clarification_of_run_id &&
+        !targetContinuation &&
+        reminderDate.source.kind !== 'clarification'
+      )
+        throw validationError(
+          '无法确认这条补充对应哪个未完成的问题。请说明要处理的目标及其与前一请求的关系。',
+        );
       // Resolve inherited reminders before the rules gate; a failure rolls back
       // admission without consuming the source or reserving the retry key.
       const reminderText = reminderDate.originalText ?? text;
@@ -280,14 +325,15 @@ export async function startConversationRun(
             execution_lifecycle: 'request-bound',
             input_message_id: userMessageId,
             received_at_utc: receivedAtUtc,
-            request_anchor_utc: reminderDate.anchor,
+            request_anchor_utc: targetContinuation?.anchor ?? reminderDate.anchor,
             continuation:
-              reminderDate.source.kind === 'clarification'
+              targetContinuation?.continuation ??
+              (reminderDate.source.kind === 'clarification'
                 ? {
                     run_id: reminderDate.source.sourceRunId,
                     invocation_id: reminderDate.source.sourceInvocationId ?? null,
                   }
-                : null,
+                : null),
             timezone: confirmedTimezone
               ? {
                   timezone_id: confirmedTimezone,
@@ -312,13 +358,16 @@ export async function startConversationRun(
         : undefined;
       const frozenContext = {
         confirmedTimezone,
-        anchorReceivedAtUtc: reminderDate.anchor,
+        anchorReceivedAtUtc: targetContinuation?.anchor ?? reminderDate.anchor,
         receivedAtUtc,
         foldChoice: input.fold_choice,
         rulesetId: deps.timeContext.ruleset_id,
         tzdbVersion: deps.timeContext.tzdb_version,
         aliasVersion: deps.timeContext.available ? deps.timeContext.aliases.version : null,
         reminderDateSource: reminderDate.source,
+        ...(delegation && (allowlist as readonly string[]).includes('cancel_reminder')
+          ? { cancellationScopeRevision: 'scope/1' as const }
+          : {}),
         ...(messageRefs ? { messageRefs } : {}),
         ...(workspaceGrant ? { workspaceGrant, workspaceSummary } : {}),
         ...(trustedExecutionContext
@@ -381,7 +430,7 @@ export async function startConversationRun(
           ...(reminderDate.originalText ? { reminderInputText: reminderDate.originalText } : {}),
           ...(reminderDate.source.kind === 'unresolved' ? { reminderNeedsRestatement: true } : {}),
           confirmedTimezone,
-          anchorReceivedAtUtc: reminderDate.anchor,
+          anchorReceivedAtUtc: targetContinuation?.anchor ?? reminderDate.anchor,
           receivedAtUtc,
           foldChoice: input.fold_choice,
           maxIterations,

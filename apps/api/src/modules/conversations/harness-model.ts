@@ -22,7 +22,7 @@ const ProviderChunkSchema = z.object({
           tool_calls: z
             .array(
               z.object({
-                index: z.literal(0),
+                index: z.number().int().min(0).max(63),
                 id: z.string().optional(),
                 type: z.literal('function').optional(),
                 function: z
@@ -30,7 +30,7 @@ const ProviderChunkSchema = z.object({
                   .optional(),
               }),
             )
-            .max(1)
+            .max(64)
             .optional(),
         }),
         finish_reason: z
@@ -166,16 +166,20 @@ export function createHarnessModelTransport(config: HarnessModelConfig): Harness
         throw modelProtocolError();
       }
       const content: string[] = [];
-      const ids: string[] = [];
-      const names: string[] = [];
-      const argumentsParts: string[] = [];
+      const calls: Array<
+        | {
+            ids: string[];
+            names: string[];
+            argumentsParts: string[];
+            hasFunctionType: boolean;
+            idUnits: number;
+            nameUnits: number;
+          }
+        | undefined
+      > = [];
       let hasContent = false;
-      let hasTool = false;
-      let hasFunctionType = false;
       let finish: string | undefined;
       let outputBytes = 0;
-      let idUnits = 0;
-      let nameUnits = 0;
       const account = (fragment: string) => {
         outputBytes += Buffer.byteLength(JSON.stringify(fragment), 'utf8') - 2;
         if (outputBytes > HARNESS_MAX_FRAME_BYTES - 1024) throw modelProtocolError();
@@ -186,23 +190,26 @@ export function createHarnessModelTransport(config: HarnessModelConfig): Harness
           if (finish === 'length') throw contextLimit();
           if (
             !finish ||
-            (!hasContent && !hasTool) ||
-            (finish === 'tool_calls') !== hasTool ||
-            (hasTool && !hasFunctionType)
+            (!hasContent && calls.length === 0) ||
+            (finish === 'tool_calls') !== calls.length > 0
           )
+            throw modelProtocolError();
+          const toolCalls = [];
+          for (let index = 0; index < calls.length; index++) {
+            const call = calls[index];
+            if (!call?.hasFunctionType) throw modelProtocolError();
+            toolCalls.push({
+              id: call.ids.join(''),
+              type: 'function' as const,
+              function: { name: call.names.join(''), arguments: call.argumentsParts.join('') },
+            });
+          }
+          if (new Set(toolCalls.map((call) => call.id)).size !== toolCalls.length)
             throw modelProtocolError();
           const reply = HarnessModelReplySchema.safeParse({
             message: {
               content: hasContent ? content.join('') : null,
-              tool_calls: hasTool
-                ? [
-                    {
-                      id: ids.join(''),
-                      type: 'function',
-                      function: { name: names.join(''), arguments: argumentsParts.join('') },
-                    },
-                  ]
-                : [],
+              tool_calls: toolCalls,
             },
             usage,
           });
@@ -249,23 +256,29 @@ export function createHarnessModelTransport(config: HarnessModelConfig): Harness
             offset = end;
           }
         }
-        const call = choice.delta.tool_calls?.[0];
-        if (call) {
-          hasTool = true;
-          if (call.type === 'function') hasFunctionType = true;
+        for (const call of choice.delta.tool_calls ?? []) {
+          const current = (calls[call.index] ??= {
+            ids: [],
+            names: [],
+            argumentsParts: [],
+            hasFunctionType: false,
+            idUnits: 0,
+            nameUnits: 0,
+          });
+          if (call.type === 'function') current.hasFunctionType = true;
           for (const [value, parts] of [
-            [call.id, ids],
-            [call.function?.name, names],
-            [call.function?.arguments, argumentsParts],
+            [call.id, current.ids],
+            [call.function?.name, current.names],
+            [call.function?.arguments, current.argumentsParts],
           ] as const) {
             if (value !== undefined) {
               account(value);
               parts.push(value);
             }
           }
-          idUnits += call.id?.length ?? 0;
-          nameUnits += call.function?.name?.length ?? 0;
-          if (idUnits > 128 || nameUnits > 128) throw modelProtocolError();
+          current.idUnits += call.id?.length ?? 0;
+          current.nameUnits += call.function?.name?.length ?? 0;
+          if (current.idUnits > 128 || current.nameUnits > 128) throw modelProtocolError();
         }
         if (choice.finish_reason === 'content_filter') throw modelProtocolError();
         // Read the usage-only trailer before turning length into a failed step.

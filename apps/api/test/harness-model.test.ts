@@ -202,6 +202,51 @@ describe('harness incremental model HTTP transport', () => {
     ]);
   });
 
+  test('assembles indexed parallel proposals without executing or dropping either', async () => {
+    const baseUrl = await provider((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      res.write(
+        chunk({
+          tool_calls: [
+            {
+              index: 0,
+              id: 'first',
+              type: 'function',
+              function: { name: 'cancel_reminder', arguments: '{"task":' },
+            },
+            {
+              index: 1,
+              id: 'second',
+              type: 'function',
+              function: { name: 'cancel_reminder', arguments: '{"task":' },
+            },
+          ],
+        }),
+      );
+      res.write(
+        chunk({
+          tool_calls: [
+            { index: 1, function: { arguments: '"b"}' } },
+            { index: 0, function: { arguments: '"a"}' } },
+          ],
+        }),
+      );
+      complete(res, 'tool_calls');
+    });
+    const steps = await Array.fromAsync(request(baseUrl));
+    expect(steps.at(-1)).toMatchObject({
+      type: 'complete',
+      reply: {
+        message: {
+          tool_calls: [
+            { id: 'first', function: { name: 'cancel_reminder', arguments: '{"task":"a"}' } },
+            { id: 'second', function: { name: 'cancel_reminder', arguments: '{"task":"b"}' } },
+          ],
+        },
+      },
+    });
+  });
+
   test('bounds actual large provider deltas without cutting Unicode scalars', async () => {
     const answer = 'a'.repeat(3999) + '😀界';
     const baseUrl = await provider((_req, res) => {
@@ -254,7 +299,7 @@ describe('harness incremental model HTTP transport', () => {
     expect(calls).toBe(1);
   });
 
-  test('rejects parallel proposals instead of selecting index zero', async () => {
+  test('rejects a truncated response containing parallel proposals', async () => {
     const baseUrl = await provider((_req, res) => {
       res.writeHead(200, { 'content-type': 'text/event-stream' });
       res.end(

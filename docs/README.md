@@ -29,7 +29,7 @@
 | 06   | [approvals 确认门](design/06-approvals-confirmation-gate.md)             | 版本化冻结回显、显式修改、按钮确认及工具批准/结果原子边界                                                                               |
 | 07   | [task_events 事件账](design/07-task-events-ledger.md)                    | 只追加账本、取消优先、活动页读模型                                                                                                      |
 | 08   | [调度与投递](design/08-scheduler-and-delivery.md)                        | 未排期过窗终结与遗留恢复、一次性调用许可、独立本地接收、未知不重发及取消栅栏                                                            |
-| 09   | [Harness 与 checkpoint](design/09-agent-runtime-and-checkpoint.md)       | 正式仓颉循环、TS 资格/事实、原子终态、有限批准恢复与只读补读                                                                            |
+| 09   | [Harness 与 checkpoint](design/09-agent-runtime-and-checkpoint.md)       | 正式仓颉循环、逐项工具决策、TS 资格/事实、原子终态、有限批准恢复与只读补读                                                              |
 | 10   | [API 与流式通道](design/10-api-and-stream-design.md)                     | REST 真源、envelope、128KiB原始JSON字节边界与未消费流收尾、SSE版本化、WS延后                                                            |
 | 11   | [仓颉 Harness 与 TS 能力层](design/11-cangjie-runtime-spike.md)          | 正式 native/固定工具链/纯模型 transport；接入、消费者门与完整 R1 分级验收                                                               |
 | 12   | [a13n 六思想落点](design/12-a13n-principles-landing.md)                  | harness/checkpoint/自托管/revision/AG-UI 投影/readyz                                                                                    |

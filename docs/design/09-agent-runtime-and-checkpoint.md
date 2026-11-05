@@ -35,7 +35,7 @@ HTTP 消息、Run 读/取消/恢复路由见 [conversations API](../api/conversa
 - `request_ref/reply_to` 仅关联当前 pipe，不能替代持久身份；一个请求等待 ack 后再继续。snapshot/suspend/finish 的 ack 必须在 TS 对应事实提交后返回。
 - TS model transport 仅使用部署服务端固定的 OpenAI-compatible chat-completions 配置做 HTTP/协议转换；普通用户不配置 provider/BYOK。仓颉构造上下文并解析提议、选择工具与决定下一轮。未配置时新 harness Run 在任何写入/SSE 之前返回 `503 HARNESS_UNAVAILABLE`，不启用测试 transport。
 - 模型 transport 请求 `stream:true`，逐次给出当前模型响应的可见增量或完整结果；native 每次将增量经 `answer` 取得 TS 持久回执后再以 `model_next` 拉取，保持单请求等待和背压。完整结果只用于工具/历史/用量，正文不重发；参数未完整时不执行工具。部分接受文本不是成功，畸形/中断流明确失败，取消关闭在途 reader，不保留非流式回退。原生系统上下文默认简体中文、明确语言要求优先。
-- 每模型响应最多一个工具提议。transport 发送 `parallel_tool_calls:false`，但不保证供应商遵守；provider/共享回复 schema 与 native 严格拒绝多个调用，不只取第一项。native 明确要求一次选择一个工具、等待实际观察后才选择下一步，独立读取亦然。运行说明、固定工具链和分发 notices 见 [harness README](../../apps/harness/README.md)。
+- 每步只执行一个工具提议。transport 发送 `parallel_tool_calls:false`；供应商仍返回多个提议时，完整解析并校验，但不预约、不执行其中任何一项，告知模型未执行并在原预算内要求逐项选择。native 等待实际观察后才选择下一步，独立读取亦然；已发生或效果未知的调用不因此重试。运行说明、固定工具链和分发 notices 见 [harness README](../../apps/harness/README.md)。
 - native 持有标准函数消息历史：实际提议存为 `assistant.tool_calls`，实际结果存为 `role=tool` 并使用对应 `tool_call_id`；TS 仅按结构原样 transport，不用普通 assistant 文本模拟工具调用。恢复 bootstrap 中的已接受观察可以是明确数据摘要；snapshot 仍只存事实引用，不扩展为完整函数历史。
 - 部署默认预算为24迭代、64000 token，可由服务端 `HARNESS_MAX_ITERATIONS/HARNESS_MAX_TOKENS` 配置；须为正安全整数，不能由 Web/模型请求覆盖。Run 接纳时持久冻结，仓颉按跨 attempt 累计迭代/可得 usage 强制，不因批准恢复或部署后来改配置重置。缺失 usage 的累计值保持未知，不字符估算、不编造费用；超预算后不安排后续模型/工具，保留已发生事实并失败。默认值不是实际 R1 预算校准证据，无法证明的 token/费用上限不作保证。
 

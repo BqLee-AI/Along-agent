@@ -554,6 +554,17 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
                 </Radio.Group>
               </fieldset>
             ) : null}
+            {task.canReplyToClarification && !task.ambiguousProposal ? (
+              <label className="flex min-h-11 items-center gap-2 px-3 text-sm">
+                <input
+                  type="checkbox"
+                  checked={task.clarificationReply}
+                  disabled={task.active}
+                  onChange={(event) => task.setClarificationReply(event.target.checked)}
+                />
+                这条消息补充上一个问题（不勾选则作为新请求）
+              </label>
+            ) : null}
           </div>
           <Label htmlFor="task-message" className="sr-only">
             发给 Agent 的消息

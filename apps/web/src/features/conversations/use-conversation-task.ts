@@ -32,6 +32,7 @@ import {
 } from '@/lib/conversation-run';
 import {
   conversationSendBlocked,
+  clarificationReplyReference,
   taskAdmission,
   taskSendEligibility,
   type TaskIntent,
@@ -75,6 +76,9 @@ export interface ConversationTask {
   sendUncertain: boolean;
   ambiguousProposal: AmbiguousProposal | null;
   foldChoice: 'first' | 'second' | '';
+  clarificationReply: boolean;
+  setClarificationReply: (value: boolean) => void;
+  canReplyToClarification: boolean;
   setFoldChoice: (value: 'first' | 'second' | '') => void;
   eligibility: { allowed: boolean; reason: string | null };
   active: boolean;
@@ -128,6 +132,7 @@ export function useConversationTask({
   const [sendUncertain, setSendUncertain] = useState(false);
   const [ambiguousProposal, setAmbiguousProposal] = useState<AmbiguousProposal | null>(null);
   const [foldChoice, setFoldChoice] = useState<'first' | 'second' | ''>('');
+  const [clarificationReply, setClarificationReply] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [reminderResults, setReminderResults] = useState<Record<string, ApprovalDetail>>({});
   const [reminderError, setReminderError] = useState<ConversationTask['reminderError']>(null);
@@ -149,6 +154,9 @@ export function useConversationTask({
   const cursors = useRef(new Map<string, number>());
   const eventsRef = useRef<ThreadEvent[]>([]);
   const selectionVersion = useRef(0);
+  useEffect(() => {
+    setClarificationReply(false);
+  }, [run?.run_id, intent]);
   const leaveAllowed = useRef(false);
   const [effectsUnknown, setEffectsUnknown] = useState(false);
   const unknownRef = useRef(false);
@@ -485,6 +493,7 @@ export function useConversationTask({
     workspaceId,
     workspaces,
   });
+  const canReplyToClarification = Boolean(clarificationReplyReference(run, intent, true));
 
   async function send(retry = false) {
     if (
@@ -517,14 +526,7 @@ export function useConversationTask({
             fold_choice: proposal ? foldChoice : undefined,
             clarification_of_run_id:
               proposal?.source_run_id ??
-              (intent === 'chat' &&
-              run?.authorization_revision === 'delegation/1' &&
-              run.goal_result &&
-              ['blocked', 'partial'].includes(run.goal_result.status) &&
-              run.goal_result.clarification &&
-              ['time', 'timezone'].includes(run.goal_result.clarification.kind)
-                ? run.run_id
-                : undefined),
+              (clarificationReply && canReplyToClarification ? run?.run_id : undefined),
             ...taskAdmission(intent),
             ...(intent === 'document' ? { workspace_id: workspaceId } : {}),
             idempotency_key: crypto.randomUUID(),
@@ -546,6 +548,7 @@ export function useConversationTask({
       setRetryResume(null);
       setAmbiguousProposal(null);
       setSendUncertain(false);
+      setClarificationReply(false);
       const accepted = await stream('/api/v1/conversations/messages', pending.body, pending.text);
       if (mounted.current && accepted) setInput('');
     } catch (failure) {
@@ -856,6 +859,9 @@ export function useConversationTask({
     sendUncertain,
     ambiguousProposal,
     foldChoice,
+    clarificationReply,
+    setClarificationReply,
+    canReplyToClarification,
     setFoldChoice,
     eligibility,
     active,

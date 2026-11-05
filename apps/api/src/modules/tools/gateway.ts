@@ -11,10 +11,15 @@ import {
   shortNoOf,
   type PresentationSnapshot,
 } from '../approvals/presentation.js';
-import { readCancelTaskCandidate, readToolTaskList } from '../tasks/tool-query.js';
+import {
+  readActiveSameNoteTasks,
+  readCancelTaskCandidate,
+  readToolTaskList,
+} from '../tasks/tool-query.js';
+import { cancelTaskWithinTransaction } from '../tasks/cancel.js';
 import { readToolBriefCards } from '../brief/tool-query.js';
 import { readUserPreferences, setUserTimezoneWithinTransaction } from '../identity/preferences.js';
-import { TOOL_INPUT_SCHEMAS } from './schemas.js';
+import { PaginatedListTasksInputSchema, TOOL_INPUT_SCHEMAS } from './schemas.js';
 import type { ToolContext, ToolOutcome, ToolPayload, ToolResult } from './contracts.js';
 import {
   executeLocalInvocation,
@@ -33,8 +38,15 @@ import { utf8Bytes, WorkspaceDeniedError } from '../workspaces/service.js';
 import { callWorkspaceMcp, type WorkspaceReadTool } from './mcp-workspace.js';
 import { readRunDocumentEvidence } from './query.js';
 import { readObservationPage } from './observation-page.js';
-import { createTaskWithinTransaction } from '../tasks/create.js';
+import { createTaskWithinTransaction, lockTaskCreationScope } from '../tasks/create.js';
 import { readRunTimezoneSettings } from './query.js';
+import { readCancellationScopeInput } from '../conversations/target-continuation.js';
+import {
+  cancellationScopeIncludes,
+  candidatesInCancellationRequest,
+  isBoundedCancellationForNote,
+  renderCancellationClarification,
+} from './reminder-cancel-scope.js';
 
 const workspaceDenied = (): ToolResult => ({
   status: 'denied',
@@ -616,7 +628,13 @@ async function runListTasks(
   ctx: ToolContext,
   args: unknown,
 ): Promise<ToolExecution> {
-  const parsed = TOOL_INPUT_SCHEMAS.list_tasks.safeParse(args ?? {});
+  const paginate =
+    ctx.authorizationRevision === 'delegation/1' &&
+    ctx.allowlist.includes('get_task') &&
+    ctx.allowlist.includes('cancel_reminder');
+  const parsed = (
+    paginate ? PaginatedListTasksInputSchema : TOOL_INPUT_SCHEMAS.list_tasks
+  ).safeParse(args ?? {});
   if (!parsed.success) {
     return {
       payload: {
@@ -628,11 +646,163 @@ async function runListTasks(
       errorCode: null,
     };
   }
-  const projection = await readToolTaskList(client, ctx.ownerId, parsed.data);
+  if ('after_task_id' in parsed.data && typeof parsed.data.after_task_id === 'string') {
+    const cursor = await readCancelTaskCandidate(client, ctx.ownerId, parsed.data.after_task_id);
+    if (!cursor)
+      return {
+        payload: {
+          kind: 'clarify',
+          reason: 'INVALID_ARGS',
+          phrase_key: 'INVALID_ARGS',
+          text: '无效的任务分页游标。',
+        },
+        errorCode: null,
+      };
+  }
+  const projection = await readToolTaskList(client, ctx.ownerId, {
+    ...parsed.data,
+    paginate,
+    ...('future_only' in parsed.data && parsed.data.future_only
+      ? { future_after: ctx.receivedAtUtc }
+      : {}),
+  });
   return {
     payload: { kind: 'list_tasks', ...projection },
     errorCode: null,
   };
+}
+async function runGetTask(
+  client: PoolClient,
+  ctx: ToolContext,
+  args: unknown,
+): Promise<ToolResult> {
+  const parsed = TOOL_INPUT_SCHEMAS.get_task.safeParse(args);
+  if (!parsed.success)
+    return { status: 'denied', error: { code: 'TOOL_FORBIDDEN', message: 'invalid task' } };
+  const task = await readCancelTaskCandidate(client, ctx.ownerId, parsed.data.task_id);
+  if (!task)
+    return { status: 'denied', error: { code: 'TOOL_FORBIDDEN', message: 'task not found' } };
+  return {
+    status: 'ok',
+    result: {
+      kind: 'task_detail',
+      task: {
+        task_id: task.id,
+        note: task.original_note,
+        fire_at_local_text: task.wall_time,
+        timezone_id: task.timezone_id,
+        state: task.state,
+      },
+    },
+  };
+}
+
+async function runCancelReminder(
+  client: PoolClient,
+  ctx: ToolContext,
+  args: unknown,
+  invocationId: string,
+): Promise<ToolResult> {
+  const parsed = TOOL_INPUT_SCHEMAS.cancel_reminder.safeParse(args);
+  if (!parsed.success)
+    return { status: 'denied', error: { code: 'TOOL_FORBIDDEN', message: 'invalid task' } };
+  const task = await readCancelTaskCandidate(client, ctx.ownerId, parsed.data.task_id);
+  if (!task)
+    return { status: 'denied', error: { code: 'TOOL_FORBIDDEN', message: 'task not found' } };
+  const { expected_note, expected_wall_time, expected_timezone_id } = parsed.data;
+  if (
+    expected_note === undefined ||
+    expected_wall_time === undefined ||
+    expected_timezone_id === undefined ||
+    expected_note !== task.original_note ||
+    expected_wall_time !== task.wall_time ||
+    expected_timezone_id !== task.timezone_id
+  ) {
+    return {
+      status: 'ok',
+      result: {
+        kind: 'clarify',
+        reason: 'TARGET_IDENTITY_REQUIRED',
+        phrase_key: 'TARGET_IDENTITY_REQUIRED',
+        text: '任务标识与目标名称、时间或时区未完整对应；未取消。请重新读取任务并核对，不必询问用户。',
+      },
+    };
+  }
+  const scope = await readCancellationScopeInput(client, ctx);
+  if (scope.revision === 'scope/1') {
+    await lockTaskCreationScope(client, ctx.ownerId);
+    const candidates = await readActiveSameNoteTasks(client, ctx.ownerId, task.original_note);
+    const batch =
+      /^(?:请|帮我|请帮我)?取消名称以[“"‘']([^“”"'‘’]+)[”"’']开头的(?:全部|所有)未来提醒(?:，别的提醒不要取消)?[。！!]?$/u.exec(
+        scope.current.trim(),
+      );
+    const allFuture = /^(?:请|帮我|请帮我)?取消(?:全部|所有)未来提醒[。！!]?$/u.test(
+      scope.current.trim(),
+    );
+    const batchIncludes =
+      (allFuture ||
+        (batch !== null &&
+          task.original_note !== null &&
+          task.original_note.startsWith(batch[1]!))) &&
+      task.fire_at_utc.getTime() > new Date(ctx.anchorReceivedAtUtc).getTime();
+    const scopeIncludes =
+      batch !== null || allFuture
+        ? batchIncludes
+        : cancellationScopeIncludes(
+            scope.current,
+            scope.original,
+            task.original_note,
+            candidates,
+            task.id,
+            scope.shownCandidates,
+          );
+    if (!scopeIncludes) {
+      return {
+        status: 'ok',
+        result: {
+          kind: 'clarify',
+          reason: 'TARGET_SCOPE_UNCLEAR',
+          phrase_key: 'TARGET_SCOPE_UNCLEAR',
+          text: renderCancellationClarification(
+            task.original_note &&
+              isBoundedCancellationForNote(scope.original ?? scope.current, task.original_note)
+              ? candidatesInCancellationRequest(
+                  scope.original ?? scope.current,
+                  task.original_note,
+                  candidates,
+                )
+              : candidates,
+          ),
+        },
+      };
+    }
+  }
+  await client.query('SAVEPOINT cancel_reminder');
+  try {
+    const result = await cancelTaskWithinTransaction(client, {
+      ownerId: ctx.ownerId,
+      taskId: task.id,
+      reason: null,
+      idempotencyKey: invocationId,
+    });
+    await client.query('RELEASE SAVEPOINT cancel_reminder');
+    return { status: 'ok', result: { kind: 'reminder_cancelled', ...result } };
+  } catch (error) {
+    await client.query('ROLLBACK TO SAVEPOINT cancel_reminder');
+    await client.query('RELEASE SAVEPOINT cancel_reminder');
+    if (error instanceof HttpError && error.errorCode === 'STATE_CONFLICT') {
+      return {
+        status: 'ok',
+        result: {
+          kind: 'clarify',
+          reason: 'STATE_CONFLICT',
+          phrase_key: 'STATE_CONFLICT',
+          text: '提醒状态已变化，无法取消。',
+        },
+      };
+    }
+    throw error;
+  }
 }
 
 async function runReadBriefCards(
@@ -720,6 +890,7 @@ export function reserveToolInvocation(
 ): Promise<{ invocationId: string }> {
   const readOnly = [
     'list_tasks',
+    'get_task',
     'read_brief_cards',
     'get_user_prefs',
     'workspace_list',
@@ -783,6 +954,10 @@ export function invokeTool(
         return runCreateReminder(client, frozen, input.args, input.invocationId);
       case 'set_user_timezone':
         return runSetUserTimezone(client, frozen, input.args);
+      case 'get_task':
+        return runGetTask(client, frozen, input.args);
+      case 'cancel_reminder':
+        return runCancelReminder(client, frozen, input.args, input.invocationId);
       case 'workspace_propose_replace':
         return runWorkspaceProposal(client, frozen, input.args);
       case 'propose_task':

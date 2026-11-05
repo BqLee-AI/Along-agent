@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import type { ConversationRunHistoryItem, RunView, WorkspaceSummary } from '@along/contracts';
 import {
   conversationSendBlocked,
+  clarificationReplyReference,
   messageRunReference,
   isNearChatBottom,
   taskAdmission,
@@ -40,6 +41,35 @@ describe('explicit conversation task entry', () => {
     expect(taskIntentFromQuery({ intent: 'harness' })).toBe('chat');
     expect(taskIntentFromQuery({ intent: ['document', 'reminder'] })).toBe('chat');
     expect(taskIntentFromQuery({})).toBe('chat');
+  });
+
+  it('sends a source reference only for an explicitly selected real clarification', () => {
+    const run = {
+      run_id: 'source',
+      conversation_id: 'conversation',
+      execution: 'harness',
+      attempt_id: 'attempt',
+      attempt_no: 1,
+      waiting: null,
+      can_resume: false,
+      status: 'done',
+      authorization_revision: 'delegation/1',
+      goal_result: {
+        status: 'blocked',
+        outcomes: [{ description: '提醒', status: 'blocked', receipt_refs: [] }],
+        clarification: { kind: 'target_selection', question: '哪一个？' },
+        answer: '请选择。',
+      },
+    } as RunView;
+    expect(clarificationReplyReference(run, 'chat', true)).toBe('source');
+    expect(clarificationReplyReference(run, 'chat', false)).toBeUndefined();
+    expect(
+      clarificationReplyReference({ ...run, status: 'running' }, 'chat', true),
+    ).toBeUndefined();
+    expect(
+      clarificationReplyReference({ ...run, authorization_revision: undefined }, 'chat', true),
+    ).toBeUndefined();
+    expect(clarificationReplyReference(run, 'reminder', true)).toBeUndefined();
   });
 
   it('never applies an entry intent to a URL carrying any historical identity', () => {
