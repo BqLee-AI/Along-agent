@@ -55,6 +55,8 @@ interface Scenario {
   conflictInjected?: boolean;
   fullRewrite?: boolean;
   invalidLiteral?: boolean;
+  omitGoalReadRefOnce?: boolean;
+  splitGoalReadRef?: boolean;
   offeredTools?: string[][];
 }
 const ModelBody = z.object({
@@ -313,15 +315,39 @@ async function delegatedReply(
   if (!scenario.omitReadBack && target.index < edit.index) {
     return tool('workspace_read', { workspace_id, path: 'brief.md' });
   }
+  if (scenario.splitGoalReadRef) {
+    return tool('finish_goal', {
+      status: 'completed',
+      outcomes: [
+        {
+          description: 'The document was saved',
+          status: 'achieved',
+          receipt_refs: [edit.invocationId],
+        },
+        {
+          description: 'The saved document was independently verified',
+          status: 'achieved',
+          receipt_refs: [target.invocationId],
+        },
+      ],
+      clarification: null,
+      answer: 'Saved and verified the document.',
+    });
+  }
   return tool('finish_goal', {
     status: 'completed',
     outcomes: [
       {
         description: 'The document was saved and independently verified',
         status: 'achieved',
-        receipt_refs: scenario.omitReadBack
-          ? [edit.invocationId]
-          : [edit.invocationId, target.invocationId],
+        receipt_refs:
+          scenario.omitReadBack ||
+          (scenario.omitGoalReadRefOnce &&
+            !messages.some((message) =>
+              message.content.includes('goal omits the fresh document read'),
+            ))
+            ? [edit.invocationId]
+            : [edit.invocationId, target.invocationId],
       },
     ],
     clarification: null,
@@ -787,6 +813,49 @@ for (const mode of ['local', 'http'] as const) {
   test(`D8.delegated-workspace.${mode}`, () => delegatedSave(mode, false), 60_000);
   test(`D8.delegated-workspace-conflict.${mode}`, () => delegatedSave(mode, true), 60_000);
   test(`D8.delegated-workspace-full.${mode}`, () => delegatedSave(mode, false, true), 60_000);
+  test(`D8.delegated-workspace-goal-correction.${mode}`, async () => {
+    const { actor, scenario, body } = await setupDelegated(mode);
+    scenario.omitGoalReadRefOnce = true;
+    const events = await (await actor.message(body)).events;
+    const run = started(events);
+    expect(events.some((event) => event.type === 'thread.completed')).toBe(true);
+    expect(
+      scenario.requests
+        .at(-1)
+        ?.some((message) => message.content.includes('goal omits the fresh document read')),
+    ).toBe(true);
+    const accepted = observations(values(scenario.requests.at(-1) ?? []));
+    expect(accepted.filter((value) => value.result.kind === 'edit_applied')).toHaveLength(1);
+    expect(await actor.view(run.conversation_id, run.run_id)).toMatchObject({
+      status: 'done',
+      document_effects: expect.arrayContaining([
+        expect.objectContaining({ path: 'brief.md', status: 'verified' }),
+      ]),
+    });
+    expect(await readFile(join(scenario.root, 'brief.md'), 'utf8')).toBe(
+      scenario.initial.replace('PENDING', `Summary: ${scenario.source.trim()}`),
+    );
+  }, 60_000);
+  test(`D8.delegated-workspace-split-read-evidence.${mode}`, async () => {
+    const { actor, scenario, body } = await setupDelegated(mode);
+    scenario.splitGoalReadRef = true;
+    const events = await (await actor.message(body)).events;
+    const run = started(events);
+    expect(events.some((event) => event.type === 'thread.completed')).toBe(true);
+    const view = await actor.view(run.conversation_id, run.run_id);
+    expect(view).toMatchObject({
+      status: 'done',
+      goal_result: { status: 'completed' },
+      document_effects: expect.arrayContaining([
+        expect.objectContaining({ path: 'brief.md', status: 'verified' }),
+      ]),
+    });
+    const accepted = observations(values(scenario.requests.at(-1) ?? []));
+    expect(accepted.filter((value) => value.result.kind === 'edit_applied')).toHaveLength(1);
+    expect(await readFile(join(scenario.root, 'brief.md'), 'utf8')).toBe(
+      scenario.initial.replace('PENDING', `Summary: ${scenario.source.trim()}`),
+    );
+  }, 60_000);
   test(`D8.delegated-workspace-invalid-literal.${mode}`, async () => {
     const { actor, scenario, body } = await setupDelegated(mode);
     scenario.invalidLiteral = true;

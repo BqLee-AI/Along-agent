@@ -79,6 +79,7 @@ async function nativeCase(options: {
   start?: Record<string, unknown>;
   model?: (request: Request, index: number) => Model;
   invoke?: (request: Request) => unknown;
+  finishGoal?: (request: Request) => unknown;
   contextSource?: (request: Request) => unknown;
   cancel?: (request: Request) => boolean;
   expectedExit?: number;
@@ -188,9 +189,11 @@ async function nativeCase(options: {
               },
             };
             break;
+          case 'finish_goal':
+            value = options.finishGoal?.(request) ?? { accepted: true };
+            break;
           case 'answer':
           case 'finish':
-          case 'finish_goal':
             value = { accepted: true };
             break;
           case 'suspend':
@@ -322,6 +325,36 @@ test('plain prose cannot silently mark delegation complete; original budget boun
     outcome: 'failed',
     error: { code: 'BUDGET_EXCEEDED' },
   });
+});
+
+test('authority-rejected goal permits bounded correction but never repeats business effects', async () => {
+  let attempts = 0;
+  const requests = await nativeCase({
+    finishGoal: () =>
+      ++attempts === 1
+        ? {
+            accepted: false,
+            code: 'INVALID_GOAL_RESULT',
+            message: 'goal omits the fresh document read',
+          }
+        : { accepted: true },
+    model: (request, index) => {
+      if (index === 0) return call('finish_goal', goal());
+      const messages = request.messages as { role: string; content: string }[];
+      expect(
+        messages.some(
+          (m) => m.role === 'tool' && m.content.includes('goal omits the fresh document read'),
+        ),
+      ).toBe(true);
+      if (index === 1) return call('set_user_timezone', { timezone_id: 'Asia/Shanghai' });
+      return call('finish_goal', goal());
+    },
+  });
+  expect(requests.filter((request) => request.type === 'finish_goal')).toHaveLength(2);
+  expect(requests.some((request) => request.type === 'reserve' || request.type === 'invoke')).toBe(
+    false,
+  );
+  expect(requests.at(-1)?.type).toBe('finish_goal');
 });
 
 test('a rejected setting is not a receipt; invalid finish_goal stays in bounded control-only correction', async () => {

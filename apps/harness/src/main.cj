@@ -1201,20 +1201,28 @@ class Harness {
             let name = ref(field(function, "name"))
             let arguments = str(field(function, "arguments"), FRAME_LIMIT)
             if (delegated && name == "finish_goal") {
-                match (goalArguments(arguments)) {
+                let feedback = match (goalArguments(arguments)) {
                     case Some(goal) =>
-                        pipe.ack("finish_goal", obj([("goal_result", goal), ("usage", usage())]), "accepted")
-                        return
+                        pipe.request("finish_goal", obj([("goal_result", goal), ("usage", usage())])).asObject()
                     case None =>
-                        closingGoal = true
-                        let historyContent: JsonValue = if (isNull(content)) { text("") } else { content }
-                        modelMessage(obj([("role", text("assistant")), ("content", historyContent), ("tool_calls", calls)]))
-                        modelMessage(obj([("role", text("tool")), ("tool_call_id", field(call, "id")), ("content", text(obj([
+                        obj([
                             ("accepted", JsonBool(false)), ("code", text("INVALID_GOAL_RESULT")),
-                            ("message", text("Goal result was not accepted. Follow the finish_goal schema: include status, nonempty outcomes, clarification (null or a valid question), and answer. Match aggregate and outcome statuses; receipt_refs must be unique accepted successful invocation UUIDs, never denied/failed/provider IDs. Correct only the structured result; no further business actions are allowed. The original iteration/token budget still applies."))
-                        ]).toString()))]))
-                        continue
+                            ("message", text("Goal result was not accepted. Follow the finish_goal schema: include status, nonempty outcomes, clarification (null or a valid question), and answer. Match aggregate and outcome statuses; receipt_refs must be unique accepted successful invocation UUIDs, never denied/failed/provider IDs."))
+                        ])
                 }
+                if (field(feedback, "accepted").asBool().getValue()) {
+                    keys(feedback, ["accepted"])
+                    return
+                }
+                keys(feedback, ["accepted", "code", "message"])
+                require(ref(field(feedback, "code")) == "INVALID_GOAL_RESULT")
+                str(field(feedback, "message"), 8192)
+                closingGoal = true
+                let historyContent: JsonValue = if (isNull(content)) { text("") } else { content }
+                modelMessage(obj([("role", text("assistant")), ("content", historyContent), ("tool_calls", calls)]))
+                modelMessage(obj([("role", text("tool")), ("tool_call_id", field(call, "id")), ("content", text(feedback.toString()))]))
+                message("system", "Correct only the structured result using the accepted receipts; no further business actions are allowed. The original iteration/token budget still applies.")
+                continue
             }
             let args = JsonValue.fromStr(arguments).asObject()
             if (hardDenied != "" || closingGoal) {

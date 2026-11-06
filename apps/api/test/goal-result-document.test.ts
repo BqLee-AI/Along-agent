@@ -37,6 +37,27 @@ describe('document GoalResult evidence', () => {
     expect(() => validateGoalDocuments(goal([apply]), evidence('applied'))).toThrow();
   });
 
+  it('accepts a verified write and its fresh read in separate achieved outcomes', () => {
+    const split: GoalResult = {
+      ...goal([]),
+      outcomes: [
+        { description: '写入资料', status: 'achieved', receipt_refs: [apply] },
+        { description: '重新读取并核对', status: 'achieved', receipt_refs: [read] },
+      ],
+    };
+    expect(() => validateGoalDocuments(split, evidence('verified'))).not.toThrow();
+    expect(() =>
+      validateGoalDocuments(
+        {
+          ...split,
+          status: 'partial',
+          outcomes: [split.outcomes[0]!, { ...split.outcomes[1]!, status: 'not_done' }],
+        },
+        evidence('verified'),
+      ),
+    ).toThrow();
+  });
+
   it('retains an accepted but unverified write as unfinished rather than achieved', () => {
     const partial: GoalResult = {
       status: 'blocked',

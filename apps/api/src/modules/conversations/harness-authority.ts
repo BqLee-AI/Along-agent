@@ -568,6 +568,7 @@ export async function createHarnessSession(
   );
   const tools = context.authorizationRevision ? [...start.tools, GOAL_CONTROL_TOOL] : start.tools;
   let stopped = false;
+  let correctingGoal = false;
   let lastSnapshot = initial.snapshot;
   const delivered = new Set(initial.snapshot?.tool_refs ?? []);
   const cumulative = { ...(initial.snapshot?.usage ?? { iterations: 0, tokens: 0 }) };
@@ -1265,6 +1266,8 @@ export async function createHarnessSession(
           return nextModelStep();
         }
         if (request.type === 'reserve') {
+          if (correctingGoal)
+            throw stateConflict('goal correction cannot reserve business actions');
           if (!approvalAuthorizesActions(initial.approval))
             throw forbidden('rejected approval cannot authorize another action');
           if (!context.allowlist.includes(request.tool_id))
@@ -1326,6 +1329,7 @@ export async function createHarnessSession(
           return { invocation_id: reserved.invocationId };
         }
         if (request.type === 'invoke') {
+          if (correctingGoal) throw stateConflict('goal correction cannot invoke business actions');
           if (!approvalAuthorizesActions(initial.approval))
             throw forbidden('rejected approval cannot authorize another action');
           if (
@@ -1465,13 +1469,20 @@ export async function createHarnessSession(
             (request.usage.tokens !== null && request.usage.tokens > context.maxTokens)
           )
             throw new HttpError(429, 429, 'BUDGET_EXCEEDED', '本轮推理预算用完，已停下。');
-          const event = await guarded(async (client) => {
-            const goal = await validateGoalResult(
-              client,
-              toolContext(context),
-              request.goal_result,
-            );
-            return commitTerminal(
+          const result = await guarded(async (client) => {
+            let goal;
+            try {
+              goal = await validateGoalResult(client, toolContext(context), request.goal_result);
+            } catch (error) {
+              if (error instanceof HttpError && error.errorCode === 'STATE_CONFLICT')
+                return {
+                  accepted: false as const,
+                  code: 'INVALID_GOAL_RESULT',
+                  message: error.message,
+                };
+              throw error;
+            }
+            const event = await commitTerminal(
               client,
               context,
               goal.status === 'cancelled' ? 'cancelled' : 'done',
@@ -1483,9 +1494,14 @@ export async function createHarnessSession(
                 goal_result: goal,
               },
             );
+            return { accepted: true as const, event };
           });
+          if (!result.accepted) {
+            correctingGoal = true;
+            return result;
+          }
           stopped = true;
-          await send(event);
+          await send(result.event);
           return { accepted: true };
         }
         if (request.type !== 'finish') throw stateConflict('unsupported terminal control');

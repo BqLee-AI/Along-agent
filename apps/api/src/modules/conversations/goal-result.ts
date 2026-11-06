@@ -31,11 +31,12 @@ export function validateGoalDocuments(goal: GoalResult, documents: RunGoalDocume
       throw stateConflict('goal claims an unverified document effect');
     if (
       effect.status === 'verified' &&
-      referenced.some(
-        (item) =>
-          item.status === 'achieved' &&
-          (!effect.read_invocation_id || !item.receipt_refs.includes(effect.read_invocation_id)),
-      )
+      referenced.some((item) => item.status === 'achieved') &&
+      (!effect.read_invocation_id ||
+        !goal.outcomes.some(
+          (item) =>
+            item.status === 'achieved' && item.receipt_refs.includes(effect.read_invocation_id!),
+        ))
     )
       throw stateConflict('goal omits the fresh document read');
   }

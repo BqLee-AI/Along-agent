@@ -30,6 +30,8 @@
 - finish 的消息/终态/attempt/Run 同事务；cancel 先提交资格撤销和唯一事件，再终止 native/模型请求。已接受工具与按钮确认任务不被假撤销。
 - delegation/1 使用 `finish_goal` 提交目标结果，SSE v2 和 RunView 保存逐项目标事实；最终答复、GoalResult、terminal 事件、attempt 与 Run 同事务，异常/取消按同一终结事务保留既成效果。纯正文或工具 completed 不代替目标完成。输入/规则拒绝可交同一模型反馈；`TOOL_FORBIDDEN` / `TOOL_DENIED` 只允许结果说明与 `finish_goal`，native 和 TS 均停止该 Run 后续业务动作；failed/unknown 不继续。请求断开按取消收尾，不回滚已接受偏好；导航、刷新、重登和 GET 只读，不启动新 attempt 或重做设置。
 - `finish_goal` 的模型参数与 pipe 帧错误分开处理：JSON、字段、状态聚合或收据资格不合法时，native 返回配对的 `accepted:false / INVALID_GOAL_RESULT` 控制观察，不接纳目标、不伪造成功；此后只允许提交修正后的目标结果，不再预约或执行业务工具。修正使用原模型迭代/token预算，耗尽按原预算错误终结；既成领域结果与收据保留。pipe/传输故障仍按原协议失败，不捕获为可继续的业务观察。普通用户无需知道或输入控制工具名。
+- TS 根据已接受效果复核目标时，如缺少写后新读收据，也返回对应的结构化拒绝原因；原运行保持未终结，模型只能修正结果，不得重做文件写入或其他业务动作。
+- 已验证写入及其对应的新读回执可以分别列在不同的已达成目标中；两者仍须来自服务端核对过的同一文件效果，不能用其他读取或未达成项代替。
 - owner 在途 disabled 时拒绝后续动作；内部失败追账只核验 owner/conversation/run、冻结 profile 与既成接受结果完整性，不重新索取已撤销的执行资格，因此仍能原子保存唯一终态。该内部投影不是公开读取或执行入口；普通工具/GET仍要求有效身份，撤权后的原连接也不披露包含目标结果或收据的终结内容。恢复有效身份后只读原持久事实，不自动重做。
 - legacy 有限 workspace 使用五个工具；合格新 delegation 另可使用 `workspace_replace` 直接编辑，读取工具显式指定冻结集合中的 workspace。前三个读取经 TS 薄只读 MCP，提案和直接编辑均绑定同 Run 真实全文 read；写后独立新读才可 verified。工具顺序由仓颉决定，TS 不隐藏另一套 Agent 或固定代跑链。
 
