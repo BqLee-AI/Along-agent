@@ -131,7 +131,9 @@ stack; unit coverage alone is not provider or complete R1 evidence.
   A development bridge cannot claim. Without an eligible old session, the
   deployer must use the original installation's `local:account` command to
   explicitly select and confirm the original account. Existing passwords are
-  not overwritten and other owners are not merged.
+  not overwritten by claim/admission and other owners are not merged. A
+  forgotten password of an admitted account is reset only through
+  `local:account --reset-password` on the trusted local terminal.
 - `/login` accepts an admitted account's username or verified contact email.
   Passwords retain leading and trailing spaces, support paste/password managers,
   and are never put in a URL or browser storage. Sessions expire after seven

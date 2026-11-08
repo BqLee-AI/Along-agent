@@ -13,9 +13,10 @@ const usage = `本机生命周期（Bun 1.4.2 / Windows + Docker Linux x64）
   bun --no-env-file run local:start [--config <私有 JSON>]
   bun --no-env-file run local:stop [--config <私有 JSON>]
   bun --no-env-file run local:upgrade [--config <私有 JSON>]
-  bun --no-env-file run local:account [--admit | --workspace] [--config <私有 JSON>]
+  bun --no-env-file run local:account [--admit | --workspace | --reset-password] [--config <私有 JSON>]
   --admit：明确选择原普通用户并验证/设置本人凭证后准入，不绑定管理员
   --workspace：明确选择已准入 owner，有限新增工作区，保留全部原登记
+  --reset-password：明确选择已准入账户，在本机交互终端重置遗忘的口令；撤销该账户全部会话，不改身份与业务数据
 已有配置时 local:init 只复用，不覆盖；首次 --new/--adopt 通过终端输入。
 未登录、缺模型或工作区均独立提示；启动不自动发模型请求。`;
 
@@ -32,7 +33,7 @@ function options(args) {
     else if (['--new', '--adopt'].includes(flag) && !value.mode && action === 'init')
       value.mode = flag.slice(2);
     else if (
-      ['--admit', '--workspace'].includes(flag) &&
+      ['--admit', '--workspace', '--reset-password'].includes(flag) &&
       value.operation === 'administrator' &&
       action === 'account'
     )
@@ -199,6 +200,10 @@ const explanations = {
   ACCOUNT_SELECTION_INVALID: '请选择列表中的明确可用序号，不默认认领或输入 owner ID。',
   ACCOUNT_CONFIRMATION_REQUIRED: '未收到明确确认；没有替你选择或授权。',
   ACCOUNT_PASSWORD_MISMATCH: '两次口令不一致；口令未提交。',
+  ACCOUNT_PASSWORD_INVALID:
+    '新口令必须为 8–128 个字符，且不会被 trim；口令未提交，原口令保持有效。',
+  ACCOUNT_RESET_INELIGIBLE:
+    '所选账户不再满足重置条件（需 active、已准入且恰有一个 credential）；没有改动任何事实，请重新读取候选并按维护说明核对。',
   ACCOUNT_INSTALLATION_CHANGED: '安装事实已变化；重新读取并显式维护，不自动重试。',
   CONFIG_VERSION_CONFLICT: '私有配置字节版本已变化；保持原文件并重新读取，不覆盖并发修改。',
   IDENTITY_KEYRING_FILE_INVALID:
@@ -212,7 +217,8 @@ const explanations = {
   WORKSPACE_IDENTITY_CHANGED:
     '登记或 root 物理身份已变化；保持原材料，重新核对，不能复制新 root 代替。',
   WORKSPACE_LOAD_FAILED: '配置已保存但登记未确认加载；账户保留，修复后仅重试 local:account 收尾。',
-  UNAUTHENTICATED: '原口令不符或账户不活跃；不会重置口令或激活原用户，请核对原材料。',
+  UNAUTHENTICATED:
+    '原口令不符或账户不活跃；本流程不重置口令也不激活原用户。已遗忘口令的已准入账户请改用 local:account --reset-password。',
   STATE_CONFLICT: '原 credential、登录名或管理员绑定冲突；保留原身份，按维护说明核对，不自动合并。',
   NOT_READY:
     '账户依赖或提交结果不可核验；核对 IDENTITY_KEYRING_FILE、APP_ORIGIN、IDENTITY_MAIL_PROVIDER、IDENTITY_MAIL_FROM、IDENTITY_MAIL_API_KEY 的显式配置，保留原安装，不重复开户。',

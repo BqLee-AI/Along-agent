@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { APIError } from 'better-auth/api';
 import type { Pool, PoolClient } from 'pg';
 import type { AuthStatus } from '@along/contracts';
-import { authInitializeSchema, authSignInSchema } from '@along/contracts';
+import { authInitializeSchema, authPasswordChangeSchema, authSignInSchema } from '@along/contracts';
 import {
   HttpError,
   notReady,
@@ -12,6 +12,7 @@ import {
 } from '../../http/errors.js';
 import { createAuth } from './better-auth.js';
 import { deriveAuthEmail } from './crypto.js';
+import { invalidateUser } from './credential-invalidation.js';
 import { listHistoricalOwners as conversationOwners } from '../conversations/owner-history.js';
 import { listHistoricalOwners as approvalOwners } from '../approvals/owner-history.js';
 import { listHistoricalOwners as taskOwners } from '../tasks/owner-history.js';
@@ -46,6 +47,13 @@ export interface MaintenanceCandidate {
   displayName: string;
   status: string;
   hasPassword: boolean;
+  eligible: boolean;
+}
+export interface PasswordResetCandidate {
+  selection: string;
+  displayName: string;
+  status: string;
+  installationAdmin: boolean;
   eligible: boolean;
 }
 export interface AccountSessionResult {
@@ -100,6 +108,12 @@ export interface AccountService {
   resolveAdmittedLocalCandidate(
     selection: string,
   ): Promise<{ userId: string; displayName: string }>;
+  listPasswordResetCandidates(): Promise<PasswordResetCandidate[]>;
+  resetLocalPassword(input: {
+    selection: string;
+    confirmed: true;
+    password: string;
+  }): Promise<{ reset: true }>;
   getAdmittedLocalOwner(userId: string): Promise<{ userId: string; displayName: string }>;
 }
 export function createAccountService(
@@ -617,6 +631,72 @@ export function createAccountService(
         if (!user) throw stateConflict('selected account is no longer eligible');
         return { userId: user.id, displayName: user.display_name };
       }, false);
+    },
+    async listPasswordResetCandidates() {
+      return transaction(async (client) => {
+        const rows = (
+          await client.query<{
+            id: string;
+            display_name: string;
+            status: string;
+            admitted: boolean;
+            administrator: boolean;
+          }>(
+            'SELECT u.id,u.display_name,u.status,(q.user_id IS NOT NULL) admitted,(a.user_id IS NOT NULL) administrator FROM users u LEFT JOIN identity_account_admissions q ON q.user_id=u.id LEFT JOIN installation_admin a ON a.user_id=u.id ORDER BY u.created_at,u.id',
+          )
+        ).rows;
+        selections.clear();
+        const candidates: PasswordResetCandidate[] = [];
+        for (const row of rows) {
+          const accounts = await credentials(client, row.id);
+          const selection = randomUUID();
+          selections.set(selection, row.id);
+          candidates.push({
+            selection,
+            displayName: row.display_name,
+            status: row.status,
+            installationAdmin: row.administrator,
+            eligible:
+              row.status === 'active' &&
+              row.admitted &&
+              accounts.length === 1 &&
+              accounts[0]!.account_id === row.id &&
+              !!accounts[0]!.password_hash,
+          });
+        }
+        return candidates;
+      }, false);
+    },
+    async resetLocalPassword(input) {
+      if (input.confirmed !== true) throw validationError('explicit confirmation required');
+      const userId = selections.get(input.selection);
+      if (!userId) throw validationError('select an account from current candidates');
+      // One password policy: the same schema as the signed-in password change.
+      const password = authPasswordChangeSchema.shape.new_password.safeParse(input.password);
+      if (!password.success) throw validationError('invalid account fields');
+      await transaction(async (client) => {
+        const user = (
+          await client.query<{ status: string }>(
+            'SELECT u.status FROM users u JOIN identity_account_admissions a ON a.user_id=u.id WHERE u.id=$1 FOR UPDATE OF u',
+            [userId],
+          )
+        ).rows[0];
+        if (user?.status !== 'active')
+          throw stateConflict('selected account is no longer eligible');
+        const accounts = await credentials(client, userId);
+        const account = accounts[0];
+        if (accounts.length !== 1 || account!.account_id !== userId || !account!.password_hash)
+          throw stateConflict('credential conflict', { reason: 'CREDENTIAL_CONFLICT' });
+        const context = await library(client).$context;
+        await context.adapter.update({
+          model: 'account',
+          where: [{ field: 'id', value: account!.id }],
+          update: { password: await context.password.hash(password.data), updatedAt: new Date() },
+        });
+        await invalidateUser(client, userId);
+      }, false);
+      selections.clear();
+      return { reset: true };
     },
   };
 }
