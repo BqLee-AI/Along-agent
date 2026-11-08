@@ -49,6 +49,25 @@
 - **WHEN** 目标已有密码、credential 不一致、登录名/绑定冲突、账户不活跃或历史 owner 缺用户
 - **THEN** 停止有冲突的转正并给有资格入口可操作说明，不覆盖口令、激活账户、合并或重写业务 owner；已有合法口令须验证后明确绑定
 
+### Requirement: 本机已准入账户口令重置
+
+系统 SHALL 在邮箱找回不可用时，仅允许部署者经受信本机交互维护入口（`local:account --reset-password`）显式选择 active、已准入且恰有一个 credential 的账户重置口令；新口令经同一库哈希/credential 写路径，并与撤销该用户全部会话、递增 credential revision、作废未消费挑战及排队邮件同属一个事务。不新增表、迁移或环境变量，不接受 argv 口令或远程/非交互重置。详见 design/16 §3（#131）。
+
+#### Scenario: 明确选择并重置
+
+- **WHEN** 部署者在受信交互终端明确选择候选序号、输入 `CONFIRM <序号>`，并两次隐藏输入合法新口令
+- **THEN** 新口令可登录且旧口令失效，该用户全部旧会话撤销；用户 ID、业务 owner 数据、登记、私有配置与其他用户保持不变，输出不含口令或哈希
+
+#### Scenario: 缺少确认或候选不合格
+
+- **WHEN** 序号无效、确认文本不符、两次口令不一致、口令不符合 8–128 字符规则，或账户为 disabled、deleted_requested、未准入、无口令或 credential 冲突
+- **THEN** 不写任何事实，旧口令保持有效；不默认选择，不显示或接受 owner ID
+
+#### Scenario: 事务失败
+
+- **WHEN** 口令写入或会话/挑战撤销任一步失败
+- **THEN** 整体回滚，旧口令与旧会话保持，不报告成功
+
 ### Requirement: 库 credential 与 Cookie 兼容
 
 系统 SHALL 复用锁定 Better Auth 的密码哈希/验证和 Cookie、现有 HMAC resolver；提供相容的标准字段、UUID、credential account_id 与真实 client-bound transaction。PG 仅存 token HMAC，HTTP JSON 不披露原 token/hash。详见 design/16 §4、§7（AC3；D1/D6/D8）。

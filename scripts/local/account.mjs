@@ -270,6 +270,65 @@ async function requestRegistration(ownerId, config, io) {
   ];
 }
 
+/**
+ * Local credential recovery for an admitted account whose password is lost. The registry, private
+ * configuration and running services are deliberately not involved: only identity's public
+ * maintenance use case writes, in one PG transaction.
+ */
+async function resetPassword(file, io, dependencies) {
+  return dependencies.lock(file, async () => {
+    const snapshot = await dependencies.loadConfig(file);
+    const context = await dependencies.prepare(file, snapshot);
+    // Candidate listing and reset never read workspace state; a broken registry must not block recovery.
+    const identity = await dependencies.openIdentity(snapshot, context, async () => ({
+      state: 'unconfigured',
+      ownerIds: [],
+    }));
+    try {
+      const candidates = await identity.service.listPasswordResetCandidates();
+      if (!candidates.length) {
+        stateReport(io, 'account_unconfigured');
+        io.write('没有可重置口令的账户。空安装请先在 Web 首次建号；不要 seed 或输入 owner ID。');
+        return { account: 'unconfigured' };
+      }
+      candidates.forEach((item, index) =>
+        io.write(
+          `${index + 1}. ${JSON.stringify(item.displayName)} | ${JSON.stringify(item.status)} | ${item.installationAdmin ? '管理员' : '普通账户'} | ${item.eligible ? '可重置口令' : '不可重置，需人工维护'}`,
+        ),
+      );
+      const answer = await io.ask('明确选择要重置口令的账户序号（无默认值；留空退出）');
+      if (!answer) return { account: 'unconfigured' };
+      if (!/^[1-9][0-9]*$/.test(answer)) throw failure('ACCOUNT_SELECTION_INVALID');
+      const candidate = candidates[Number(answer) - 1];
+      if (!candidate?.eligible) throw failure('ACCOUNT_SELECTION_INVALID');
+      const confirmation = await io.ask(
+        `确认重置该账户口令：其全部现有会话与未完成的找回/验证流程将失效，原用户及历史保持不变；输入 CONFIRM ${answer}`,
+      );
+      if (confirmation !== `CONFIRM ${answer}`) throw failure('ACCOUNT_CONFIRMATION_REQUIRED');
+      const password = await io.ask('新口令（隐藏，8–128 字符，不 trim）', { secret: true });
+      if (password !== (await io.ask('再次输入新口令（隐藏）', { secret: true })))
+        throw failure('ACCOUNT_PASSWORD_MISMATCH');
+      try {
+        await identity.service.resetLocalPassword({
+          selection: candidate.selection,
+          confirmed: true,
+          password,
+        });
+      } catch (error) {
+        // Public service errors are HTTP-shaped; give the operator the stable local codes.
+        if (error?.errorCode === 'VALIDATION_ERROR') throw failure('ACCOUNT_PASSWORD_INVALID');
+        if (error?.errorCode === 'STATE_CONFLICT') throw failure('ACCOUNT_RESET_INELIGIBLE');
+        throw error;
+      }
+      stateReport(io, 'password_reset');
+      io.write('口令已重置，该账户的原会话已失效；请在 Web 用原登录名和新口令登录。');
+      return { account: 'password_reset' };
+    } finally {
+      await identity.close();
+    }
+  });
+}
+
 /** One-shot maintenance. IO/dependencies are injectable for isolated acceptance; no argv secrets. */
 export async function maintainAccount(
   file,
@@ -295,8 +354,9 @@ export async function maintainAccount(
     ...injected,
   };
   assertExternalConfiguration(file);
-  if (!['administrator', 'admit', 'workspace'].includes(operation))
+  if (!['administrator', 'admit', 'workspace', 'reset-password'].includes(operation))
     throw failure('ARGUMENT_INVALID');
+  if (operation === 'reset-password') return resetPassword(file, io, dependencies);
   let committed = false,
     saved = false,
     bound,
