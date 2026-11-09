@@ -1,6 +1,7 @@
 // The gateway binds each logical tool call before executing local work.
 // Approved results, local approval inserts and audit rows commit together.
 import type { Pool, PoolClient } from 'pg';
+import { workspaceGrantSchema } from '@along/contracts';
 import { normalizeTime } from '../time/normalize.js';
 import { addElapsed, classifyEntry, reminderDateExpression, utcToLocal } from '@along/time-core';
 import { readReminderDateInput } from '../conversations/reminder-date.js';
@@ -44,7 +45,12 @@ import {
   type ApprovedWorkspaceTarget,
 } from '../workspaces/replace.js';
 import { publishWorkspaceCreate } from '../workspaces/create.js';
-import { strictUtf8, utf8Bytes, WorkspaceDeniedError } from '../workspaces/service.js';
+import {
+  isWorkspaceOutputDirectory,
+  strictUtf8,
+  utf8Bytes,
+  WorkspaceDeniedError,
+} from '../workspaces/service.js';
 import { readAcceptedInvocationResult } from './accepted-result.js';
 import { callWorkspaceMcp, type WorkspaceReadTool } from './mcp-workspace.js';
 import { readRunDocumentEvidence } from './query.js';
@@ -1122,7 +1128,12 @@ export function invokeTool(
               invocation_id: string;
               args_hash: string;
               frozen_context: {
-                documentCreate?: { relative_path: string; directory_identity: string };
+                workspaceGrant?: unknown;
+                documentCreate?: {
+                  output_directory: string;
+                  relative_path: string;
+                  directory_identity: string;
+                };
               };
               result_version: number | null;
               tool_id: string;
@@ -1130,26 +1141,56 @@ export function invokeTool(
               accepted_result: unknown;
               outcome_kind: string | null;
             }>(
-              `SELECT invocation_id,args_hash,frozen_context,result_version,tool_id,approval_id,accepted_result,outcome_kind
-               FROM tool_invocations WHERE owner_id=$1 AND conversation_id=$2 AND run_id=$3
-                 AND tool_id='workspace_create' AND state='completed'
-                 AND frozen_context->'workspaceGrant'=$4::jsonb
-                 AND accepted_result->'result'->>'kind'='create_applied'`,
+              `SELECT i.invocation_id,i.args_hash,i.frozen_context,i.result_version,i.tool_id,i.approval_id,i.accepted_result,i.outcome_kind
+               FROM tool_invocations i
+               JOIN agent_runs current_run ON current_run.id=$3 AND current_run.owner_id=$1
+                 AND current_run.conversation_id=$2
+               WHERE i.owner_id=$1 AND i.tool_id='workspace_create' AND i.state='completed'
+                 AND i.accepted_result->'result'->>'kind'='create_applied'
+                 AND (
+                   (i.conversation_id=$2 AND i.run_id=$3 AND i.frozen_context->'workspaceGrant'=$4::jsonb)
+                   OR (
+                     current_run.frozen_context->>'createdArtifactReadRevision'='owner-created/1'
+                     AND i.run_id<>$3 AND i.accepted_at < current_run.created_at
+                     AND i.frozen_context->'workspaceGrant'->>'workspace_id'=$5
+                     AND i.frozen_context->'workspaceGrant'->>'owner_id'=$1::text
+                     AND i.frozen_context->'workspaceGrant'->>'root_identity'=$6
+                   )
+                 )
+               ORDER BY i.accepted_at DESC,i.invocation_id DESC`,
               [
                 frozen.ownerId,
                 frozen.conversationId,
                 frozen.runId,
                 JSON.stringify(frozen.workspaceGrant),
+                frozen.workspaceGrant.workspace_id,
+                frozen.workspaceGrant.root_identity,
               ],
             );
             for (const row of rows) {
               const accepted = await readAcceptedInvocationResult(client, frozen, row);
               const target = row.frozen_context.documentCreate;
               const privateResult = row.accepted_result as { file_identity?: unknown };
+              const historicalGrant = workspaceGrantSchema.safeParse(
+                row.frozen_context.workspaceGrant,
+              );
+              const slash = target?.relative_path.lastIndexOf('/') ?? -1;
+              const directory = slash < 0 ? '' : target!.relative_path.slice(0, slash);
               if (
                 accepted.status === 'ok' &&
                 accepted.result.kind === 'create_applied' &&
                 target &&
+                historicalGrant.success &&
+                historicalGrant.data.owner_id === frozen.ownerId &&
+                historicalGrant.data.workspace_id === frozen.workspaceGrant.workspace_id &&
+                historicalGrant.data.root_identity === frozen.workspaceGrant.root_identity &&
+                typeof target.directory_identity === 'string' &&
+                target.directory_identity.length > 0 &&
+                typeof target.output_directory === 'string' &&
+                target.output_directory === directory &&
+                isWorkspaceOutputDirectory(historicalGrant.data, directory) &&
+                isWorkspaceOutputDirectory(frozen.workspaceGrant, directory) &&
+                !authorizedCreatedPaths.some((entry) => entry.path === target.relative_path) &&
                 typeof privateResult.file_identity === 'string' &&
                 privateResult.file_identity.length > 0
               )

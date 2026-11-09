@@ -530,9 +530,6 @@ export async function readRunGoalDocumentEvidence(
   // Only a unique chain ending in an independently verified write resolves a
   // zero-write conflict. A reserved, failed or unverified successor is not proof.
   const successorIds = (id: string): string[] => {
-    const createDirect = delegated.filter(
-      (row) => row.frozen_context.documentCreate?.replaces_invocation_id === id,
-    );
     const direct = delegated.filter(
       (row) => row.frozen_context.documentEdit?.replaces_invocation_id === id,
     );
@@ -550,7 +547,7 @@ export async function readRunGoalDocumentEvidence(
       ))
         ids.push(approval.apply_invocation_id ?? approval.id);
     }
-    return [...new Set([...ids, ...createDirect.map((row) => row.invocation_id)])];
+    return [...new Set(ids)];
   };
   const reachesVerified = (effect: RunGoalDocumentEffect, visited: Set<string>): boolean => {
     if (effect.status === 'verified') return true;
@@ -573,24 +570,10 @@ export async function readRunGoalDocumentEvidence(
     if (successors.length !== 1) return false;
     const next = effects.find((item) => item.invocation_id === successors[0]);
     if (!next || next.workspace_id !== effect.workspace_id) return false;
-    if (effect.operation === 'create') {
-      const previous = row.frozen_context.documentCreate;
-      const successorRow = delegated.find((item) => item.invocation_id === next.invocation_id);
-      const successor = successorRow?.frozen_context.documentCreate;
-      if (
-        next.operation !== 'create' ||
-        !previous ||
-        !successor ||
-        !isDeepStrictEqual(
-          row.frozen_context.workspaceGrant,
-          successorRow?.frozen_context.workspaceGrant,
-        ) ||
-        previous.output_directory !== successor.output_directory ||
-        previous.directory_identity !== successor.directory_identity ||
-        previous.content_base64 !== successor.content_base64
-      )
-        return false;
-    } else if (next.path !== effect.path || next.operation === 'create') return false;
+    // Historical create links were inferred from matching bytes, not from a
+    // trusted user decision. They cannot prove that two paths are one goal.
+    if (effect.operation === 'create' || next.path !== effect.path || next.operation === 'create')
+      return false;
     visited.add(effect.invocation_id);
     return reachesVerified(next, visited);
   };

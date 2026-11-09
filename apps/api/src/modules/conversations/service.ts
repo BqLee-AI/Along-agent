@@ -449,6 +449,11 @@ export async function startConversationRun(
         ...(messageRefs ? { messageRefs } : {}),
         ...(workspaceGrant ? { workspaceGrant, workspaceSummary } : {}),
         ...(delegation ? { workspaceGrants: workspaceSet.grants } : {}),
+        ...(delegation &&
+        (!targetContinuation || targetContinuation.createdArtifactReadAllowed) &&
+        workspaceSet.grants.some((grant) => (grant.output_directories?.length ?? 0) > 0)
+          ? { createdArtifactReadRevision: 'owner-created/1' as const }
+          : {}),
         ...(trustedExecutionContext
           ? {
               authorization_revision: 'delegation/1' as const,

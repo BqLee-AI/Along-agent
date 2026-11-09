@@ -478,37 +478,12 @@ export async function reserveInvocation(
           if (!read) throw stateConflict('same-target action requires a fresh verified read');
           await assertDocumentTargetAvailable(client, ctx, read);
         }
-        const candidates = await client.query<{ invocation_id: string }>(
-          `SELECT i.invocation_id FROM tool_invocations i
-           WHERE i.owner_id=$1 AND i.conversation_id=$2 AND i.run_id=$3 AND i.tool_id='workspace_create'
-             AND i.state='completed' AND i.accepted_result->>'status'='ok'
-             AND i.accepted_result->'result'->>'kind'='create_conflict'
-             AND i.frozen_context->'workspaceGrant'=$4::jsonb
-             AND i.frozen_context->'documentCreate'->>'output_directory'=$5
-             AND i.frozen_context->'documentCreate'->>'content_base64'=$6
-             AND i.frozen_context->'documentCreate'->>'relative_path'<>$7
-             AND NOT EXISTS (SELECT 1 FROM tool_invocations successor
-               WHERE successor.owner_id=i.owner_id AND successor.run_id=i.run_id
-                 AND successor.frozen_context->'documentCreate'->>'replaces_invocation_id'=i.invocation_id::text)`,
-          [
-            ctx.ownerId,
-            ctx.conversationId,
-            ctx.runId,
-            JSON.stringify(selected),
-            args.output_directory,
-            contentBase64,
-            relativePath,
-          ],
-        );
         documentCreate = {
           output_directory: args.output_directory,
           directory_identity: directoryIdentity,
           relative_path: relativePath,
           content_base64: contentBase64,
           new_version: hashBytes(bytes),
-          ...(candidates.rows.length === 1
-            ? { replaces_invocation_id: candidates.rows[0]!.invocation_id }
-            : {}),
         };
       } else if (
         input.toolId === 'workspace_replace' ||

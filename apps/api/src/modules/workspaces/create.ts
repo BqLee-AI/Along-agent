@@ -9,6 +9,7 @@ import {
   hashBytes,
   readWorkspaceBytes,
   utf8Bytes,
+  workspaceIdentity,
   WorkspaceDeniedError,
 } from './service.js';
 
@@ -38,7 +39,7 @@ export async function publishWorkspaceCreate(
   const bytes = utf8Bytes(target.exact_new_content);
   if (hashBytes(bytes) !== target.new_version) throw new Error('Invalid frozen document target');
   const lock = `along:workspace:${grant.workspace_id}`;
-  let temporaryIdentity: { dev: number; ino: number } | undefined;
+  let temporaryIdentity: { dev: bigint; ino: bigint } | undefined;
   await client.query('SELECT pg_advisory_lock(hashtextextended($1, 0))', [lock]);
   let temporary: string | undefined;
   let linkStarted = false;
@@ -53,15 +54,15 @@ export async function publishWorkspaceCreate(
     const destination = path.join(directory.absolute, filename);
     temporary = path.join(directory.absolute, `.along-${randomUUID()}.tmp`);
     const handle = await open(temporary, 'wx', 0o600);
-    let dev: number;
-    let ino: number;
+    let dev: bigint;
+    let ino: bigint;
     try {
-      const initial = await handle.stat();
+      const initial = await handle.stat({ bigint: true });
       temporaryIdentity = { dev: initial.dev, ino: initial.ino };
       await handle.writeFile(bytes);
       await handle.sync();
-      const stat = await handle.stat();
-      if (!stat.isFile() || stat.nlink !== 1) throw new WorkspaceDeniedError();
+      const stat = await handle.stat({ bigint: true });
+      if (!stat.isFile() || stat.nlink !== 1n) throw new WorkspaceDeniedError();
       dev = stat.dev;
       ino = stat.ino;
     } finally {
@@ -70,8 +71,8 @@ export async function publishWorkspaceCreate(
     const again = await checkedWorkspaceOutputDirectory(ownerId, grant, target.output_directory);
     if (again.identity !== directory.identity || again.absolute !== directory.absolute)
       throw new WorkspaceDeniedError();
-    const tempStat = await lstat(temporary);
-    if (!tempStat.isFile() || tempStat.nlink !== 1 || tempStat.dev !== dev || tempStat.ino !== ino)
+    const tempStat = await lstat(temporary, { bigint: true });
+    if (!tempStat.isFile() || tempStat.nlink !== 1n || tempStat.dev !== dev || tempStat.ino !== ino)
       throw new WorkspaceDeniedError();
     linkStarted = true;
     try {
@@ -96,7 +97,7 @@ export async function publishWorkspaceCreate(
     } finally {
       await parent.close();
     }
-    const fileIdentity = `${dev}:${ino}`;
+    const fileIdentity = workspaceIdentity({ dev, ino });
     const observed = await readWorkspaceBytes(ownerId, grant, target.path, false, [
       {
         path: target.path,
@@ -119,7 +120,7 @@ export async function publishWorkspaceCreate(
   } finally {
     try {
       if (temporary && temporaryIdentity && !published) {
-        const current = await lstat(temporary).catch(() => undefined);
+        const current = await lstat(temporary, { bigint: true }).catch(() => undefined);
         if (
           current?.isFile() &&
           current.dev === temporaryIdentity.dev &&

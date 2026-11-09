@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { constants, type Stats } from 'node:fs';
+import { constants, type BigIntStats } from 'node:fs';
 import { lstat, realpath, open, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type {
@@ -69,8 +69,13 @@ export function utf8Bytes(value: string): Buffer {
     throw new WorkspaceDeniedError();
   return Buffer.from(value, 'utf8');
 }
-function identity(stat: { dev: number; ino: number }): string {
-  return `${stat.dev}:${stat.ino}`;
+// A legacy numeric identity is ambiguous outside the safe integer range, even
+// when its rounded value happens to equal the actual inode.
+export function workspaceIdentity(stat: { dev: bigint; ino: bigint }): string {
+  const limit = BigInt(Number.MAX_SAFE_INTEGER);
+  const legacySafe =
+    stat.dev >= -limit && stat.dev <= limit && stat.ino >= -limit && stat.ino <= limit;
+  return `${legacySafe ? '' : 'exact:'}${stat.dev}:${stat.ino}`;
 }
 function inside(parent: string, child: string): boolean {
   const rel = path.relative(parent, child);
@@ -147,8 +152,8 @@ export async function configureWorkspaceRegistry(input: unknown): Promise<Regist
       await checkedDirectory(item.root);
       const root = await realpath(item.root);
       if (path.resolve(item.root) !== root) continue;
-      const stat = await lstat(root);
-      const root_identity = identity(stat);
+      const stat = await lstat(root, { bigint: true });
+      const root_identity = workspaceIdentity(stat);
       const outputs =
         item.output_directories === undefined
           ? undefined
@@ -161,7 +166,10 @@ export async function configureWorkspaceRegistry(input: unknown): Promise<Regist
                 const directory = path.join(root, ...relative.split('/').filter(Boolean));
                 await checkedDirectory(directory);
                 if ((await realpath(directory)) !== directory) throw new WorkspaceDeniedError();
-                return { path: relative, identity: identity(await lstat(directory)) };
+                return {
+                  path: relative,
+                  identity: workspaceIdentity(await lstat(directory, { bigint: true })),
+                };
               }),
             );
       const material = {
@@ -403,7 +411,7 @@ export async function getWorkspaceOutputIdentity(
   try {
     await checkedDirectory(item.root);
     if (
-      identity(await lstat(item.root)) !== item.root_identity ||
+      workspaceIdentity(await lstat(item.root, { bigint: true })) !== item.root_identity ||
       (await realpath(item.root)) !== item.root
     )
       throw new WorkspaceDeniedError();
@@ -411,13 +419,13 @@ export async function getWorkspaceOutputIdentity(
     await checkedDirectory(registered);
     if (
       (await realpath(registered)) !== registered ||
-      identity(await lstat(registered)) !== entry.identity
+      workspaceIdentity(await lstat(registered, { bigint: true })) !== entry.identity
     )
       throw new WorkspaceDeniedError();
     const absolute = path.join(item.root, ...outputDirectory.split('/').filter(Boolean));
     await checkedDirectory(absolute);
     if ((await realpath(absolute)) !== absolute) throw new WorkspaceDeniedError();
-    directoryIdentity = identity(await lstat(absolute));
+    directoryIdentity = workspaceIdentity(await lstat(absolute, { bigint: true }));
   } catch {
     throw new WorkspaceDeniedError();
   }
@@ -451,7 +459,7 @@ async function checkedOutputForPath(
 
 export interface CheckedWorkspaceTarget {
   absolute: string;
-  stat: Stats;
+  stat: BigIntStats;
   parent_identity: string;
 }
 export interface WorkspaceFileBytes extends CheckedWorkspaceTarget {
@@ -476,13 +484,13 @@ export async function checkedTarget(
     await checkedOutputForPath(ownerId, grant, relative);
   await checkedDirectory(item.root);
   if (
-    identity(await lstat(item.root)) !== item.root_identity ||
+    workspaceIdentity(await lstat(item.root, { bigint: true })) !== item.root_identity ||
     (await realpath(item.root)) !== item.root
   )
     throw new WorkspaceDeniedError();
   const absolute = path.join(item.root, ...relative.split('/'));
   await checkedDirectory(path.dirname(absolute));
-  const parent_identity = identity(await lstat(path.dirname(absolute)));
+  const parent_identity = workspaceIdentity(await lstat(path.dirname(absolute), { bigint: true }));
   if (
     !write &&
     !item.readable_paths.includes(relative) &&
@@ -491,11 +499,11 @@ export async function checkedTarget(
     )
   )
     throw new WorkspaceDeniedError();
-  const stat = await lstat(absolute);
+  const stat = await lstat(absolute, { bigint: true });
   if (
     stat.isSymbolicLink() ||
     !stat.isFile() ||
-    stat.nlink !== 1 ||
+    stat.nlink !== 1n ||
     !inside(item.root, await realpath(absolute))
   )
     throw new WorkspaceDeniedError();
@@ -506,7 +514,7 @@ export async function checkedTarget(
       (entry) =>
         entry.path === relative &&
         entry.directory_identity === parent_identity &&
-        entry.file_identity === identity(stat),
+        entry.file_identity === workspaceIdentity(stat),
     )
   )
     throw new WorkspaceDeniedError();
@@ -525,8 +533,12 @@ export async function readWorkspaceBytes(
     constants.O_RDONLY | (process.platform === 'linux' ? constants.O_NOFOLLOW : 0),
   );
   try {
-    const stat = await handle.stat();
-    if (!stat.isFile() || stat.nlink !== 1 || identity(stat) !== identity(target.stat))
+    const stat = await handle.stat({ bigint: true });
+    if (
+      !stat.isFile() ||
+      stat.nlink !== 1n ||
+      workspaceIdentity(stat) !== workspaceIdentity(target.stat)
+    )
       throw new WorkspaceDeniedError();
     if (
       !write &&
@@ -535,7 +547,7 @@ export async function readWorkspaceBytes(
         (entry) =>
           entry.path === relative &&
           entry.directory_identity === target.parent_identity &&
-          entry.file_identity === identity(stat),
+          entry.file_identity === workspaceIdentity(stat),
       )
     )
       throw new WorkspaceDeniedError();
@@ -547,7 +559,7 @@ export async function readWorkspaceBytes(
         (entry) =>
           entry.path === relative &&
           entry.directory_identity === target.parent_identity &&
-          entry.file_identity === identity(stat) &&
+          entry.file_identity === workspaceIdentity(stat) &&
           entry.version === hashBytes(bytes),
       )
     )

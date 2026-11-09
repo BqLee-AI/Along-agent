@@ -294,7 +294,7 @@ maybe('delegated workspace gateway', () => {
           expect.objectContaining({
             invocation_id: conflict.invocationId,
             status: 'conflict',
-            superseded: true,
+            superseded: false,
           }),
           expect.objectContaining({
             invocation_id: created.invocationId,
