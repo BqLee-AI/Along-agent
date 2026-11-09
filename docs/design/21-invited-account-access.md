@@ -17,7 +17,7 @@
 - Better Auth 1.7.10、604800 秒固定会话、无 refresh/cache、PG token HMAC、同 client 事务及确认提交后的库 Cookie 发布保持不变。
 - resolver、Run/工具与只读历史入口核对当前资格；历史事实的内部终态记账不重新授予披露权，撤销后仍记录原已接受结果并结束执行。
 - scheduler 在 task/outbox 栅栏下提交一次许可时持 user SHARE，网络前释放；notifications 以独立连接核对当前资格并提交。既有回执只读核对原发送版本，不能把篡改版本当有效接收。
-- 本机 `local:account --admit` 明确准入历史普通 owner；`--workspace` 从已准入候选中选择有限独立 root，不接管其他登记。
+- 本机 `local:account --admit` 明确准入历史普通 owner；`--workspace` 从已准入候选中选择有限独立 root，不接管其他登记；`--reset-password` 在邮箱找回不可用时由部署者明确选已准入账户重置口令并撤销其全部会话（[design/16 §3](16-r1-account-access.md)）。
 
 [P0 可行性 F1–F5](../verification/invited-account-feasibility-2026-11-03.md)保留其原源码版本，只证明库/事务接缝。[P1 验证](../verification/invited-account-implementation-2026-11-03.md)分别记录正式 API、隔离 PG、原生消费者、浏览器和旧副本生命周期，不用模拟邮件代替真实收件或生产 HTTPS。
 
