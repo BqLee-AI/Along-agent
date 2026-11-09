@@ -1,4 +1,5 @@
 import type { PoolClient } from 'pg';
+import { isDeepStrictEqual } from 'node:util';
 import { HarnessObservationSchema, workspaceGrantSchema } from '@along/contracts';
 import { HttpError, forbidden } from '../../http/errors.js';
 import { assertToolRunBinding } from '../conversations/tool-binding.js';
@@ -93,16 +94,32 @@ export function authorizeContextSource(ctx: ToolContext, row: ContextSourceMetad
   if (ctx.signal?.aborted || !ctx.allowlist.includes(row.tool_id)) throw forbidden();
   if (row.tool_id.startsWith('workspace_')) {
     const parsed = workspaceGrantSchema.safeParse(row.frozen_context.workspaceGrant);
-    const current = ctx.workspaceGrant;
+    const current =
+      ctx.authorizationRevision === 'delegation/1'
+        ? ctx.workspaceGrants?.find(
+            (grant) => grant.workspace_id === (parsed.success ? parsed.data.workspace_id : ''),
+          )
+        : ctx.workspaceGrant;
     if (!parsed.success || !current) throw forbidden();
     const grant = parsed.data;
     if (
       grant.workspace_id !== current.workspace_id ||
       grant.owner_id !== current.owner_id ||
       grant.registration_digest !== current.registration_digest ||
-      grant.root_identity !== current.root_identity
+      grant.root_identity !== current.root_identity ||
+      !isDeepStrictEqual(grant, current)
     )
       throw forbidden();
+    if (
+      ctx.authorizationRevision === 'delegation/1' &&
+      row.result_status === 'ok' &&
+      (row.kind === 'read' || row.kind === 'list' || row.kind === 'search') &&
+      (!row.source ||
+        typeof row.source !== 'object' ||
+        !('workspace_id' in row.source) ||
+        row.source.workspace_id !== grant.workspace_id)
+    )
+      throw contextSourceCorrupt();
     validateWorkspaceGrant(ctx.ownerId, grant);
   }
 }
@@ -154,6 +171,8 @@ export async function authorizeSliceOrigin(
   });
   if (!original.success || original.data.view !== 'projected') throw contextSourceCorrupt();
   const fact = original.data.source;
+  if ('workspace_id' in fact && source.workspace_id !== fact.workspace_id)
+    throw contextSourceCorrupt();
   let total: number;
   if (
     fact.kind === 'read' &&

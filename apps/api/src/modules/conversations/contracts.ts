@@ -33,6 +33,7 @@ export interface RunContext {
   userMessageId: string;
   allowlist: readonly string[];
   workspaceGrant?: WorkspaceGrant | null;
+  workspaceGrants?: WorkspaceGrant[];
   resumeCheckpointId?: string;
   messageRefs?: readonly string[];
   messages?: HarnessStart['messages'];

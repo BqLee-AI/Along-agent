@@ -50,3 +50,18 @@ export async function listDocumentApprovals(
     )
   ).rows;
 }
+
+// Caller holds the Run authority lock before issuing delegated actions.
+export async function hasRejectedDocumentApproval(
+  client: PoolClient,
+  binding: { ownerId: string; conversationId: string; runId: string },
+): Promise<boolean> {
+  const result = await client.query<{ rejected: boolean }>(
+    `SELECT EXISTS (
+      SELECT 1 FROM document_approvals
+      WHERE owner_id=$1 AND conversation_id=$2 AND run_id=$3 AND state='rejected'
+    ) AS rejected`,
+    [binding.ownerId, binding.conversationId, binding.runId],
+  );
+  return result.rows[0]?.rejected === true;
+}

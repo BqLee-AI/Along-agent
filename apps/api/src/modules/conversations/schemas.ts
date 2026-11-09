@@ -8,6 +8,11 @@ export const SendMessageBodySchema = z
     execution: z.enum(['business', 'harness']).optional(),
     authorization_revision: z.literal('delegation/1').optional(),
     workspace_id: workspaceSummarySchema.shape.workspace_id.optional(),
+    workspace_ids: z
+      .array(workspaceSummarySchema.shape.workspace_id)
+      .min(1)
+      .refine((ids) => new Set(ids).size === ids.length)
+      .optional(),
     raw_text: z.string().min(1).max(20000),
     card_ref: z.string().min(1).max(200).optional(),
     confirmed_timezone_id: z.string().min(1).max(100).nullable().optional(),
@@ -30,6 +35,14 @@ export const SendMessageBodySchema = z
       message: 'delegation/1 currently requires non-workspace harness execution',
       path: ['authorization_revision'],
     },
+  )
+  .refine(
+    (input) =>
+      input.workspace_ids === undefined ||
+      (input.execution === 'harness' &&
+        input.authorization_revision === 'delegation/1' &&
+        input.workspace_id === undefined),
+    { message: 'workspace_ids requires delegation harness execution', path: ['workspace_ids'] },
   );
 
 export type SendMessageBody = z.infer<typeof SendMessageBodySchema>;

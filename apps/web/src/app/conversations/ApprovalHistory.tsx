@@ -12,6 +12,7 @@ import { Alert } from '@lorelum/lumen-ui/components/alert';
 import { Button } from '@lorelum/lumen-ui/components/button';
 import { approvalStatusLabels } from '../../features/approvals/model';
 import { inlineReminderWaiting } from '../../features/conversations/inline-reminder';
+import { inlineDocumentWaiting } from '../../features/conversations/inline-document';
 import type { ConversationTask } from '../../features/conversations/use-conversation-task';
 import { readEnvelope, type HistoryApprovalReference } from '../../lib/conversation-run';
 import { TaskDetailSchema, type TaskDetail } from '../../lib/types';
@@ -94,14 +95,30 @@ export default function ApprovalHistory({
   const { state, read } = useHistoryPage<ApprovalHistoryDetail>(`${kind}:${approvalId}`, loader);
   const loaded = state.items[0];
   const confirmed = task?.reminderResults[approvalId];
+  const confirmedDocument = task?.documentResults[approvalId];
   const item =
-    loaded?.kind === 'task' && confirmed ? { kind: 'task' as const, detail: confirmed } : loaded;
+    loaded?.kind === 'task' && confirmed
+      ? { kind: 'task' as const, detail: confirmed }
+      : loaded?.kind === 'document' && confirmedDocument
+        ? {
+            kind: 'document' as const,
+            detail: { ...loaded.detail, state: confirmedDocument.state },
+          }
+        : loaded;
   const currentReminder = Boolean(
     task &&
     task.selected?.conversationId === conversationId &&
     task.selected.runId === runId &&
     inlineReminderWaiting(task.run, approvalId),
   );
+  const currentDocument = Boolean(
+    task &&
+    task.selected?.conversationId === conversationId &&
+    task.selected.runId === runId &&
+    inlineDocumentWaiting(task.run, approvalId),
+  );
+  const documentError =
+    task?.documentError?.approvalId === approvalId ? task.documentError.message : null;
   const confirmationError =
     task?.reminderError?.approvalId === approvalId ? task.reminderError.message : null;
   useEffect(() => {
@@ -128,7 +145,9 @@ export default function ApprovalHistory({
       <p className="text-sm text-muted-foreground">
         {currentReminder
           ? '本次确认仅授权这条冻结提醒，并继续同一运行；文档修改与后继提议仍需单独批准。'
-          : '本处只读。'}
+          : currentDocument
+            ? '本次授权仅针对以下冻结内容，并在原等待点有效时继续同一运行。'
+            : '本处只读。'}
         {state.error
           ? '最新结果读取失败；下方仅保留上次获取的事实，当前效果尚未确认。'
           : '决议、工具效果与运行终态分别读取，不是原子快照。'}
@@ -265,6 +284,52 @@ export default function ApprovalHistory({
               <dd className="font-mono">{item.detail.workspace_id}</dd>
             </div>
           </dl>
+          {currentDocument && item.detail.state === 'pending' && task ? (
+            <div className="space-y-4">
+              <h4 className="font-medium">完整冻结修改与授权正文</h4>
+              <p>替换前</p>
+              <pre className="whitespace-pre-wrap font-mono [overflow-wrap:anywhere]">
+                {item.detail.preview.before}
+              </pre>
+              <p>替换后</p>
+              <pre className="whitespace-pre-wrap font-mono [overflow-wrap:anywhere]">
+                {item.detail.preview.after}
+              </pre>
+              <p>实际将写入的完整目标</p>
+              <pre className="whitespace-pre-wrap font-mono [overflow-wrap:anywhere]">
+                {item.detail.exact_new_content}
+              </pre>
+              <p>冻结授权正文</p>
+              <pre className="whitespace-pre-wrap font-mono [overflow-wrap:anywhere]">
+                {item.detail.preview.body}
+              </pre>
+              <Button
+                disabled={
+                  task.busy ||
+                  task.reading ||
+                  task.stopping ||
+                  task.streaming ||
+                  task.effectsUnknown ||
+                  Boolean(task.readError) ||
+                  state.reading ||
+                  Boolean(state.error)
+                }
+                data-testid="confirm-document-inline"
+                onClick={() => void task.confirmDocument(item.detail)}
+              >
+                {task.busy
+                  ? '正在授权并继续…'
+                  : documentError
+                    ? '核对原授权并继续（同键）'
+                    : '授权并继续'}
+              </Button>
+            </div>
+          ) : null}
+          {documentError ? (
+            <p role="alert" className="text-sm">
+              {documentError}
+            </p>
+          ) : null}
           <details className="text-sm">
             <summary className="cursor-pointer py-2 font-medium">版本与执行证据</summary>
             <dl className="space-y-3 font-mono">

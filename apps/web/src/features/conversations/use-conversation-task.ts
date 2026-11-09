@@ -6,6 +6,7 @@ import {
   ConversationRunPageSchema,
   DocumentApprovalDetailSchema,
   type ApprovalDetail,
+  type DocumentApprovalDetail,
   type ConversationRunHistoryItem,
   type MessageHistoryItem,
   RunViewSchema,
@@ -40,6 +41,7 @@ import {
 import type { RunTranscript } from '@/lib/conversation-run';
 import { isSameReadingPage, watchHistoryNavigation } from '@/lib/stream-navigation';
 import { confirmInlineReminder, inlineReminderWaiting } from './inline-reminder';
+import { confirmInlineDocument, inlineDocumentWaiting } from './inline-document';
 
 type AmbiguousProposal = z.infer<typeof AmbiguousTimeDetailsSchema> & {
   raw_text: string;
@@ -89,6 +91,9 @@ export interface ConversationTask {
   reminderResults: Record<string, ApprovalDetail>;
   reminderError: { approvalId: string; message: string } | null;
   confirmReminder: (detail: ApprovalDetail) => Promise<void>;
+  documentResults: Record<string, DocumentApprovalDetail>;
+  documentError: { approvalId: string; message: string } | null;
+  confirmDocument: (detail: DocumentApprovalDetail) => Promise<void>;
   resume: () => Promise<void>;
   stop: () => Promise<void>;
   refresh: (clearError?: boolean) => Promise<void>;
@@ -136,6 +141,10 @@ export function useConversationTask({
   const [leaving, setLeaving] = useState(false);
   const [reminderResults, setReminderResults] = useState<Record<string, ApprovalDetail>>({});
   const [reminderError, setReminderError] = useState<ConversationTask['reminderError']>(null);
+  const [documentResults, setDocumentResults] = useState<Record<string, DocumentApprovalDetail>>(
+    {},
+  );
+  const [documentError, setDocumentError] = useState<ConversationTask['documentError']>(null);
   const leaveAction = useRef<(() => void) | null>(null);
   const selectedRef = useRef(selected);
   const conversationRef = useRef(conversationId);
@@ -303,6 +312,16 @@ export function useConversationTask({
           if (page.nextCursor === null) break;
           after = Number(page.nextCursor);
         }
+        if (item.run_id !== target?.runId) {
+          const historical = await readRun(cid, item.run_id, request.signal);
+          if (!valid()) return;
+          if (historical.conversation_id !== cid || historical.run_id !== item.run_id)
+            throw new Error('历史运行身份不匹配，不能确认发送资格。');
+          if (historical.document_effects?.some((effect) => effect.status === 'unknown')) {
+            unknownRef.current = true;
+            setEffectsUnknown(true);
+          }
+        }
       }
       const transcripts = collectRunTranscripts(eventsRef.current);
       for (const [rid, transcript] of transcripts) {
@@ -336,7 +355,10 @@ export function useConversationTask({
         if (current.conversation_id !== cid || current.run_id !== target.runId)
           throw new Error('运行身份不匹配，未接纳状态。');
         setRun(current);
-        if (current.goal_result?.status === 'unknown') {
+        if (
+          current.goal_result?.status === 'unknown' ||
+          current.document_effects?.some((effect) => effect.status === 'unknown')
+        ) {
           unknownRef.current = true;
           setEffectsUnknown(true);
         }
@@ -560,7 +582,12 @@ export function useConversationTask({
     }
   }
 
-  async function resume(expected?: { target: Identity; checkpointId: string; approvalId: string }) {
+  async function resume(expected?: {
+    target: Identity;
+    checkpointId: string;
+    approvalId: string;
+    kind?: 'document';
+  }) {
     const target = selectedRef.current;
     if (!target || busyRef.current || stopRef.current || unknownRef.current) return;
     if (
@@ -589,10 +616,18 @@ export function useConversationTask({
       setRun(current);
       if (
         expected &&
-        (!inlineReminderWaiting(current, expected.approvalId) ||
+        (!(expected.kind === 'document'
+          ? inlineDocumentWaiting(current, expected.approvalId)
+          : inlineReminderWaiting(current, expected.approvalId)) ||
           current.waiting?.checkpoint_id !== expected.checkpointId)
       ) {
-        await refresh();
+        if (expected.kind === 'document')
+          setError('授权已记录，但原等待点已变化；本次未继续，请读取最新状态。');
+        await refresh(false);
+        return;
+      }
+      if (expected?.kind === 'document' && !current.can_resume) {
+        setError('授权已记录，但当前等待点不可继续；本次未继续。');
         return;
       }
       let request = retryResume;
@@ -690,6 +725,75 @@ export function useConversationTask({
         target,
         checkpointId: waiting.checkpoint_id,
         approvalId: detail.approval_id,
+      });
+  }
+
+  async function confirmDocument(detail: DocumentApprovalDetail) {
+    const target = selectedRef.current;
+    const waiting = run?.waiting;
+    if (
+      !target ||
+      !waiting ||
+      !inlineDocumentWaiting(run, detail.approval_id) ||
+      target.conversationId !== detail.conversation_id ||
+      target.runId !== detail.run_id ||
+      busyRef.current ||
+      stopRef.current ||
+      unknownRef.current ||
+      streamRef.current
+    )
+      return;
+    const version = selectionVersion.current;
+    const controller = new AbortController();
+    reminderController.current = controller;
+    busyRef.current = true;
+    setBusy(true);
+    setDocumentError(null);
+    let confirmed = false;
+    const valid = () =>
+      mounted.current &&
+      !controller.signal.aborted &&
+      version === selectionVersion.current &&
+      !stopRef.current &&
+      !unknownRef.current;
+    try {
+      const current = await readRun(target.conversationId, target.runId, controller.signal);
+      if (!valid()) return;
+      if (
+        current.conversation_id !== target.conversationId ||
+        current.run_id !== target.runId ||
+        !inlineDocumentWaiting(current, detail.approval_id) ||
+        current.waiting?.checkpoint_id !== waiting.checkpoint_id
+      )
+        throw new Error('原文档等待点已改变；未提交授权。');
+      const me = await loadMe(controller.signal);
+      if (!valid()) return;
+      const approved = await confirmInlineDocument({
+        initial: detail,
+        run: current,
+        csrf: me.csrf_token,
+        signal: controller.signal,
+      });
+      if (!valid()) return;
+      setDocumentResults((previous) => ({ ...previous, [detail.approval_id]: approved }));
+      confirmed = true;
+    } catch (failure) {
+      if (valid())
+        setDocumentError({
+          approvalId: detail.approval_id,
+          message: `${failure instanceof Error ? failure.message : '授权结果尚未核验。'} 请读取原批准；重试只核对原请求，不换键。`,
+        });
+    } finally {
+      if (reminderController.current === controller) reminderController.current = null;
+      busyRef.current = false;
+      if (mounted.current && version === selectionVersion.current) setBusy(false);
+    }
+    if (confirmed && valid())
+      await resume({
+        target,
+        checkpointId: waiting.checkpoint_id,
+        approvalId: detail.approval_id,
+        kind: 'document',
       });
   }
 
@@ -872,6 +976,9 @@ export function useConversationTask({
     reminderResults,
     reminderError,
     confirmReminder,
+    documentResults,
+    documentError,
+    confirmDocument,
     resume,
     stop,
     refresh,

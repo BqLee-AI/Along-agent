@@ -7,6 +7,7 @@ import type {
 } from '@along/contracts';
 import { forbidden, stateConflict, validationError } from '../../http/errors.js';
 import { readWorkspaceFile, validateWorkspaceGrant } from '../workspaces/service.js';
+import { compileWorkspaceEdit, type WorkspaceEditChange } from '../workspaces/replace.js';
 import { readRunDocumentEvidence } from '../tools/query.js';
 import type {
   CreateDocumentApprovalInput,
@@ -17,7 +18,7 @@ import {
   getDocumentApproval,
   listDocumentApprovals,
   type DocumentApprovalRow,
-} from './document-repository.js';
+} from './document-query.js';
 import {
   assertExactDocumentText,
   buildDocumentPresentation,
@@ -38,11 +39,17 @@ export class DocumentProposalOperationError extends Error {
   }
 }
 
+type DocumentApprovalInput =
+  | CreateDocumentApprovalInput
+  | (Omit<CreateDocumentApprovalInput, 'oldText' | 'newText'> & {
+      change: WorkspaceEditChange;
+    });
+
 // Caller holds attempt → Run → proposal invocation locks. This uses the same
 // PoolClient as proposal acceptance, so a failed acceptance leaves no approval.
 export async function createDocumentApproval(
   client: PoolClient,
-  input: CreateDocumentApprovalInput,
+  input: DocumentApprovalInput,
 ): Promise<DocumentApprovalReceipt> {
   const { baseRead: read, workspaceGrant: grant } = input;
   const summary = validateWorkspaceGrant(input.ownerId, grant);
@@ -63,18 +70,20 @@ export async function createDocumentApproval(
   )
     throw forbidden('proposal requires an accepted same-Run full read');
   assertExactDocumentText(read.result.content);
-  assertExactDocumentText(input.oldText);
-  assertExactDocumentText(input.newText);
-  if (!input.oldText) throw validationError('replacement requires a nonempty literal');
-  if (input.oldText === input.newText) throw new DocumentProposalOperationError('unchanged');
-  const start = read.result.content.indexOf(input.oldText);
-  if (start < 0) throw new DocumentProposalOperationError('literal_not_found');
-  if (read.result.content.indexOf(input.oldText, start + 1) >= 0)
-    throw new DocumentProposalOperationError('literal_not_unique');
-  const exactNewContent =
-    read.result.content.slice(0, start) +
-    input.newText +
-    read.result.content.slice(start + input.oldText.length);
+  const change: WorkspaceEditChange =
+    'change' in input
+      ? input.change
+      : { kind: 'literal', old_text: input.oldText, new_text: input.newText };
+  if (change.kind === 'literal') {
+    assertExactDocumentText(change.old_text);
+    assertExactDocumentText(change.new_text);
+    if (!change.old_text) throw validationError('replacement requires a nonempty literal');
+  } else {
+    assertExactDocumentText(change.new_content);
+  }
+  const compiled = compileWorkspaceEdit(read.result.content, change);
+  if (!compiled.ok) throw new DocumentProposalOperationError(compiled.reason);
+  const exactNewContent = compiled.exact_new_content;
   const current = await readWorkspaceFile(input.ownerId, grant, input.relativePath);
   if (current.kind !== 'read') throw new DocumentProposalOperationError(current.reason);
   if (current.version !== read.result.version)
@@ -111,7 +120,7 @@ export async function createDocumentApproval(
     workspace_id: grant.workspace_id,
     relative_path: input.relativePath,
     base_version: read.result.version,
-    new_version: documentContentVersion(exactNewContent),
+    new_version: compiled.new_version,
     before: read.result.content,
     exact_new_content: exactNewContent,
   });
@@ -126,7 +135,7 @@ export async function createDocumentApproval(
     base_read_invocation_id: read.invocation_id,
     base_version: read.result.version,
     exact_new_content: exactNewContent,
-    new_version: documentContentVersion(exactNewContent),
+    new_version: compiled.new_version,
     ...presentation,
     state: 'pending',
     apply_invocation_id: null,

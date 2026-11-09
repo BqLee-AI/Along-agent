@@ -13,12 +13,18 @@ import {
   listWorkspaceFiles,
   searchWorkspaceFiles,
   validateWorkspaceGrant,
+  resolveWorkspaceGrants,
+  resolveFrozenWorkspaceGrant,
   hashBytes,
   strictUtf8,
   utf8Bytes,
   WorkspaceDeniedError,
 } from '../src/modules/workspaces/service.js';
-import { applyWorkspaceReplace } from '../src/modules/workspaces/replace.js';
+import {
+  applyWorkspaceReplace,
+  compileWorkspaceEdit,
+  publishWorkspaceReplace,
+} from '../src/modules/workspaces/replace.js';
 
 let root: string;
 const owner = 'workspace-test-owner';
@@ -110,6 +116,75 @@ describe('trusted finite workspace boundary', () => {
     expect(listWorkspaces('other')).toEqual([]);
     expect(JSON.stringify(listWorkspaces(owner))).not.toContain(root);
     expect(() => getWorkspaceGrant('other', 'workspace-test')).toThrow();
+  });
+  test('freezes exact owner grants and revalidates membership after registry changes', async () => {
+    const frozen = resolveWorkspaceGrants(owner);
+    expect(frozen.grants.map((grant) => grant.workspace_id)).toEqual(['workspace-test']);
+    expect(frozen.summaries.map((item) => item.workspace_id)).toEqual(['workspace-test']);
+    expect(resolveWorkspaceGrants(owner, ['workspace-test'])).toEqual(frozen);
+    expect(resolveWorkspaceGrants('other')).toEqual({ grants: [], summaries: [] });
+    expect(() => resolveWorkspaceGrants('other', ['workspace-test'])).toThrow(WorkspaceDeniedError);
+    expect(() => resolveWorkspaceGrants(owner, ['workspace-test', 'workspace-test'])).toThrow(
+      WorkspaceDeniedError,
+    );
+    expect(() => resolveWorkspaceGrants(owner, [])).toThrow(WorkspaceDeniedError);
+    expect(() => resolveFrozenWorkspaceGrant(owner, frozen.grants, 'missing')).toThrow(
+      WorkspaceDeniedError,
+    );
+    expect(resolveFrozenWorkspaceGrant(owner, frozen.grants, 'workspace-test')).toEqual(
+      frozen.grants[0],
+    );
+    await configureWorkspaceRegistry([{ ...registration(), label: 'changed' }]);
+    expect(() => resolveFrozenWorkspaceGrant(owner, frozen.grants, 'workspace-test')).toThrow(
+      WorkspaceDeniedError,
+    );
+  });
+  test('compiles literal and full edits without changing unrelated bytes', () => {
+    const content = '\uFEFFbefore\r\nold 中文\r\nafter\r\n';
+    const result = compileWorkspaceEdit(content, {
+      kind: 'literal',
+      old_text: 'old 中文',
+      new_text: 'new 中文',
+    });
+    expect(result).toEqual({
+      ok: true,
+      exact_new_content: '\uFEFFbefore\r\nnew 中文\r\nafter\r\n',
+      new_version: hashBytes(Buffer.from('\uFEFFbefore\r\nnew 中文\r\nafter\r\n')),
+    });
+    expect(compileWorkspaceEdit('abc', { kind: 'literal', old_text: 'x', new_text: 'y' })).toEqual({
+      ok: false,
+      reason: 'literal_not_found',
+    });
+    expect(compileWorkspaceEdit('aaa', { kind: 'literal', old_text: 'aa', new_text: 'b' })).toEqual(
+      { ok: false, reason: 'literal_not_unique' },
+    );
+    expect(compileWorkspaceEdit('abc', { kind: 'full', new_content: 'abc' })).toEqual({
+      ok: false,
+      reason: 'unchanged',
+    });
+    expect(compileWorkspaceEdit('', { kind: 'full', new_content: 'new' })).toEqual({
+      ok: true,
+      exact_new_content: 'new',
+      new_version: hashBytes(Buffer.from('new')),
+    });
+    expect(() => compileWorkspaceEdit('', { kind: 'full', new_content: '\ud800' })).toThrow(
+      WorkspaceDeniedError,
+    );
+  });
+  test('direct publication reports zero-write conflict without an approval', async () => {
+    const grant = getWorkspaceGrant(owner, 'workspace-test');
+    const client = { query: async () => ({ rows: [] }) } as unknown as PoolClient;
+    const result = await publishWorkspaceReplace(client, owner, grant, {
+      path: 'target.txt',
+      base_version: '0'.repeat(64),
+      exact_new_content: 'new',
+      new_version: hashBytes(Buffer.from('new')),
+    });
+    expect(result).toMatchObject({ kind: 'conflict', reason: 'version_changed', zero_write: true });
+    expect(await readWorkspaceFile(owner, grant, 'target.txt')).toMatchObject({
+      kind: 'read',
+      content: '\uFEFFbefore\r\nold 中文\r\nafter  \r\n',
+    });
   });
   test('overlapping roots and duplicate physical identity disable both registrations', async () => {
     await configureWorkspaceRegistry([

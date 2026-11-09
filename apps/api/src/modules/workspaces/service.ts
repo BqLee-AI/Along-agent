@@ -228,6 +228,46 @@ export function getWorkspaceGrant(ownerId: string, id: string): WorkspaceGrant {
     root_identity: item.root_identity,
   };
 }
+/** Freeze one owner-scoped registry snapshot; an explicit selection must be exact. */
+export function resolveWorkspaceGrants(
+  ownerId: string,
+  ids?: string[],
+): { grants: WorkspaceGrant[]; summaries: WorkspaceSummary[] } {
+  if (ids && (ids.length === 0 || new Set(ids).size !== ids.length))
+    throw new WorkspaceDeniedError();
+  const items = ids
+    ? ids.map((id) => {
+        const item = registry.get(id);
+        if (!item || item.owner_id !== ownerId) throw new WorkspaceDeniedError();
+        return item;
+      })
+    : [...registry.values()].filter((item) => item.owner_id === ownerId);
+  items.sort((a, b) =>
+    a.workspace_id < b.workspace_id ? -1 : a.workspace_id > b.workspace_id ? 1 : 0,
+  );
+  return {
+    grants: items.map((item) => ({
+      workspace_id: item.workspace_id,
+      owner_id: item.owner_id,
+      registration_digest: item.registration_digest,
+      root_identity: item.root_identity,
+    })),
+    summaries: items.map(summary),
+  };
+}
+
+/** Select only a member of the frozen Run set and revalidate its registration. */
+export function resolveFrozenWorkspaceGrant(
+  ownerId: string,
+  grants: WorkspaceGrant[],
+  workspaceId: string,
+): WorkspaceGrant {
+  const matches = grants.filter((grant) => grant.workspace_id === workspaceId);
+  if (matches.length !== 1) throw new WorkspaceDeniedError();
+  selected(ownerId, matches[0]!);
+  return matches[0]!;
+}
+
 export function validateWorkspaceGrant(ownerId: string, grant: WorkspaceGrant): WorkspaceSummary {
   return summary(selected(ownerId, grant));
 }

@@ -62,6 +62,19 @@ describe('explicit conversation task entry', () => {
       },
     } as RunView;
     expect(clarificationReplyReference(run, 'chat', true)).toBe('source');
+    expect(
+      clarificationReplyReference(
+        {
+          ...run,
+          goal_result: {
+            ...run.goal_result!,
+            clarification: { kind: 'destination', question: '保存到哪里？' },
+          },
+        },
+        'chat',
+        true,
+      ),
+    ).toBe('source');
     expect(clarificationReplyReference(run, 'chat', false)).toBeUndefined();
     expect(
       clarificationReplyReference({ ...run, status: 'running' }, 'chat', true),

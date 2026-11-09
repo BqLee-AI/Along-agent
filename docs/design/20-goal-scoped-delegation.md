@@ -1,6 +1,6 @@
 # 20. 本人目标内委托与授权
 
-> 状态：目标合同；本人默认时区切片的可执行边界见 §1，其余能力按对应实施验收启用。
+> 状态：目标合同；各能力以 Run 冻结的实际工具、资源和生命周期为边界，合同不代替运行验收。
 > 范围：设置、提醒、有限受管资料的自主步骤、可信事实、接续、结果、停止及新旧 profile 迁移。
 > 不包含：市场、模型供应商、推送与计费决策；这些边界仍见 PRD 04 Deferred。具体能力以接纳时冻结的 profile 为准，不能将本方案的完整路线视为全部可执行。
 > 阶段：#104 能力重构；行为增量见 [OpenSpec change](../../openspec/changes/refactor-assistant-capability-authorization/proposal.md)。
@@ -15,7 +15,7 @@
 
 授权修订、实际能力和执行生命周期是独立事实：`delegation/1` 只定义目标内自主策略，不证明后台执行已交付。每个新 Run 同时冻结 `execution_lifecycle:'request-bound'|'server-owned'`，由 conversations 持有，并经可信 start、Run 只读投影和 Web 如实呈现。早期设置等完整切片可以采用 request-bound，沿现行请求绑定的断连取消语义，不承诺离开/退出后继续；仅在 §8 所有权与故障验收完成后，新接纳的相应 Run 才可冻结 server-owned。已接纳 Run（包括早期 delegation/1）不随部署升级、当前开关或批准恢复改变生命周期；缺此字段的 legacy 仍沿原合同读取，不回填。这里只增加两种具体生命周期，不建立通用 profile/权限平台。最终重构必须完成 server-owned 订阅解耦及其真实验收，不能以 request-bound 阶段替代收口。
 
-本人委托采用显式接纳：仅非工作区 Harness 请求的 `authorization_revision:'delegation/1'` 进入该 profile；普通 Web Agent 提交此字段。省略字段的 API 调用、业务提醒和资料快捷入口保留 legacy，不因协议升级而切换。新接纳 profile 提供本人默认时区保存/清除、明确单次墙上时间提醒直接创建及既有只读工具，冻结 request-bound、空工作区和 `elapsed_revision:null`。`create_reminder` 与 legacy confirm 共用 tasks 公共事务用例，保存真实 invocation 或 approval 来源；创建不证明排期、触发或通知。旧 settings-only Run、snapshot2 和批准仍按原工具集合执行，不因部署扩权。wire 统一为 v6，legacy start 明确传 `trusted_context:null`；结构化 GoalResult 的 SSE v2 与 legacy v1 分开解析，Run 只读视图保留实际修订、生命周期和持久目标结果。
+本人委托采用显式接纳：`execution:'harness'` 且 `authorization_revision:'delegation/1'` 的新请求进入该 profile，普通 Web Agent 提交此字段。可选 `workspace_ids` 只收窄本人登记集合，与 legacy 的单 `workspace_id` 互斥；省略修订的 API 调用、业务提醒和资料快捷入口保留 legacy。实际工具及工作区集合随新 Run 冻结，空集合不阻断其他已有能力；旧 settings-only Run、snapshot2 和批准不因部署扩权。生命周期仍为 request-bound；wire 为 v6，legacy start 明确传 `trusted_context:null`，SSE v2 与 legacy v1 分读。提醒创建只证明保存，不证明排期、触发或通知。
 
 ## 2. 规则的唯一所有者
 
@@ -131,13 +131,13 @@ wall_time/timezone_id/fold/offset 保持非空。仅有对应 elapsed 依据且 
 
 ## 7. 工作区资格、有限创建与精确写入
 
-部署 workspaces 登记 owner、digest、root identity、有限 readable/writable_paths；新增有限 output directories 只用于普通文件创建，不授权任意 mkdir/move/delete。新 Run 冻结本人可用登记资格集合，用户明确选更窄范围时只冻结该子集；模型见友好摘要并在集合内选择 workspace ID，TS 解析实际 grant。不要求先切资料模式，不默认第一项；对象/位置确有多个合理答案才问。
+部署 workspaces 登记 owner、digest、root identity、有限 readable/writable_paths。合格新 Run 冻结本人可用登记资格集合，用户明确选择时只冻结非空、去重的子集；模型见安全摘要并在集合内指定 workspace ID，TS 解析实际 grant。不要求先切资料模式，不默认第一项；对象/位置确有多个合理答案才问。有限输出目录普通文件创建属于尚未实现的 2.6，不授权任意 mkdir/move/delete。
 
 无登记明确不可用；登记新增/变化不进入旧 Run，新动作仍验当前摘要和资格。集合超过帧/上下文容量时明确限制，不把静默截断当完整权限事实。工具可见性、部署资源资格与本次语义委托三者独立，任一不足不能靠按钮放行。
 
 直接编辑从本 Run 已接受的完整读取编译精确对象、基线、目标字节并绑定 invocation，不创建自动 approved 文档单。正常修改保留无关字节；明确整篇重写以全文目标绑定，允许改变用户明确要求改变的内容。版本 CAS、可信目录/路径身份、锁与真实发布保留。确定零写 conflict 可新读重算；旧精确许可不重用，拒绝/未尝试/unknown 不能冒充零写后继。
 
-创建在冻结输出目录内 no-replace 原子发布，撞名不覆盖；用户未固定名时可选不覆盖别名，固定名所需新影响按 §3 裁决。采用同文件系统独占链接发布并移除临时名、核对目标 nlink=1 等真实排他机制；普通覆盖 rename 不满足创建。文件系统不满足前提就明确不可用，不降级覆盖。编辑沿既有临时文件/rename/fsync 边界。部署登记与协作写者是保证前提，PG 锁不是任意宿主进程的 OS 沙箱。
+[Deferred · 2.6] 创建拟在冻结输出目录内 no-replace 原子发布，撞名不覆盖；用户未固定名时可选不覆盖别名，固定名所需新影响按 §3 裁决。此目标不授予当前 Run 创建资格；不支持任意 mkdir/move/delete。编辑沿既有临时文件/rename/fsync 边界，部署登记与协作写者是保证前提，PG 锁不是任意宿主进程的 OS 沙箱。
 
 非事务一次许可前先持久 unknown；只有确认取得许可的当前执行栈可实施，accepted result 归 tools。写后独立新 read 才可 verified。响应/接受结果丢失且无绑定证据时保持 unknown，即使当前内容相同也不补造成功、不再写；可只报告当前字节事实。真实新增影响需要精确预览与授权；legacy 文档批准继续冻结所见内容/hash、唯一 apply 和显式同 Run 恢复，不能把它自然升级为直接写。
 

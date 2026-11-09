@@ -181,7 +181,11 @@ export async function runNativeHarness(options: NativeHarnessOptions): Promise<v
           terminal =
             request.type === 'suspend' ||
             request.type === 'finish' ||
-            request.type === 'finish_goal';
+            (request.type === 'finish_goal' &&
+              typeof result === 'object' &&
+              result !== null &&
+              'accepted' in result &&
+              result.accepted === true);
         } catch (error) {
           if (!(error instanceof HttpError)) throw error;
           reply = {

@@ -242,7 +242,11 @@ export const HarnessToolResultSchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('failed'), error: toolFailure }).strict(),
   z.object({ status: z.literal('unknown'), error: toolFailure }).strict(),
 ]);
-const source = { result_version: z.literal(1), omitted: z.literal(true) };
+const source = {
+  result_version: z.literal(1),
+  omitted: z.literal(true),
+  workspace_id: z.string().min(1).optional(),
+};
 const sourceVersion = z.string().regex(/^[a-f0-9]{64}$/);
 const projectedSource = z
   .discriminatedUnion('kind', [
@@ -640,10 +644,25 @@ export const RunViewSchema = z
       ])
       .nullable(),
     workspace: workspaceSummarySchema.optional(),
+    workspaces: z.array(workspaceSummarySchema).optional(),
     can_resume: z.boolean(),
     authorization_revision: z.literal('delegation/1').optional(),
     execution_lifecycle: z.literal('request-bound').optional(),
     goal_result: GoalResultSchema.nullable().optional(),
+    document_effects: z
+      .array(
+        z
+          .object({
+            workspace_id: z.string().min(1),
+            path: z.string(),
+            invocation_id: uuid,
+            read_invocation_id: uuid.nullable(),
+            version: z.string().nullable(),
+            status: z.enum(['applied', 'verified', 'conflict', 'unknown']),
+          })
+          .strict(),
+      )
+      .optional(),
     created_reminders: z
       .array(
         taskCreatedSchema

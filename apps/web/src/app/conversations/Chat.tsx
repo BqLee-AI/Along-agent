@@ -101,7 +101,9 @@ export default function Chat({
                   <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">
                     今天有什么想聊的？
                   </h2>
-                  <p className="text-sm text-muted-foreground">从一条消息开始。</p>
+                  <p className="text-sm text-muted-foreground">
+                    直接描述任务即可；Agent 可在本次运行冻结的已登记资料范围内检索和处理文件。
+                  </p>
                 </div>
               ) : null}
               {task.messages.length ? (

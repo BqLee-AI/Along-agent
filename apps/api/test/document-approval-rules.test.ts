@@ -5,7 +5,7 @@ import type {
   DocumentApplyEvidence,
   DocumentReadEvidence,
 } from '../src/modules/approvals/document-evidence.js';
-import type { DocumentApprovalRow } from '../src/modules/approvals/document-repository.js';
+import type { DocumentApprovalRow } from '../src/modules/approvals/document-query.js';
 import {
   assertExactDocumentText,
   buildDocumentPresentation,

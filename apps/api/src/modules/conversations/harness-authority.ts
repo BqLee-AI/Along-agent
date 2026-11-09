@@ -8,6 +8,7 @@ import {
   HarnessStartSchema,
   HarnessModelStepSchema,
   HarnessRequestSchema,
+  workspaceGrantSchema,
   type HarnessModelStep,
   type HarnessRequest,
   type HarnessSnapshot,
@@ -31,6 +32,7 @@ import {
   validationError,
 } from '../../http/errors.js';
 import { validateDocumentApprovalsDone } from '../approvals/document-service.js';
+import { getDocumentApproval, hasRejectedDocumentApproval } from '../approvals/document-query.js';
 import { invokeTool, reserveToolInvocation } from '../tools/gateway.js';
 import { readRunInvocationStates, readInvocationSnapshots } from '../tools/invocations.js';
 import {
@@ -39,7 +41,13 @@ import {
   readRunDocumentEvidence,
 } from '../tools/query.js';
 import type { ToolContext, ToolPayload } from '../tools/contracts.js';
-import { HARNESS_BASE_TOOL_IDS, DELEGATION_TOOL_IDS, TOOL_IDS } from '../tools/contracts.js';
+import {
+  HARNESS_BASE_TOOL_IDS,
+  DELEGATION_TOOL_IDS,
+  DELEGATION_WORKSPACE_READ_TOOL_IDS,
+  DELEGATION_WORKSPACE_WRITE_TOOL_IDS,
+  TOOL_IDS,
+} from '../tools/contracts.js';
 import { HARNESS_TOOL_DEFINITIONS, DELEGATION_TOOL_DEFINITIONS } from '../tools/catalog.js';
 import { GOAL_CONTROL_TOOL } from './goal-control.js';
 import { validateGoalResult } from './goal-result.js';
@@ -87,6 +95,11 @@ export interface HarnessSession {
 
 const active = new Map<string, AbortController>();
 const sessionAborts = new Map<string, Set<AbortController>>();
+const DELEGATION_ALLOWED_TOOLS: readonly string[] = [
+  ...DELEGATION_TOOL_IDS,
+  ...DELEGATION_WORKSPACE_READ_TOOL_IDS,
+  ...DELEGATION_WORKSPACE_WRITE_TOOL_IDS,
+];
 
 function poolOf(deps: ConversationDeps): Pool {
   if (!deps.pool) throw notReady();
@@ -199,13 +212,14 @@ async function contextOf(
     allowlist: run.tools_allowlist.filter((name) =>
       (
         (frozen.authorization_revision
-          ? DELEGATION_TOOL_IDS
+          ? DELEGATION_ALLOWED_TOOLS
           : frozen.workspaceGrant
             ? TOOL_IDS
             : HARNESS_BASE_TOOL_IDS) as readonly string[]
       ).includes(name),
     ),
     ...(frozen.workspaceGrant ? { workspaceGrant: frozen.workspaceGrant } : {}),
+    ...(frozen.workspaceGrants ? { workspaceGrants: frozen.workspaceGrants } : {}),
     ...(frozen.authorization_revision
       ? {
           authorizationRevision: frozen.authorization_revision,
@@ -423,6 +437,28 @@ export async function resumeConversationRun(
     );
     if (decision.status === 'pending')
       throw stateConflict('approval still pending', { status: 'pending' });
+    if (
+      run.frozen_context?.authorization_revision === 'delegation/1' &&
+      decision.kind === 'document' &&
+      decision.status !== 'approved'
+    )
+      throw stateConflict('rejected document approval cannot resume');
+    if (
+      run.frozen_context?.authorization_revision === 'delegation/1' &&
+      decision.kind === 'document'
+    ) {
+      const approval = await getDocumentApproval(client, ownerId, decision.approval_id);
+      const grant = workspaceGrantSchema.parse(approval.workspace_grant);
+      if (
+        approval.conversation_id !== conversationId ||
+        approval.run_id !== runId ||
+        !run.frozen_context.workspaceGrants?.some(
+          (member) => JSON.stringify(workspaceGrantSchema.parse(member)) === JSON.stringify(grant),
+        )
+      )
+        throw forbidden('document approval workspace differs from frozen Run grants');
+      validateWorkspaceGrant(ownerId, grant);
+    }
     if (!deps.harness) throw unavailable();
     if (
       snapshot.usage.iterations >= run.budget_max_iterations ||
@@ -532,6 +568,7 @@ export async function createHarnessSession(
   );
   const tools = context.authorizationRevision ? [...start.tools, GOAL_CONTROL_TOOL] : start.tools;
   let stopped = false;
+  let correctingGoal = false;
   let lastSnapshot = initial.snapshot;
   const delivered = new Set(initial.snapshot?.tool_refs ?? []);
   const cumulative = { ...(initial.snapshot?.usage ?? { iterations: 0, tokens: 0 }) };
@@ -569,6 +606,7 @@ export async function createHarnessSession(
       throw stateConflict('model continuation requires an acknowledged previous delta');
     current.pulling = true;
     try {
+      await guarded(assertActionAuthority);
       const next = await current.iterator.next();
       if (next.done)
         throw new HttpError(502, 502, 'HARNESS_PROTOCOL_ERROR', 'model ended without completion');
@@ -576,7 +614,7 @@ export async function createHarnessSession(
       if (!parsed.success)
         throw new HttpError(502, 502, 'HARNESS_PROTOCOL_ERROR', 'model step rejected');
       const step = parsed.data;
-      await guarded(async () => undefined);
+      await guarded(assertActionAuthority);
       if (step.type === 'delta') current.pendingDelta = step.delta;
       else {
         cumulative.iterations++;
@@ -608,6 +646,13 @@ export async function createHarnessSession(
       if (context.workspaceGrant) validateWorkspaceGrant(context.ownerId, context.workspaceGrant);
       return action(client, locked);
     });
+  }
+  async function assertActionAuthority(client: PoolClient): Promise<void> {
+    if (
+      context.authorizationRevision === 'delegation/1' &&
+      (await hasRejectedDocumentApproval(client, context))
+    )
+      throw forbidden('rejected document approval cannot authorize another action');
   }
   async function routingEligible(client: PoolClient, locked: LockedRun): Promise<void> {
     if (
@@ -1198,6 +1243,7 @@ export async function createHarnessSession(
             );
           }
           await guarded(async (client) => {
+            await assertActionAuthority(client);
             const states = await readRunInvocationStates(client, toolContext(context));
             if (states.some((row) => row.state === 'unknown' || row.outcome_kind === 'failed'))
               throw stateConflict('Run has unresolved tool effects');
@@ -1220,6 +1266,8 @@ export async function createHarnessSession(
           return nextModelStep();
         }
         if (request.type === 'reserve') {
+          if (correctingGoal)
+            throw stateConflict('goal correction cannot reserve business actions');
           if (!approvalAuthorizesActions(initial.approval))
             throw forbidden('rejected approval cannot authorize another action');
           if (!context.allowlist.includes(request.tool_id))
@@ -1232,6 +1280,7 @@ export async function createHarnessSession(
           )
             throw forbidden('routing direct must reserve original unique tool and arguments');
           await guarded(async (client) => {
+            await assertActionAuthority(client);
             if (routingDecision?.payload.decision === 'direct') {
               const states = await readRunInvocationStates(client, toolContext(context));
               if (
@@ -1280,6 +1329,7 @@ export async function createHarnessSession(
           return { invocation_id: reserved.invocationId };
         }
         if (request.type === 'invoke') {
+          if (correctingGoal) throw stateConflict('goal correction cannot invoke business actions');
           if (!approvalAuthorizesActions(initial.approval))
             throw forbidden('rejected approval cannot authorize another action');
           if (
@@ -1291,6 +1341,7 @@ export async function createHarnessSession(
           if (initial.snapshot?.tool_refs.includes(request.invocation_id))
             throw stateConflict('resume consumes stored observations without reinvoking them');
           await guarded(async (client) => {
+            await assertActionAuthority(client);
             if (routingDecision?.payload.decision === 'direct')
               await directInvocation(client, request.invocation_id);
             const states = await readRunInvocationStates(client, toolContext(context));
@@ -1355,6 +1406,7 @@ export async function createHarnessSession(
         }
         if (request.type === 'suspend') {
           await guarded(async (client, locked) => {
+            await assertActionAuthority(client);
             const latest = (
               await client.query<{ id: string }>(
                 `SELECT id FROM run_checkpoints WHERE attempt_id=$1 AND kind='harness_snapshot' ORDER BY seq DESC LIMIT 1`,
@@ -1417,13 +1469,20 @@ export async function createHarnessSession(
             (request.usage.tokens !== null && request.usage.tokens > context.maxTokens)
           )
             throw new HttpError(429, 429, 'BUDGET_EXCEEDED', '本轮推理预算用完，已停下。');
-          const event = await guarded(async (client) => {
-            const goal = await validateGoalResult(
-              client,
-              toolContext(context),
-              request.goal_result,
-            );
-            return commitTerminal(
+          const result = await guarded(async (client) => {
+            let goal;
+            try {
+              goal = await validateGoalResult(client, toolContext(context), request.goal_result);
+            } catch (error) {
+              if (error instanceof HttpError && error.errorCode === 'STATE_CONFLICT')
+                return {
+                  accepted: false as const,
+                  code: 'INVALID_GOAL_RESULT',
+                  message: error.message,
+                };
+              throw error;
+            }
+            const event = await commitTerminal(
               client,
               context,
               goal.status === 'cancelled' ? 'cancelled' : 'done',
@@ -1435,9 +1494,14 @@ export async function createHarnessSession(
                 goal_result: goal,
               },
             );
+            return { accepted: true as const, event };
           });
+          if (!result.accepted) {
+            correctingGoal = true;
+            return result;
+          }
           stopped = true;
-          await send(event);
+          await send(result.event);
           return { accepted: true };
         }
         if (request.type !== 'finish') throw stateConflict('unsupported terminal control');

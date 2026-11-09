@@ -1,5 +1,9 @@
 import type { PoolClient } from 'pg';
-import { HistoricalHarnessSnapshotSchema, GoalResultSchema } from '@along/contracts';
+import {
+  HistoricalHarnessSnapshotSchema,
+  GoalResultSchema,
+  workspaceGrantSchema,
+} from '@along/contracts';
 import type { HarnessApprovalDecision, HarnessSnapshot, RunView } from '@along/contracts';
 import {
   THREAD_PROTOCOL_VERSION,
@@ -16,11 +20,16 @@ import {
 } from './repository.js';
 import type { RunContext } from './contracts.js';
 import { readApprovalDecision, readDocumentApprovalDecision } from '../approvals/decision.js';
+import { getDocumentApproval } from '../approvals/document-query.js';
 import { readRunInvocationStates } from '../tools/invocations.js';
 import { BUSINESS_TOOL_IDS } from '../tools/contracts.js';
 import { validateWorkspaceGrant, WorkspaceDeniedError } from '../workspaces/service.js';
 import { interruptedGoalResult } from './goal-result.js';
-import { readRunCreatedReminders, readRunReminderTimeErrors } from '../tools/query.js';
+import {
+  readRunCreatedReminders,
+  readRunGoalDocumentEvidence,
+  readRunReminderTimeErrors,
+} from '../tools/query.js';
 
 export async function appendEvent(
   client: PoolClient,
@@ -73,6 +82,7 @@ export async function commitTerminal(
   context: Pick<RunContext, 'ownerId' | 'conversationId' | 'runId' | 'attemptId' | 'requestId'>,
   status: 'done' | 'failed' | 'cancelled',
   payload: unknown,
+  options?: { preserveAttemptStatus: boolean },
 ): Promise<ThreadEvent> {
   // The caller holds current attempt -> Run; the message and visible terminal
   // checkpoint are part of that same transaction, including persistence faults.
@@ -120,7 +130,8 @@ export async function commitTerminal(
         ? 'thread.failed'
         : 'thread.cancelled';
   const event = await appendEvent(client, context, type, payload);
-  await finishAttempt(client, context.attemptId, status === 'done' ? 'done' : 'failed');
+  if (!options?.preserveAttemptStatus)
+    await finishAttempt(client, context.attemptId, status === 'done' ? 'done' : 'failed');
   await client.query(
     `UPDATE agent_runs SET status=$2,ended_at=now(),waiting_checkpoint_id=NULL,
       waiting_invocation_id=NULL,waiting_approval_id=NULL,goal_result=$3::jsonb WHERE id=$1`,
@@ -203,6 +214,67 @@ export async function viewOf(client: PoolClient, locked: LockedRun): Promise<Run
       canResume = false;
     }
   }
+  // Delegated document approval is tied to one frozen member, not the
+  // registration currently associated with the same name or another member.
+  if (
+    canResume &&
+    run.frozen_context?.authorization_revision === 'delegation/1' &&
+    decision?.kind === 'document'
+  ) {
+    canResume = decision.status === 'approved';
+    if (canResume) {
+      const approval = await getDocumentApproval(client, run.owner_id, decision.approval_id);
+      const grant = workspaceGrantSchema.parse(approval.workspace_grant);
+      const members = run.frozen_context.workspaceGrants ?? [];
+      canResume =
+        approval.conversation_id === run.conversation_id &&
+        approval.run_id === run.id &&
+        members.some(
+          (member) => JSON.stringify(workspaceGrantSchema.parse(member)) === JSON.stringify(grant),
+        );
+      if (canResume) {
+        try {
+          validateWorkspaceGrant(run.owner_id, grant);
+        } catch (error) {
+          if (!(error instanceof WorkspaceDeniedError)) throw error;
+          canResume = false;
+        }
+      }
+    }
+    if (canResume && waiting) {
+      const snapshot = await readSnapshot(client, run, waiting.checkpoint_id);
+      const used = await client.query('SELECT 1 FROM harness_resumes WHERE checkpoint_id=$1', [
+        waiting.checkpoint_id,
+      ]);
+      canResume =
+        snapshot.waiting?.invocation_id === waiting.invocation_id &&
+        snapshot.waiting?.approval_id === waiting.approval_id &&
+        snapshot.usage.iterations < run.budget_max_iterations &&
+        (snapshot.usage.tokens === null || snapshot.usage.tokens < run.budget_max_tokens) &&
+        !used.rowCount;
+    }
+  }
+  const documentEffects =
+    run.frozen_context?.authorization_revision === 'delegation/1' &&
+    run.frozen_context.workspaceGrants !== undefined &&
+    run.tools_allowlist.includes('workspace_read')
+      ? (
+          await readRunGoalDocumentEvidence(client, {
+            ownerId: run.owner_id,
+            conversationId: run.conversation_id,
+            runId: run.id,
+          })
+        ).effects.map(
+          ({ status, workspace_id, path, invocation_id, read_invocation_id, version }) => ({
+            status,
+            workspace_id,
+            path,
+            invocation_id,
+            read_invocation_id,
+            version,
+          }),
+        )
+      : undefined;
   return {
     run_id: run.id,
     conversation_id: run.conversation_id,
@@ -214,7 +286,12 @@ export async function viewOf(client: PoolClient, locked: LockedRun): Promise<Run
       waiting && decision?.kind === 'document'
         ? { ...waiting, approval_kind: 'document' }
         : waiting,
+    ...(documentEffects ? { document_effects: documentEffects } : {}),
     ...(workspace ? { workspace } : {}),
+    ...(run.frozen_context?.workspaceGrants !== undefined &&
+    run.frozen_context.trustedExecutionContext
+      ? { workspaces: run.frozen_context.trustedExecutionContext.workspaces }
+      : {}),
     ...(run.frozen_context?.authorization_revision
       ? {
           authorization_revision: run.frozen_context.authorization_revision,

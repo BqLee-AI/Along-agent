@@ -175,6 +175,35 @@ export function RunStatusPanel({ task }: { task: ConversationTask }) {
           </Alert.Content>
         </Alert>
       ) : null}
+      {run?.document_effects?.length ? (
+        <section className="space-y-3" aria-label="文件效果">
+          <h3 className="font-medium">文件效果</h3>
+          <ul className="space-y-3">
+            {run.document_effects.map((effect) => (
+              <li key={effect.invocation_id} className="space-y-1">
+                <p className="font-mono">
+                  {effect.workspace_id} · {effect.path}
+                </p>
+                <p>
+                  {effect.status === 'verified'
+                    ? '已保存并经新全文读取核对。'
+                    : effect.status === 'applied'
+                      ? '已记录写入，尚未经新全文读取核对。'
+                      : effect.status === 'conflict'
+                        ? '写前版本冲突，此次未写入。'
+                        : '文件效果未知，可能已写入；不可自动重做。'}
+                </p>
+                <details className="text-xs text-muted-foreground">
+                  <summary className="min-h-8 content-center">查看文件证据</summary>
+                  <p>写入调用：{effect.invocation_id}</p>
+                  <p>新全文读取：{effect.read_invocation_id ?? '尚无'}</p>
+                  <p>版本：{effect.version ?? '尚无'}</p>
+                </details>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       {lifecycle === 'request-bound' ? (
         <div className="space-y-2 px-4 py-3" data-testid="request-bound-lifecycle">
           <p className="font-medium">本次执行绑定当前连接，不在后台继续</p>
