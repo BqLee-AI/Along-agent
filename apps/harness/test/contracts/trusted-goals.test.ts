@@ -1533,6 +1533,90 @@ test('delegated workspaces require frozen resources and tool allowlist, without 
   expect(old.at(-1)).toMatchObject({ type: 'finish', error: { code: 'TOOL_DENIED' } });
 });
 
+test('creation is available only to delegated starts with frozen output directories', async () => {
+  const output = {
+    workspace_id: 'out',
+    label: 'Output',
+    readable_paths: [],
+    writable_paths: [],
+    output_directories: ['reports'],
+  };
+  for (const start of [
+    { trusted_context: null, tools: [workspaceTool('workspace_create')] },
+    {
+      trusted_context: { ...trusted, workspaces: [delegatedWorkspaces[0]] },
+      tools: [workspaceTool('workspace_create')],
+    },
+    {
+      trusted_context: { ...trusted, workspaces: [{ ...output, output_directories: [] }] },
+      tools: [workspaceTool('workspace_create')],
+    },
+    {
+      trusted_context: {
+        ...trusted,
+        workspaces: [{ ...output, output_directories: ['../escape'] }],
+      },
+      tools: [workspaceTool('workspace_create')],
+    },
+    {
+      trusted_context: {
+        ...trusted,
+        workspaces: [{ ...output, output_directories: ['reports', 'reports'] }],
+      },
+      tools: [workspaceTool('workspace_create')],
+    },
+  ]) {
+    expect(await nativeCase({ start, expectedExit: 2 })).toEqual([]);
+  }
+  const requests = await nativeCase({
+    start: {
+      trusted_context: { ...trusted, workspaces: [output] },
+      tools: [workspaceTool('workspace_create'), workspaceTool('workspace_read')],
+    },
+    model: () => call('finish_goal', goal()),
+  });
+  expect(requests.at(-1)).toMatchObject({ type: 'finish_goal' });
+  const old = await nativeCase({
+    start: { trusted_context: { ...trusted, workspaces: [output] }, tools: [] },
+    model: () => call('workspace_create', {}),
+  });
+  expect(old.some((request) => request.type === 'reserve')).toBe(false);
+  expect(old.at(-1)).toMatchObject({ type: 'finish', error: { code: 'TOOL_DENIED' } });
+});
+
+test('unknown creation stops without another reservation or model step', async () => {
+  const output = {
+    workspace_id: 'out',
+    label: 'Output',
+    readable_paths: [],
+    writable_paths: [],
+    output_directories: ['reports'],
+  };
+  const requests = await nativeCase({
+    start: {
+      trusted_context: { ...trusted, workspaces: [output] },
+      tools: [workspaceTool('workspace_create')],
+    },
+    model: () =>
+      call('workspace_create', {
+        workspace_id: 'out',
+        output_directory: 'reports',
+        filename: 'brief.txt',
+        content: 'brief',
+      }),
+    invoke: (request) => ({
+      status: 'unknown',
+      invocationId: request.invocation_id,
+      replayed: false,
+      error: { code: 'TOOL_EFFECT_UNKNOWN', message: 'Unknown effect' },
+    }),
+  });
+  expect(requests.filter((request) => request.type === 'model')).toHaveLength(1);
+  expect(requests.filter((request) => request.type === 'reserve')).toHaveLength(1);
+  expect(requests.filter((request) => request.type === 'invoke')).toHaveLength(1);
+  expect(requests.at(-1)).toMatchObject({ type: 'finish', error: { code: 'TOOL_EFFECT_UNKNOWN' } });
+});
+
 test('delegated document proposal suspends and approved bootstrap continues only the frozen target', async () => {
   const approvalId = randomUUID();
   let invocationId = '';

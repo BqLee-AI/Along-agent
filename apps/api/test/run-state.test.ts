@@ -95,6 +95,44 @@ describe('document RunView projection', () => {
     }
   });
 
+  it('exposes creation and zero-write failure without private projection data', async () => {
+    const projection = spyOn(query, 'readRunGoalDocumentEvidence').mockResolvedValue({
+      effects: [
+        {
+          status: 'failed',
+          operation: 'create',
+          workspace_id: 'workspace',
+          path: 'output/a.md',
+          invocation_id: 'write',
+          read_invocation_id: null,
+          version: null,
+          superseded: false,
+        },
+      ],
+      hasPendingApproval: false,
+      resolvedApprovalInvocationIds: [],
+    });
+    const reminders = spyOn(query, 'readRunCreatedReminders').mockResolvedValue([]);
+    const timeErrors = spyOn(query, 'readRunReminderTimeErrors').mockResolvedValue([]);
+    try {
+      expect((await viewOf(client, locked)).document_effects).toEqual([
+        {
+          status: 'failed',
+          operation: 'create',
+          workspace_id: 'workspace',
+          path: 'output/a.md',
+          invocation_id: 'write',
+          read_invocation_id: null,
+          version: null,
+        },
+      ]);
+    } finally {
+      projection.mockRestore();
+      reminders.mockRestore();
+      timeErrors.mockRestore();
+    }
+  });
+
   it('does not add document effects or query document facts for old Runs', async () => {
     const projection = spyOn(query, 'readRunGoalDocumentEvidence');
     try {

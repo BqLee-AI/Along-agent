@@ -658,7 +658,8 @@ export const RunViewSchema = z
             invocation_id: uuid,
             read_invocation_id: uuid.nullable(),
             version: z.string().nullable(),
-            status: z.enum(['applied', 'verified', 'conflict', 'unknown']),
+            operation: z.enum(['create', 'replace']).optional(),
+            status: z.enum(['applied', 'verified', 'conflict', 'failed', 'unknown']),
           })
           .strict(),
       )

@@ -50,6 +50,7 @@ interface Scenario {
   requests: ModelMessage[][];
   omitReadBack: boolean;
   delegated?: boolean;
+  create?: boolean;
   noWorkspace?: boolean;
   conflict?: boolean;
   conflictInjected?: boolean;
@@ -252,6 +253,33 @@ async function delegatedReply(
     });
   }
   const workspace_id = scenario.workspaceId;
+  if (scenario.create) {
+    const created = latest(accepted, (value) => value.result.kind === 'create_applied');
+    if (!created)
+      return tool('workspace_create', {
+        workspace_id,
+        output_directory: '',
+        filename: 'created.txt',
+        content: 'Created through native and MCP.\n',
+      });
+    const fresh = latest(
+      accepted,
+      (value) => value.index > created.index && value.result.kind === 'read',
+    );
+    if (!fresh) return tool('workspace_read', { workspace_id, path: 'created.txt' });
+    return tool('finish_goal', {
+      status: 'completed',
+      outcomes: [
+        {
+          description: 'Created and independently verified the file',
+          status: 'achieved',
+          receipt_refs: [created.invocationId, fresh.invocationId],
+        },
+      ],
+      clarification: null,
+      answer: 'Created and verified the file.',
+    });
+  }
   if (!latest(accepted, (value) => value.result.kind === 'list')) {
     return tool('workspace_list', { workspace_id, path: '' });
   }
@@ -452,6 +480,7 @@ async function setup(mode: ConsumerMode, conflict: boolean) {
     root,
     readable_paths: ['brief.md', 'sources/deadline.md'],
     writable_paths: ['brief.md'],
+    output_directories: [''],
   });
   await configureWorkspaceRegistry(registrations);
   const body = {
@@ -734,6 +763,45 @@ async function setupDelegated(mode: ConsumerMode) {
       idempotency_key: randomUUID(),
     },
   };
+}
+
+for (const mode of ['local', 'http'] as const) {
+  test(`D8.delegated-create.${mode}`, async () => {
+    const { actor, scenario, body } = await setupDelegated(mode);
+    scenario.create = true;
+    const events = await (await actor.message(body)).events;
+    expect(events.some((event) => event.type === 'thread.failed')).toBe(false);
+    expect(events.filter((event) => event.type === 'thread.completed')).toHaveLength(1);
+    expect(await readFile(join(scenario.root, 'created.txt'), 'utf8')).toBe(
+      'Created through native and MCP.\n',
+    );
+    const accepted = observations(values(scenario.requests.at(-1) ?? []));
+    const created = accepted.find((value) => value.result.kind === 'create_applied');
+    const fresh = accepted.find(
+      (value) => created && value.index > created.index && value.result.kind === 'read',
+    );
+    expect(created).toBeDefined();
+    expect(fresh?.result).toMatchObject({
+      kind: 'read',
+      path: 'created.txt',
+      content: 'Created through native and MCP.\n',
+    });
+    expect(fresh?.invocationId).not.toBe(created?.invocationId);
+    const run = started(events);
+    expect(await actor.view(run.conversation_id, run.run_id)).toMatchObject({
+      status: 'done',
+      document_effects: expect.arrayContaining([
+        expect.objectContaining({
+          operation: 'create',
+          path: 'created.txt',
+          invocation_id: created?.invocationId,
+          read_invocation_id: fresh?.invocationId,
+          status: 'verified',
+        }),
+      ]),
+    });
+    expect((await documentFacts(actor.ownerId)).document_approvals).toEqual([]);
+  }, 30_000);
 }
 
 async function delegatedSave(mode: ConsumerMode, conflict: boolean, fullRewrite = false) {

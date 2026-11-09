@@ -265,13 +265,22 @@ export async function viewOf(client: PoolClient, locked: LockedRun): Promise<Run
             runId: run.id,
           })
         ).effects.map(
-          ({ status, workspace_id, path, invocation_id, read_invocation_id, version }) => ({
+          ({
             status,
             workspace_id,
             path,
             invocation_id,
             read_invocation_id,
             version,
+            operation,
+          }) => ({
+            status,
+            workspace_id,
+            path,
+            invocation_id,
+            read_invocation_id,
+            version,
+            ...(operation ? { operation } : {}),
           }),
         )
       : undefined;

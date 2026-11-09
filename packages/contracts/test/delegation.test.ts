@@ -4,6 +4,11 @@ import {
   HarnessRequestSchema,
   HarnessToolPayloadSchema,
 } from '../src/harness.js';
+import {
+  workspaceGrantSchema,
+  workspaceResultSchema,
+  workspaceSummarySchema,
+} from '../src/workspaces.js';
 const id = '00000000-0000-4000-8000-000000000001';
 const trusted = {
   version: 1,
@@ -186,6 +191,61 @@ test('trusted continuation retains a structured unresolved goal without fabricat
     HarnessStartSchema.safeParse({
       ...start,
       trusted_context: { ...trusted, continuation: { ...continuation, original_text: undefined } },
+    }).success,
+  ).toBe(false);
+});
+
+test('output grants remain private and creation receipts have closed shapes', () => {
+  const summary = {
+    workspace_id: 'w',
+    label: 'W',
+    readable_paths: [],
+    writable_paths: [],
+    output_directories: [''],
+  };
+  expect(workspaceSummarySchema.safeParse(summary).success).toBe(true);
+  expect(workspaceSummarySchema.safeParse({ ...summary, root: '/private' }).success).toBe(false);
+  expect(
+    workspaceGrantSchema.safeParse({
+      workspace_id: 'w',
+      owner_id: 'owner',
+      registration_digest: 'a'.repeat(64),
+      root_identity: '1:2',
+      output_directories: [{ path: '', identity: '1:2' }],
+    }).success,
+  ).toBe(true);
+  const identity = { workspace_id: 'w', path: 'new.txt', invocation_id: id, args_hash: 'hash' };
+  expect(
+    workspaceResultSchema.safeParse({
+      ...identity,
+      kind: 'create_applied',
+      version: 'v',
+      byte_length: 0,
+      evidence_ref: 'e',
+    }).success,
+  ).toBe(true);
+  expect(
+    workspaceResultSchema.safeParse({
+      ...identity,
+      kind: 'create_conflict',
+      reason: 'already_exists',
+      zero_write: true,
+    }).success,
+  ).toBe(true);
+  expect(
+    workspaceResultSchema.safeParse({
+      ...identity,
+      kind: 'create_failed',
+      reason: 'unavailable',
+      zero_write: true,
+    }).success,
+  ).toBe(true);
+  expect(
+    workspaceResultSchema.safeParse({
+      ...identity,
+      kind: 'create_conflict',
+      reason: 'already_exists',
+      zero_write: false,
     }).success,
   ).toBe(false);
 });

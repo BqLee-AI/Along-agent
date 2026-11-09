@@ -43,7 +43,9 @@ import {
   publishWorkspaceReplace,
   type ApprovedWorkspaceTarget,
 } from '../workspaces/replace.js';
-import { utf8Bytes, WorkspaceDeniedError } from '../workspaces/service.js';
+import { publishWorkspaceCreate } from '../workspaces/create.js';
+import { strictUtf8, utf8Bytes, WorkspaceDeniedError } from '../workspaces/service.js';
+import { readAcceptedInvocationResult } from './accepted-result.js';
 import { callWorkspaceMcp, type WorkspaceReadTool } from './mcp-workspace.js';
 import { readRunDocumentEvidence } from './query.js';
 import { readObservationPage } from './observation-page.js';
@@ -231,6 +233,69 @@ function invokeWorkspaceReplace(
                     reason: result.reason,
                     zero_write: true,
                   },
+          },
+        };
+      } finally {
+        client.release();
+      }
+    },
+  });
+}
+function invokeWorkspaceCreate(
+  pool: Pool,
+  ctx: ToolContext,
+  input: { invocationId: string; toolId: string; args: unknown },
+): Promise<ToolOutcome> {
+  let frozen: ToolContext | undefined;
+  return executeNonTransactionalInvocation(pool, ctx, input, {
+    validateDispatch: async (_client, context) => {
+      if (
+        context.authorizationRevision !== 'delegation/1' ||
+        !context.workspaceGrant ||
+        !context.documentCreate
+      )
+        throw new WorkspaceDeniedError();
+      frozen = context;
+    },
+    execute: async (binding) => {
+      const grant = frozen?.workspaceGrant;
+      const target = frozen?.documentCreate;
+      if (!frozen || !grant || !target) throw new Error('missing frozen create target');
+      frozen.signal?.throwIfAborted();
+      const client = await pool.connect();
+      try {
+        const result = await publishWorkspaceCreate(client, frozen.ownerId, grant, {
+          output_directory: target.output_directory,
+          directory_identity: target.directory_identity,
+          path: target.relative_path,
+          exact_new_content: strictUtf8(Buffer.from(target.content_base64, 'base64')),
+          new_version: target.new_version,
+        });
+        const common = {
+          workspace_id: grant.workspace_id,
+          path: target.relative_path,
+          invocation_id: binding.invocationId,
+          args_hash: binding.argsHash,
+        };
+        const evidenceRef = `workspace-create:${binding.invocationId}:${target.new_version}`;
+        return {
+          ...binding,
+          evidenceRef,
+          ...(result.kind === 'applied' ? { fileIdentity: result.file_identity } : {}),
+          result: {
+            status: 'ok',
+            result:
+              result.kind === 'applied'
+                ? {
+                    kind: 'create_applied',
+                    ...common,
+                    version: result.version,
+                    byte_length: result.byte_length,
+                    evidence_ref: evidenceRef,
+                  }
+                : result.kind === 'conflict'
+                  ? { kind: 'create_conflict', ...common, reason: result.reason, zero_write: true }
+                  : { kind: 'create_failed', ...common, reason: result.reason, zero_write: true },
           },
         };
       } finally {
@@ -993,7 +1058,9 @@ export function reserveToolInvocation(
   return reserveInvocation(pool, ctx, {
     ...input,
     executionKind:
-      input.toolId === 'workspace_apply_replace' || input.toolId === 'workspace_replace'
+      input.toolId === 'workspace_apply_replace' ||
+      input.toolId === 'workspace_replace' ||
+      input.toolId === 'workspace_create'
         ? 'non_transactional'
         : readOnly
           ? 'read_only'
@@ -1008,6 +1075,7 @@ export function invokeTool(
 ): Promise<ToolOutcome> {
   if (input.toolId === 'workspace_apply_replace') return invokeWorkspaceApply(pool, ctx, input);
   if (input.toolId === 'workspace_replace') return invokeWorkspaceReplace(pool, ctx, input);
+  if (input.toolId === 'workspace_create') return invokeWorkspaceCreate(pool, ctx, input);
   if (input.toolId === 'read_run_observation') {
     return executeReadOnlyInvocation(pool, ctx, input, async (frozen) => {
       const parsed = TOOL_INPUT_SCHEMAS.read_run_observation.safeParse(input.args);
@@ -1041,7 +1109,62 @@ export function invokeTool(
           'literal' in parsed.data && typeof parsed.data.literal === 'string'
             ? { path, literal: parsed.data.literal }
             : { path };
-        const result = await callWorkspaceMcp(frozen, toolId, mcpArgs);
+        const authorizedCreatedPaths: Array<{
+          path: string;
+          directory_identity: string;
+          file_identity: string;
+          version: string;
+        }> = [];
+        if (frozen.authorizationRevision === 'delegation/1' && frozen.workspaceGrant) {
+          const client = await pool.connect();
+          try {
+            const { rows } = await client.query<{
+              invocation_id: string;
+              args_hash: string;
+              frozen_context: {
+                documentCreate?: { relative_path: string; directory_identity: string };
+              };
+              result_version: number | null;
+              tool_id: string;
+              approval_id: string | null;
+              accepted_result: unknown;
+              outcome_kind: string | null;
+            }>(
+              `SELECT invocation_id,args_hash,frozen_context,result_version,tool_id,approval_id,accepted_result,outcome_kind
+               FROM tool_invocations WHERE owner_id=$1 AND conversation_id=$2 AND run_id=$3
+                 AND tool_id='workspace_create' AND state='completed'
+                 AND frozen_context->'workspaceGrant'=$4::jsonb
+                 AND accepted_result->'result'->>'kind'='create_applied'`,
+              [
+                frozen.ownerId,
+                frozen.conversationId,
+                frozen.runId,
+                JSON.stringify(frozen.workspaceGrant),
+              ],
+            );
+            for (const row of rows) {
+              const accepted = await readAcceptedInvocationResult(client, frozen, row);
+              const target = row.frozen_context.documentCreate;
+              const privateResult = row.accepted_result as { file_identity?: unknown };
+              if (
+                accepted.status === 'ok' &&
+                accepted.result.kind === 'create_applied' &&
+                target &&
+                typeof privateResult.file_identity === 'string' &&
+                privateResult.file_identity.length > 0
+              )
+                authorizedCreatedPaths.push({
+                  path: target.relative_path,
+                  directory_identity: target.directory_identity,
+                  file_identity: privateResult.file_identity,
+                  version: accepted.result.version,
+                });
+            }
+          } finally {
+            client.release();
+          }
+        }
+        const result = await callWorkspaceMcp(frozen, toolId, mcpArgs, authorizedCreatedPaths);
         return {
           status: 'ok',
           result:

@@ -1,10 +1,19 @@
 import { describe, expect, it } from 'bun:test';
 import {
   DelegatedWorkspaceReadInputSchema,
+  WorkspaceCreateInputSchema,
   WorkspaceReplaceInputSchema,
   WorkspaceReadInputSchema,
 } from '../src/modules/tools/schemas.js';
 import { DELEGATION_TOOL_DEFINITIONS } from '../src/modules/tools/catalog.js';
+
+it('accepts only the exact delegated create arguments', () => {
+  const args = { workspace_id: 'one', output_directory: 'out', filename: 'a.txt', content: '' };
+  expect(WorkspaceCreateInputSchema.safeParse(args).success).toBe(true);
+  expect(WorkspaceCreateInputSchema.safeParse({ ...args, overwrite: true }).success).toBe(false);
+  expect(WorkspaceCreateInputSchema.safeParse({ ...args, filename: '' }).success).toBe(false);
+  expect(DELEGATION_TOOL_DEFINITIONS.some((tool) => tool.name === 'workspace_create')).toBe(true);
+});
 
 describe('delegated workspace gateway contracts', () => {
   it('requires an explicit workspace on delegated reads while preserving legacy shape', () => {

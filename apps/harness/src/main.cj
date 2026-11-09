@@ -191,7 +191,17 @@ func workspacePath(v: JsonValue): String {
 func workspaceCheck(v: JsonValue): Unit {
     if (isNull(v)) { return }
     let w = v.asObject()
-    keys(w, ["workspace_id", "label", "readable_paths", "writable_paths"])
+    if (w.containsKey("output_directories")) {
+        keys(w, ["workspace_id", "label", "readable_paths", "writable_paths", "output_directories"])
+        let outputs = HashSet<String>()
+        for (p in field(w, "output_directories").asArray().getItems()) {
+            let path = str(p, FRAME_LIMIT)
+            if (path != "") { workspacePath(p) }
+            require(outputs.add(path))
+        }
+    } else {
+        keys(w, ["workspace_id", "label", "readable_paths", "writable_paths"])
+    }
     require(str(field(w, "workspace_id"), FRAME_LIMIT).size > 0)
     require(str(field(w, "label"), FRAME_LIMIT).size > 0)
     let readable = HashSet<String>()
@@ -379,6 +389,7 @@ class Harness {
     var trustedWorkspaces = JsonArray()
     let workspaceIds = HashSet<String>()
     var hasWritableWorkspace: Bool = false
+    var hasOutputWorkspace: Bool = false
     var hardDenied: String = ""
     var closingGoal: Bool = false
     let acceptedReceipts = HashSet<String>()
@@ -685,6 +696,7 @@ class Harness {
                 let workspace = value.asObject()
                 workspaceIds.add(str(field(workspace, "workspace_id"), FRAME_LIMIT))
                 if (field(workspace, "writable_paths").asArray().size() > 0) { hasWritableWorkspace = true }
+                if (workspace.containsKey("output_directories") && field(workspace, "output_directories").asArray().size() > 0) { hasOutputWorkspace = true }
             }
         }
         if (delegated && !isNull(field(trusted.asObject(), "continuation"))) {
@@ -741,13 +753,15 @@ class Harness {
             keys(t, ["name", "description", "parameters", "risk"])
             require(tools.add(ref(field(t, "name"))))
             let name = ref(field(t, "name"))
-            require(delegated || (name != "create_reminder" && name != "get_task" && name != "cancel_reminder" && name != "workspace_replace"))
+            require(delegated || (name != "create_reminder" && name != "get_task" && name != "cancel_reminder" && name != "workspace_replace" && name != "workspace_create"))
             if (delegated) {
                 let workspaceRead = name == "workspace_list" || name == "workspace_grep" || name == "workspace_read"
                 let workspaceWrite = name == "workspace_replace" || name == "workspace_propose_replace" || name == "workspace_apply_replace"
-                require(name == "get_user_prefs" || name == "set_user_timezone" || name == "create_reminder" || name == "get_task" || name == "cancel_reminder" || name == "read_run_observation" || name == "list_tasks" || name == "read_brief_cards" || workspaceRead || workspaceWrite)
+                let workspaceCreate = name == "workspace_create"
+                require(name == "get_user_prefs" || name == "set_user_timezone" || name == "create_reminder" || name == "get_task" || name == "cancel_reminder" || name == "read_run_observation" || name == "list_tasks" || name == "read_brief_cards" || workspaceRead || workspaceWrite || workspaceCreate)
                 if (workspaceRead) { require(workspaceIds.size > 0) }
                 if (workspaceWrite) { require(hasWritableWorkspace) }
+                if (workspaceCreate) { require(hasOutputWorkspace) }
             }
             str(field(t, "description"), 8192)
             field(t, "parameters").asObject()
@@ -760,6 +774,9 @@ class Harness {
             }
             if (tools.contains("workspace_replace")) {
                 message("system", "For normal edits or an explicitly requested full rewrite of an existing file, use workspace_replace directly from an accepted complete workspace_read in this Run. Preserve unrelated content for a literal change. Do not invent approval for normal work. Use a proposal only for a genuinely new impact beyond the user's authorization. A proposal or approval is not a write. A successful write is not verified until a new independent workspace_read after that write confirms the complete exact content and version. Report partial, conflict and unknown truthfully. Only an explicitly zero-write version conflict may be followed by a new read and recomputation; never retry unknown or switch tools to bypass a refusal.")
+            }
+            if (tools.contains("workspace_create")) {
+                message("system", "Create files only in the frozen output directories using workspace_create. Never overwrite an existing name or create directories. If the user specified a fixed filename, do not silently choose another on collision; if the name was not fixed, a different name may be chosen only after a confirmed zero-write collision and must be reported. An accepted creation is not verified until a new independent workspace_read confirms the complete file and version. Never retry or choose another name after an unknown effect.")
             }
             if (tools.contains("get_task") && tools.contains("cancel_reminder")) {
                 message("system", "For a delegated request to locate or cancel reminders, use the available task reads to discover the user's actual matching tasks before choosing. Follow list_tasks next_cursor using after_task_id until all pages needed to establish uniqueness or the explicitly authorized scope have been read; use get_task when details are needed. A single page with has_more is not the complete set. Never ask the user for an internal task ID. If multiple plausible targets remain, ask only the identifying gap; after a trusted clarification continue without asking again for the same authorization. An explicit request to cancel all matching future reminders authorizes each matching task in the scope read, not a global atomic operation or tasks added after the read. Cancel each target separately and report actual per-task and partial results.")
@@ -969,6 +986,24 @@ class Harness {
                     require(elapsed && str(field(payload, "timezone_id"), 512) == "UTC" && fold == 0 && offset == 0)
                 } else { str(field(payload, "tzdb_version"), 512) }
                 if (!isNull(field(payload, "original_note"))) { str(field(payload, "original_note"), 8192) }
+            }
+            else if (kind == "create_applied" || kind == "create_conflict" || kind == "create_failed") {
+                if (kind == "create_applied") {
+                    keys(payload, ["kind", "workspace_id", "path", "invocation_id", "args_hash", "version", "byte_length", "evidence_ref"])
+                    nonempty(field(payload, "version"), FRAME_LIMIT)
+                    integer(field(payload, "byte_length"), 0)
+                    nonempty(field(payload, "evidence_ref"), FRAME_LIMIT)
+                } else {
+                    keys(payload, ["kind", "workspace_id", "path", "invocation_id", "args_hash", "reason", "zero_write"])
+                    let reason = ref(field(payload, "reason"))
+                    require((kind == "create_conflict" && reason == "already_exists") || (kind == "create_failed" && reason == "unavailable"))
+                    require(field(payload, "zero_write").asBool().getValue())
+                }
+                nonempty(field(payload, "workspace_id"), FRAME_LIMIT)
+                workspacePath(field(payload, "path"))
+                let invocation = uuid(field(payload, "invocation_id"))
+                if (outcome) { require(invocation == id) }
+                nonempty(field(payload, "args_hash"), FRAME_LIMIT)
             }
         }
         else { errorCheck(field(o, "error")) }

@@ -28,6 +28,7 @@ export const DELEGATION_WORKSPACE_WRITE_TOOL_IDS = [
   'workspace_propose_replace',
   'workspace_apply_replace',
 ] as const;
+export const DELEGATION_WORKSPACE_CREATE_TOOL_IDS = ['workspace_create'] as const;
 export const CONTEXT_TOOL_IDS = ['read_run_observation'] as const;
 export const HARNESS_BASE_TOOL_IDS = [...BUSINESS_TOOL_IDS, ...CONTEXT_TOOL_IDS] as const;
 export const DELEGATION_TOOL_IDS = [
@@ -44,7 +45,8 @@ export const TOOL_IDS = [...BUSINESS_TOOL_IDS, ...WORKSPACE_TOOL_IDS, ...CONTEXT
 export type ToolId =
   | (typeof TOOL_IDS)[number]
   | (typeof DELEGATION_TOOL_IDS)[number]
-  | (typeof DELEGATION_WORKSPACE_WRITE_TOOL_IDS)[number];
+  | (typeof DELEGATION_WORKSPACE_WRITE_TOOL_IDS)[number]
+  | (typeof DELEGATION_WORKSPACE_CREATE_TOOL_IDS)[number];
 
 export const TASK_STATES = [
   'saved',
@@ -78,6 +80,14 @@ export interface ToolContext {
     exact_new_content?: string;
     new_version?: string;
     operation_error?: 'literal_not_found' | 'literal_not_unique' | 'unchanged';
+    replaces_invocation_id?: string;
+  };
+  documentCreate?: {
+    output_directory: string;
+    directory_identity: string;
+    relative_path: string;
+    content_base64: string;
+    new_version: string;
     replaces_invocation_id?: string;
   };
   signal?: AbortSignal;

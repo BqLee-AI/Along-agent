@@ -171,6 +171,21 @@ export const DELEGATION_TOOL_DEFINITIONS = [
     },
   })),
   {
+    name: 'workspace_create',
+    description:
+      '仅在本 Run 冻结的输出目录内创建新普通文件，绝不覆盖。固定名称碰撞时不得擅自改名；允许换名时仅在确定零写碰撞后使用新调用。效果未知时停止，不得重试；创建成功后必须独立新调用全文回读核验。',
+    risk: 'high' as const,
+    parameters: workspaceParameters(
+      {
+        workspace_id: { type: 'string', minLength: 1 },
+        output_directory: { type: 'string' },
+        filename: { type: 'string', minLength: 1 },
+        content: { type: 'string' },
+      },
+      ['workspace_id', 'output_directory', 'filename', 'content'],
+    ),
+  },
+  {
     name: 'workspace_replace',
     description:
       '引用本 Run 接受的完整读取，直接精确编辑现有文件；冲突仅在零写后重新读取，未知不得重试，成功须独立新读取核验。',

@@ -172,6 +172,7 @@ export async function acceptTargetContinuation(
     },
     anchor: run.frozen_context.anchorReceivedAtUtc,
     ...(workspaceScope ? { workspaceGrants: run.frozen_context.workspaceGrants! } : {}),
+    workspaceCreateAllowed: run.tools_allowlist.includes('workspace_create'),
   };
 }
 

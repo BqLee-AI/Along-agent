@@ -23,6 +23,7 @@ export interface WorkspaceRegistration extends WorkspaceSummary {
 interface ActiveRegistration extends WorkspaceRegistration {
   registration_digest: string;
   root_identity: string;
+  output_identities?: { path: string; identity: string }[];
 }
 const registry = new Map<string, ActiveRegistration>();
 export const hashBytes = (bytes: Uint8Array): string =>
@@ -50,6 +51,14 @@ export function canonicalRelativePath(value: string, directory = false): string 
   for (let index = 0; index < value.length; index++) {
     if (value.charCodeAt(index) < 32) throw new WorkspaceDeniedError();
   }
+  utf8Bytes(value);
+  return value;
+}
+const internalTemporaryName =
+  /^\.along-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.tmp$/u;
+export function canonicalWorkspaceFilename(value: string): string {
+  canonicalRelativePath(value);
+  if (value.includes('/') || internalTemporaryName.test(value)) throw new WorkspaceDeniedError();
   return value;
 }
 export function strictUtf8(bytes: Uint8Array): string {
@@ -112,6 +121,7 @@ export async function configureWorkspaceRegistry(input: unknown): Promise<Regist
               'root',
               'readable_paths',
               'writable_paths',
+              'output_directories',
             ].includes(key),
         )
       )
@@ -123,6 +133,7 @@ export async function configureWorkspaceRegistry(input: unknown): Promise<Regist
         ) ||
         !Array.isArray(item.readable_paths) ||
         !Array.isArray(item.writable_paths) ||
+        (item.output_directories !== undefined && !Array.isArray(item.output_directories)) ||
         !path.isAbsolute(item.root)
       )
         continue;
@@ -138,6 +149,21 @@ export async function configureWorkspaceRegistry(input: unknown): Promise<Regist
       if (path.resolve(item.root) !== root) continue;
       const stat = await lstat(root);
       const root_identity = identity(stat);
+      const outputs =
+        item.output_directories === undefined
+          ? undefined
+          : [...new Set(item.output_directories.map((v) => canonicalRelativePath(v, true)))].sort();
+      const output_identities =
+        outputs === undefined
+          ? undefined
+          : await Promise.all(
+              outputs.map(async (relative) => {
+                const directory = path.join(root, ...relative.split('/').filter(Boolean));
+                await checkedDirectory(directory);
+                if ((await realpath(directory)) !== directory) throw new WorkspaceDeniedError();
+                return { path: relative, identity: identity(await lstat(directory)) };
+              }),
+            );
       const material = {
         workspace_id: item.workspace_id,
         label: item.label,
@@ -146,6 +172,7 @@ export async function configureWorkspaceRegistry(input: unknown): Promise<Regist
         readable_paths: readable,
         writable_paths: writable,
         root_identity,
+        ...(outputs === undefined ? {} : { output_directories: outputs, output_identities }),
       };
       candidates.push({
         ...material,
@@ -202,7 +229,16 @@ function selected(ownerId: string, grant: WorkspaceGrant): ActiveRegistration {
     item.owner_id !== ownerId ||
     grant.owner_id !== ownerId ||
     item.registration_digest !== grant.registration_digest ||
-    item.root_identity !== grant.root_identity
+    item.root_identity !== grant.root_identity ||
+    (grant.output_directories !== undefined &&
+      (new Set(grant.output_directories.map((entry) => entry.path)).size !==
+        grant.output_directories.length ||
+        grant.output_directories.some(
+          (entry) =>
+            !item.output_identities?.some(
+              (current) => current.path === entry.path && current.identity === entry.identity,
+            ),
+        )))
   )
     throw new WorkspaceDeniedError();
   return item;
@@ -213,6 +249,9 @@ function summary(item: WorkspaceRegistration): WorkspaceSummary {
     label: item.label,
     readable_paths: [...item.readable_paths],
     writable_paths: [...item.writable_paths],
+    ...(item.output_directories === undefined
+      ? {}
+      : { output_directories: [...item.output_directories] }),
   };
 }
 export function listWorkspaces(ownerId: string): WorkspaceSummary[] {
@@ -251,6 +290,9 @@ export function resolveWorkspaceGrants(
       owner_id: item.owner_id,
       registration_digest: item.registration_digest,
       root_identity: item.root_identity,
+      ...(item.output_identities === undefined
+        ? {}
+        : { output_directories: item.output_identities.map((v) => ({ ...v })) }),
     })),
     summaries: items.map(summary),
   };
@@ -269,12 +311,144 @@ export function resolveFrozenWorkspaceGrant(
 }
 
 export function validateWorkspaceGrant(ownerId: string, grant: WorkspaceGrant): WorkspaceSummary {
-  return summary(selected(ownerId, grant));
-}
-export function getWorkspaceMcpConfiguration(ownerId: string, grant: WorkspaceGrant): string {
   const item = selected(ownerId, grant);
-  return JSON.stringify({ ...summary(item), owner_id: item.owner_id, root: item.root });
+  const result = summary(item);
+  if (!grant.output_directories) delete result.output_directories;
+  else result.output_directories = grant.output_directories.map((entry) => entry.path);
+  return result;
 }
+export interface AuthorizedCreatedPath {
+  path: string;
+  directory_identity: string;
+  file_identity: string;
+  version: string;
+}
+export function getWorkspaceMcpConfiguration(
+  ownerId: string,
+  grant: WorkspaceGrant,
+  authorizedCreatedPaths: AuthorizedCreatedPath[] = [],
+): string {
+  const item = selected(ownerId, grant);
+  return JSON.stringify({
+    registration: { ...summary(item), owner_id: item.owner_id, root: item.root },
+    grant,
+    authorizedCreatedPaths,
+  });
+}
+function withinOutput(relative: string, directory: string): boolean {
+  return directory === '' ? relative !== '' : relative.startsWith(`${directory}/`);
+}
+
+export function isWorkspaceOutputDirectory(grant: WorkspaceGrant, directory: string): boolean {
+  canonicalRelativePath(directory, true);
+  return (grant.output_directories ?? []).some(
+    (entry) => entry.path === directory || withinOutput(directory, entry.path),
+  );
+}
+
+export function isWorkspaceReadablePath(
+  ownerId: string,
+  grant: WorkspaceGrant,
+  relative: string,
+  authorizedCreatedPaths: AuthorizedCreatedPath[] = [],
+): boolean {
+  canonicalRelativePath(relative);
+  const item = selected(ownerId, grant);
+  if (item.readable_paths.includes(relative)) return true;
+  const slash = relative.lastIndexOf('/');
+  const directory = slash < 0 ? '' : relative.slice(0, slash);
+  return (
+    isWorkspaceOutputDirectory(grant, directory) &&
+    authorizedCreatedPaths.some(
+      (entry) =>
+        entry.path === relative &&
+        !!entry.directory_identity &&
+        !!entry.file_identity &&
+        /^[a-f0-9]{64}$/u.test(entry.version),
+    )
+  );
+}
+
+export function isWorkspaceReadableDirectory(
+  ownerId: string,
+  grant: WorkspaceGrant,
+  directory: string,
+  authorizedCreatedPaths: AuthorizedCreatedPath[] = [],
+): boolean {
+  canonicalRelativePath(directory, true);
+  const item = selected(ownerId, grant);
+  const paths = [
+    ...item.readable_paths,
+    ...authorizedCreatedPaths
+      .filter((entry) =>
+        isWorkspaceReadablePath(ownerId, grant, entry.path, authorizedCreatedPaths),
+      )
+      .map((entry) => entry.path),
+  ];
+  return directory === '' || paths.some((v) => v.startsWith(`${directory}/`));
+}
+
+export async function getWorkspaceOutputIdentity(
+  ownerId: string,
+  grant: WorkspaceGrant,
+  outputDirectory: string,
+): Promise<string> {
+  canonicalRelativePath(outputDirectory, true);
+  const item = selected(ownerId, grant);
+  const entry = grant.output_directories?.find(
+    (v) => v.path === outputDirectory || withinOutput(outputDirectory, v.path),
+  );
+  if (!entry) throw new WorkspaceDeniedError();
+  let directoryIdentity: string;
+  try {
+    await checkedDirectory(item.root);
+    if (
+      identity(await lstat(item.root)) !== item.root_identity ||
+      (await realpath(item.root)) !== item.root
+    )
+      throw new WorkspaceDeniedError();
+    const registered = path.join(item.root, ...entry.path.split('/').filter(Boolean));
+    await checkedDirectory(registered);
+    if (
+      (await realpath(registered)) !== registered ||
+      identity(await lstat(registered)) !== entry.identity
+    )
+      throw new WorkspaceDeniedError();
+    const absolute = path.join(item.root, ...outputDirectory.split('/').filter(Boolean));
+    await checkedDirectory(absolute);
+    if ((await realpath(absolute)) !== absolute) throw new WorkspaceDeniedError();
+    directoryIdentity = identity(await lstat(absolute));
+  } catch {
+    throw new WorkspaceDeniedError();
+  }
+  return directoryIdentity;
+}
+
+export async function checkedWorkspaceOutputDirectory(
+  ownerId: string,
+  grant: WorkspaceGrant,
+  outputDirectory: string,
+): Promise<{ absolute: string; identity: string }> {
+  const directoryIdentity = await getWorkspaceOutputIdentity(ownerId, grant, outputDirectory);
+  const item = selected(ownerId, grant);
+  return {
+    absolute: path.join(item.root, ...outputDirectory.split('/').filter(Boolean)),
+    identity: directoryIdentity,
+  };
+}
+
+async function checkedOutputForPath(
+  ownerId: string,
+  grant: WorkspaceGrant,
+  relative: string,
+): Promise<void> {
+  const matches = (grant.output_directories ?? []).filter((entry) =>
+    withinOutput(relative, entry.path),
+  );
+  if (!matches.length) throw new WorkspaceDeniedError();
+  await getWorkspaceOutputIdentity(ownerId, grant, matches[0]!.path);
+}
+
 export interface CheckedWorkspaceTarget {
   absolute: string;
   stat: Stats;
@@ -288,11 +462,18 @@ export async function checkedTarget(
   grant: WorkspaceGrant,
   relative: string,
   write = false,
+  authorizedCreatedPaths: AuthorizedCreatedPath[] = [],
 ): Promise<CheckedWorkspaceTarget> {
   canonicalRelativePath(relative);
   const item = selected(ownerId, grant);
-  if (!(write ? item.writable_paths : item.readable_paths).includes(relative))
+  if (
+    write
+      ? !item.writable_paths.includes(relative)
+      : !isWorkspaceReadablePath(ownerId, grant, relative, authorizedCreatedPaths)
+  )
     throw new WorkspaceDeniedError();
+  if (!write && !item.readable_paths.includes(relative))
+    await checkedOutputForPath(ownerId, grant, relative);
   await checkedDirectory(item.root);
   if (
     identity(await lstat(item.root)) !== item.root_identity ||
@@ -302,12 +483,31 @@ export async function checkedTarget(
   const absolute = path.join(item.root, ...relative.split('/'));
   await checkedDirectory(path.dirname(absolute));
   const parent_identity = identity(await lstat(path.dirname(absolute)));
+  if (
+    !write &&
+    !item.readable_paths.includes(relative) &&
+    !authorizedCreatedPaths.some(
+      (entry) => entry.path === relative && entry.directory_identity === parent_identity,
+    )
+  )
+    throw new WorkspaceDeniedError();
   const stat = await lstat(absolute);
   if (
     stat.isSymbolicLink() ||
     !stat.isFile() ||
     stat.nlink !== 1 ||
     !inside(item.root, await realpath(absolute))
+  )
+    throw new WorkspaceDeniedError();
+  if (
+    !write &&
+    !item.readable_paths.includes(relative) &&
+    !authorizedCreatedPaths.some(
+      (entry) =>
+        entry.path === relative &&
+        entry.directory_identity === parent_identity &&
+        entry.file_identity === identity(stat),
+    )
   )
     throw new WorkspaceDeniedError();
   return { absolute, stat, parent_identity };
@@ -317,8 +517,9 @@ export async function readWorkspaceBytes(
   grant: WorkspaceGrant,
   relative: string,
   write = false,
+  authorizedCreatedPaths: AuthorizedCreatedPath[] = [],
 ): Promise<WorkspaceFileBytes> {
-  const target = await checkedTarget(ownerId, grant, relative, write);
+  const target = await checkedTarget(ownerId, grant, relative, write, authorizedCreatedPaths);
   const handle = await open(
     target.absolute,
     constants.O_RDONLY | (process.platform === 'linux' ? constants.O_NOFOLLOW : 0),
@@ -327,7 +528,30 @@ export async function readWorkspaceBytes(
     const stat = await handle.stat();
     if (!stat.isFile() || stat.nlink !== 1 || identity(stat) !== identity(target.stat))
       throw new WorkspaceDeniedError();
+    if (
+      !write &&
+      !selected(ownerId, grant).readable_paths.includes(relative) &&
+      !authorizedCreatedPaths.some(
+        (entry) =>
+          entry.path === relative &&
+          entry.directory_identity === target.parent_identity &&
+          entry.file_identity === identity(stat),
+      )
+    )
+      throw new WorkspaceDeniedError();
     const bytes = await handle.readFile();
+    if (
+      !write &&
+      !selected(ownerId, grant).readable_paths.includes(relative) &&
+      !authorizedCreatedPaths.some(
+        (entry) =>
+          entry.path === relative &&
+          entry.directory_identity === target.parent_identity &&
+          entry.file_identity === identity(stat) &&
+          entry.version === hashBytes(bytes),
+      )
+    )
+      throw new WorkspaceDeniedError();
     return { ...target, stat, bytes };
   } finally {
     await handle.close();
@@ -350,9 +574,16 @@ export async function readWorkspaceFile(
   ownerId: string,
   grant: WorkspaceGrant,
   relative: string,
+  authorizedCreatedPaths: AuthorizedCreatedPath[] = [],
 ): Promise<WorkspaceReadResult | WorkspaceOperationError> {
   try {
-    const { bytes } = await readWorkspaceBytes(ownerId, grant, relative);
+    const { bytes } = await readWorkspaceBytes(
+      ownerId,
+      grant,
+      relative,
+      false,
+      authorizedCreatedPaths,
+    );
     return {
       kind: 'read',
       path: relative,
@@ -368,17 +599,25 @@ export async function listWorkspaceFiles(
   ownerId: string,
   grant: WorkspaceGrant,
   directory: string,
+  authorizedCreatedPaths: AuthorizedCreatedPath[] = [],
 ) {
   canonicalRelativePath(directory, true);
   const item = selected(ownerId, grant);
   const prefix = directory ? `${directory}/` : '';
-  const paths = item.readable_paths.filter((v) => v.startsWith(prefix));
-  if (directory && !paths.length) throw new WorkspaceDeniedError();
+  const paths = [
+    ...new Set([...item.readable_paths, ...authorizedCreatedPaths.map((entry) => entry.path)]),
+  ].filter(
+    (v) =>
+      v.startsWith(prefix) && isWorkspaceReadablePath(ownerId, grant, v, authorizedCreatedPaths),
+  );
+  if (!isWorkspaceReadableDirectory(ownerId, grant, directory, authorizedCreatedPaths))
+    throw new WorkspaceDeniedError();
   const entries = new Map<string, { path: string; kind: 'file' | 'directory' }>();
   const failures: WorkspaceOperationError[] = [];
   for (const relative of paths) {
     try {
-      await checkedTarget(ownerId, grant, relative);
+      if (item.readable_paths.includes(relative)) await checkedTarget(ownerId, grant, relative);
+      else await readWorkspaceBytes(ownerId, grant, relative, false, authorizedCreatedPaths);
       const rest = relative.slice(prefix.length);
       const first = rest.split('/')[0]!;
       entries.set(prefix + first, {
@@ -396,19 +635,25 @@ export async function searchWorkspaceFiles(
   grant: WorkspaceGrant,
   directory: string,
   literal: string,
+  authorizedCreatedPaths: AuthorizedCreatedPath[] = [],
 ) {
   canonicalRelativePath(directory, true);
   utf8Bytes(literal);
   if (!literal) throw new WorkspaceDeniedError();
   const item = selected(ownerId, grant);
-  const paths = item.readable_paths.filter(
-    (v) => !directory || v === directory || v.startsWith(`${directory}/`),
+  if (!isWorkspaceReadableDirectory(ownerId, grant, directory, authorizedCreatedPaths))
+    throw new WorkspaceDeniedError();
+  const paths = [
+    ...new Set([...item.readable_paths, ...authorizedCreatedPaths.map((entry) => entry.path)]),
+  ].filter(
+    (v) =>
+      (!directory || v === directory || v.startsWith(`${directory}/`)) &&
+      isWorkspaceReadablePath(ownerId, grant, v, authorizedCreatedPaths),
   );
-  if (directory && !paths.length) throw new WorkspaceDeniedError();
   const matches: { path: string; line: number; text: string; version: string }[] = [];
   const failures: WorkspaceOperationError[] = [];
   for (const relative of paths) {
-    const read = await readWorkspaceFile(ownerId, grant, relative);
+    const read = await readWorkspaceFile(ownerId, grant, relative, authorizedCreatedPaths);
     if (read.kind === 'operation_error') {
       failures.push(read);
       continue;

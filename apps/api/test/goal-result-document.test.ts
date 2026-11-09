@@ -2,6 +2,11 @@ import { describe, expect, it } from 'bun:test';
 import type { GoalResult } from '@along/contracts';
 import type { RunGoalDocumentEvidence } from '../src/modules/tools/query.js';
 import { validateGoalDocuments } from '../src/modules/conversations/goal-result.js';
+import {
+  decodeWorkspaceContent,
+  hydrateWorkspaceReadResult,
+} from '../src/modules/tools/accepted-result.js';
+import { hashBytes } from '../src/modules/workspaces/service.js';
 
 const apply = '00000000-0000-4000-8000-000000000001';
 const read = '00000000-0000-4000-8000-000000000002';
@@ -12,7 +17,7 @@ const goal = (refs: string[]): GoalResult => ({
   answer: '已保存。',
 });
 const evidence = (
-  status: 'applied' | 'verified' | 'conflict' | 'unknown',
+  status: 'applied' | 'verified' | 'conflict' | 'failed' | 'unknown',
 ): RunGoalDocumentEvidence => ({
   effects: [
     {
@@ -77,7 +82,7 @@ describe('document GoalResult evidence', () => {
   });
 
   it('does not turn conflicts, unknown effects or pending approvals into success', () => {
-    for (const status of ['conflict', 'unknown'] as const)
+    for (const status of ['conflict', 'failed', 'unknown'] as const)
       expect(() => validateGoalDocuments(goal([apply]), evidence(status))).toThrow();
     expect(() =>
       validateGoalDocuments(goal([apply, read]), {
@@ -102,5 +107,39 @@ describe('document GoalResult evidence', () => {
         effects: [{ ...chain.effects[0]!, superseded: false }, chain.effects[1]!],
       }),
     ).toThrow();
+  });
+
+  it('requires fresh verification for a created artifact and rejects zero-write failures', () => {
+    const created = evidence('verified');
+    created.effects[0]!.operation = 'create';
+    expect(() => validateGoalDocuments(goal([apply]), created)).toThrow();
+    expect(() => validateGoalDocuments(goal([apply, read]), created)).not.toThrow();
+    const failed = evidence('failed');
+    failed.effects[0]!.operation = 'create';
+    expect(() => validateGoalDocuments(goal([apply]), failed)).toThrow();
+  });
+
+  it('hydrates a JSONB-safe NUL read and rejects malformed encoded bytes', () => {
+    const content = 'before\u0000中文😀';
+    const bytes = Buffer.from(content, 'utf8');
+    const result = {
+      status: 'ok',
+      result: {
+        kind: 'read',
+        workspace_id: 'test',
+        path: 'output/nul.txt',
+        version: hashBytes(bytes),
+        byte_length: bytes.length,
+        content,
+      },
+    } as const;
+    const envelope = {
+      encoding: 'json-base64/1',
+      data: Buffer.from(JSON.stringify(result), 'utf8').toString('base64'),
+    };
+    expect(hydrateWorkspaceReadResult(envelope)).toEqual(result);
+    expect(() => decodeWorkspaceContent('YQ')).toThrow();
+    expect(() => decodeWorkspaceContent('/w==')).toThrow();
+    expect(() => hydrateWorkspaceReadResult({ ...envelope, unexpected: true })).toThrow();
   });
 });

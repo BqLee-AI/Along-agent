@@ -1,4 +1,5 @@
 import type { PoolClient } from 'pg';
+import { isDeepStrictEqual } from 'node:util';
 import {
   HarnessObservationSchema,
   workspaceGrantSchema,
@@ -18,7 +19,11 @@ import type {
   ReminderCancelledPayload,
 } from './contracts.js';
 import { parseResult, resultKind } from './result-schema.js';
-import { readAcceptedInvocationResult } from './accepted-result.js';
+import {
+  decodeWorkspaceContent,
+  hydrateWorkspaceReadResult,
+  readAcceptedInvocationResult,
+} from './accepted-result.js';
 import { readReminderTimeErrors } from './reminder-source.js';
 import {
   authorizeSliceOrigin,
@@ -35,6 +40,7 @@ import {
   verifiedDocumentRead,
 } from '../approvals/document-rules.js';
 import { listDocumentApprovals } from '../approvals/document-query.js';
+import { hashBytes, isWorkspaceOutputDirectory } from '../workspaces/service.js';
 
 export interface RunGoalDocumentEffect {
   workspace_id: string;
@@ -42,7 +48,8 @@ export interface RunGoalDocumentEffect {
   invocation_id: string;
   read_invocation_id: string | null;
   version: string | null;
-  status: 'applied' | 'verified' | 'conflict' | 'unknown';
+  status: 'applied' | 'verified' | 'conflict' | 'failed' | 'unknown';
+  operation?: 'create' | 'replace';
   superseded: boolean;
 }
 export interface RunGoalDocumentEvidence {
@@ -210,7 +217,11 @@ export async function readRunDocumentEvidence(
 async function readDocumentEvidence(
   client: PoolClient,
   binding: RunBinding,
-): Promise<DocumentRunEvidence> {
+): Promise<
+  Omit<DocumentRunEvidence, 'reads'> & {
+    reads: Array<DocumentRunEvidence['reads'][number] & { frozen_grant: unknown }>;
+  }
+> {
   const { rows } = await client.query<{
     invocation_id: string;
     owner_id: string;
@@ -238,7 +249,7 @@ async function readDocumentEvidence(
      ORDER BY created_at,invocation_id`,
     [binding.ownerId, binding.conversationId, binding.runId],
   );
-  const reads: DocumentRunEvidence['reads'][number][] = [];
+  const reads: Array<DocumentRunEvidence['reads'][number] & { frozen_grant: unknown }> = [];
   const applies: DocumentRunEvidence['applies'][number][] = [];
   for (const row of rows) {
     const grant = workspaceGrantSchema.parse(row.frozen_context.workspaceGrant);
@@ -254,7 +265,7 @@ async function readDocumentEvidence(
     };
     if (row.tool_id === 'workspace_read') {
       if (row.state !== 'completed') continue;
-      const accepted = parseResult(row.accepted_result);
+      const accepted = hydrateWorkspaceReadResult(row.accepted_result);
       if (
         accepted.status === 'ok' &&
         accepted.result.kind === 'read' &&
@@ -265,6 +276,7 @@ async function readDocumentEvidence(
       if (accepted.status === 'ok' && accepted.result.kind === 'read')
         reads.push({
           ...identity,
+          frozen_grant: grant,
           kind: 'read',
           relative_path: accepted.result.path,
           result: accepted.result,
@@ -308,6 +320,7 @@ export async function readRunGoalDocumentEvidence(
       authorizationRevision?: string;
       workspaceGrant?: unknown;
       documentEdit?: NonNullable<ToolContext['documentEdit']>;
+      documentCreate?: NonNullable<ToolContext['documentCreate']>;
     };
     accepted_result: unknown;
     accepted_at: string;
@@ -315,7 +328,7 @@ export async function readRunGoalDocumentEvidence(
     `SELECT invocation_id,tool_id,state,args_hash,approval_id,frozen_context,accepted_result,
       coalesce(to_char(accepted_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),'') accepted_at
       FROM tool_invocations WHERE owner_id=$1 AND conversation_id=$2 AND run_id=$3
-      AND tool_id IN ('workspace_replace','workspace_propose_replace','workspace_apply_replace')
+      AND tool_id IN ('workspace_replace','workspace_propose_replace','workspace_apply_replace','workspace_create')
       ORDER BY created_at,invocation_id`,
     [binding.ownerId, binding.conversationId, binding.runId],
   );
@@ -332,6 +345,85 @@ export async function readRunGoalDocumentEvidence(
     binding.runId,
   );
   const effects: RunGoalDocumentEffect[] = [];
+  for (const row of delegated.filter((item) => item.tool_id === 'workspace_create')) {
+    const grant = workspaceGrantSchema.parse(row.frozen_context.workspaceGrant);
+    const create = row.frozen_context.documentCreate;
+    if (!create) throw stateConflict('missing frozen document creation');
+    const directory = isWorkspaceOutputDirectory(grant, create.output_directory);
+    const { bytes, content } = decodeWorkspaceContent(create.content_base64);
+    const prefix = create.output_directory ? `${create.output_directory}/` : '';
+    const filename = create.relative_path.slice(prefix.length);
+    if (
+      !directory ||
+      !create.directory_identity ||
+      !create.relative_path.startsWith(prefix) ||
+      !filename ||
+      filename.includes('/') ||
+      hashBytes(bytes) !== create.new_version
+    )
+      throw stateConflict('invalid frozen document creation');
+    const common = {
+      workspace_id: grant.workspace_id,
+      path: create.relative_path,
+      invocation_id: row.invocation_id,
+      read_invocation_id: null,
+      version: null,
+      superseded: false,
+      operation: 'create' as const,
+    };
+    if (row.state === 'unknown') {
+      effects.push({ ...common, status: 'unknown' });
+      continue;
+    }
+    if (row.state !== 'completed') continue;
+    const accepted = hydrateWorkspaceReadResult(row.accepted_result);
+    if (accepted.status !== 'ok') continue;
+    const result = accepted.result;
+    if (
+      result.kind !== 'create_applied' &&
+      result.kind !== 'create_conflict' &&
+      result.kind !== 'create_failed'
+    )
+      throw stateConflict('invalid document creation result');
+    if (
+      result.invocation_id !== row.invocation_id ||
+      result.args_hash !== row.args_hash ||
+      result.workspace_id !== grant.workspace_id ||
+      result.path !== create.relative_path
+    )
+      throw stateConflict('invalid document creation binding');
+    if (result.kind !== 'create_applied') {
+      effects.push({
+        ...common,
+        status: result.kind === 'create_conflict' ? 'conflict' : 'failed',
+      });
+      continue;
+    }
+    if (
+      result.version !== create.new_version ||
+      result.byte_length !== bytes.length ||
+      result.evidence_ref !== `workspace-create:${row.invocation_id}:${create.new_version}`
+    )
+      throw stateConflict('invalid document creation bytes or evidence');
+    const read = evidence.reads.find(
+      (item) =>
+        item.workspace_id === grant.workspace_id &&
+        item.registration_digest === grant.registration_digest &&
+        isDeepStrictEqual(item.frozen_grant, grant) &&
+        item.relative_path === create.relative_path &&
+        item.result.version === create.new_version &&
+        item.result.content === content &&
+        item.result.byte_length === result.byte_length &&
+        documentEvidenceLater(item.created_at, row.accepted_at) &&
+        documentEvidenceLater(item.accepted_at, row.accepted_at),
+    );
+    effects.push({
+      ...common,
+      status: read ? 'verified' : 'applied',
+      read_invocation_id: read?.invocation_id ?? null,
+      version: result.version,
+    });
+  }
   for (const row of delegated.filter((item) => item.tool_id === 'workspace_replace')) {
     const grant = workspaceGrantSchema.parse(row.frozen_context.workspaceGrant);
     const edit = row.frozen_context.documentEdit;
@@ -438,6 +530,9 @@ export async function readRunGoalDocumentEvidence(
   // Only a unique chain ending in an independently verified write resolves a
   // zero-write conflict. A reserved, failed or unverified successor is not proof.
   const successorIds = (id: string): string[] => {
+    const createDirect = delegated.filter(
+      (row) => row.frozen_context.documentCreate?.replaces_invocation_id === id,
+    );
     const direct = delegated.filter(
       (row) => row.frozen_context.documentEdit?.replaces_invocation_id === id,
     );
@@ -455,33 +550,47 @@ export async function readRunGoalDocumentEvidence(
       ))
         ids.push(approval.apply_invocation_id ?? approval.id);
     }
-    return [...new Set(ids)];
+    return [...new Set([...ids, ...createDirect.map((row) => row.invocation_id)])];
   };
   const reachesVerified = (effect: RunGoalDocumentEffect, visited: Set<string>): boolean => {
     if (effect.status === 'verified') return true;
     if (effect.status !== 'conflict' || visited.has(effect.invocation_id)) return false;
     const row = delegated.find((item) => item.invocation_id === effect.invocation_id);
     if (!row || row.state !== 'completed') return false;
-    const result = parseResult(row.accepted_result);
+    const result = hydrateWorkspaceReadResult(row.accepted_result);
     if (
       result.status !== 'ok' ||
       !(
         (result.result.kind === 'conflict' && result.result.zero_write) ||
         (result.result.kind === 'edit_conflict' &&
           result.result.zero_write &&
-          result.result.reason === 'version_changed')
+          result.result.reason === 'version_changed') ||
+        (result.result.kind === 'create_conflict' && result.result.zero_write)
       )
     )
       return false;
     const successors = successorIds(effect.invocation_id);
     if (successors.length !== 1) return false;
-    const next = effects.find(
-      (item) =>
-        item.invocation_id === successors[0] &&
-        item.workspace_id === effect.workspace_id &&
-        item.path === effect.path,
-    );
-    if (!next) return false;
+    const next = effects.find((item) => item.invocation_id === successors[0]);
+    if (!next || next.workspace_id !== effect.workspace_id) return false;
+    if (effect.operation === 'create') {
+      const previous = row.frozen_context.documentCreate;
+      const successorRow = delegated.find((item) => item.invocation_id === next.invocation_id);
+      const successor = successorRow?.frozen_context.documentCreate;
+      if (
+        next.operation !== 'create' ||
+        !previous ||
+        !successor ||
+        !isDeepStrictEqual(
+          row.frozen_context.workspaceGrant,
+          successorRow?.frozen_context.workspaceGrant,
+        ) ||
+        previous.output_directory !== successor.output_directory ||
+        previous.directory_identity !== successor.directory_identity ||
+        previous.content_base64 !== successor.content_base64
+      )
+        return false;
+    } else if (next.path !== effect.path || next.operation === 'create') return false;
     visited.add(effect.invocation_id);
     return reachesVerified(next, visited);
   };

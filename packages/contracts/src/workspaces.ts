@@ -6,6 +6,7 @@ export const workspaceSummarySchema = z
     label: z.string().min(1),
     readable_paths: z.array(z.string()),
     writable_paths: z.array(z.string()),
+    output_directories: z.array(z.string()).optional(),
   })
   .strict();
 export type WorkspaceSummary = z.infer<typeof workspaceSummarySchema>;
@@ -15,6 +16,9 @@ export const workspaceGrantSchema = z
     owner_id: z.string().min(1),
     registration_digest: z.string().regex(/^[a-f0-9]{64}$/),
     root_identity: z.string().min(1),
+    output_directories: z
+      .array(z.object({ path: z.string(), identity: z.string().min(1) }).strict())
+      .optional(),
   })
   .strict();
 export type WorkspaceGrant = z.infer<typeof workspaceGrantSchema>;
@@ -109,6 +113,38 @@ export const workspaceEditConflictResultSchema = workspaceConflictResultSchema
   .omit({ approval_id: true, kind: true })
   .extend({ kind: z.literal('edit_conflict') });
 
+const workspaceCreateIdentity = {
+  workspace_id: z.string().min(1),
+  path: z.string(),
+  invocation_id: z.string().uuid(),
+  args_hash: z.string(),
+};
+export const workspaceCreateAppliedResultSchema = z
+  .object({
+    ...workspaceCreateIdentity,
+    kind: z.literal('create_applied'),
+    version: z.string(),
+    byte_length: z.number().int().nonnegative(),
+    evidence_ref: z.string(),
+  })
+  .strict();
+export const workspaceCreateConflictResultSchema = z
+  .object({
+    ...workspaceCreateIdentity,
+    kind: z.literal('create_conflict'),
+    reason: z.literal('already_exists'),
+    zero_write: z.literal(true),
+  })
+  .strict();
+export const workspaceCreateFailedResultSchema = z
+  .object({
+    ...workspaceCreateIdentity,
+    kind: z.literal('create_failed'),
+    reason: z.literal('unavailable'),
+    zero_write: z.literal(true),
+  })
+  .strict();
+
 const contextIndex = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const contextSliceIdentity = {
   kind: z.literal('context_slice'),
@@ -190,6 +226,9 @@ export const workspaceResultSchema = z.union([
   workspaceConflictResultSchema,
   workspaceEditAppliedResultSchema,
   workspaceEditConflictResultSchema,
+  workspaceCreateAppliedResultSchema,
+  workspaceCreateConflictResultSchema,
+  workspaceCreateFailedResultSchema,
   contextSliceResultSchema,
 ]);
 export type WorkspaceReadResult = z.infer<typeof workspaceReadResultSchema>;

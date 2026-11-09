@@ -10,6 +10,8 @@ import {
   canonicalRelativePath,
   getWorkspaceMcpConfiguration,
   hashBytes,
+  isWorkspaceReadableDirectory,
+  isWorkspaceReadablePath,
   utf8Bytes,
   validateWorkspaceGrant,
   WorkspaceDeniedError,
@@ -53,19 +55,26 @@ export async function callWorkspaceMcp(
   ctx: ToolContext,
   toolId: WorkspaceReadTool,
   args: { path: string; literal?: string },
+  authorizedCreatedPaths: Array<{
+    path: string;
+    directory_identity: string;
+    file_identity: string;
+    version: string;
+  }> = [],
 ): Promise<WorkspaceResult> {
   if (!ctx.workspaceGrant) throw new WorkspaceDeniedError();
-  const summary = validateWorkspaceGrant(ctx.ownerId, ctx.workspaceGrant);
+  validateWorkspaceGrant(ctx.ownerId, ctx.workspaceGrant);
+  const grant = ctx.workspaceGrant;
   canonicalRelativePath(args.path, toolId !== 'workspace_read');
   const inSubtree = (path: string) =>
     args.path === '' || path === args.path || path.startsWith(`${args.path}/`);
   if (
     toolId === 'workspace_read'
-      ? !summary.readable_paths.includes(args.path)
-      : args.path !== '' && !summary.readable_paths.some((path) => inSubtree(path))
+      ? !isWorkspaceReadablePath(ctx.ownerId, grant, args.path, authorizedCreatedPaths)
+      : !isWorkspaceReadableDirectory(ctx.ownerId, grant, args.path, authorizedCreatedPaths)
   )
     throw new WorkspaceDeniedError();
-  const configuration = getWorkspaceMcpConfiguration(ctx.ownerId, ctx.workspaceGrant);
+  const configuration = getWorkspaceMcpConfiguration(ctx.ownerId, grant, authorizedCreatedPaths);
   const transport = new StdioClientTransport({
     command: BUN_EXECUTABLE,
     args: [SERVER_ENTRY],
@@ -113,7 +122,10 @@ export async function callWorkspaceMcp(
     const result = workspaceResultSchema.parse(response.structuredContent);
     const allowedFile = (path: string) => {
       canonicalRelativePath(path);
-      if (!summary.readable_paths.includes(path) || !inSubtree(path))
+      if (
+        !isWorkspaceReadablePath(ctx.ownerId, grant, path, authorizedCreatedPaths) ||
+        !inSubtree(path)
+      )
         throw new ToolExecutionError();
     };
     if (result.kind === 'operation_error') {
@@ -124,6 +136,12 @@ export async function callWorkspaceMcp(
       const bytes = utf8Bytes(result.content);
       if (bytes.length !== result.byte_length || hashBytes(bytes) !== result.version)
         throw new ToolExecutionError();
+      const created = authorizedCreatedPaths.find((entry) => entry.path === result.path);
+      if (
+        !isWorkspaceReadablePath(ctx.ownerId, grant, result.path) &&
+        (!created || created.version !== result.version)
+      )
+        throw new ToolExecutionError();
     } else if (result.kind === 'list') {
       if (toolId !== 'workspace_list' || result.path !== args.path) throw new ToolExecutionError();
       const prefix = args.path ? `${args.path}/` : '';
@@ -132,7 +150,9 @@ export async function callWorkspaceMcp(
         if (!entry.path.startsWith(prefix) || entry.path.slice(prefix.length).includes('/'))
           throw new ToolExecutionError();
         if (entry.kind === 'file') allowedFile(entry.path);
-        else if (!summary.readable_paths.some((path) => path.startsWith(`${entry.path}/`)))
+        else if (
+          !isWorkspaceReadableDirectory(ctx.ownerId, grant, entry.path, authorizedCreatedPaths)
+        )
           throw new ToolExecutionError();
       }
       for (const failure of result.failures) allowedFile(failure.path);
@@ -140,6 +160,12 @@ export async function callWorkspaceMcp(
       if (toolId !== 'workspace_grep' || result.path !== args.path) throw new ToolExecutionError();
       for (const match of result.matches) {
         allowedFile(match.path);
+        const created = authorizedCreatedPaths.find((entry) => entry.path === match.path);
+        if (
+          !isWorkspaceReadablePath(ctx.ownerId, grant, match.path) &&
+          (!created || created.version !== match.version)
+        )
+          throw new ToolExecutionError();
         if (
           !/^[a-f0-9]{64}$/.test(match.version) ||
           !args.literal ||

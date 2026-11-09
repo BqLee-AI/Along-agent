@@ -30,7 +30,7 @@ export function ScopePaths({ title, paths }: { title: string; paths: readonly st
       {paths.length ? (
         <ul className="space-y-1 font-mono text-sm [overflow-wrap:anywhere]">
           {paths.map((path) => (
-            <li key={path}>{path}</li>
+            <li key={path}>{path || '工作区根目录'}</li>
           ))}
         </ul>
       ) : (
@@ -190,12 +190,19 @@ export function RunStatusPanel({ task }: { task: ConversationTask }) {
                     : effect.status === 'applied'
                       ? '已记录写入，尚未经新全文读取核对。'
                       : effect.status === 'conflict'
-                        ? '写前版本冲突，此次未写入。'
-                        : '文件效果未知，可能已写入；不可自动重做。'}
+                        ? effect.operation === 'create'
+                          ? '目标名称已存在，此次未写入，也未覆盖。'
+                          : '写前版本冲突，此次未写入。'
+                        : effect.status === 'failed'
+                          ? '创建未能发布，此次未写入。'
+                          : '文件效果未知，可能已写入；不可自动重做。'}
                 </p>
                 <details className="text-xs text-muted-foreground">
                   <summary className="min-h-8 content-center">查看文件证据</summary>
-                  <p>写入调用：{effect.invocation_id}</p>
+                  <p>
+                    {effect.operation === 'create' ? '创建调用' : '写入调用'}：
+                    {effect.invocation_id}
+                  </p>
                   <p>新全文读取：{effect.read_invocation_id ?? '尚无'}</p>
                   <p>版本：{effect.version ?? '尚无'}</p>
                 </details>
@@ -316,6 +323,26 @@ export function RunStatusPanel({ task }: { task: ConversationTask }) {
               </p>
             </div>
           ) : null}
+          {run?.workspaces?.map((workspace) => (
+            <div className="space-y-3" key={workspace.workspace_id}>
+              <h3>
+                冻结资料范围：{workspace.label} · {workspace.workspace_id}
+              </h3>
+              <ScopePaths title="可读取" paths={workspace.readable_paths} />
+              <ScopePaths title="可修改" paths={workspace.writable_paths} />
+              {workspace.output_directories?.length ? (
+                <>
+                  <ScopePaths title="可创建文件的目录" paths={workspace.output_directories} />
+                  <p className="text-muted-foreground">
+                    仅可创建新文件，不可覆盖已有名称或创建目录。
+                  </p>
+                </>
+              ) : null}
+              <p className="text-muted-foreground">
+                此摘要是本次运行冻结的范围，不会重新授权或扩大权限。
+              </p>
+            </div>
+          ))}
           <dl className="space-y-2">
             <div>
               <dt className="text-muted-foreground">会话</dt>
@@ -529,7 +556,7 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
                         <ScopePaths title="可读取" paths={workspace.readable_paths} />
                         <ScopePaths title="可修改" paths={workspace.writable_paths} />
                         {!workspace.writable_paths.length ? (
-                          <p>此登记不可修改，可提出只读资料任务。</p>
+                          <p>此资料模式不可修改，可提出只读资料任务。</p>
                         ) : null}
                       </>
                     ) : null}

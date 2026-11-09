@@ -35,6 +35,7 @@ interface DocumentGrant {
   owner_id: string;
   registration_digest: string;
   root_identity: string;
+  output_directories?: Array<{ path: string; identity: string }>;
 }
 
 function documentGrant(ownerId: string): DocumentGrant {
@@ -765,6 +766,7 @@ test.each(['target_selection', 'destination'] as const)(
         kind,
       });
       expect(accepted?.workspaceGrants).toEqual([grant]);
+      expect(accepted?.workspaceCreateAllowed).toBe(false);
       expect(accepted?.continuation).toMatchObject({
         run_id: f.runId,
         original_input_message_id: f.messageId,
@@ -787,6 +789,39 @@ test.each(['target_selection', 'destination'] as const)(
     }
   },
 );
+
+test('a destination continuation preserves the predecessor creation eligibility', async () => {
+  const f = await fixture(['workspace_read', 'workspace_create'], {
+    clarificationKind: 'destination',
+    workspaceGrants: (ownerId) => [
+      {
+        ...documentGrant(ownerId),
+        output_directories: [{ path: 'outputs', identity: 'directory' }],
+      },
+    ],
+  });
+  const inputMessageId = randomUUID();
+  await db.pool.query(
+    "INSERT INTO messages(id,owner_id,conversation_id,role,content) VALUES($1,$2,$3,'user','输出目录')",
+    [inputMessageId, f.ownerId, f.conversationId],
+  );
+  const client = await db.pool.connect();
+  try {
+    const accepted = await acceptTargetContinuation(client, {
+      ...f,
+      inputMessageId,
+      sourceRunId: f.runId,
+      timeContext,
+      kind: 'destination',
+    });
+    expect(accepted?.workspaceCreateAllowed).toBe(true);
+    expect(accepted?.workspaceGrants?.[0]?.output_directories).toEqual([
+      { path: 'outputs', identity: 'directory' },
+    ]);
+  } finally {
+    client.release();
+  }
+});
 
 test('a document destination and an older target gap are ambiguous', async () => {
   const f = await fixture(['workspace_read'], {

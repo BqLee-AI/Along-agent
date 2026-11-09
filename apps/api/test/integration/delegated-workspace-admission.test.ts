@@ -116,6 +116,39 @@ maybe('delegated conversation workspace admission against PostgreSQL', () => {
     expect(JSON.stringify(view)).not.toContain('foreign');
   });
 
+  it('freezes output creation only for newly admitted delegated runs', async () => {
+    const owner = await seedAdmittedSession(database.pool);
+    const workspace = await registration(owner.userId, 'output');
+    await configureWorkspaceRegistry([workspace]);
+    const oldRun = await start(owner.userId);
+    await configureWorkspaceRegistry([{ ...workspace, output_directories: [''] }]);
+    const newRun = await start(owner.userId);
+    const oldRow = await stored(oldRun.runId);
+    const newRow = await stored(newRun.runId);
+    expect(oldRow.tools_allowlist).not.toContain('workspace_create');
+    expect(oldRow.frozen_context.workspaceGrants[0]?.output_directories).toBeUndefined();
+    expect(newRow.tools_allowlist).toContain('workspace_create');
+    expect(
+      newRow.frozen_context.workspaceGrants[0]?.output_directories?.map((d) => d.path),
+    ).toEqual(['']);
+    expect(JSON.stringify(newRow.frozen_context.trustedExecutionContext.workspaces)).not.toContain(
+      'identity',
+    );
+  });
+
+  it('admits an output-only workspace without granting existing-file editing', async () => {
+    const owner = await seedAdmittedSession(database.pool);
+    const workspace = await registration(owner.userId, 'output-only', false);
+    await configureWorkspaceRegistry([
+      { ...workspace, readable_paths: [], output_directories: [''] },
+    ]);
+    const run = await start(owner.userId);
+    const row = await stored(run.runId);
+    expect(row.tools_allowlist).toContain('workspace_create');
+    expect(row.tools_allowlist).toContain('workspace_read');
+    expect(row.tools_allowlist).not.toContain('workspace_replace');
+  });
+
   it('admits an empty collection without giving workspace tools or blocking other capabilities', async () => {
     const owner = await seedAdmittedSession(database.pool);
     await configureWorkspaceRegistry([]);

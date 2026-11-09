@@ -40,7 +40,7 @@
 | 17   | [R1 会话历史与只读恢复](design/17-r1-conversation-history.md)            | #69 服务端会话发现、原话/多 Run、稳定分页及零执行恢复；#91 当前 Harness 提醒完整冻结审阅、明确确认并继续，不扩展 business 或文档  |
 | 18   | [R2-A 单 Run 有界上下文](design/18-r2a-harness-context.md)               | #83 四种额度、可信计量与未知输入的后验超额边界、不可变策略、来源投影/分页回取及有界批准恢复；实现、受控消费者、真实模型分级取证   |
 | 19   | [R2-B 有限只读意图路由](design/19-r2b-readonly-intent-routing.md)        | #88：BGE INT8、三类只读、仓颉首轮决议、默认关闭、来源/资产/落盘原子性与逐意图验证；当前配套 v6 保留 legacy 路由合同，不自动接管   |
-| 20   | [本人目标内委托与授权](design/20-goal-scoped-delegation.md)              | 冻结实际能力与本人登记集合、目标内资料编辑、v6/SSE v2、GoalResult 和 request-bound；有限创建及后台仍为后续目标                    |
+| 20   | [本人目标内委托与授权](design/20-goal-scoped-delegation.md)              | 冻结实际能力与本人登记集合、目标内资料编辑及有限创建、v6/SSE v2、GoalResult 和 request-bound；后台为后续目标                      |
 | 21   | [受邀账户准入与恢复](design/21-invited-account-access.md)                | #112 显式准入/有限管理、停用后的流式披露边界、邀请/恢复/会话与前向升级；#131 本机口令重置；隔离实现证据与真实外部放行分列         |
 
 活动列表为空与历史创建事实、批量请求部分完成及标题序号的证据边界见[design/09 §5](design/09-agent-runtime-and-checkpoint.md#5-toolgateway-交互required)。
@@ -142,7 +142,7 @@ R2-B 的完整目标及多轮自主查询边界见[design/19 §4、§6](design/1
 ## 十一、OpenSpec 行为契约与 ADR
 
 - [OpenSpec 说明](../openspec/README.md)：`openspec/specs/` 为可验收行为契约真源（SHALL + Scenario），`docs/design/` 为设计真源；spec 只写行为并引用 design 章节，不复制字段/路由表。
-- [本人目标内委托（#105）](design/20-goal-scoped-delegation.md) 定义分阶段目标合同，行为增量见 [change](../openspec/changes/refactor-assistant-capability-authorization/proposal.md)。本人登记集合内的既有资料编辑与 legacy 单工作区批准分别约束；授权修订、实际能力和生命周期独立，旧 Run 不随部署扩权。有限创建及 server-owned 分属后续阶段，合同不代替受控或真实用户验收。
+- [本人目标内委托（#105）](design/20-goal-scoped-delegation.md) 定义分阶段目标合同，行为增量见 [change](../openspec/changes/refactor-assistant-capability-authorization/proposal.md)。本人登记集合内的资料编辑、有限创建与 legacy 单工作区批准分别约束；授权修订、实际能力和生命周期独立，旧 Run 不随部署扩权。server-owned 属后续阶段，合同不代替受控或真实用户验收。
 - [会话与 Web 任务体验主规格](../openspec/specs/conversations/spec.md)约束入口、真实状态、显式动作、流式对话和一致首屏；[体验设计与实施归档](../openspec/changes/archive/2026-10-30-close-r1-web-task-experience/)保留方案、任务及分版本证据。
 - [ADR 决策记录](adr/README.md)：0000 模板、0001–0005 种子 ADR、[0006 Bun + Ox 工具链](adr/0006-bun-ox-toolchain.md)（取代 0002）、[0007 CI 关键路径局部修订](adr/0007-ci-critical-path.md)（调整 0006 的编排/失败传播）及 [0008 static 内部调度](adr/0008-static-scheduling.md)（局部修订 0007 的内部并发边界）；Bun/Ox 选型和五门全成功不变，冻结决策正文保留，改口径另起新 ADR。
 - [ADR0009](adr/0009-cangjie-harness-ts-capabilities.md) 确定仓颉唯一 Harness/TS 长期能力，并局部修订0003的 outbox/确认事务绝对范围；历史 ADR/验收保留其适用边界。同步公共用例/DTO、只读投影、确认创建/取消单事务和可靠异步 outbox 分列，D1 不证明 SQL 所有权。正式实现与分级验收见 design/09/11，[native 构建/运行说明](../apps/harness/README.md) 不等于真实 provider/完整 R1 验收。

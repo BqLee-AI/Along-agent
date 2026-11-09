@@ -316,12 +316,14 @@ export async function interruptedGoalResult(
       .map((effect) => ({
         description:
           effect.status === 'verified'
-            ? `资料 ${effect.path} 已保存并经新读取验证`
+            ? `资料 ${effect.path} 已${effect.operation === 'create' ? '创建' : '保存'}并经新读取验证`
             : effect.status === 'applied'
-              ? `资料 ${effect.path} 已保存，但尚未经新读取验证`
-              : effect.superseded
-                ? `资料 ${effect.path} 曾发生零写冲突，已有后续调用`
-                : `资料 ${effect.path} 修改发生冲突，未确认完成`,
+              ? `资料 ${effect.path} 已${effect.operation === 'create' ? '创建' : '保存'}，但尚未经新读取验证`
+              : effect.status === 'failed'
+                ? `资料 ${effect.path} 创建失败，未写入`
+                : effect.superseded
+                  ? `资料 ${effect.path} 曾发生零写冲突，已有后续调用`
+                  : `资料 ${effect.path} ${effect.operation === 'create' ? '创建' : '修改'}发生冲突，未确认完成`,
         status: effect.status === 'verified' ? ('achieved' as const) : ('not_done' as const),
         receipt_refs:
           effect.status === 'verified' && effect.read_invocation_id

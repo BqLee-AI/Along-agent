@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { hostEnvironment } from '../local/commands.mjs';
-import { mkdir, mkdtemp, rename, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rename, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { maintainAccount } from '../local/account.mjs';
@@ -258,6 +258,7 @@ const configureAnswers = [
   'My documents',
   '["notes.txt"]',
   '[]',
+  '[]',
   'REGISTER',
 ];
 
@@ -420,7 +421,7 @@ describe('local:account explicit maintenance and non-atomic recovery', () => {
     expect(f.messages).toContain('[registry_loaded]');
   });
 
-  it('requires a managed subdirectory and explicit finite readable paths', async () => {
+  it('requires a managed subdirectory and at least one readable path or output directory', async () => {
     for (const root of ['/var/lib/along/workspaces', '/outside/documents']) {
       const f = fixture({ configured: false, registry: null, answers: ['CONFIGURE', root] });
       await expect(maintainAccount(file, f.io, f.dependencies)).rejects.toMatchObject({
@@ -431,12 +432,56 @@ describe('local:account explicit maintenance and non-atomic recovery', () => {
     const f = fixture({
       configured: false,
       registry: null,
-      answers: ['CONFIGURE', '/var/lib/along/workspaces/documents', 'docs', '[]', '[]'],
+      answers: ['CONFIGURE', '/var/lib/along/workspaces/documents', 'docs', '[]', '[]', '[]'],
     });
     await expect(maintainAccount(file, f.io, f.dependencies)).rejects.toMatchObject({
       code: 'WORKSPACE_REGISTRY_INVALID',
     });
     expect(f.counts.publishes).toBe(0);
+  });
+
+  it('registers an output-only workspace for the selected owner without changing existing registrations', async () => {
+    const f = fixture({
+      answers: [
+        '1',
+        'CONFIRM 1',
+        'ADD',
+        '/var/lib/along/workspaces/ordinary',
+        'Outputs',
+        '[]',
+        '[]',
+        '["outputs"]',
+        'REGISTER',
+      ],
+    });
+    const original = f.files.get(registryFile);
+    await maintainAccount(file, f.io, f.dependencies, { operation: 'workspace' });
+    expect(f.files.get(registryFile)).toBe(original);
+    const rows = JSON.parse(f.files.get(f.config.registryFile!)!);
+    expect(rows[0]).toEqual(registration());
+    expect(rows[1]).toMatchObject({
+      owner_id: 'ordinary-owner',
+      readable_paths: [],
+      writable_paths: [],
+      output_directories: ['outputs'],
+    });
+    expect(f.counts.publishes).toBe(1);
+    expect(f.counts.reloads).toBe(1);
+  });
+
+  it('rejects malformed output directory input before publishing', async () => {
+    for (const output of ['not-json', '"outputs"', '{}']) {
+      const f = fixture({
+        configured: false,
+        registry: null,
+        answers: ['CONFIGURE', '/var/lib/along/workspaces/documents', 'docs', '[]', '[]', output],
+      });
+      await expect(maintainAccount(file, f.io, f.dependencies)).rejects.toMatchObject({
+        code: 'WORKSPACE_REGISTRY_INVALID',
+      });
+      expect(f.counts.publishes).toBe(0);
+      expect(f.counts.reloads).toBe(0);
+    }
   });
 
   it('admits an explicitly selected ordinary legacy owner without administrator binding or workspace side effects', async () => {
@@ -464,6 +509,7 @@ describe('local:account explicit maintenance and non-atomic recovery', () => {
       '/var/lib/along/workspaces/ordinary',
       'Ordinary',
       '["notes.txt"]',
+      '[]',
       '[]',
       'REGISTER',
     ];
@@ -500,6 +546,7 @@ describe('local:account explicit maintenance and non-atomic recovery', () => {
         'Ordinary',
         '["notes.txt"]',
         '[]',
+        '[]',
         'REGISTER',
       ],
     });
@@ -528,6 +575,7 @@ describe('local:account explicit maintenance and non-atomic recovery', () => {
         '/var/lib/along/workspaces/ordinary',
         'Ordinary',
         '["notes.txt"]',
+        '[]',
         '[]',
         'REGISTER',
       ],
@@ -578,6 +626,32 @@ describe('local:account explicit maintenance and non-atomic recovery', () => {
       expect(getWorkspaceGrant(admin.userId, original.workspace_id).root_identity).not.toBe(
         before.root_identity,
       );
+    } finally {
+      await configureWorkspaceRegistry([]);
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('uses the real registry validator for output-only directories and rejects unsafe paths', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'along-output-registry-'));
+    try {
+      const root = path.join(directory, 'workspace');
+      await mkdir(root);
+      await mkdir(path.join(root, 'outputs'));
+      await symlink(path.join(root, 'outputs'), path.join(root, 'linked'), 'dir');
+      const outputOnly = {
+        ...registration(),
+        root,
+        readable_paths: [],
+        output_directories: ['outputs'],
+      };
+      expect((await configureWorkspaceRegistry([outputOnly])).state).toBe('loaded');
+      for (const invalid of ['../outside', 'linked', 'missing']) {
+        expect(
+          (await configureWorkspaceRegistry([{ ...outputOnly, output_directories: [invalid] }]))
+            .state,
+        ).toBe('invalid');
+      }
     } finally {
       await configureWorkspaceRegistry([]);
       await rm(directory, { recursive: true, force: true });
