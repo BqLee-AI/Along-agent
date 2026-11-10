@@ -1,4 +1,5 @@
 import type { PoolClient } from 'pg';
+import { isDeepStrictEqual } from 'node:util';
 import {
   HarnessObservationSchema,
   workspaceGrantSchema,
@@ -18,7 +19,11 @@ import type {
   ReminderCancelledPayload,
 } from './contracts.js';
 import { parseResult, resultKind } from './result-schema.js';
-import { readAcceptedInvocationResult } from './accepted-result.js';
+import {
+  decodeWorkspaceContent,
+  hydrateWorkspaceReadResult,
+  readAcceptedInvocationResult,
+} from './accepted-result.js';
 import { readReminderTimeErrors } from './reminder-source.js';
 import {
   authorizeSliceOrigin,
@@ -35,6 +40,7 @@ import {
   verifiedDocumentRead,
 } from '../approvals/document-rules.js';
 import { listDocumentApprovals } from '../approvals/document-query.js';
+import { hashBytes, isWorkspaceOutputDirectory } from '../workspaces/service.js';
 
 export interface RunGoalDocumentEffect {
   workspace_id: string;
@@ -42,7 +48,8 @@ export interface RunGoalDocumentEffect {
   invocation_id: string;
   read_invocation_id: string | null;
   version: string | null;
-  status: 'applied' | 'verified' | 'conflict' | 'unknown';
+  status: 'applied' | 'verified' | 'conflict' | 'failed' | 'unknown';
+  operation?: 'create' | 'replace';
   superseded: boolean;
 }
 export interface RunGoalDocumentEvidence {
@@ -210,7 +217,16 @@ export async function readRunDocumentEvidence(
 async function readDocumentEvidence(
   client: PoolClient,
   binding: RunBinding,
-): Promise<DocumentRunEvidence> {
+): Promise<
+  Omit<DocumentRunEvidence, 'reads'> & {
+    reads: Array<
+      DocumentRunEvidence['reads'][number] & {
+        frozen_grant: unknown;
+        authorization_revision: string | undefined;
+      }
+    >;
+  }
+> {
   const { rows } = await client.query<{
     invocation_id: string;
     owner_id: string;
@@ -238,7 +254,12 @@ async function readDocumentEvidence(
      ORDER BY created_at,invocation_id`,
     [binding.ownerId, binding.conversationId, binding.runId],
   );
-  const reads: DocumentRunEvidence['reads'][number][] = [];
+  const reads: Array<
+    DocumentRunEvidence['reads'][number] & {
+      frozen_grant: unknown;
+      authorization_revision: string | undefined;
+    }
+  > = [];
   const applies: DocumentRunEvidence['applies'][number][] = [];
   for (const row of rows) {
     const grant = workspaceGrantSchema.parse(row.frozen_context.workspaceGrant);
@@ -254,7 +275,7 @@ async function readDocumentEvidence(
     };
     if (row.tool_id === 'workspace_read') {
       if (row.state !== 'completed') continue;
-      const accepted = parseResult(row.accepted_result);
+      const accepted = hydrateWorkspaceReadResult(row.accepted_result);
       if (
         accepted.status === 'ok' &&
         accepted.result.kind === 'read' &&
@@ -265,6 +286,8 @@ async function readDocumentEvidence(
       if (accepted.status === 'ok' && accepted.result.kind === 'read')
         reads.push({
           ...identity,
+          frozen_grant: grant,
+          authorization_revision: row.frozen_context.authorizationRevision,
           kind: 'read',
           relative_path: accepted.result.path,
           result: accepted.result,
@@ -308,6 +331,7 @@ export async function readRunGoalDocumentEvidence(
       authorizationRevision?: string;
       workspaceGrant?: unknown;
       documentEdit?: NonNullable<ToolContext['documentEdit']>;
+      documentCreate?: NonNullable<ToolContext['documentCreate']>;
     };
     accepted_result: unknown;
     accepted_at: string;
@@ -315,7 +339,7 @@ export async function readRunGoalDocumentEvidence(
     `SELECT invocation_id,tool_id,state,args_hash,approval_id,frozen_context,accepted_result,
       coalesce(to_char(accepted_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),'') accepted_at
       FROM tool_invocations WHERE owner_id=$1 AND conversation_id=$2 AND run_id=$3
-      AND tool_id IN ('workspace_replace','workspace_propose_replace','workspace_apply_replace')
+      AND tool_id IN ('workspace_replace','workspace_propose_replace','workspace_apply_replace','workspace_create')
       ORDER BY created_at,invocation_id`,
     [binding.ownerId, binding.conversationId, binding.runId],
   );
@@ -332,6 +356,85 @@ export async function readRunGoalDocumentEvidence(
     binding.runId,
   );
   const effects: RunGoalDocumentEffect[] = [];
+  for (const row of delegated.filter((item) => item.tool_id === 'workspace_create')) {
+    const grant = workspaceGrantSchema.parse(row.frozen_context.workspaceGrant);
+    const create = row.frozen_context.documentCreate;
+    if (!create) throw stateConflict('missing frozen document creation');
+    const directory = isWorkspaceOutputDirectory(grant, create.output_directory);
+    const { bytes, content } = decodeWorkspaceContent(create.content_base64);
+    const prefix = create.output_directory ? `${create.output_directory}/` : '';
+    const filename = create.relative_path.slice(prefix.length);
+    if (
+      !directory ||
+      !create.directory_identity ||
+      !create.relative_path.startsWith(prefix) ||
+      !filename ||
+      filename.includes('/') ||
+      hashBytes(bytes) !== create.new_version
+    )
+      throw stateConflict('invalid frozen document creation');
+    const common = {
+      workspace_id: grant.workspace_id,
+      path: create.relative_path,
+      invocation_id: row.invocation_id,
+      read_invocation_id: null,
+      version: null,
+      superseded: false,
+      operation: 'create' as const,
+    };
+    if (row.state === 'unknown') {
+      effects.push({ ...common, status: 'unknown' });
+      continue;
+    }
+    if (row.state !== 'completed') continue;
+    const accepted = hydrateWorkspaceReadResult(row.accepted_result);
+    if (accepted.status !== 'ok') continue;
+    const result = accepted.result;
+    if (
+      result.kind !== 'create_applied' &&
+      result.kind !== 'create_conflict' &&
+      result.kind !== 'create_failed'
+    )
+      throw stateConflict('invalid document creation result');
+    if (
+      result.invocation_id !== row.invocation_id ||
+      result.args_hash !== row.args_hash ||
+      result.workspace_id !== grant.workspace_id ||
+      result.path !== create.relative_path
+    )
+      throw stateConflict('invalid document creation binding');
+    if (result.kind !== 'create_applied') {
+      effects.push({
+        ...common,
+        status: result.kind === 'create_conflict' ? 'conflict' : 'failed',
+      });
+      continue;
+    }
+    if (
+      result.version !== create.new_version ||
+      result.byte_length !== bytes.length ||
+      result.evidence_ref !== `workspace-create:${row.invocation_id}:${create.new_version}`
+    )
+      throw stateConflict('invalid document creation bytes or evidence');
+    const read = evidence.reads.find(
+      (item) =>
+        item.workspace_id === grant.workspace_id &&
+        item.registration_digest === grant.registration_digest &&
+        isDeepStrictEqual(item.frozen_grant, grant) &&
+        item.relative_path === create.relative_path &&
+        item.result.version === create.new_version &&
+        item.result.content === content &&
+        item.result.byte_length === result.byte_length &&
+        documentEvidenceLater(item.created_at, row.accepted_at) &&
+        documentEvidenceLater(item.accepted_at, row.accepted_at),
+    );
+    effects.push({
+      ...common,
+      status: read ? 'verified' : 'applied',
+      read_invocation_id: read?.invocation_id ?? null,
+      version: result.version,
+    });
+  }
   for (const row of delegated.filter((item) => item.tool_id === 'workspace_replace')) {
     const grant = workspaceGrantSchema.parse(row.frozen_context.workspaceGrant);
     const edit = row.frozen_context.documentEdit;
@@ -462,26 +565,26 @@ export async function readRunGoalDocumentEvidence(
     if (effect.status !== 'conflict' || visited.has(effect.invocation_id)) return false;
     const row = delegated.find((item) => item.invocation_id === effect.invocation_id);
     if (!row || row.state !== 'completed') return false;
-    const result = parseResult(row.accepted_result);
+    const result = hydrateWorkspaceReadResult(row.accepted_result);
     if (
       result.status !== 'ok' ||
       !(
         (result.result.kind === 'conflict' && result.result.zero_write) ||
         (result.result.kind === 'edit_conflict' &&
           result.result.zero_write &&
-          result.result.reason === 'version_changed')
+          result.result.reason === 'version_changed') ||
+        (result.result.kind === 'create_conflict' && result.result.zero_write)
       )
     )
       return false;
     const successors = successorIds(effect.invocation_id);
     if (successors.length !== 1) return false;
-    const next = effects.find(
-      (item) =>
-        item.invocation_id === successors[0] &&
-        item.workspace_id === effect.workspace_id &&
-        item.path === effect.path,
-    );
-    if (!next) return false;
+    const next = effects.find((item) => item.invocation_id === successors[0]);
+    if (!next || next.workspace_id !== effect.workspace_id) return false;
+    // Historical create links were inferred from matching bytes, not from a
+    // trusted user decision. They cannot prove that two paths are one goal.
+    if (effect.operation === 'create' || next.path !== effect.path || next.operation === 'create')
+      return false;
     visited.add(effect.invocation_id);
     return reachesVerified(next, visited);
   };
@@ -508,6 +611,109 @@ export async function readRunGoalDocumentEvidence(
     ),
     resolvedApprovalInvocationIds,
   };
+}
+
+// Validate explicit model-proposed create links against immutable same-Run facts.
+// Matching facts establish provenance, not the user's semantic permission.
+export async function validateCreateResolutionEvidence(
+  client: PoolClient,
+  binding: RunBinding,
+  resolution: {
+    zero_write_invocation_ids: string[];
+    created_invocation_id: string;
+    read_invocation_id: string;
+  },
+  documents: RunGoalDocumentEvidence,
+): Promise<void> {
+  const ids = [...resolution.zero_write_invocation_ids, resolution.created_invocation_id];
+  const { rows } = await client.query<{
+    invocation_id: string;
+    state: string;
+    args_hash: string;
+    frozen_context: {
+      authorizationRevision?: string;
+      workspaceGrant?: unknown;
+      documentCreate?: NonNullable<ToolContext['documentCreate']>;
+    };
+    accepted_result: unknown;
+    created_at: string;
+    accepted_at: string;
+    resolution_revision: string | null;
+  }>(
+    `SELECT invocation_id,state,args_hash,frozen_context,accepted_result,
+      (SELECT frozen_context->>'createResolutionRevision' FROM agent_runs WHERE id=tool_invocations.run_id) AS resolution_revision,
+      to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS created_at,
+      coalesce(to_char(accepted_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),'') AS accepted_at
+     FROM tool_invocations WHERE owner_id=$1 AND conversation_id=$2 AND run_id=$3
+       AND tool_id='workspace_create' AND invocation_id=ANY($4::uuid[])`,
+    [binding.ownerId, binding.conversationId, binding.runId, ids],
+  );
+  const created = rows.find((row) => row.invocation_id === resolution.created_invocation_id);
+  const effect = documents.effects.find(
+    (item) => item.invocation_id === resolution.created_invocation_id,
+  );
+  if (
+    !created ||
+    created.state !== 'completed' ||
+    !created.frozen_context.documentCreate ||
+    created.frozen_context.authorizationRevision !== 'delegation/1' ||
+    !effect ||
+    effect.operation !== 'create' ||
+    effect.status !== 'verified'
+  )
+    throw stateConflict('create resolution requires a verified creation');
+  const target = created.frozen_context.documentCreate;
+  const grant = workspaceGrantSchema.parse(created.frozen_context.workspaceGrant);
+  const applied = hydrateWorkspaceReadResult(created.accepted_result);
+  if (applied.status !== 'ok' || applied.result.kind !== 'create_applied')
+    throw stateConflict('create resolution requires an accepted creation');
+  for (const id of resolution.zero_write_invocation_ids) {
+    const prior = rows.find((row) => row.invocation_id === id);
+    const priorTarget = prior?.frozen_context.documentCreate;
+    const priorEffect = documents.effects.find((item) => item.invocation_id === id);
+    if (
+      !prior ||
+      prior.state !== 'completed' ||
+      !priorTarget ||
+      prior.frozen_context.authorizationRevision !== 'delegation/1' ||
+      !priorEffect ||
+      priorEffect.operation !== 'create' ||
+      priorEffect.status !== 'conflict' ||
+      !isDeepStrictEqual(prior.frozen_context.workspaceGrant, grant) ||
+      priorTarget.output_directory !== target.output_directory ||
+      priorTarget.directory_identity !== target.directory_identity ||
+      priorTarget.relative_path === target.relative_path ||
+      (created.resolution_revision === 'create-resolution/1' &&
+        (priorTarget.new_version !== target.new_version ||
+          priorTarget.content_base64 !== target.content_base64)) ||
+      !documentEvidenceLater(created.created_at, prior.accepted_at)
+    )
+      throw stateConflict('invalid create resolution predecessor');
+    const result = hydrateWorkspaceReadResult(prior.accepted_result);
+    if (
+      result.status !== 'ok' ||
+      result.result.kind !== 'create_conflict' ||
+      result.result.reason !== 'already_exists' ||
+      !result.result.zero_write
+    )
+      throw stateConflict('create resolution predecessor is not a zero-write collision');
+  }
+  const evidence = await readDocumentEvidence(client, binding);
+  const read = evidence.reads.find((item) => item.invocation_id === resolution.read_invocation_id);
+  const { bytes, content } = decodeWorkspaceContent(target.content_base64);
+  if (
+    !read ||
+    read.authorization_revision !== 'delegation/1' ||
+    !isDeepStrictEqual(read.frozen_grant, grant) ||
+    read.workspace_id !== grant.workspace_id ||
+    read.relative_path !== target.relative_path ||
+    read.result.version !== target.new_version ||
+    read.result.content !== content ||
+    read.result.byte_length !== bytes.length ||
+    !documentEvidenceLater(read.created_at, created.accepted_at) ||
+    !documentEvidenceLater(read.accepted_at, created.accepted_at)
+  )
+    throw stateConflict('create resolution requires an independent later full read');
 }
 
 // Metadata is fetched/projected in PostgreSQL before any large body is read.

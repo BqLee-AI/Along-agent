@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdtemp, writeFile, mkdir, rm, link, symlink } from 'node:fs/promises';
+import { mkdtemp, writeFile, readFile, mkdir, rm, link, symlink, rename } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { PoolClient } from 'pg';
@@ -15,6 +15,7 @@ import {
   validateWorkspaceGrant,
   resolveWorkspaceGrants,
   resolveFrozenWorkspaceGrant,
+  getWorkspaceOutputIdentity,
   hashBytes,
   strictUtf8,
   utf8Bytes,
@@ -25,6 +26,7 @@ import {
   compileWorkspaceEdit,
   publishWorkspaceReplace,
 } from '../src/modules/workspaces/replace.js';
+import { publishWorkspaceCreate } from '../src/modules/workspaces/create.js';
 
 let root: string;
 const owner = 'workspace-test-owner';
@@ -108,6 +110,7 @@ describe('trusted finite workspace boundary', () => {
       'NUL',
       'target.txt.',
       'a\0b',
+      '\ud800',
     ])
       expect(() => canonicalRelativePath(value)).toThrow(WorkspaceDeniedError);
     expect(canonicalRelativePath('', true)).toBe('');
@@ -328,6 +331,210 @@ describe('trusted finite workspace boundary', () => {
         content,
         version: hashBytes(Buffer.from(content)),
       });
+    },
+  );
+});
+
+describe('frozen output directories and exclusive creation', () => {
+  const client = { query: async () => ({ rows: [] }) } as unknown as PoolClient;
+  async function setup() {
+    await mkdir(path.join(root, 'output'));
+    await configureWorkspaceRegistry([{ ...registration(), output_directories: ['output'] }]);
+    const grant = resolveWorkspaceGrants(owner).grants[0]!;
+    const directoryIdentity = grant.output_directories![0]!.identity;
+    const target = (name: string, content: string) => ({
+      output_directory: 'output',
+      directory_identity: directoryIdentity,
+      path: `output/${name}`,
+      exact_new_content: content,
+      new_version: hashBytes(Buffer.from(content)),
+    });
+    return { grant, target };
+  }
+
+  test('output-only listing reports its restricted scope without disclosing existing files', async () => {
+    const { grant } = await setup();
+    await writeFile(path.join(root, 'output', 'private.txt'), 'not registered');
+    const result = await listWorkspaceFiles(owner, grant, 'output');
+    expect(result).toMatchObject({
+      kind: 'list',
+      path: 'output',
+      visibility: 'authorized_paths_only',
+      entries: [],
+      failures: [],
+    });
+    await expect(readWorkspaceFile(owner, grant, 'output/private.txt')).rejects.toThrow(
+      WorkspaceDeniedError,
+    );
+    await expect(
+      listWorkspaceFiles(owner, getWorkspaceGrant(owner, 'workspace-test'), 'output'),
+    ).rejects.toThrow(WorkspaceDeniedError);
+  });
+
+  test('freezes output eligibility without expanding legacy grants or public identity', async () => {
+    await mkdir(path.join(root, 'output'));
+    const old = getWorkspaceGrant(owner, 'workspace-test');
+    await configureWorkspaceRegistry([{ ...registration(), output_directories: ['output'] }]);
+    expect(() => validateWorkspaceGrant(owner, old)).toThrow(WorkspaceDeniedError);
+    const legacy = getWorkspaceGrant(owner, 'workspace-test');
+    const frozen = resolveWorkspaceGrants(owner);
+    expect(frozen.summaries[0]!.output_directories).toEqual(['output']);
+    expect(JSON.stringify(frozen.summaries)).not.toContain(root);
+    expect(validateWorkspaceGrant(owner, legacy).output_directories).toBeUndefined();
+    await writeFile(path.join(root, 'output', 'existing.txt'), 'existing');
+    await expect(readWorkspaceFile(owner, legacy, 'output/existing.txt')).rejects.toThrow(
+      WorkspaceDeniedError,
+    );
+    await expect(
+      readWorkspaceFile(owner, frozen.grants[0]!, 'output/existing.txt'),
+    ).rejects.toThrow(WorkspaceDeniedError);
+    const narrowed = { ...frozen.grants[0]!, output_directories: [] };
+    expect(validateWorkspaceGrant(owner, narrowed).output_directories).toEqual([]);
+    await expect(readWorkspaceFile(owner, narrowed, 'output/existing.txt')).rejects.toThrow(
+      WorkspaceDeniedError,
+    );
+  });
+
+  test.skipIf(process.platform === 'win32')(
+    'creates exact bytes and reports a real exclusive collision',
+    async () => {
+      const { grant, target } = await setup();
+      const first = target('report.txt', '\uFEFF报告\r\n');
+      const result = await publishWorkspaceCreate(client, owner, grant, first);
+      expect(result).toMatchObject({
+        kind: 'applied',
+        version: first.new_version,
+        byte_length: Buffer.byteLength(first.exact_new_content),
+      });
+      if (result.kind !== 'applied') throw new Error('creation required');
+      const authorized = [
+        {
+          path: first.path,
+          directory_identity: first.directory_identity,
+          file_identity: result.file_identity,
+          version: result.version,
+        },
+      ];
+      await expect(readWorkspaceFile(owner, grant, first.path)).rejects.toThrow(
+        WorkspaceDeniedError,
+      );
+      expect(await readWorkspaceFile(owner, grant, first.path, authorized)).toMatchObject({
+        kind: 'read',
+        content: first.exact_new_content,
+        version: first.new_version,
+      });
+      expect(
+        await publishWorkspaceCreate(client, owner, grant, target('report.txt', 'overwrite')),
+      ).toEqual({ kind: 'conflict', reason: 'already_exists', zero_write: true });
+      expect(await readFile(path.join(root, first.path), 'utf8')).toBe(first.exact_new_content);
+    },
+  );
+
+  test.skipIf(process.platform === 'win32')(
+    'concurrent creators have one winner without overwriting',
+    async () => {
+      const { grant, target } = await setup();
+      const results = await Promise.all([
+        publishWorkspaceCreate(client, owner, grant, target('race.txt', 'one')),
+        publishWorkspaceCreate(client, owner, grant, target('race.txt', 'two')),
+      ]);
+      expect(results.filter((result) => result.kind === 'applied')).toHaveLength(1);
+      expect(results.filter((result) => result.kind === 'conflict')).toHaveLength(1);
+      expect(['one', 'two']).toContain(await readFile(path.join(root, 'output/race.txt'), 'utf8'));
+    },
+  );
+
+  test.skipIf(process.platform === 'win32')(
+    'an occupied symlink or directory remains untouched',
+    async () => {
+      const { grant, target } = await setup();
+      await symlink(path.join(root, 'target.txt'), path.join(root, 'output/link'));
+      await mkdir(path.join(root, 'output/directory'));
+      for (const name of ['link', 'directory']) {
+        expect(
+          await publishWorkspaceCreate(client, owner, grant, target(name, 'not written')),
+        ).toEqual({
+          kind: 'conflict',
+          reason: 'already_exists',
+          zero_write: true,
+        });
+      }
+      expect(await readFile(path.join(root, 'target.txt'), 'utf8')).toBe(
+        '\uFEFFbefore\r\nold 中文\r\nafter  \r\n',
+      );
+    },
+  );
+
+  test('only exact internal UUID names are reserved for publishing', async () => {
+    const { grant, target } = await setup();
+    const reserved = '.along-00000000-0000-4000-8000-000000000000.tmp';
+    await expect(
+      publishWorkspaceCreate(client, owner, grant, target(reserved, 'x')),
+    ).rejects.toThrow(WorkspaceDeniedError);
+  });
+
+  test('rejects replaced output identity and invalid filenames', async () => {
+    const { grant, target } = await setup();
+    await expect(
+      publishWorkspaceCreate(client, owner, grant, target('../escape', 'x')),
+    ).rejects.toThrow(WorkspaceDeniedError);
+    await rename(path.join(root, 'output'), path.join(root, 'old-output'));
+    await mkdir(path.join(root, 'output'));
+    await expect(publishWorkspaceCreate(client, owner, grant, target('file', 'x'))).rejects.toThrow(
+      WorkspaceDeniedError,
+    );
+  });
+
+  test.skipIf(process.platform === 'win32')(
+    'creates in safe existing descendants and reads only the accepted inode',
+    async () => {
+      const { grant } = await setup();
+      await mkdir(path.join(root, 'output/nested'));
+      await writeFile(path.join(root, 'output/nested/private.txt'), 'private');
+      const directoryIdentity = await getWorkspaceOutputIdentity(owner, grant, 'output/nested');
+      const content = 'created needle';
+      const target = {
+        output_directory: 'output/nested',
+        directory_identity: directoryIdentity,
+        path: 'output/nested/report.txt',
+        exact_new_content: content,
+        new_version: hashBytes(Buffer.from(content)),
+      };
+      const result = await publishWorkspaceCreate(client, owner, grant, target);
+      if (result.kind !== 'applied') throw new Error('creation required');
+      const authorized = [
+        {
+          path: target.path,
+          directory_identity: directoryIdentity,
+          file_identity: result.file_identity,
+          version: result.version,
+        },
+      ];
+      await expect(
+        readWorkspaceFile(owner, grant, 'output/nested/private.txt', authorized),
+      ).rejects.toThrow(WorkspaceDeniedError);
+      expect(await listWorkspaceFiles(owner, grant, 'output/nested', authorized)).toMatchObject({
+        entries: [{ path: target.path, kind: 'file' }],
+      });
+      expect(
+        await searchWorkspaceFiles(owner, grant, 'output/nested', 'needle', authorized),
+      ).toMatchObject({ matches: [expect.objectContaining({ path: target.path })] });
+      await writeFile(path.join(root, target.path), 'in-place secret');
+      await expect(readWorkspaceFile(owner, grant, target.path, authorized)).rejects.toThrow(
+        WorkspaceDeniedError,
+      );
+      await expect(listWorkspaceFiles(owner, grant, 'output/nested', authorized)).rejects.toThrow(
+        WorkspaceDeniedError,
+      );
+      await expect(
+        searchWorkspaceFiles(owner, grant, 'output/nested', 'secret', authorized),
+      ).rejects.toThrow(WorkspaceDeniedError);
+      await writeFile(path.join(root, target.path), content);
+      await rename(path.join(root, target.path), path.join(root, 'output/nested/original.txt'));
+      await writeFile(path.join(root, target.path), 'replacement secret');
+      await expect(readWorkspaceFile(owner, grant, target.path, authorized)).rejects.toThrow(
+        WorkspaceDeniedError,
+      );
     },
   );
 });

@@ -4,6 +4,11 @@ import {
   HarnessRequestSchema,
   HarnessToolPayloadSchema,
 } from '../src/harness.js';
+import {
+  workspaceGrantSchema,
+  workspaceResultSchema,
+  workspaceSummarySchema,
+} from '../src/workspaces.js';
 const id = '00000000-0000-4000-8000-000000000001';
 const trusted = {
   version: 1,
@@ -100,6 +105,66 @@ test('finish_goal carries outcomes and receipts, not a plain Run done', () => {
   ).toBe(false);
 });
 
+test('creation resolution is optional, strict and requires unique nonempty collision references', () => {
+  const resolution = {
+    source_message_id: id,
+    source_quote: '创建报告',
+    zero_write_invocation_ids: [id],
+    created_invocation_id: '00000000-0000-4000-8000-000000000002',
+    read_invocation_id: '00000000-0000-4000-8000-000000000003',
+  };
+  const request = {
+    protocol: 'harness/v6',
+    type: 'finish_goal',
+    request_ref: 'finish',
+    usage: { iterations: 1, tokens: 1 },
+    goal_result: {
+      status: 'completed',
+      outcomes: [
+        {
+          description: '创建报告',
+          status: 'achieved',
+          receipt_refs: [],
+          create_resolution: resolution,
+        },
+      ],
+      clarification: null,
+      answer: '已创建。',
+    },
+  };
+  expect(HarnessRequestSchema.safeParse(request).success).toBe(true);
+  for (const patch of [
+    { zero_write_invocation_ids: [] },
+    { zero_write_invocation_ids: [id, id] },
+    { zero_write_invocation_ids: ['invalid'] },
+    { source_quote: '' },
+    { extra: true },
+  ]) {
+    const outcome = {
+      ...request.goal_result.outcomes[0],
+      create_resolution: { ...resolution, ...patch },
+    };
+    expect(
+      HarnessRequestSchema.safeParse({
+        ...request,
+        goal_result: { ...request.goal_result, outcomes: [outcome] },
+      }).success,
+    ).toBe(false);
+  }
+  expect(
+    HarnessStartSchema.safeParse({
+      ...start,
+      trusted_context: { ...trusted, create_resolution_revision: 'create-resolution/1' },
+    }).success,
+  ).toBe(true);
+  expect(
+    HarnessStartSchema.safeParse({
+      ...start,
+      trusted_context: { ...trusted, create_resolution_revision: 'future/1' },
+    }).success,
+  ).toBe(false);
+});
+
 test('task observations preserve complete pagination and actual cancellation state', () => {
   expect(
     HarnessToolPayloadSchema.safeParse({
@@ -186,6 +251,61 @@ test('trusted continuation retains a structured unresolved goal without fabricat
     HarnessStartSchema.safeParse({
       ...start,
       trusted_context: { ...trusted, continuation: { ...continuation, original_text: undefined } },
+    }).success,
+  ).toBe(false);
+});
+
+test('output grants remain private and creation receipts have closed shapes', () => {
+  const summary = {
+    workspace_id: 'w',
+    label: 'W',
+    readable_paths: [],
+    writable_paths: [],
+    output_directories: [''],
+  };
+  expect(workspaceSummarySchema.safeParse(summary).success).toBe(true);
+  expect(workspaceSummarySchema.safeParse({ ...summary, root: '/private' }).success).toBe(false);
+  expect(
+    workspaceGrantSchema.safeParse({
+      workspace_id: 'w',
+      owner_id: 'owner',
+      registration_digest: 'a'.repeat(64),
+      root_identity: '1:2',
+      output_directories: [{ path: '', identity: '1:2' }],
+    }).success,
+  ).toBe(true);
+  const identity = { workspace_id: 'w', path: 'new.txt', invocation_id: id, args_hash: 'hash' };
+  expect(
+    workspaceResultSchema.safeParse({
+      ...identity,
+      kind: 'create_applied',
+      version: 'v',
+      byte_length: 0,
+      evidence_ref: 'e',
+    }).success,
+  ).toBe(true);
+  expect(
+    workspaceResultSchema.safeParse({
+      ...identity,
+      kind: 'create_conflict',
+      reason: 'already_exists',
+      zero_write: true,
+    }).success,
+  ).toBe(true);
+  expect(
+    workspaceResultSchema.safeParse({
+      ...identity,
+      kind: 'create_failed',
+      reason: 'unavailable',
+      zero_write: true,
+    }).success,
+  ).toBe(true);
+  expect(
+    workspaceResultSchema.safeParse({
+      ...identity,
+      kind: 'create_conflict',
+      reason: 'already_exists',
+      zero_write: false,
     }).success,
   ).toBe(false);
 });

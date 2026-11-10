@@ -191,6 +191,20 @@ const goalResult = z
             description: goalText,
             status: z.enum(['achieved', 'not_done', 'blocked', 'unknown']),
             receipt_refs: z.array(uuidSchema).max(64),
+            create_resolution: z
+              .object({
+                source_message_id: uuidSchema,
+                source_quote: goalText,
+                zero_write_invocation_ids: z
+                  .array(uuidSchema)
+                  .min(1)
+                  .max(64)
+                  .refine((refs) => new Set(refs).size === refs.length),
+                created_invocation_id: uuidSchema,
+                read_invocation_id: uuidSchema,
+              })
+              .strict()
+              .optional(),
           })
           .strict(),
       )

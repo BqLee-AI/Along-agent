@@ -15,7 +15,8 @@ const workspacePath = { type: 'string' };
 export const WORKSPACE_TOOL_DEFINITIONS = [
   {
     name: 'workspace_list',
-    description: '列出当前工作区授权目录的真实直接子项；根目录 path 使用空串。',
+    description:
+      '仅列出已授权的真实直接子项，不是目录完整清单；未列出不代表文件不存在。根目录 path 使用空串。',
     risk: 'low' as const,
     parameters: workspaceParameters({ path: workspacePath }, ['path']),
   },
@@ -170,6 +171,21 @@ export const DELEGATION_TOOL_DEFINITIONS = [
       required: [...(tool.parameters.required as string[]), 'workspace_id'],
     },
   })),
+  {
+    name: 'workspace_create',
+    description:
+      '仅在本 Run 冻结的输出目录内创建新普通文件，绝不覆盖。固定名称碰撞时不得擅自改名；允许换名时仅在确定零写碰撞后使用新调用。效果未知时停止，不得重试；创建成功后必须独立新调用全文回读核验。',
+    risk: 'high' as const,
+    parameters: workspaceParameters(
+      {
+        workspace_id: { type: 'string', minLength: 1 },
+        output_directory: { type: 'string' },
+        filename: { type: 'string', minLength: 1 },
+        content: { type: 'string' },
+      },
+      ['workspace_id', 'output_directory', 'filename', 'content'],
+    ),
+  },
   {
     name: 'workspace_replace',
     description:

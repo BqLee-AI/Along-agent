@@ -54,6 +54,12 @@ TS SHALL 原子保存真实资格、运行/attempt/消息及事件投影，仓�
 - WHEN 接受最终结构化结果、消息及Run/attempt终结
 - THEN 同事务保存唯一终态及版本化投影；虚假/跨owner收据被拒，预算/失败也保留真实成果；TS不宣称能证明模型没遗漏任意自然语言目标
 
+#### Scenario: 创建撞名的目标恢复（D8/D10）
+
+- WHEN 目标结果声明零写撞名由后续别名创建及独立新读完成
+- THEN 校验真实用户消息来源和同 Run 的冲突、冻结目标、调用先后及完整回读；声明只是模型对目标的语义解释，不因原文或 ID 可核验就声称语义授权得到独立证明
+- AND 缺少声明时不得按同内容推断，旧 Run 不因部署新增恢复能力而改变冻结语义
+
 ### Requirement: 有界接续而非目标执行引擎
 
 系统 SHALL 复用conversations可信前序关系和每Run预算，不新增输入长等待、suspended_input、snapshot3、目标表/执行器或模型发号持久去重。见 [design/20 §5–§6](../../../../../docs/design/20-goal-scoped-delegation.md)。

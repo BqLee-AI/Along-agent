@@ -91,7 +91,11 @@ bun --no-env-file run local:account --config C:\AlongPrivate\local.json
    bun --no-env-file run local:account --config C:\AlongPrivate\local.json
    ```
 
-   在维护提示输入 `CONFIGURE`，明确填写容器内子目录（默认挂载示例 `/var/lib/along/workspaces/documents`）、显示名、可读相对文件路径 JSON 数组（例如 `["notes.txt"]`）、可写数组（只读用 `[]`），最后输入 `REGISTER`。没有默认路径授权；写路径必须也在读路径中，不允许绝对路径、`..`、空路径或整个卷授权。工具复用正式工作区 schema/物理 root 校验器；目录权限不符应由部署者修复刚准备的目录，不更换原 root。
+   在维护提示输入 `CONFIGURE`，明确填写容器内子目录（默认挂载示例 `/var/lib/along/workspaces/documents`）、显示名、可读相对文件路径 JSON 数组、可写数组及可创建产物的已有输出目录数组，最后输入 `REGISTER`。输出专用工作区可以将读写文件数组均设为 `[]`；输出目录允许读取其中获授权的普通文件并创建新文件，不授予覆盖已有文件或创建目录的权限。没有默认路径授权；写路径必须也在读路径中，不允许绝对路径、`..` 或整个卷授权。工具复用正式工作区 schema/物理 root 校验器；目录权限不符应由部署者修复刚准备的目录，不更换原 root。
+
+   系统使用 `.along-<UUIDv4>.tmp` 格式的内部临时文件名，避免读取尚未发布的内容；不要将此格式用作产物名称。其他名称不因此被保留。
+
+   物理身份采用无精度损失的设备号和文件号。旧记录若使用超出安全整数范围的近似身份，不能证明仍是同一对象，升级后会拒绝使用；需要重新登记相应文件并启动新 Run。安全整数范围内的旧身份保持兼容。
 
 3. **发布与加载**：私有原子发布到配置同目录的 `workspace-registry.json`，不覆盖已存在文件；经 `updateConfig` 保存 registryFile。释放安装锁和本次数据库连接后，单独 `reloadInstallation` 停本安装写者并核对加载结果。不会停未知服务、自动循环重试、发模型请求或执行 Agent。
 4. **普通owner有限新增**：运行 `bun --no-env-file run local:account --workspace --config C:\AlongPrivate\local.json`，明确选择已准入owner序号及 `CONFIRM <序号>`，再输入 `ADD`。root、读写路径和 `REGISTER` 的规则与上文相同；复用正式物理root/重叠冲突校验器，不能重新授权原root或重叠目录。现有全部owner、workspace_id、root、权限和物理身份都保留；只追加新条目，先发布新的私有 `workspace-registry.<uuid>.json`，原来源文件字节永不覆盖，再比较原配置/来源字节版本并原子切换registryFile。并发编辑、root更换或配置版本变化均停止，不覆盖来源。已选owner已有登记时输入 `LOAD` 只核验并重载，不创建新workspace；输入 `ADD` 才明确另增。无效/不可读原登记必须修复，不能当空文件覆盖。

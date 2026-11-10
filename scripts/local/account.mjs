@@ -245,16 +245,25 @@ async function requestRegistration(ownerId, config, io) {
     throw failure('WORKSPACE_ROOT_INVALID');
   const label = await io.ask('工作区显示名');
   if (!label || label.length > 128) throw failure('WORKSPACE_REGISTRY_INVALID');
-  const readable = await io.ask('明确允许读取的相对文件路径（JSON 字符串数组，无默认值）');
+  const readable = await io.ask('明确允许读取的相对文件路径（JSON 字符串数组，可填 []）');
   const writable = await io.ask('明确允许写入的相对文件路径（JSON 字符串数组，可填 []）');
-  let readablePaths, writablePaths;
+  const output = await io.ask(
+    '明确允许创建且读取产物的现有相对输出目录（JSON 字符串数组，可填 []；不允许覆盖或创建目录）',
+  );
+  let readablePaths, writablePaths, outputDirectories;
   try {
     readablePaths = JSON.parse(readable);
     writablePaths = JSON.parse(writable);
+    outputDirectories = JSON.parse(output);
   } catch {
     throw failure('WORKSPACE_REGISTRY_INVALID');
   }
-  if (!Array.isArray(readablePaths) || !readablePaths.length || !Array.isArray(writablePaths))
+  if (
+    !Array.isArray(readablePaths) ||
+    !Array.isArray(writablePaths) ||
+    !Array.isArray(outputDirectories) ||
+    (!readablePaths.length && !outputDirectories.length)
+  )
     throw failure('WORKSPACE_REGISTRY_INVALID');
   if ((await io.ask('确认仅授权这些有限路径；输入 REGISTER')) !== 'REGISTER')
     throw failure('ACCOUNT_CONFIRMATION_REQUIRED');
@@ -266,6 +275,7 @@ async function requestRegistration(ownerId, config, io) {
       root,
       readable_paths: readablePaths,
       writable_paths: writablePaths,
+      ...(outputDirectories.length ? { output_directories: outputDirectories } : {}),
     },
   ];
 }

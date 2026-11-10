@@ -49,6 +49,8 @@ export interface FrozenContext {
   workspaceGrant?: WorkspaceGrant | null;
   workspaceSummary?: WorkspaceSummary | null;
   workspaceGrants?: WorkspaceGrant[];
+  createdArtifactReadRevision?: 'owner-created/1';
+  createResolutionRevision?: 'create-resolution/1' | 'create-resolution/2';
   authorization_revision?: 'delegation/1';
   execution_lifecycle?: 'request-bound';
   trustedExecutionContext?: TrustedExecutionContext;

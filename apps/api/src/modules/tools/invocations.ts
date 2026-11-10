@@ -7,6 +7,8 @@ import {
   validateWorkspaceGrant,
   hashBytes,
   utf8Bytes,
+  canonicalWorkspaceFilename,
+  getWorkspaceOutputIdentity,
 } from '../workspaces/service.js';
 import { compileWorkspaceEdit } from '../workspaces/replace.js';
 import {
@@ -43,9 +45,10 @@ import {
   WorkspaceReplaceInputSchema,
   DELEGATED_WORKSPACE_READ_SCHEMAS,
   DelegatedWorkspaceProposeInputSchema,
+  WorkspaceCreateInputSchema,
 } from './schemas.js';
 import { assertContextSourceAuthorized } from './context-source.js';
-import { readAcceptedInvocationResult } from './accepted-result.js';
+import { hydrateWorkspaceReadResult, readAcceptedInvocationResult } from './accepted-result.js';
 
 const HASH_DOMAIN = 'along/tool-args/v1\0';
 const frozenSchema = z
@@ -71,6 +74,19 @@ const frozenSchema = z
         operation_error: z
           .enum(['literal_not_found', 'literal_not_unique', 'unchanged'])
           .optional(),
+        replaces_invocation_id: z.string().uuid().optional(),
+      })
+      .strict()
+      .optional(),
+    documentCreate: z
+      .object({
+        output_directory: z.string(),
+        directory_identity: z.string(),
+        relative_path: z.string(),
+        content_base64: z
+          .string()
+          .regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
+        new_version: z.string(),
         replaces_invocation_id: z.string().uuid().optional(),
       })
       .strict()
@@ -222,6 +238,7 @@ function executionContext(ctx: ToolContext, row: Invocation): ToolContext {
     ...ctx,
     workspaceGrant: frozen.workspaceGrant ?? null,
     documentEdit: frozen.documentEdit,
+    documentCreate: frozen.documentCreate,
     confirmedTimezone: frozen.confirmedTimezone,
     anchorReceivedAtUtc: frozen.anchorReceivedAtUtc,
     receivedAtUtc: frozen.receivedAtUtc,
@@ -245,6 +262,36 @@ export async function assertDocumentTargetAvailable(
   read: DocumentReadEvidence,
   options: { proposal?: boolean } = {},
 ): Promise<string | undefined> {
+  const creates = await client.query<{
+    state: string;
+    accepted_result: unknown;
+    frozen_context: { documentCreate?: NonNullable<ToolContext['documentCreate']> };
+    accepted_at: string;
+  }>(
+    `SELECT state,accepted_result,frozen_context,
+      coalesce(to_char(accepted_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),'') accepted_at
+     FROM tool_invocations WHERE owner_id=$1 AND conversation_id=$2 AND run_id=$3
+       AND tool_id='workspace_create' AND frozen_context->'workspaceGrant'->>'workspace_id'=$4
+       AND frozen_context->'documentCreate'->>'relative_path'=$5`,
+    [ctx.ownerId, ctx.conversationId, ctx.runId, read.workspace_id, read.relative_path],
+  );
+  for (const create of creates.rows) {
+    if (create.state !== 'completed') throw stateConflict('same-target create not settled');
+    const result = hydrateWorkspaceReadResult(create.accepted_result);
+    if (result.status !== 'ok') throw stateConflict('same-target create not settled');
+    if (result.result.kind === 'create_conflict' || result.result.kind === 'create_failed')
+      continue;
+    if (
+      result.result.kind !== 'create_applied' ||
+      !documentEvidenceLater(read.created_at, create.accepted_at) ||
+      !documentEvidenceLater(read.accepted_at, create.accepted_at) ||
+      read.result.version !== result.result.version ||
+      utf8Bytes(read.result.content).toString('base64') !==
+        create.frozen_context.documentCreate?.content_base64 ||
+      read.result.byte_length !== result.result.byte_length
+    )
+      throw stateConflict('same-target create requires a fresh verified read');
+  }
   const approvals = await listDocumentApprovals(client, ctx.ownerId, ctx.conversationId, ctx.runId);
   const matching = approvals.filter(
     (a) => a.workspace_id === read.workspace_id && a.relative_path === read.relative_path,
@@ -367,8 +414,11 @@ export async function reserveInvocation(
       return { invocationId: row.invocation_id };
     }
     if (!binding.canExecute) throw stateConflict('Run/attempt cannot reserve new tool execution');
+    if (input.toolId === 'workspace_create' && ctx.authorizationRevision !== 'delegation/1')
+      throw forbidden();
     let selected = ctx.workspaceGrant ?? null;
     let documentEdit: ToolContext['documentEdit'];
+    let documentCreate: ToolContext['documentCreate'];
     if (ctx.authorizationRevision === 'delegation/1' && input.toolId.startsWith('workspace_')) {
       const grants = ctx.workspaceGrants ?? [];
       if (
@@ -385,6 +435,56 @@ export async function reserveInvocation(
           throw forbidden();
         selected = resolveFrozenWorkspaceGrant(ctx.ownerId, grants, approval.workspace_id);
         if (canonicalJson(selected) !== canonicalJson(approval.workspace_grant)) throw forbidden();
+      } else if (input.toolId === 'workspace_create') {
+        if (!ctx.allowlist.includes(input.toolId) || input.executionKind !== 'non_transactional')
+          throw forbidden();
+        const args = WorkspaceCreateInputSchema.parse(input.args);
+        selected = resolveFrozenWorkspaceGrant(ctx.ownerId, grants, args.workspace_id);
+        const directoryIdentity = await getWorkspaceOutputIdentity(
+          ctx.ownerId,
+          selected,
+          args.output_directory,
+        );
+        const filename = canonicalWorkspaceFilename(args.filename);
+        const relativePath = args.output_directory
+          ? `${args.output_directory}/${filename}`
+          : filename;
+        const bytes = utf8Bytes(args.content);
+        const contentBase64 = bytes.toString('base64');
+        const approvals = (
+          await listDocumentApprovals(client, ctx.ownerId, ctx.conversationId, ctx.runId)
+        ).filter(
+          (item) => item.workspace_id === args.workspace_id && item.relative_path === relativePath,
+        );
+        const actions = await client.query(
+          `SELECT 1 FROM tool_invocations WHERE owner_id=$1 AND conversation_id=$2 AND run_id=$3
+           AND frozen_context->'workspaceGrant'->>'workspace_id'=$4
+           AND ((tool_id IN ('workspace_replace','workspace_propose_replace')
+             AND frozen_context->'documentEdit'->>'relative_path'=$5)
+             OR (tool_id='workspace_create' AND frozen_context->'documentCreate'->>'relative_path'=$5))
+           AND (state<>'completed' OR coalesce(accepted_result->'result'->>'kind','') NOT IN ('create_conflict','create_failed','operation_error'))`,
+          [ctx.ownerId, ctx.conversationId, ctx.runId, args.workspace_id, relativePath],
+        );
+        if (approvals.length || actions.rowCount) {
+          const evidence = await readRunDocumentEvidence(client, ctx);
+          const read = evidence.reads
+            .filter(
+              (item) =>
+                item.workspace_id === args.workspace_id &&
+                item.relative_path === relativePath &&
+                item.registration_digest === selected!.registration_digest,
+            )
+            .at(-1);
+          if (!read) throw stateConflict('same-target action requires a fresh verified read');
+          await assertDocumentTargetAvailable(client, ctx, read);
+        }
+        documentCreate = {
+          output_directory: args.output_directory,
+          directory_identity: directoryIdentity,
+          relative_path: relativePath,
+          content_base64: contentBase64,
+          new_version: hashBytes(bytes),
+        };
       } else if (
         input.toolId === 'workspace_replace' ||
         input.toolId === 'workspace_propose_replace'
@@ -442,6 +542,7 @@ export async function reserveInvocation(
         JSON.stringify({
           ...freezeContext({ ...ctx, workspaceGrant: selected }),
           ...(documentEdit ? { documentEdit } : {}),
+          ...(documentCreate ? { documentCreate } : {}),
           ...(input.toolId === 'workspace_apply_replace'
             ? { documentApprovalId: WorkspaceApplyReplaceInputSchema.parse(input.args).approval_id }
             : {}),
@@ -618,11 +719,41 @@ async function accept(
   value: ToolResult,
   recordKind: string,
   evidenceRef: string | null = null,
+  fileIdentity?: string,
 ): Promise<ToolResult> {
   const result = parseResult(value);
   if (result.status === 'unknown') throw stateConflict('unknown is not a completed tool result');
+  if (
+    result.status === 'ok' &&
+    (result.result.kind === 'create_applied' ||
+      result.result.kind === 'create_conflict' ||
+      result.result.kind === 'create_failed')
+  ) {
+    const target = row.frozen_context.documentCreate;
+    const grant = row.frozen_context.workspaceGrant;
+    const payload = result.result;
+    if (
+      row.tool_id !== 'workspace_create' ||
+      row.frozen_context.authorizationRevision !== 'delegation/1' ||
+      !target ||
+      !grant ||
+      payload.workspace_id !== grant.workspace_id ||
+      payload.path !== target.relative_path ||
+      payload.invocation_id !== row.invocation_id ||
+      payload.args_hash !== row.args_hash ||
+      (payload.kind === 'create_applied' &&
+        (!fileIdentity ||
+          payload.version !== target.new_version ||
+          payload.byte_length !== Buffer.from(target.content_base64, 'base64').length ||
+          payload.evidence_ref !== `workspace-create:${row.invocation_id}:${target.new_version}` ||
+          evidenceRef !== payload.evidence_ref))
+    )
+      throw stateConflict('invalid create effect evidence');
+  }
   let stored: unknown = result;
   let approvalId: string | null = null;
+  if (result.status === 'ok' && result.result.kind === 'create_applied')
+    stored = { ...result, file_identity: fileIdentity };
   if (result.status === 'ok' && result.result.kind === 'approval') {
     const approval = result.result.approval;
     const receipt = {
@@ -665,14 +796,16 @@ async function accept(
     row.tool_id !== 'read_run_observation'
   )
     throw stateConflict('context result requires observation reader');
-  const serialized = JSON.stringify(stored);
-  if (Buffer.byteLength(serialized, 'utf8') > 240000)
-    throw stateConflict('tool result exceeds safe snapshot bound');
-  if (
-    result.status === 'ok' &&
-    result.result.kind === 'context_slice' &&
-    Buffer.byteLength(serialized, 'utf8') > 16384
-  )
+  const logical = JSON.stringify(stored);
+  const logicalBytes = Buffer.byteLength(logical, 'utf8');
+  const serialized = logical.includes('\\u0000')
+    ? JSON.stringify({
+        encoding: 'json-base64/1',
+        data: Buffer.from(logical, 'utf8').toString('base64'),
+      })
+    : logical;
+  if (logicalBytes > 240000) throw stateConflict('tool result exceeds safe snapshot bound');
+  if (result.status === 'ok' && result.result.kind === 'context_slice' && logicalBytes > 16384)
     throw stateConflict('context page exceeds safe snapshot bound');
   await client.query(
     `UPDATE tool_invocations SET state = 'completed', outcome_kind = $2, result_version = 1,
@@ -862,6 +995,7 @@ export interface EffectBinding {
 export interface EffectEvidence extends EffectBinding {
   evidenceRef: string;
   result: ToolResult;
+  fileIdentity?: string;
 }
 export interface NotAppliedEvidence extends EffectBinding {
   evidenceRef: string;
@@ -883,6 +1017,7 @@ const evidenceSchema = z.union([
       argsHash: z.string().regex(/^[a-f0-9]{64}$/),
       evidenceRef: z.string().min(1).max(512),
       result: z.unknown(),
+      fileIdentity: z.string().min(1).optional(),
     })
     .strict(),
   z
@@ -971,7 +1106,10 @@ export async function executeNonTransactionalInvocation(
     (result.result.kind === 'applied' ||
       result.result.kind === 'conflict' ||
       result.result.kind === 'edit_applied' ||
-      result.result.kind === 'edit_conflict')
+      result.result.kind === 'edit_conflict' ||
+      result.result.kind === 'create_applied' ||
+      result.result.kind === 'create_conflict' ||
+      result.result.kind === 'create_failed')
   ) {
     if (
       result.result.invocation_id !== dispatch.binding.invocationId ||
@@ -1007,6 +1145,7 @@ export async function executeNonTransactionalInvocation(
       result,
       dispatch.permission ? 'accepted' : 'reconciled',
       evidence.evidenceRef,
+      'result' in evidence ? evidence.fileIdentity : undefined,
     );
     if (!disclose) {
       await audit(client, ctx, row, 'denied', permissionDenied);
@@ -1014,7 +1153,12 @@ export async function executeNonTransactionalInvocation(
     }
     return { ...accepted, invocationId: row.invocation_id, replayed: false };
   }).catch((error: unknown) => {
-    if (error instanceof HttpError && input.toolId !== 'workspace_replace') throw error;
+    if (
+      error instanceof HttpError &&
+      input.toolId !== 'workspace_replace' &&
+      input.toolId !== 'workspace_create'
+    )
+      throw error;
     // A durable once-permit already committed. Acceptance/COMMIT failure does
     // not permit redispatch, nor can it turn external evidence into success.
     return { ...unknown, invocationId: input.invocationId, replayed: false };

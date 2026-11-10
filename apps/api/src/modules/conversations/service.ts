@@ -18,6 +18,7 @@ import {
   DELEGATION_TOOL_IDS,
   DELEGATION_WORKSPACE_READ_TOOL_IDS,
   DELEGATION_WORKSPACE_WRITE_TOOL_IDS,
+  DELEGATION_WORKSPACE_CREATE_TOOL_IDS,
   TOOL_IDS,
 } from '../tools/contracts.js';
 import {
@@ -215,6 +216,9 @@ export async function startConversationRun(
                   ...(workspaceSet.summaries.some((summary) => summary.writable_paths.length)
                     ? DELEGATION_WORKSPACE_WRITE_TOOL_IDS
                     : []),
+                  ...(workspaceSet.grants.some((grant) => grant.output_directories?.length)
+                    ? DELEGATION_WORKSPACE_CREATE_TOOL_IDS
+                    : []),
                 ]
               : HARNESS_BASE_TOOL_IDS
           : BUSINESS_TOOL_IDS;
@@ -279,21 +283,6 @@ export async function startConversationRun(
               kind: 'destination',
             })))
           : null;
-      if (targetContinuation?.workspaceGrants) {
-        const priorIds = new Set(
-          targetContinuation.workspaceGrants.map((grant) => grant.workspace_id),
-        );
-        if (input.workspace_ids?.some((id) => !priorIds.has(id)))
-          throw validationError('workspace selection exceeds the original goal scope');
-        workspaceSet = resolveWorkspaceGrants(ownerId, input.workspace_ids ?? [...priorIds]);
-        allowlist = [
-          ...DELEGATION_TOOL_IDS,
-          ...(workspaceSet.grants.length ? DELEGATION_WORKSPACE_READ_TOOL_IDS : []),
-          ...(workspaceSet.summaries.some((summary) => summary.writable_paths.length)
-            ? DELEGATION_WORKSPACE_WRITE_TOOL_IDS
-            : []),
-        ];
-      }
       const reminderDate = await acceptReminderDate(client, {
         ownerId,
         conversationId: conversation.id,
@@ -327,6 +316,47 @@ export async function startConversationRun(
         targetContinuation =
           (await acceptTargetContinuation(client, { ...sourceInput, kind: 'time' })) ??
           (await acceptTargetContinuation(client, { ...sourceInput, kind: 'timezone' }));
+      }
+      if (targetContinuation?.workspaceGrants) {
+        const priorIds = new Set(
+          targetContinuation.workspaceGrants.map((grant) => grant.workspace_id),
+        );
+        if (input.workspace_ids?.some((id) => !priorIds.has(id)))
+          throw validationError('workspace selection exceeds the original goal scope');
+        workspaceSet = resolveWorkspaceGrants(ownerId, input.workspace_ids ?? [...priorIds]);
+        const continuedGrants = workspaceSet.grants.map((grant) => {
+          const previous = targetContinuation.workspaceGrants!.find(
+            (candidate) => candidate.workspace_id === grant.workspace_id,
+          );
+          const directories = targetContinuation.workspaceCreateAllowed
+            ? grant.output_directories?.filter((directory) =>
+                previous?.output_directories?.some(
+                  (old) => old.path === directory.path && old.identity === directory.identity,
+                ),
+              )
+            : undefined;
+          const base = {
+            workspace_id: grant.workspace_id,
+            owner_id: grant.owner_id,
+            registration_digest: grant.registration_digest,
+            root_identity: grant.root_identity,
+          };
+          return directories?.length ? { ...base, output_directories: directories } : base;
+        });
+        workspaceSet = {
+          grants: continuedGrants,
+          summaries: continuedGrants.map((grant) => validateWorkspaceGrant(ownerId, grant)),
+        };
+        allowlist = [
+          ...DELEGATION_TOOL_IDS,
+          ...(workspaceSet.grants.length ? DELEGATION_WORKSPACE_READ_TOOL_IDS : []),
+          ...(workspaceSet.summaries.some((summary) => summary.writable_paths.length)
+            ? DELEGATION_WORKSPACE_WRITE_TOOL_IDS
+            : []),
+          ...(workspaceSet.grants.some((grant) => grant.output_directories?.length)
+            ? DELEGATION_WORKSPACE_CREATE_TOOL_IDS
+            : []),
+        ];
       }
       if (
         delegation &&
@@ -371,6 +401,11 @@ export async function startConversationRun(
             version: 1,
             authorization_revision: 'delegation/1',
             execution_lifecycle: 'request-bound',
+            ...(execution === 'harness' &&
+            (allowlist as readonly string[]).includes('workspace_create') &&
+            (allowlist as readonly string[]).includes('workspace_read')
+              ? { create_resolution_revision: 'create-resolution/2' as const }
+              : {}),
             input_message_id: userMessageId,
             received_at_utc: receivedAtUtc,
             request_anchor_utc: targetContinuation?.anchor ?? reminderDate.anchor,
@@ -419,6 +454,16 @@ export async function startConversationRun(
         ...(messageRefs ? { messageRefs } : {}),
         ...(workspaceGrant ? { workspaceGrant, workspaceSummary } : {}),
         ...(delegation ? { workspaceGrants: workspaceSet.grants } : {}),
+        ...(delegation &&
+        (!targetContinuation || targetContinuation.createdArtifactReadAllowed) &&
+        workspaceSet.grants.some((grant) => (grant.output_directories?.length ?? 0) > 0)
+          ? { createdArtifactReadRevision: 'owner-created/1' as const }
+          : {}),
+        ...(delegation &&
+        (allowlist as readonly string[]).includes('workspace_create') &&
+        (allowlist as readonly string[]).includes('workspace_read')
+          ? { createResolutionRevision: 'create-resolution/2' as const }
+          : {}),
         ...(trustedExecutionContext
           ? {
               authorization_revision: 'delegation/1' as const,

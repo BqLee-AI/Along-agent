@@ -22,6 +22,7 @@ type Frozen = {
   foldChoice?: 'first' | 'second' | 'none';
   reminderDateSource?: { inputMessageId?: string };
   workspaceGrants?: WorkspaceGrant[];
+  createdArtifactReadRevision?: 'owner-created/1';
   trustedExecutionContext?: { continuation?: { run_id: string } | null };
 };
 function hasWorkspaceScope(
@@ -172,6 +173,9 @@ export async function acceptTargetContinuation(
     },
     anchor: run.frozen_context.anchorReceivedAtUtc,
     ...(workspaceScope ? { workspaceGrants: run.frozen_context.workspaceGrants! } : {}),
+    workspaceCreateAllowed: run.tools_allowlist.includes('workspace_create'),
+    createdArtifactReadAllowed:
+      run.frozen_context.createdArtifactReadRevision === 'owner-created/1',
   };
 }
 

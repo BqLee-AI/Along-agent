@@ -5,7 +5,7 @@
 > 不包含：功能实现、运行验收记录、通用 MCP 平台、任意宿主路径或外部 exactly-once。
 > 阶段：R1；关联 #62。行为以 OpenSpec 为准，字段、接口、所有权和一致性以本设计为准。
 
-> 授权作用域：本文单工作区选择、逐项文档按钮及冲突后重新批准适用于 legacy。新 delegation 的本人登记集合、正常直接编辑、新增影响精确授权及零写冲突边界见 [design/20 §3、§7](20-goal-scoped-delegation.md)；两者共享真实全文基线、对象/版本绑定、一次许可、新回读和 unknown 边界，不模拟批准、不开放全盘。有限创建和 server-owned 不属于当前编辑合同；设计不等于已验收。
+> 授权作用域：本文单工作区选择、逐项文档按钮及冲突后重新批准适用于 legacy。新 delegation 的本人登记集合、正常直接编辑、有限输出目录创建、新增影响精确授权及零写冲突边界见 [design/20 §3、§7](20-goal-scoped-delegation.md)；两者共享对象绑定、一次许可、新回读和 unknown 边界，不模拟批准、不开放全盘。server-owned 不属于当前连接合同；设计不等于已验收。
 
 ## 1. 结论与范围
 
@@ -34,7 +34,7 @@
 
 ### 3.1 登记来源
 
-新增 workspaces 模块，拥有服务端部署登记清单及文件边界。登记项仅含满足当前能力所需的信息：workspace_id、展示 label、owner_id、canonical root、有限 readable_paths、writable_paths；writable_paths 必须是 readable_paths 的子集。路径为逐项登记的相对文件路径，不接受任意递归 glob。登记由受信部署配置提供，不是模型生成、浏览器目录选择结果、MCP roots/list 或用户原话中的绝对路径。无需另建 workspace 数据库/文件索引。
+新增 workspaces 模块，拥有服务端部署登记清单及文件边界。登记项含 workspace_id、展示 label、owner_id、canonical root、有限 readable_paths、writable_paths，以及可选 output_directories；writable_paths 必须是 readable_paths 的子集。输出目录允许在已有合格子目录内创建新文件，不授予读取该目录中未登记的已有文件。路径为相对路径，不接受任意递归 glob。登记由受信部署配置提供，不是模型生成、浏览器目录选择结果、MCP roots/list 或用户原话中的绝对路径。无需另建 workspace 数据库/文件索引。
 
 root 是专用持久目录，明确交付给应用的资料和简报就是本能力操作的真实文件；不是工具回显或运行后丢弃的 mock。若登记的是授权副本，Web 必须展示这是受管副本，不能声称已经修改其他未登记原件。登记配置和文件来源说明属于部署文档，不把个人路径写进仓库。
 

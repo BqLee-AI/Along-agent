@@ -27,6 +27,20 @@ export const GoalResultSchema = z
               .array(uuid)
               .max(64)
               .refine((refs) => new Set(refs).size === refs.length),
+            create_resolution: z
+              .object({
+                source_message_id: uuid,
+                source_quote: text,
+                zero_write_invocation_ids: z
+                  .array(uuid)
+                  .min(1)
+                  .max(64)
+                  .refine((refs) => new Set(refs).size === refs.length),
+                created_invocation_id: uuid,
+                read_invocation_id: uuid,
+              })
+              .strict()
+              .optional(),
           })
           .strict(),
       )
@@ -80,6 +94,7 @@ export const TrustedExecutionContextSchema = z
     version: z.literal(1),
     authorization_revision: z.literal('delegation/1'),
     execution_lifecycle: z.literal('request-bound'),
+    create_resolution_revision: z.enum(['create-resolution/1', 'create-resolution/2']).optional(),
     input_message_id: uuid,
     received_at_utc: z.string().datetime({ precision: 0 }),
     request_anchor_utc: z.string().datetime({ precision: 0 }),

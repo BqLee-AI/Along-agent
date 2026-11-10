@@ -105,9 +105,10 @@ export async function publishWorkspaceReplace(
     const actual = hashBytes(base.bytes);
     if (actual !== target.base_version) return conflict('version_changed', actual);
     temporary = path.join(path.dirname(base.absolute), `.along-${randomUUID()}.tmp`);
-    const handle = await open(temporary, 'wx', base.stat.mode & 0o777);
+    const mode = Number(base.stat.mode & 0o777n);
+    const handle = await open(temporary, 'wx', mode);
     try {
-      await handle.chmod(base.stat.mode & 0o777);
+      await handle.chmod(mode);
       await handle.writeFile(bytes);
       await handle.sync();
     } finally {

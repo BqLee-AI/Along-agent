@@ -1,6 +1,7 @@
 // The gateway binds each logical tool call before executing local work.
 // Approved results, local approval inserts and audit rows commit together.
 import type { Pool, PoolClient } from 'pg';
+import { workspaceGrantSchema } from '@along/contracts';
 import { normalizeTime } from '../time/normalize.js';
 import { addElapsed, classifyEntry, reminderDateExpression, utcToLocal } from '@along/time-core';
 import { readReminderDateInput } from '../conversations/reminder-date.js';
@@ -43,7 +44,14 @@ import {
   publishWorkspaceReplace,
   type ApprovedWorkspaceTarget,
 } from '../workspaces/replace.js';
-import { utf8Bytes, WorkspaceDeniedError } from '../workspaces/service.js';
+import { publishWorkspaceCreate } from '../workspaces/create.js';
+import {
+  isWorkspaceOutputDirectory,
+  strictUtf8,
+  utf8Bytes,
+  WorkspaceDeniedError,
+} from '../workspaces/service.js';
+import { readAcceptedInvocationResult } from './accepted-result.js';
 import { callWorkspaceMcp, type WorkspaceReadTool } from './mcp-workspace.js';
 import { readRunDocumentEvidence } from './query.js';
 import { readObservationPage } from './observation-page.js';
@@ -231,6 +239,69 @@ function invokeWorkspaceReplace(
                     reason: result.reason,
                     zero_write: true,
                   },
+          },
+        };
+      } finally {
+        client.release();
+      }
+    },
+  });
+}
+function invokeWorkspaceCreate(
+  pool: Pool,
+  ctx: ToolContext,
+  input: { invocationId: string; toolId: string; args: unknown },
+): Promise<ToolOutcome> {
+  let frozen: ToolContext | undefined;
+  return executeNonTransactionalInvocation(pool, ctx, input, {
+    validateDispatch: async (_client, context) => {
+      if (
+        context.authorizationRevision !== 'delegation/1' ||
+        !context.workspaceGrant ||
+        !context.documentCreate
+      )
+        throw new WorkspaceDeniedError();
+      frozen = context;
+    },
+    execute: async (binding) => {
+      const grant = frozen?.workspaceGrant;
+      const target = frozen?.documentCreate;
+      if (!frozen || !grant || !target) throw new Error('missing frozen create target');
+      frozen.signal?.throwIfAborted();
+      const client = await pool.connect();
+      try {
+        const result = await publishWorkspaceCreate(client, frozen.ownerId, grant, {
+          output_directory: target.output_directory,
+          directory_identity: target.directory_identity,
+          path: target.relative_path,
+          exact_new_content: strictUtf8(Buffer.from(target.content_base64, 'base64')),
+          new_version: target.new_version,
+        });
+        const common = {
+          workspace_id: grant.workspace_id,
+          path: target.relative_path,
+          invocation_id: binding.invocationId,
+          args_hash: binding.argsHash,
+        };
+        const evidenceRef = `workspace-create:${binding.invocationId}:${target.new_version}`;
+        return {
+          ...binding,
+          evidenceRef,
+          ...(result.kind === 'applied' ? { fileIdentity: result.file_identity } : {}),
+          result: {
+            status: 'ok',
+            result:
+              result.kind === 'applied'
+                ? {
+                    kind: 'create_applied',
+                    ...common,
+                    version: result.version,
+                    byte_length: result.byte_length,
+                    evidence_ref: evidenceRef,
+                  }
+                : result.kind === 'conflict'
+                  ? { kind: 'create_conflict', ...common, reason: result.reason, zero_write: true }
+                  : { kind: 'create_failed', ...common, reason: result.reason, zero_write: true },
           },
         };
       } finally {
@@ -993,7 +1064,9 @@ export function reserveToolInvocation(
   return reserveInvocation(pool, ctx, {
     ...input,
     executionKind:
-      input.toolId === 'workspace_apply_replace' || input.toolId === 'workspace_replace'
+      input.toolId === 'workspace_apply_replace' ||
+      input.toolId === 'workspace_replace' ||
+      input.toolId === 'workspace_create'
         ? 'non_transactional'
         : readOnly
           ? 'read_only'
@@ -1008,6 +1081,7 @@ export function invokeTool(
 ): Promise<ToolOutcome> {
   if (input.toolId === 'workspace_apply_replace') return invokeWorkspaceApply(pool, ctx, input);
   if (input.toolId === 'workspace_replace') return invokeWorkspaceReplace(pool, ctx, input);
+  if (input.toolId === 'workspace_create') return invokeWorkspaceCreate(pool, ctx, input);
   if (input.toolId === 'read_run_observation') {
     return executeReadOnlyInvocation(pool, ctx, input, async (frozen) => {
       const parsed = TOOL_INPUT_SCHEMAS.read_run_observation.safeParse(input.args);
@@ -1041,7 +1115,97 @@ export function invokeTool(
           'literal' in parsed.data && typeof parsed.data.literal === 'string'
             ? { path, literal: parsed.data.literal }
             : { path };
-        const result = await callWorkspaceMcp(frozen, toolId, mcpArgs);
+        const authorizedCreatedPaths: Array<{
+          path: string;
+          directory_identity: string;
+          file_identity: string;
+          version: string;
+        }> = [];
+        if (frozen.authorizationRevision === 'delegation/1' && frozen.workspaceGrant) {
+          const client = await pool.connect();
+          try {
+            const { rows } = await client.query<{
+              invocation_id: string;
+              args_hash: string;
+              frozen_context: {
+                workspaceGrant?: unknown;
+                documentCreate?: {
+                  output_directory: string;
+                  relative_path: string;
+                  directory_identity: string;
+                };
+              };
+              result_version: number | null;
+              tool_id: string;
+              approval_id: string | null;
+              accepted_result: unknown;
+              outcome_kind: string | null;
+            }>(
+              `SELECT i.invocation_id,i.args_hash,i.frozen_context,i.result_version,i.tool_id,i.approval_id,i.accepted_result,i.outcome_kind
+               FROM tool_invocations i
+               JOIN agent_runs current_run ON current_run.id=$3 AND current_run.owner_id=$1
+                 AND current_run.conversation_id=$2
+               WHERE i.owner_id=$1 AND i.tool_id='workspace_create' AND i.state='completed'
+                 AND i.accepted_result->'result'->>'kind'='create_applied'
+                 AND (
+                   (i.conversation_id=$2 AND i.run_id=$3 AND i.frozen_context->'workspaceGrant'=$4::jsonb)
+                   OR (
+                     current_run.frozen_context->>'createdArtifactReadRevision'='owner-created/1'
+                     AND i.run_id<>$3 AND i.accepted_at < current_run.created_at
+                     AND i.frozen_context->'workspaceGrant'->>'workspace_id'=$5
+                     AND i.frozen_context->'workspaceGrant'->>'owner_id'=$1::text
+                     AND i.frozen_context->'workspaceGrant'->>'root_identity'=$6
+                   )
+                 )
+               ORDER BY i.accepted_at DESC,i.invocation_id DESC`,
+              [
+                frozen.ownerId,
+                frozen.conversationId,
+                frozen.runId,
+                JSON.stringify(frozen.workspaceGrant),
+                frozen.workspaceGrant.workspace_id,
+                frozen.workspaceGrant.root_identity,
+              ],
+            );
+            for (const row of rows) {
+              const accepted = await readAcceptedInvocationResult(client, frozen, row);
+              const target = row.frozen_context.documentCreate;
+              const privateResult = row.accepted_result as { file_identity?: unknown };
+              const historicalGrant = workspaceGrantSchema.safeParse(
+                row.frozen_context.workspaceGrant,
+              );
+              const slash = target?.relative_path.lastIndexOf('/') ?? -1;
+              const directory = slash < 0 ? '' : target!.relative_path.slice(0, slash);
+              if (
+                accepted.status === 'ok' &&
+                accepted.result.kind === 'create_applied' &&
+                target &&
+                historicalGrant.success &&
+                historicalGrant.data.owner_id === frozen.ownerId &&
+                historicalGrant.data.workspace_id === frozen.workspaceGrant.workspace_id &&
+                historicalGrant.data.root_identity === frozen.workspaceGrant.root_identity &&
+                typeof target.directory_identity === 'string' &&
+                target.directory_identity.length > 0 &&
+                typeof target.output_directory === 'string' &&
+                target.output_directory === directory &&
+                isWorkspaceOutputDirectory(historicalGrant.data, directory) &&
+                isWorkspaceOutputDirectory(frozen.workspaceGrant, directory) &&
+                !authorizedCreatedPaths.some((entry) => entry.path === target.relative_path) &&
+                typeof privateResult.file_identity === 'string' &&
+                privateResult.file_identity.length > 0
+              )
+                authorizedCreatedPaths.push({
+                  path: target.relative_path,
+                  directory_identity: target.directory_identity,
+                  file_identity: privateResult.file_identity,
+                  version: accepted.result.version,
+                });
+            }
+          } finally {
+            client.release();
+          }
+        }
+        const result = await callWorkspaceMcp(frozen, toolId, mcpArgs, authorizedCreatedPaths);
         return {
           status: 'ok',
           result:
