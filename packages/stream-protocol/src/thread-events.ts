@@ -240,7 +240,7 @@ export const DelegationThreadEventSchema = z.discriminatedUnion('type', [
     ThreadStartedPayloadSchema.extend({
       stream_protocol_version: z.literal('v2'),
       authorization_revision: z.literal('delegation/1'),
-      execution_lifecycle: z.literal('request-bound'),
+      execution_lifecycle: z.enum(['request-bound', 'server-owned']),
     }),
   ),
   delegationEnvelope(z.literal('message.delta'), MessageDeltaPayloadSchema),

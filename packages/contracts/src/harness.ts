@@ -6,6 +6,7 @@ import {
 } from './document-approvals.js';
 import { RoutingPolicySchema, RoutingIntentSchema } from './routing.js';
 import {
+  ExecutionLifecycleSchema,
   ElapsedTimeBasisSchema,
   GoalResultSchema,
   TrustedExecutionContextSchema,
@@ -647,7 +648,7 @@ export const RunViewSchema = z
     workspaces: z.array(workspaceSummarySchema).optional(),
     can_resume: z.boolean(),
     authorization_revision: z.literal('delegation/1').optional(),
-    execution_lifecycle: z.literal('request-bound').optional(),
+    execution_lifecycle: ExecutionLifecycleSchema.optional(),
     goal_result: GoalResultSchema.nullable().optional(),
     document_effects: z
       .array(

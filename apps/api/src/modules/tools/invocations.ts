@@ -29,6 +29,7 @@ import {
   lockToolRunBinding as lockConversationToolBinding,
   lockToolEffectAcceptanceBinding,
 } from '../conversations/tool-binding.js';
+import { withRunTransaction } from '../conversations/run-ownership.js';
 import type {
   InvocationInput,
   ReservationInput,
@@ -394,7 +395,7 @@ export async function reserveInvocation(
   const digest = digestInvocationArgs(input.args);
   if (input.callKey.length === 0 || input.callKey.length > 200)
     throw stateConflict('invalid tool call slot');
-  return withTransaction(pool, async (client) => {
+  return withRunTransaction(pool, ctx.ownership, async (client) => {
     const binding = await lockToolRunBinding(client, ctx);
     const existing = await client.query(
       'SELECT * FROM tool_invocations WHERE run_id = $1 AND call_key = $2 FOR UPDATE',
@@ -911,7 +912,7 @@ export async function executeLocalInvocation(
   input: InvocationInput,
   execute: (client: PoolClient, frozenContext: ToolContext) => Promise<ToolResult>,
 ): Promise<ToolOutcome> {
-  return withTransaction(pool, async (client) => {
+  return withRunTransaction(pool, ctx.ownership, async (client) => {
     const { row, canExecute } = await loadInvocation(client, ctx, input);
     const gated = await gate(client, ctx, row, input, canExecute);
     if (gated) return gated;
@@ -951,7 +952,7 @@ export async function executeReadOnlyInvocation(
   input: InvocationInput,
   execute: (frozenContext: ToolContext) => Promise<ToolResult>,
 ): Promise<ToolOutcome> {
-  const qualified = await withTransaction(pool, async (client) => {
+  const qualified = await withRunTransaction(pool, ctx.ownership, async (client) => {
     const { row, canExecute } = await loadInvocation(client, ctx, input);
     const gated = await gate(client, ctx, row, input, canExecute);
     if (gated) return { outcome: gated, frozen: null };
@@ -968,7 +969,7 @@ export async function executeReadOnlyInvocation(
     if (!(error instanceof ToolExecutionError) && !ctx.signal?.aborted) throw error;
     observed = failed;
   }
-  return withTransaction(pool, async (client) => {
+  return withRunTransaction(pool, ctx.ownership, async (client) => {
     const { row, canExecute } = await loadInvocation(client, ctx, input);
     // Revalidate before replay, too: a read which was already in flight must
     // not disclose its peer's accepted content after cancellation/revocation.
@@ -1039,7 +1040,7 @@ export async function executeNonTransactionalInvocation(
   capabilities: NonTransactionalCapabilities,
 ): Promise<ToolOutcome> {
   let permitPrepared = false;
-  const dispatch = await withTransaction(pool, async (client) => {
+  const dispatch = await withRunTransaction(pool, ctx.ownership, async (client) => {
     const { row, canExecute } = await loadInvocation(client, ctx, input);
     const gated = await gate(client, ctx, row, input, canExecute);
     if (gated)
@@ -1077,6 +1078,14 @@ export async function executeNonTransactionalInvocation(
   if (dispatch.outcome) return dispatch.outcome;
   let observed: EffectEvidence | NotAppliedEvidence | null;
   if (dispatch.permission) {
+    if (ctx.ownership) {
+      await withRunTransaction(pool, ctx.ownership, async (client) => {
+        const binding = await lockConversationToolBinding(client, ctx);
+        if (!binding.canExecute) throw stateConflict('Run cannot dispatch tool execution');
+      });
+      ctx.signal?.throwIfAborted();
+      ctx.ownership.signal.throwIfAborted();
+    }
     try {
       observed = await capabilities.execute(dispatch.binding);
     } catch {
@@ -1117,9 +1126,10 @@ export async function executeNonTransactionalInvocation(
     )
       throw stateConflict('workspace effect payload does not bind invocation/content');
   }
-  return withTransaction(pool, async (client) => {
+  const accounted = await withTransaction(pool, async (client) => {
     const { row, canExecute } = await loadInvocation(client, ctx, input, true);
     const disclose =
+      !ctx.ownership &&
       (await isActiveOwner(client, ctx.ownerId)) &&
       ctx.allowlist.includes(row.tool_id) &&
       workspaceAuthorized(ctx, row) &&
@@ -1163,4 +1173,24 @@ export async function executeNonTransactionalInvocation(
     // not permit redispatch, nor can it turn external evidence into success.
     return { ...unknown, invocationId: input.invocationId, replayed: false };
   });
+  if (!ctx.ownership || accounted.status === 'unknown') return accounted;
+  try {
+    return await withRunTransaction(pool, ctx.ownership, async (client) => {
+      ctx.signal?.throwIfAborted();
+      const { row, canExecute } = await loadInvocation(client, ctx, input);
+      if (
+        !canExecute ||
+        row.state !== 'completed' ||
+        !ctx.allowlist.includes(row.tool_id) ||
+        !workspaceAuthorized(ctx, row)
+      )
+        return { ...permissionDenied, invocationId: row.invocation_id, replayed: false };
+      const accepted = await readAcceptedInvocationResult(client, ctx, row);
+      if (canonicalJson(accepted) !== canonicalJson(result))
+        throw stateConflict('conflicting external effect evidence');
+      return { ...accepted, invocationId: row.invocation_id, replayed: !dispatch.permission };
+    });
+  } catch {
+    return { ...permissionDenied, invocationId: input.invocationId, replayed: false };
+  }
 }

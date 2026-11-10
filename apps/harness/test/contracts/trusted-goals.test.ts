@@ -220,7 +220,7 @@ test('v6 rejects v5, missing trust discriminator and unsupported frozen facts be
     { protocol: 'harness/v5' },
     { trusted_context: undefined },
     { trusted_context: { ...trusted, extra: true } },
-    { trusted_context: { ...trusted, execution_lifecycle: 'server-owned' } },
+    { trusted_context: { ...trusted, execution_lifecycle: 'unknown' } },
     { trusted_context: { ...trusted, received_at_utc: '2026-02-30T12:00:00Z' } },
     { trusted_context: { ...trusted, received_at_utc: '2026-11-02T12:00:00.000Z' } },
     {
@@ -234,6 +234,21 @@ test('v6 rejects v5, missing trust discriminator and unsupported frozen facts be
   ]) {
     expect(await nativeCase({ start, expectedExit: 2 })).toEqual([]);
   }
+}, 120_000);
+
+test('native accepts both frozen lifecycles and preserves legacy execution', async () => {
+  for (const lifecycle of ['request-bound', 'server-owned']) {
+    const requests = await nativeCase({
+      start: { trusted_context: { ...trusted, execution_lifecycle: lifecycle } },
+      model: () => call('finish_goal', goal()),
+    });
+    expect(requests.some((request) => request.type === 'finish_goal')).toBe(true);
+  }
+  const legacy = await nativeCase({
+    start: { trusted_context: null, tools: [] },
+    model: () => ({ content: '完成', tool_calls: [] }),
+  });
+  expect(legacy.some((request) => request.type === 'finish')).toBe(true);
 }, 120_000);
 
 test('native accepts frozen elapsed capability without wall rules and exposes it to the model', async () => {

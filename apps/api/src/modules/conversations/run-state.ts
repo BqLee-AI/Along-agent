@@ -38,8 +38,12 @@ export async function appendEvent(
   payload: unknown,
 ): Promise<ThreadEvent> {
   const authority = (
-    await client.query<{ revision: string | null }>(
-      `SELECT frozen_context->>'authorization_revision' AS revision FROM agent_runs WHERE id=$1 AND owner_id=$2`,
+    await client.query<{
+      revision: string | null;
+      lifecycle: 'request-bound' | 'server-owned' | null;
+    }>(
+      `SELECT frozen_context->>'authorization_revision' AS revision,
+       frozen_context->>'execution_lifecycle' AS lifecycle FROM agent_runs WHERE id=$1 AND owner_id=$2`,
       [context.runId, context.ownerId],
     )
   ).rows[0];
@@ -49,7 +53,7 @@ export async function appendEvent(
       ...(payload as Record<string, unknown>),
       stream_protocol_version: 'v2',
       authorization_revision: 'delegation/1',
-      execution_lifecycle: 'request-bound',
+      execution_lifecycle: authority?.lifecycle ?? 'request-bound',
     };
   const event = ThreadEventSchema.parse({
     protocol_version: delegation ? 'v2' : THREAD_PROTOCOL_VERSION,

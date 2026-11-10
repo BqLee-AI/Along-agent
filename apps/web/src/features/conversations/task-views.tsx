@@ -158,7 +158,7 @@ export function RunStatusPanel({ task }: { task: ConversationTask }) {
   const resumable = Boolean(
     run &&
     !['done', 'failed', 'cancelled'].includes(run.status) &&
-    (run.can_resume || task.retryResume),
+    (run.can_resume || (run.execution_lifecycle !== 'server-owned' && task.retryResume)),
   );
   return (
     <section
@@ -228,6 +228,15 @@ export function RunStatusPanel({ task }: { task: ConversationTask }) {
           </p>
         </div>
       ) : null}
+      {lifecycle === 'server-owned' ? (
+        <div className="space-y-2 px-4 py-3" data-testid="server-owned-lifecycle">
+          <p className="font-medium">本次执行由服务端持有</p>
+          <p className="text-muted-foreground">
+            离开、刷新或断网只断开订阅，运行在原预算和超时内继续。停止请使用停止按钮；
+            重连只读取原运行，不会重发或继续请求。
+          </p>
+        </div>
+      ) : null}
       {goalResult ? (
         <>
           <div className="px-4 py-3 text-sm">
@@ -269,7 +278,8 @@ export function RunStatusPanel({ task }: { task: ConversationTask }) {
                 task.stopping ||
                 !run ||
                 ['done', 'failed', 'cancelled'].includes(run.status) ||
-                (!run.can_resume && !task.retryResume)
+                (!run.can_resume &&
+                  (run.execution_lifecycle === 'server-owned' || !task.retryResume))
               }
               onClick={() => void task.resume()}
               data-testid="resume-run"
@@ -278,7 +288,7 @@ export function RunStatusPanel({ task }: { task: ConversationTask }) {
                 ? '正在继续…'
                 : run?.can_resume
                   ? '继续此运行'
-                  : task.retryResume
+                  : task.retryResume && run?.execution_lifecycle !== 'server-owned'
                     ? '重试原继续请求（同键）'
                     : '等待继续资格'}
             </Button>
@@ -299,7 +309,7 @@ export function RunStatusPanel({ task }: { task: ConversationTask }) {
               {task.stopping ? '正在停止…' : '停止此运行'}
             </Button>
           </div>
-          {task.retryResume ? (
+          {task.retryResume && run?.execution_lifecycle !== 'server-owned' ? (
             <p className="text-muted-foreground">
               重试绑定原等待点与原请求键，不会创建新消息或重新批准。
             </p>

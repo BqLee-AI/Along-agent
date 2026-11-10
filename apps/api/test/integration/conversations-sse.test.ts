@@ -880,4 +880,90 @@ maybe('conversation runtime', () => {
     ]);
     expect(events[0]?.protocol_version).toBe('v1');
   });
+  it('GET run events follows the durable cursor without executing again', async () => {
+    const ownerId = await seedUser(pool);
+    const started = await startConversationRun(
+      { pool, timeContext },
+      ownerId,
+      randomUUID(),
+      { raw_text: '你好', confirmed_timezone: 'Asia/Shanghai' },
+      randomUUID(),
+    );
+    const original = await collect(pool, started);
+    const path = `/api/v1/conversations/${started.conversationId}/runs/${started.runId}/events?after_seq=${original[0]!.seq}`;
+    const server = createServer((req, res) => {
+      void handleConversationRoute(req, res, new URL(req.url ?? '/', 'http://localhost'), {
+        pool,
+        timeContext,
+        resolveActor: async () => ({
+          ownerId,
+          sessionId: null,
+          displayName: 'tester',
+          timezoneId: 'Asia/Shanghai',
+        }),
+      });
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    try {
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('missing server address');
+      const response = await fetch(`http://127.0.0.1:${address.port}${path}`);
+      expect(response.status).toBe(200);
+      const replay = (await response.text())
+        .split('\n\n')
+        .filter((frame) => frame.startsWith('data: '))
+        .map((frame) => ThreadEventSchema.parse(JSON.parse(frame.slice(6))));
+      expect(replay).toEqual(original.slice(1));
+      expect(await listRunEvents(pool, ownerId, started.runId)).toEqual(original);
+    } finally {
+      server.closeAllConnections();
+      const { promise, resolve } = Promise.withResolvers<void>();
+      server.close(() => resolve());
+      await promise;
+    }
+  });
+  it('closes an idle HTTP subscription after session revocation without cancelling the run', async () => {
+    const session = await seedAdmittedSession(pool);
+    const started = await startConversationRun(
+      { pool, timeContext },
+      session.userId,
+      randomUUID(),
+      { raw_text: '你好', confirmed_timezone: 'Asia/Shanghai' },
+      randomUUID(),
+    );
+    const path = `/api/v1/conversations/${started.conversationId}/runs/${started.runId}/events`;
+    const server = createServer((req, res) => {
+      void handleConversationRoute(req, res, new URL(req.url ?? '/', 'http://localhost'), {
+        pool,
+        timeContext,
+        resolveActor: async () => ({
+          ownerId: session.userId,
+          sessionId: session.sessionId,
+          displayName: 'tester',
+          timezoneId: 'Asia/Shanghai',
+        }),
+      });
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    try {
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('missing server address');
+      const response = await fetch(`http://127.0.0.1:${address.port}${path}`);
+      expect(response.status).toBe(200);
+      await pool.query('UPDATE sessions SET revoked_at=clock_timestamp() WHERE id=$1', [
+        session.sessionId,
+      ]);
+      const events = await collect(pool, started);
+      expect(events.at(-1)?.type).toBe('thread.completed');
+      expect(await response.text()).toBe('');
+      expect(await listRunEvents(pool, session.userId, started.runId)).toEqual(events);
+    } finally {
+      server.closeAllConnections();
+      const { promise, resolve } = Promise.withResolvers<void>();
+      server.close(() => resolve());
+      await promise;
+    }
+  });
 });

@@ -3,6 +3,8 @@ import { workspaceSummarySchema } from './workspaces.js';
 
 const uuid = z.string().uuid();
 const text = z.string().min(1).max(8192);
+export const ExecutionLifecycleSchema = z.enum(['request-bound', 'server-owned']);
+
 export const ElapsedTimeBasisSchema = z
   .object({
     kind: z.literal('elapsed'),
@@ -93,7 +95,7 @@ export const TrustedExecutionContextSchema = z
   .object({
     version: z.literal(1),
     authorization_revision: z.literal('delegation/1'),
-    execution_lifecycle: z.literal('request-bound'),
+    execution_lifecycle: ExecutionLifecycleSchema,
     create_resolution_revision: z.enum(['create-resolution/1', 'create-resolution/2']).optional(),
     input_message_id: uuid,
     received_at_utc: z.string().datetime({ precision: 0 }),

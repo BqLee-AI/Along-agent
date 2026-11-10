@@ -21,6 +21,7 @@ import { handleBriefRoute } from '../modules/brief/routes.js';
 import { loadTimeContext, type TimeContext } from '../modules/time/context.js';
 import type { HarnessServices } from '../modules/conversations/harness-process.js';
 import type { RoutingRuntime } from '../modules/conversations/routing/index.js';
+import type { RunDriver } from '../modules/conversations/run-driver.js';
 import { createAccountService, type AccountService } from '../modules/identity/account-service.js';
 import { handleAccountRoute, isKnownAccountRoute } from '../modules/identity/routes.js';
 import {
@@ -36,6 +37,7 @@ export interface AppDeps {
   timeContext?: TimeContext;
   harness?: HarnessServices | null;
   routing?: RoutingRuntime;
+  runDriver?: RunDriver;
   accountService?: AccountService;
   invitedAccountService?: InvitedAccountService;
 }
@@ -318,6 +320,7 @@ async function dispatchRequest(
         timeContext,
         harness: deps.harness,
         routing: deps.routing,
+        runDriver: deps.runDriver,
       });
       if (handled) return;
     }

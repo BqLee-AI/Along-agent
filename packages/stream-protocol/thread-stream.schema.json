@@ -354,7 +354,7 @@
                 "ruleset_id": { "type": "string", "minLength": 1, "maxLength": 200 },
                 "tzdb_version": { "type": "string", "minLength": 1, "maxLength": 100 },
                 "authorization_revision": { "const": "delegation/1" },
-                "execution_lifecycle": { "const": "request-bound" }
+                "execution_lifecycle": { "enum": ["request-bound", "server-owned"] }
               }
             }
           }

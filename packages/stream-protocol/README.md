@@ -52,8 +52,9 @@ zod 入口：`ThreadEventSchema` 同时读取显式 `v1` / `v2`；`LegacyThreadE
 `v2` 保留相同七个事件名，不将 harness wire 版本或授权修订混作 SSE 版本：
 
 - `thread.started` 的 `stream_protocol_version` 为 `v2`，必含
-  `authorization_revision: "delegation/1"` 和 `execution_lifecycle: "request-bound"`；
-  后者如实表示连接绑定执行，不承诺离开页面后后台继续。
+  `authorization_revision: "delegation/1"` 和冻结的 `execution_lifecycle`；
+  `request-bound` 的断连可能取消执行，`server-owned` 的断连仅结束订阅，执行在原预算和超时内继续。
+  重连只读取事实，不自动重试；协议支持不代表已启用或验收 `server-owned` 接纳。
 - `message.delta`、`card.proposed`、`approval_required` 保留原 payload 形状，
   但信封 `protocol_version` 必须为 `v2`。事件存在不代表当前委托 profile 提供所有旧能力。
 - 三种终结事件 `thread.completed` / `thread.failed` / `thread.cancelled`

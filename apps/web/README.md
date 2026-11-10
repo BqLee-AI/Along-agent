@@ -71,6 +71,14 @@ under `apps/web`.
   and historical reads, with no background continuation promise. Refresh,
   reconnect and login remain GET-only; accepted timezone settings are not
   rolled back or automatically repeated after disconnect.
+- When a Run actually reports `server-owned`, the page displays that lifecycle
+  rather than the connection-bound warning. Running Runs are followed through
+  `GET /conversations/{cid}/runs/{rid}/events?after_seq=…` after history is
+  read. The stream carries existing SSE events; persisted sequence cursors
+  deduplicate reconnects. Three bounded GET attempts are made before offering
+  a manual read; 401/403/404 stop retries. Leaving only detaches the view.
+  Admission and execution authority remain server-side decisions; the page
+  displays the lifecycle frozen for that Run rather than inferring it.
 - `GoalResult` is the durable source for goal status, item outcomes, accepted
   receipt references, clarification and final answer. Run `done` means execution
   ended, not that the goal completed; partial, blocked, cancelled and unknown
@@ -81,14 +89,16 @@ under `apps/web`.
 - Plain Agent sends do not promote a cached `/me` preference into an explicit
   timezone hint. Admission reads the actual saved preference; legacy shortcuts
   and explicit ambiguity choices retain their original timezone input.
-- Approval links retain those original IDs and open a separate tab. Keep the
-  original conversation open: an approval may arrive before its native snapshot
-  commits, and ordinary disconnection still cancels active execution.
+- Approval links retain those original IDs and open a separate tab. An approval
+  may arrive before its native snapshot commits. Request-bound execution retains
+  its disconnect cancellation contract; server-owned execution only detaches
+  the subscription.
   confirm/reject/revise 后返回原标签页或原 Run 深链，先读取状态，再在“此运行的操作”中明确继续。文档批准页只授权，不写文件、不自动 resume；批准早于挂起或 `can_resume=false` 时保留授权事实，不能一概解释为尚未批准。普通挂起 EOF 不是成功或取消。
-- Resume retries retain the same checkpoint and idempotency key in this tab's
-  session storage, including across reload. 显式同键重试
-  retries that request, not approval confirmation, a successor, or a fresh
-  message. **读取运行状态** is read-only.
+- Resume requests retain the checkpoint and idempotency key in session storage.
+  After an uncertain result, read the original Run first. If the fresh state
+  still permits continuing the same checkpoint, the user may explicitly retry
+  with the same key; refresh and reconnect never resend it automatically.
+  **读取运行状态** is read-only.
 - **停止原运行** first posts the durable cancel action with a retained
   idempotency key, then aborts the stream. It does not undo accepted effects.
   The proxy forwards actual Next request cancellation and downstream reader
