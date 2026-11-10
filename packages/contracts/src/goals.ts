@@ -94,7 +94,7 @@ export const TrustedExecutionContextSchema = z
     version: z.literal(1),
     authorization_revision: z.literal('delegation/1'),
     execution_lifecycle: z.literal('request-bound'),
-    create_resolution_revision: z.literal('create-resolution/1').optional(),
+    create_resolution_revision: z.enum(['create-resolution/1', 'create-resolution/2']).optional(),
     input_message_id: uuid,
     received_at_utc: z.string().datetime({ precision: 0 }),
     request_anchor_utc: z.string().datetime({ precision: 0 }),

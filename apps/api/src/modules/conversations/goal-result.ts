@@ -145,7 +145,7 @@ async function applyCreateResolutions(
       [binding.runId, binding.ownerId, binding.conversationId],
     )
   ).rows[0];
-  if (!row || row.revision !== 'create-resolution/1')
+  if (!row || !['create-resolution/1', 'create-resolution/2'].includes(row.revision ?? ''))
     throw stateConflict('create resolution is not enabled for this run');
   const messages = await client.query<{ id: string; content: string }>(
     `SELECT id,content FROM messages WHERE owner_id=$1 AND conversation_id=$2
@@ -185,7 +185,9 @@ async function applyCreateResolutions(
           goal.outcomes.some((other) => other !== outcome && other.receipt_refs.includes(ref)),
       )
     )
-      throw stateConflict('invalid or reused create resolution references');
+      throw stateConflict(
+        'create resolution requires all distinct collision, creation and read IDs in the same outcome receipt_refs, not reused by other outcomes',
+      );
     refs.forEach((ref) => used.add(ref));
     await validateCreateResolutionEvidence(client, binding, resolution, documents);
     for (const id of resolution.zero_write_invocation_ids)

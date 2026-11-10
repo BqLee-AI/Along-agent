@@ -404,7 +404,7 @@ export async function startConversationRun(
             ...(execution === 'harness' &&
             (allowlist as readonly string[]).includes('workspace_create') &&
             (allowlist as readonly string[]).includes('workspace_read')
-              ? { create_resolution_revision: 'create-resolution/1' as const }
+              ? { create_resolution_revision: 'create-resolution/2' as const }
               : {}),
             input_message_id: userMessageId,
             received_at_utc: receivedAtUtc,
@@ -462,7 +462,7 @@ export async function startConversationRun(
         ...(delegation &&
         (allowlist as readonly string[]).includes('workspace_create') &&
         (allowlist as readonly string[]).includes('workspace_read')
-          ? { createResolutionRevision: 'create-resolution/1' as const }
+          ? { createResolutionRevision: 'create-resolution/2' as const }
           : {}),
         ...(trustedExecutionContext
           ? {

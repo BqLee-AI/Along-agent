@@ -638,8 +638,10 @@ export async function validateCreateResolutionEvidence(
     accepted_result: unknown;
     created_at: string;
     accepted_at: string;
+    resolution_revision: string | null;
   }>(
     `SELECT invocation_id,state,args_hash,frozen_context,accepted_result,
+      (SELECT frozen_context->>'createResolutionRevision' FROM agent_runs WHERE id=tool_invocations.run_id) AS resolution_revision,
       to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS created_at,
       coalesce(to_char(accepted_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),'') AS accepted_at
      FROM tool_invocations WHERE owner_id=$1 AND conversation_id=$2 AND run_id=$3
@@ -681,8 +683,9 @@ export async function validateCreateResolutionEvidence(
       priorTarget.output_directory !== target.output_directory ||
       priorTarget.directory_identity !== target.directory_identity ||
       priorTarget.relative_path === target.relative_path ||
-      priorTarget.new_version !== target.new_version ||
-      priorTarget.content_base64 !== target.content_base64 ||
+      (created.resolution_revision === 'create-resolution/1' &&
+        (priorTarget.new_version !== target.new_version ||
+          priorTarget.content_base64 !== target.content_base64)) ||
       !documentEvidenceLater(created.created_at, prior.accepted_at)
     )
       throw stateConflict('invalid create resolution predecessor');

@@ -40,8 +40,9 @@ maybe('creation collision target identity', () => {
   for (const rawText of [
     'Create both out/a.txt and out/b.txt with identical content.',
     'Create a report in out; if a name is taken, choose another name.',
+    'Create a report in out; if a name is taken, choose another name and revise the draft.',
   ]) {
-    it(`does not infer a successor from equal bytes: ${rawText}`, async () => {
+    it(`requires explicit, fact-checked collision recovery: ${rawText}`, async () => {
       const actor = await seedAdmittedSession(database.pool, {});
       const root = await mkdtemp(join(tmpdir(), 'along-create-target-'));
       roots.push(root);
@@ -99,7 +100,10 @@ maybe('creation collision target identity', () => {
         workspace_id: 'docs',
         output_directory: 'out',
         filename,
-        content: 'same content',
+        content:
+          rawText.includes('revise the draft') && filename === 'b.txt'
+            ? 'revised content'
+            : 'same content',
       });
       const conflict = await call('workspace_create', create('a.txt'));
       expect(conflict.result).toMatchObject({
@@ -111,7 +115,10 @@ maybe('creation collision target identity', () => {
       const read = await call('workspace_read', { workspace_id: 'docs', path: 'out/b.txt' });
       expect(read.result).toMatchObject({
         status: 'ok',
-        result: { kind: 'read', content: 'same content' },
+        result: {
+          kind: 'read',
+          content: rawText.includes('revise the draft') ? 'revised content' : 'same content',
+        },
       });
       expect(await readFile(join(root, 'out', 'a.txt'), 'utf8')).toBe('existing');
       const client = await database.pool.connect();
@@ -183,6 +190,30 @@ maybe('creation collision target identity', () => {
             ],
           };
           expect(await validateGoalResult(client, ctx, resolved)).toEqual(resolved);
+          if (rawText.includes('revise the draft')) {
+            const oldRevisionClient = new Proxy(client, {
+              get(target, property) {
+                if (property !== 'query') return Reflect.get(target, property, target);
+                return async (text: string, values: unknown[]) => {
+                  const result = await target.query(text, values);
+                  if (text.includes('AS revision') && text.includes('original_id'))
+                    result.rows = result.rows.map((row) => ({
+                      ...row,
+                      revision: 'create-resolution/1',
+                    }));
+                  if (text.includes('AS resolution_revision'))
+                    result.rows = result.rows.map((row) => ({
+                      ...row,
+                      resolution_revision: 'create-resolution/1',
+                    }));
+                  return result;
+                };
+              },
+            });
+            await expect(validateGoalResult(oldRevisionClient, ctx, resolved)).rejects.toThrow(
+              'invalid create resolution predecessor',
+            );
+          }
           for (const patch of [
             { source_message_id: randomUUID() },
             { source_quote: 'not in the user message' },

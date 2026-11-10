@@ -147,7 +147,7 @@ function respond(scenario: Scenario, messages: ModelMessage[]): HarnessModelRepl
     messages.filter((message) => message.role === 'system'),
     TrustedExecutionContextSchema,
   );
-  if (!trusted || trusted.create_resolution_revision !== 'create-resolution/1')
+  if (!trusted || trusted.create_resolution_revision !== 'create-resolution/2')
     throw new Error('Missing trusted resolution context');
   const resolution = {
     source_message_id: trusted.input_message_id,
