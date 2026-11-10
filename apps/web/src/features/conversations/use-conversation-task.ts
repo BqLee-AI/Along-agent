@@ -36,6 +36,7 @@ import {
   conversationSendBlocked,
   clarificationReplyReference,
   taskAdmission,
+  selectResumeRequest,
   taskSendEligibility,
   type TaskIntent,
 } from './task-model';
@@ -636,25 +637,11 @@ export function useConversationTask({
         setError('授权已记录，但当前等待点不可继续；本次未继续。');
         return;
       }
-      if (
-        current.execution_lifecycle === 'server-owned' &&
-        (!current.can_resume || retryResume?.checkpoint_id === current.waiting?.checkpoint_id)
-      ) {
-        setError('原继续请求结果尚待核对；只读取原运行，不重复提交。');
-        return;
-      }
-      let request = retryResume;
-      if (current.can_resume && current.waiting) {
-        if (request?.checkpoint_id !== current.waiting.checkpoint_id)
-          request = {
-            checkpoint_id: current.waiting.checkpoint_id,
-            idempotency_key: crypto.randomUUID(),
-          };
-      } else if (!request || !['running', 'suspended_approval'].includes(current.status)) {
+      const request = selectResumeRequest(current, retryResume);
+      if (!request) {
         setError('当前不可继续，请读取最新状态。此资格值不表示尚未批准。');
         return;
       }
-      if (!request) return;
       sessionStorage.setItem(
         `run-resume:${target.conversationId}:${target.runId}`,
         JSON.stringify(request),

@@ -86,7 +86,7 @@ data: {"protocol_version":"v1","seq":12,"type":"approval_required","payload":{"c
 - `GET /conversations/{id}?after_seq=&limit=`：返回该会话历史事件（按 `event_seq` 升序，`after_seq` 之后最多 `limit` 条，默认 200），用于刷新/换端恢复；事件体与 SSE 同 schema，`200` 通用 envelope 包裹 `data.events` + `data.next_after_seq`。跨用户返回 `403`，不存在返回 `404`。
 - `GET /conversations/{cid}/runs/{rid}/events?after_seq=`：以 SSE 从指定全局游标之后补读并跟随该 Run 的持久事件；参数仅允许可选的非负安全整数 `after_seq`。流在 Run 终态或批准挂起且事件读完后结束，断开订阅不创建消息、attempt、工具调用或恢复动作。交付时复验会话和账户资格；已交给网络的字节无法撤回。
 - `server-owned` 断开 SSE、刷新或退出只停止交付，已接纳执行在原预算和超时内继续；禁用账户或撤销资源资格阻止后续动作及披露。显式停止先持久撤销执行资格，再中断模型和 native；已接受结果不回滚，在途未知效果不重放。持锁会话失联或宿主崩溃后，取得同锁的收尾者只终结原运行，不重启执行。旧 `request-bound`/legacy 断连仍按原合同取消；批准挂起的正常 EOF 不触发取消。
-- 服务端每个 API 进程使用独立、有界的持锁连接池，最多同时持有 4 个执行；容量不足时拒绝新接纳或恢复，不降级为 request-bound。每次执行另有 5 分钟持有上限，超时后中断并收尾，不自动重做。数据库连接必须保持 PostgreSQL session 语义，不能使用 transaction-pooling 代理承载 advisory lock。
+- 服务端每个 API 进程使用独立、有界的持锁连接池，最多同时持有 4 个执行；容量不足时拒绝新接纳或恢复，不降级为 request-bound。每次执行最多持有动作资格 5 分钟，超时后中断，不自动重做；已派发的外部效果及迟到记账结束前仍占用执行槽，避免耗尽控制连接。停机先撤销资格并等待在途结果，进程保留 5 秒强制退出上限；超过上限未确认的效果保持 unknown，不推断成功或重发。数据库连接必须保持 PostgreSQL session 语义，不能使用 transaction-pooling 代理承载 advisory lock。
 - 仓颉累计迭代/可得 usage，超限 `thread.failed`、`BUDGET_EXCEEDED`/429；缺 usage 保留未知，不再使用 TS 字符估算或保证不可证明的费用。前端保留已发生事实，不自动重开流。
 
 ### Run 查询
@@ -113,6 +113,7 @@ strict body `{checkpoint_id,idempotency_key}`，仅 harness Run 的最后有效�
 - consumed：同 Run 新递增 attempt，将原 invocation/批准和真实 task ID 交给 native，原接受结果不改写、不重执行；
 - rejected/expired/superseded：将决议交给 native 停止原动作，不追 successor/同义绕拒绝；
 - 同等待点唯一有效恢复。并发、同键回答丢失重交或换键不得分配第二进程；已恢复且仍运行时409，已结束同键只补读原恢复 attempt 的帧。
+- 容量不足等未接纳请求后，若读取仍确认同一等待点可继续，用户可主动重交同一 checkpoint 和幂等键；读取、刷新或重登本身不提交。资格不明或不可继续时不以新键自动重放。
 - 恢复决议按可信提议结果区分 `kind=task|document`，不是客户端指定查表。document 的 approved 仅授权原冻结目标的唯一 apply，不等于保存；新 delegation 的 rejected 不得开启后续业务动作或绕拒绝，legacy 按原恢复合同处理。
 
 新 delegation 对真实新增影响提供完整冻结预览及一次明确“授权并继续”；只有原 Run 的有效等待点、当前资格、预算和决议均满足才继续。早于挂起的确认可保存决议，但没有有效等待点时不得排队自动继续；停止、撤权、终态或 unknown 不得复活。legacy 独立文档页仍需返回原 Run 显式继续；GET、刷新和重登都不授权或恢复。

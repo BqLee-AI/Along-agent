@@ -1732,6 +1732,7 @@ export async function executeHarness(
   let cancellationFailure: { error: unknown } | undefined;
   let cancellationProjected = false;
   let closeSession: (() => Promise<void>) | undefined;
+  const inFlight = new Set<Promise<unknown>>();
   const disconnected = () => {
     cancellation ??= cancelConversationRun(
       deps,
@@ -1788,11 +1789,21 @@ export async function executeHarness(
       signal: controller.signal,
       detachOnAbort: !!context.ownership,
       onExit: session.close,
-      handleRequest: async (request) => {
-        // No next native action may overtake a disconnect's durable decision.
-        await cancellation;
-        if (cancellationFailure) throw cancellationFailure.error;
-        return session.handleRequest(request);
+      handleRequest: (request) => {
+        const pending = (async () => {
+          // No next native action may overtake a disconnect's durable decision.
+          await cancellation;
+          if (cancellationFailure) throw cancellationFailure.error;
+          return session.handleRequest(request);
+        })();
+        if (context.ownership) {
+          inFlight.add(pending);
+          void pending.then(
+            () => inFlight.delete(pending),
+            () => inFlight.delete(pending),
+          );
+        }
+        return pending;
       },
     });
   } catch (error) {
@@ -1819,16 +1830,20 @@ export async function executeHarness(
       // Stale/terminal authority wins; revoked readers receive no failure content.
     }
   } finally {
-    await closeSession?.();
-    signal?.removeEventListener('abort', disconnected);
-    context.ownership?.signal.removeEventListener('abort', ownershipLost);
-    if (active.get(context.runId) === controller) active.delete(context.runId);
-    // An explicit stop commits on another HTTP request. Project that existing
-    // receipt to the still-open stream; never create a second terminal fact.
-    if (controller.signal.aborted && !signal?.aborted && !cancellationProjected) {
-      const events = await listRunEvents(pool, context.ownerId, context.runId);
-      const cancelled = events.find((event) => event.type === 'thread.cancelled');
-      if (cancelled) await write(cancelled);
+    try {
+      await closeSession?.();
+      signal?.removeEventListener('abort', disconnected);
+      context.ownership?.signal.removeEventListener('abort', ownershipLost);
+      if (active.get(context.runId) === controller) active.delete(context.runId);
+      // Project the committed stop before waiting for already-dispatched effects.
+      if (controller.signal.aborted && !signal?.aborted && !cancellationProjected) {
+        const events = await listRunEvents(pool, context.ownerId, context.runId);
+        const cancelled = events.find((event) => event.type === 'thread.cancelled');
+        if (cancelled) await write(cancelled);
+      }
+    } finally {
+      // Keep the execution slot and control pool alive through late accounting.
+      await Promise.allSettled(inFlight);
     }
   }
 }

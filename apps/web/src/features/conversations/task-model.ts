@@ -4,6 +4,21 @@ import type {
   RunView,
   WorkspaceSummary,
 } from '@along/contracts';
+import type { ResumeRequest } from '@/lib/conversation-run';
+
+/** A manual retry keeps its original key while the same waiting point remains eligible. */
+export function selectResumeRequest(
+  run: Pick<RunView, 'execution_lifecycle' | 'can_resume' | 'waiting' | 'status'>,
+  previous: ResumeRequest | null,
+): ResumeRequest | null {
+  if (run.execution_lifecycle === 'server-owned' && !run.can_resume) return null;
+  if (run.can_resume && run.waiting) {
+    return previous?.checkpoint_id === run.waiting.checkpoint_id
+      ? previous
+      : { checkpoint_id: run.waiting.checkpoint_id, idempotency_key: crypto.randomUUID() };
+  }
+  return previous && ['running', 'suspended_approval'].includes(run.status) ? previous : null;
+}
 
 export type TaskIntent = 'chat' | 'reminder' | 'document';
 

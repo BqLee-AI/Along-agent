@@ -6,6 +6,7 @@ import {
   messageRunReference,
   isNearChatBottom,
   taskAdmission,
+  selectResumeRequest,
   taskIntentFromQuery,
   taskSendEligibility,
   shouldSubmitMessage,
@@ -280,5 +281,33 @@ describe('chat input and scroll policy', () => {
       false,
     );
     expect(isNearChatBottom({ scrollHeight: 300, scrollTop: 0, clientHeight: 600 })).toBe(true);
+  });
+});
+
+describe('explicit resume identity', () => {
+  it('reuses the same request for an eligible waiting point and refuses an ineligible server-owned Run', () => {
+    const waiting = {
+      checkpoint_id: '33333333-3333-4333-8333-333333333333',
+      invocation_id: '44444444-4444-4444-8444-444444444444',
+      approval_id: '55555555-5555-4555-8555-555555555555',
+    };
+    const previous = {
+      checkpoint_id: waiting.checkpoint_id,
+      idempotency_key: '66666666-6666-4666-8666-666666666666',
+    };
+    const run = {
+      execution_lifecycle: 'server-owned' as const,
+      can_resume: true,
+      waiting,
+      status: 'suspended_approval' as const,
+    };
+    expect(selectResumeRequest(run, previous)).toEqual(previous);
+    expect(selectResumeRequest({ ...run, can_resume: false }, previous)).toBeNull();
+    const next = selectResumeRequest(
+      { ...run, waiting: { ...waiting, checkpoint_id: '77777777-7777-4777-8777-777777777777' } },
+      previous,
+    );
+    expect(next?.checkpoint_id).not.toBe(previous.checkpoint_id);
+    expect(next?.idempotency_key).not.toBe(previous.idempotency_key);
   });
 });
