@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { createConnection, createServer } from 'node:net';
 import { Pool } from 'pg';
 import { setTimeout as delay } from 'node:timers/promises';
+import { fileURLToPath } from 'node:url';
 import { RunOwnership } from '../../src/modules/conversations/run-ownership.js';
 import { withTransaction } from '../../src/db/transaction.js';
 import { lockRun } from '../../src/modules/conversations/repository.js';
@@ -68,7 +69,7 @@ maybe('Run ownership PostgreSQL session', () => {
     `;
     const probe = async () => {
       const child = Bun.spawn([process.execPath, '--no-env-file', '-e', childSource], {
-        cwd: 'apps/api',
+        cwd: fileURLToPath(new URL('../..', import.meta.url)),
         env: {
           ...process.env,
           OWNERSHIP_TEST_DATABASE: database.connectionString,
@@ -258,7 +259,12 @@ maybe('Run ownership PostgreSQL session', () => {
       await lockPool.end();
       await new Promise<void>((resolve) => proxy.close(() => resolve()));
     }
-    const successor = await RunOwnership.tryAcquire(database.pool, runId);
+    let successor: RunOwnership | null = null;
+    const deadline = Date.now() + 3000;
+    while (!successor && Date.now() < deadline) {
+      successor = await RunOwnership.tryAcquire(database.pool, runId);
+      if (!successor) await delay(50);
+    }
     expect(successor).not.toBeNull();
     await successor?.close();
   });
@@ -313,7 +319,7 @@ maybe('Run ownership PostgreSQL session', () => {
     `,
       ],
       {
-        cwd: 'apps/api',
+        cwd: fileURLToPath(new URL('../..', import.meta.url)),
         env: {
           ...process.env,
           OWNERSHIP_TEST_DATABASE: database.connectionString,

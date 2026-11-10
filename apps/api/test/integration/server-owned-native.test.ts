@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { createServer, type Server } from 'node:http';
 import { setTimeout as delay } from 'node:timers/promises';
+import { fileURLToPath } from 'node:url';
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
 import { createHarnessModelTransport } from '../../src/modules/conversations/harness-model.js';
 import { createRunDriver } from '../../src/modules/conversations/run-driver.js';
@@ -254,7 +255,7 @@ maybe('server-owned native execution', () => {
         await pool.end();
       `;
         const child = Bun.spawn([process.execPath, '--no-env-file', '-e', childSource], {
-          cwd: 'apps/api',
+          cwd: fileURLToPath(new URL('../..', import.meta.url)),
           env: {
             ...process.env,
             OWNERSHIP_TEST_DATABASE: database.connectionString,

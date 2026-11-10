@@ -6,6 +6,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { withTransaction } from '../../src/db/transaction.js';
 import { confirmDocumentApproval } from '../../src/modules/approvals/document-actions.js';
 import { readDocumentApprovalReceipt } from '../../src/modules/approvals/decision.js';
@@ -303,7 +304,7 @@ maybe('server-owned approval resume across processes', () => {
       for (let i = 0; i < 2; i++)
         children.push(
           Bun.spawn([process.execPath, '--no-env-file', '-e', source], {
-            cwd: 'apps/api',
+            cwd: fileURLToPath(new URL('../..', import.meta.url)),
             env,
             stdin: 'pipe',
             stdout: 'pipe',
