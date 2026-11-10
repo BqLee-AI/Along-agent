@@ -22,6 +22,7 @@ import {
   collectRunTranscripts,
   consumeThreadStream,
   conversationHref,
+  followRunEvents,
   mergeThreadEvents,
   readEnvelope,
   readHistoryCollectionPage,
@@ -153,6 +154,9 @@ export function useConversationTask({
   const busyRef = useRef(false);
   const stopRef = useRef(false);
   const streamRef = useRef<AbortController | null>(null);
+  const followRef = useRef<AbortController | null>(null);
+  const followed = useRef<string | null>(null);
+  const [followGeneration, setFollowGeneration] = useState(0);
   const readRef = useRef<AbortController | null>(null);
   const workspaceRef = useRef<AbortController | null>(null);
   const cancelRef = useRef<AbortController | null>(null);
@@ -426,6 +430,8 @@ export function useConversationTask({
 
   async function stream(url: string, body: object, text?: string) {
     const request = new AbortController();
+    followRef.current?.abort();
+    followed.current = null;
     streamRef.current = request;
     const version = selectionVersion.current;
     setStreaming(true);
@@ -628,6 +634,13 @@ export function useConversationTask({
       }
       if (expected?.kind === 'document' && !current.can_resume) {
         setError('授权已记录，但当前等待点不可继续；本次未继续。');
+        return;
+      }
+      if (
+        current.execution_lifecycle === 'server-owned' &&
+        (!current.can_resume || retryResume?.checkpoint_id === current.waiting?.checkpoint_id)
+      ) {
+        setError('原继续请求结果尚待核对；只读取原运行，不重复提交。');
         return;
       }
       let request = retryResume;
@@ -833,6 +846,7 @@ export function useConversationTask({
       setRun(cancelled);
       // Abort only after the server accepts cancellation, never as a fake receipt.
       reminderController.current?.abort();
+      followRef.current?.abort();
       streamRef.current?.abort();
       await refresh();
     } catch (failure) {
@@ -870,6 +884,7 @@ export function useConversationTask({
       mounted.current = false;
       selectionVersion.current++;
       streamRef.current?.abort();
+      followRef.current?.abort();
       readRef.current?.abort();
       workspaceRef.current?.abort();
       cancelRef.current?.abort();
@@ -888,7 +903,78 @@ export function useConversationTask({
   }, [intent]);
 
   useEffect(() => {
-    if (!streaming) return;
+    if (
+      !selected ||
+      !run ||
+      run.run_id !== selected.runId ||
+      run.execution_lifecycle !== 'server-owned' ||
+      run.status !== 'running' ||
+      streaming
+    )
+      return;
+    const target = selected;
+    const key = `${target.conversationId}:${target.runId}:${followGeneration}`;
+    if (followed.current === key) return;
+    followed.current = key;
+    const controller = new AbortController();
+    followRef.current = controller;
+    const version = selectionVersion.current;
+    const valid = () =>
+      mounted.current && !controller.signal.aborted && version === selectionVersion.current;
+    void (async () => {
+      try {
+        await followRunEvents({
+          conversationId: target.conversationId,
+          runId: target.runId,
+          signal: controller.signal,
+          cursor: () => cursors.current.get(target.runId) ?? 0,
+          onEvent: (event) => {
+            if (!valid()) return;
+            acceptEvent(event);
+            if (event.type === 'message.delta') setLiveReply(true);
+          },
+          readStatus: async () => {
+            const current = await readRun(target.conversationId, target.runId, controller.signal);
+            if (
+              current.conversation_id !== target.conversationId ||
+              current.run_id !== target.runId
+            )
+              throw new Error('运行身份不匹配，未接纳状态。');
+            return current.status;
+          },
+        });
+        if (valid()) await refresh();
+      } catch (failure) {
+        if (valid())
+          setReadError(
+            `${failure instanceof Error ? failure.message : '事件连接中断。'} 请读取最新状态后重试跟随；不会重发原请求。`,
+          );
+      } finally {
+        if (followRef.current === controller) followRef.current = null;
+      }
+    })();
+    return () => {
+      controller.abort();
+      if (followRef.current === controller) followRef.current = null;
+    };
+    // The identity, frozen lifecycle and status determine subscription ownership.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    selected?.conversationId,
+    selected?.runId,
+    run?.run_id,
+    run?.execution_lifecycle,
+    run?.status,
+    streaming,
+    followGeneration,
+  ]);
+
+  const transcript = useMemo(() => collectRunTranscripts(events), [events]);
+  const lifecycle =
+    run?.execution_lifecycle ??
+    (selected ? transcript.get(selected.runId)?.execution_lifecycle : undefined);
+  useEffect(() => {
+    if (!streaming || lifecycle === 'server-owned') return;
     const unload = (event: BeforeUnloadEvent) => {
       if (leaveAllowed.current) return;
       event.preventDefault();
@@ -924,9 +1010,8 @@ export function useConversationTask({
       window.removeEventListener('beforeunload', unload);
       unwatchHistory();
     };
-  }, [streaming]);
+  }, [streaming, lifecycle]);
 
-  const transcript = useMemo(() => collectRunTranscripts(events), [events]);
   return {
     input,
     setInput: (text) => {
@@ -981,7 +1066,10 @@ export function useConversationTask({
     confirmDocument,
     resume,
     stop,
-    refresh,
+    refresh: async (clearError) => {
+      await refresh(clearError);
+      if (mounted.current) setFollowGeneration((value) => value + 1);
+    },
     leaving,
     setLeaving,
     leave: () => {

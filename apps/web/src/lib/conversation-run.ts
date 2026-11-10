@@ -160,6 +160,66 @@ export async function consumeThreadStream(
   }
 }
 
+// Following is read-only: an interrupted subscription never retries admission or resume.
+export async function followRunEvents({
+  conversationId,
+  runId,
+  signal,
+  cursor,
+  onEvent,
+  readStatus,
+  fetchEvents = fetch,
+  retryDelay = 500,
+}: {
+  conversationId: string;
+  runId: string;
+  signal: AbortSignal;
+  cursor: () => number;
+  onEvent: (event: ThreadEvent) => void;
+  readStatus: () => Promise<RunView['status']>;
+  fetchEvents?: (url: string, init: RequestInit) => Promise<Response>;
+  retryDelay?: number;
+}): Promise<void> {
+  let failure: unknown;
+  for (let attempt = 0; attempt < 3 && !signal.aborted; attempt++) {
+    try {
+      const query = new URLSearchParams({ after_seq: String(cursor()) });
+      const response = await fetchEvents(`${runPath(conversationId, runId)}/events?${query}`, {
+        method: 'GET',
+        headers: { accept: 'text/event-stream' },
+        cache: 'no-store',
+        signal,
+      });
+      await consumeThreadStream(response, (event) => {
+        if (event.payload.conversation_id !== conversationId || event.payload.run_id !== runId)
+          throw new Error('订阅事件与指定会话 / Run 不匹配。');
+        if (event.seq > cursor()) onEvent(event);
+      });
+      if (signal.aborted) return;
+      // A card alone is not proof that the attempt has actually suspended.
+      if ((await readStatus()) !== 'running') return;
+      failure = new Error('运行仍在进行，但事件连接已断开。');
+    } catch (error) {
+      if (signal.aborted) return;
+      if (error instanceof ApiReadError && [401, 403, 404].includes(error.status)) throw error;
+      failure = error;
+    }
+    if (attempt < 2) {
+      const { promise, resolve } = Promise.withResolvers<void>();
+      const finish = () => {
+        clearTimeout(timer);
+        signal.removeEventListener('abort', finish);
+        resolve();
+      };
+      const timer = setTimeout(finish, retryDelay * 2 ** attempt);
+      signal.addEventListener('abort', finish, { once: true });
+      if (signal.aborted) finish();
+      await promise;
+    }
+  }
+  if (!signal.aborted) throw failure ?? new Error('事件连接已断开。');
+}
+
 export const runStatusLabel: Record<RunView['status'], string> = {
   running: '运行中（读取不会自动继续）',
   suspended_approval: '运行已挂起；请核对决议与继续资格',

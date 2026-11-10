@@ -3,6 +3,7 @@ import {
   HarnessStartSchema,
   HarnessRequestSchema,
   HarnessToolPayloadSchema,
+  RunViewSchema,
 } from '../src/harness.js';
 import {
   workspaceGrantSchema,
@@ -62,6 +63,38 @@ test('v6 accepts trusted request-bound facts but rejects v5, invented elapsed an
       trusted_context: { ...trusted, workspaces: [{ root: '/' }] },
     }).success,
   ).toBe(false);
+});
+test('trusted starts and run views preserve both lifecycle values and reject unknown values', () => {
+  const view = {
+    run_id: id,
+    conversation_id: id,
+    execution: 'harness',
+    status: 'running',
+    attempt_id: id,
+    attempt_no: 1,
+    waiting: null,
+    can_resume: false,
+    authorization_revision: 'delegation/1',
+  };
+  for (const lifecycle of ['request-bound', 'server-owned'] as const) {
+    expect(
+      HarnessStartSchema.parse({
+        ...start,
+        trusted_context: { ...trusted, execution_lifecycle: lifecycle },
+      }).trusted_context?.execution_lifecycle,
+    ).toBe(lifecycle);
+    expect(
+      RunViewSchema.parse({ ...view, execution_lifecycle: lifecycle }).execution_lifecycle,
+    ).toBe(lifecycle);
+  }
+  expect(
+    HarnessStartSchema.safeParse({
+      ...start,
+      trusted_context: { ...trusted, execution_lifecycle: 'unknown' },
+    }).success,
+  ).toBe(false);
+  expect(RunViewSchema.safeParse({ ...view, execution_lifecycle: 'unknown' }).success).toBe(false);
+  expect(RunViewSchema.safeParse(view).success).toBe(true);
 });
 test('v6 accepts the delivered elapsed revision without granting unknown revisions', () => {
   expect(

@@ -36,7 +36,7 @@ unknown 与取消后迟到调用另验证真实非事务调用核心到 native �
 ## 执行与失败合同
 
 - 两端验证有界 UTF-8 NDJSON、版本、精确字段、唯一请求引用和对应回答。每次仅一个请求等待且立即 flush；帧上限1MiB。不完整帧、等待输入时 EOF、畸形/错配/超限失败并返回脱敏错误，不将 raw stderr/provider body 暴露给用户。
-- `start.trusted_context` 是 v6 必需判别字段。`null` 保留 legacy 原工具/批准/等待/快照/预算和原模型策略；非空仅接受 `version:1`、`delegation/1`、`request-bound` 与冻结时间能力、受管工作区安全摘要集合。完整嵌套字段严格校验，UTC 锚为秒精度 `...Z`；本轮 input_message_id 必须指向实际 user 消息。可信上下文单独进入 system 层，用户/资料/观察不会升级为可信指令。
+- `start.trusted_context` 是 v6 必需判别字段。`null` 保留 legacy 原工具/批准/等待/快照/预算和原模型策略；非空仅接受 `version:1`、`delegation/1`、冻结的 `request-bound` 或 `server-owned` 与冻结时间能力、受管工作区安全摘要集合。生命周期由服务端提供，不由协议支持推断接纳能力。完整嵌套字段严格校验，UTC 锚为秒精度 `...Z`；本轮 input_message_id 必须指向实际 user 消息。可信上下文单独进入 system 层，用户/资料/观察不会升级为可信指令。
 - 新 profile 按实际冻结的工具和工作区集合使用已交付能力，不走 legacy direct routing 或 task 逐项批准。空集合不授予资料工具，可写工具还需冻结摘要含可写路径；旧 Run 不因修订号获得工具。明确保存/清除本人默认时区可自主执行；只本次指定时区不意味着保存。资料正文不能扩大委托，request-bound 不承诺离开后继续。
 - `finish_goal` 是模型控制出口，不是领域工具，也不预约 invocation。native 验证有界 GoalResult、逐项/聚合状态、clarification 和已接受收据 UUID 后发送同名请求及累计 usage；TS 按真实归属与领域事实原子保存结果/最终 answer/终态。完成一个工具不会自动完成目标；普通最终正文必须在原预算内再经模型提交结构化出口，不偷换为成功。设置观察不投影丢弃，模型工具观察含实际 invocation_id（不是 provider call ID）。失败/预算仍走原 `finish(failed)`，由 TS 保留既成/unknown 事实；取消已在 TS 提交，native 不制造第二终态。
 - 合格新 Run 的可信上下文可带 `create_resolution_revision`。模型仅对确属同一未固定名称目标的零写撞名声明恢复，在同一 outcome 的收据中同时列出冲突、实际创建和新回读，并提交原用户消息来源；固定目标不按相同字节合并。`create-resolution/2` 允许创建前修改草稿，但独立新全文回读仍须与实际创建内容一致；旧 `/1` 保持原有相同内容要求。native 校验结构，TS 校验事实，来源引用不能证明模型对自然语言的理解正确。

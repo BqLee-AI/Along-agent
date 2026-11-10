@@ -3,6 +3,7 @@ import type { TimeContext } from '../time/context.js';
 import type { TimeFailure } from '../time/normalize.js';
 import type { WorkspaceGrant, WorkspaceResult } from '@along/contracts';
 import type { DocumentApprovalReceipt, ElapsedTimeBasis } from '@along/contracts';
+import type { RunOwnership } from '../conversations/run-ownership.js';
 
 export const BUSINESS_TOOL_IDS = [
   'propose_task',
@@ -63,6 +64,7 @@ export interface ToolContext {
   conversationId: string;
   runId: string;
   attemptId: string;
+  ownership?: RunOwnership;
   requestId: string;
   allowlist: readonly string[];
   authorizationRevision?: 'delegation/1';

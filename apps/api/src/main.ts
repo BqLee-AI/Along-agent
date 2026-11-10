@@ -5,11 +5,13 @@ import { createPool } from './db/pool.js';
 import { loadHarnessServices } from './modules/conversations/harness-config.js';
 import { loadWorkspaceRegistry } from './modules/workspaces/service.js';
 import { createRoutingRuntime } from './modules/conversations/routing/index.js';
+import { createRunDriver } from './modules/conversations/run-driver.js';
 
 const role = parseRole(process.env.ROLE);
 
 // Main owns the request/scheduler pool; the worker owns its receive pool.
 const pool = createPool();
+const runDriver = pool && (role === 'api' || role === 'all') ? createRunDriver(pool) : undefined;
 if (role === 'api' || role === 'all') {
   const registry = await loadWorkspaceRegistry();
   console.info(
@@ -28,6 +30,7 @@ const server =
         pool,
         harness: loadHarnessServices(),
         routing: createRoutingRuntime(),
+        runDriver,
       })
     : null;
 const worker = role === 'worker' || role === 'all' ? startWorkerLoop({ pool }) : null;
@@ -44,7 +47,11 @@ function shutdown(): void {
   });
   void (async () => {
     try {
-      await Promise.all([serverClosed, worker?.stop().catch(() => undefined)]);
+      await Promise.all([
+        serverClosed,
+        worker?.stop().catch(() => undefined),
+        runDriver?.shutdown().catch(() => undefined),
+      ]);
     } finally {
       await pool?.end().catch(() => undefined);
       process.exit(0);

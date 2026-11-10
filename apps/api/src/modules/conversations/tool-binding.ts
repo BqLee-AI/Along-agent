@@ -4,6 +4,7 @@ import { isActiveOwner } from '../identity/preferences.js';
 import { workspaceGrantSchema, type WorkspaceGrant } from '@along/contracts';
 import { validateWorkspaceGrant, WorkspaceDeniedError } from '../workspaces/service.js';
 import { hasRejectedDocumentApproval } from '../approvals/document-query.js';
+import type { RunOwnership } from './run-ownership.js';
 import { latestAttemptId, lockRun } from './repository.js';
 
 export interface ToolRunBinding {
@@ -11,6 +12,7 @@ export interface ToolRunBinding {
   conversationId: string;
   runId: string;
   attemptId: string;
+  ownership?: RunOwnership;
 }
 
 type ToolScope = {
@@ -149,6 +151,7 @@ async function lockToolBinding(
       workspaceGrant?: unknown;
       workspaceGrants?: unknown;
       authorization_revision?: unknown;
+      execution_lifecycle?: string;
     } | null;
   }>(
     `SELECT r.status,r.execution,r.tools_allowlist,r.frozen_context FROM agent_runs r
@@ -166,6 +169,13 @@ async function lockToolBinding(
     run.rows[0].status === 'running' &&
     row.status === 'running' &&
     row.attempt_no === latest.rows[0]?.attempt_no;
+  if (run.rows[0].frozen_context?.execution_lifecycle === 'server-owned') {
+    if (acceptRevokedFact) canExecute = false;
+    else {
+      if (!binding.ownership) throw forbidden('Run ownership required');
+      await binding.ownership.assert(client, binding.runId, binding.attemptId);
+    }
+  }
   canExecute = canExecute && (await isActiveOwner(client, binding.ownerId));
   if (run.rows[0].execution === 'harness') {
     if (binding.allowlist?.some((tool) => !run.rows[0]!.tools_allowlist.includes(tool))) {

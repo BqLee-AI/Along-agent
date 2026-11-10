@@ -166,21 +166,21 @@ snapshot2 原字段/集合不变，typed views/context_slice 不写入快照正�
 
 ### 用途
 
-[Required] 同 Run 的一次有效执行；批准挂起结束当前 attempt，显式恢复创建递增 attempt。每次动作校验最新 running attempt 与实际 Run/权限/取消；旧 pipe 不因持有 UUID 而恢复执行权。存在 lease 字段不代表已实现通用租约或任意崩溃 kill/resume。
+[Required] 同 Run 的一次有效执行；批准挂起结束当前 attempt，显式恢复创建递增 attempt。每次动作校验最新 running attempt 与实际 Run/权限/取消；server-owned 还在持有同一 PostgreSQL session advisory lock 的事务中比对该 attempt 的 token。旧 pipe 不因持有 UUID 而恢复执行权；这不是通用租约或崩溃自动重放。
 
 ### 字段
 
-| 字段               | 类型          | 约束                                                     | 说明                                     |
-| ------------------ | ------------- | -------------------------------------------------------- | ---------------------------------------- |
-| `id`               | `uuid`        | primary key                                              | attempt ID                               |
-| `owner_id`         | `uuid`        | not null                                                 | 所属用户，查询必带                       |
-| `run_id`           | `uuid`        | not null, references `agent_runs(id)` on delete restrict | 所属 run                                 |
-| `attempt_no`       | `integer`     | not null                                                 | 第几次尝试，从 1 递增                    |
-| `lease_token`      | `uuid`        | nullable                                                 | fencing 租约令牌；Scheduler claim 持有者 |
-| `lease_expires_at` | `timestamptz` | nullable                                                 | 租约过期时间                             |
-| `status`           | `text`        | not null, default `'running'`                            | 按 `running/done/failed/fenced_out` 约束 |
-| `created_at`       | `timestamptz` | not null, default `now()`                                | 创建时间                                 |
-| `ended_at`         | `timestamptz` | nullable                                                 | 结束时间                                 |
+| 字段               | 类型          | 约束                                                     | 说明                                                     |
+| ------------------ | ------------- | -------------------------------------------------------- | -------------------------------------------------------- |
+| `id`               | `uuid`        | primary key                                              | attempt ID                                               |
+| `owner_id`         | `uuid`        | not null                                                 | 所属用户，查询必带                                       |
+| `run_id`           | `uuid`        | not null, references `agent_runs(id)` on delete restrict | 所属 run                                                 |
+| `attempt_no`       | `integer`     | not null                                                 | 第几次尝试，从 1 递增                                    |
+| `lease_token`      | `uuid`        | nullable                                                 | server-owned attempt 的持锁执行 token；旧 attempt 可为空 |
+| `lease_expires_at` | `timestamptz` | nullable                                                 | 保留字段，不作为 server-owned 执行资格                   |
+| `status`           | `text`        | not null, default `'running'`                            | 按 `running/done/failed/fenced_out` 约束                 |
+| `created_at`       | `timestamptz` | not null, default `now()`                                | 创建时间                                                 |
+| `ended_at`         | `timestamptz` | nullable                                                 | 结束时间                                                 |
 
 ### 约束与索引
 

@@ -70,6 +70,7 @@ import { acceptReminderDate } from './reminder-date.js';
 import { acceptTargetContinuation } from './target-continuation.js';
 import { isActiveOwner, readUserPreferences } from '../identity/preferences.js';
 import { writeAuthorizedEvent } from './stream-authorization.js';
+import { withRunTransaction, type RunOwnership } from './run-ownership.js';
 
 const AGENT_REVISION = 'assistant/r1';
 const BUSINESS_MAX_ITERATIONS = 10;
@@ -171,6 +172,18 @@ export async function startConversationRun(
       : {}),
   });
   const pool = requirePool(deps);
+  const candidateRunId = randomUUID();
+  const serverOwnedEligible =
+    execution === 'harness' && input.authorization_revision === 'delegation/1' && !!deps.runDriver;
+  let ownership: RunOwnership | undefined;
+  if (serverOwnedEligible && !(await findIdempotency(pool, ownerId, key))) {
+    try {
+      ownership = await deps.runDriver!.acquire(candidateRunId);
+    } catch (error) {
+      // A duplicate may have committed while capacity was being acquired.
+      if (!(await findIdempotency(pool, ownerId, key))) throw error;
+    }
+  }
 
   let started: {
     conversationId: string;
@@ -179,7 +192,7 @@ export async function startConversationRun(
     context: RunContext | null;
   };
   try {
-    started = await withTransaction(pool, async (client: PoolClient) => {
+    started = await withRunTransaction(pool, ownership, async (client: PoolClient) => {
       if (!(await isActiveOwner(client, ownerId, { lock: 'share' })))
         throw forbidden('owner authorization revoked');
       const existing = await findIdempotency(client, ownerId, key);
@@ -194,6 +207,9 @@ export async function startConversationRun(
           context: null,
         };
       }
+      if (serverOwnedEligible && !ownership)
+        throw stateConflict('server-owned execution capacity unavailable');
+      if (ownership) await ownership.assert(client, candidateRunId);
       if (execution === 'harness' && !deps.harness)
         throw new HttpError(503, 503, 'HARNESS_UNAVAILABLE', '原生 Agent 暂不可用。');
       const workspaceGrant =
@@ -377,7 +393,7 @@ export async function startConversationRun(
       )
         requireTimeContext(deps.timeContext);
       confirmedTimezone = reminderDate.timezone ?? confirmedTimezone;
-      const runId = randomUUID();
+      const runId = candidateRunId;
       const attemptId = randomUUID();
       const mode =
         execution === 'harness'
@@ -400,7 +416,7 @@ export async function startConversationRun(
         ? TrustedExecutionContextSchema.parse({
             version: 1,
             authorization_revision: 'delegation/1',
-            execution_lifecycle: 'request-bound',
+            execution_lifecycle: ownership ? 'server-owned' : 'request-bound',
             ...(execution === 'harness' &&
             (allowlist as readonly string[]).includes('workspace_create') &&
             (allowlist as readonly string[]).includes('workspace_read')
@@ -467,7 +483,9 @@ export async function startConversationRun(
         ...(trustedExecutionContext
           ? {
               authorization_revision: 'delegation/1' as const,
-              execution_lifecycle: 'request-bound' as const,
+              execution_lifecycle: ownership
+                ? ('server-owned' as const)
+                : ('request-bound' as const),
               trustedExecutionContext,
             }
           : {}),
@@ -494,6 +512,7 @@ export async function startConversationRun(
         ownerId,
         runId,
         attemptNo: 1,
+        ...(ownership ? { leaseToken: ownership.token } : {}),
       });
       if (execution === 'harness')
         await insertRoutingPolicy(
@@ -520,6 +539,7 @@ export async function startConversationRun(
           runId,
           attemptId,
           requestId,
+          ...(ownership ? { ownership } : {}),
           inputText: text,
           ...(reminderDate.originalText ? { reminderInputText: reminderDate.originalText } : {}),
           ...(reminderDate.source.kind === 'unresolved' ? { reminderNeedsRestatement: true } : {}),
@@ -544,6 +564,7 @@ export async function startConversationRun(
       };
     });
   } catch (err) {
+    if (ownership) await deps.runDriver!.release(ownership);
     const pgError = pgErrorOf(err);
     if (pgError?.code === '23505' && pgError.constraint === 'conversation_idempotency_pkey') {
       const existing = await findIdempotency(pool, ownerId, key);
@@ -562,6 +583,7 @@ export async function startConversationRun(
     }
   }
 
+  if (started.replayRunId && ownership) await deps.runDriver!.release(ownership);
   if (started.replayRunId) {
     const status = await getRunStatus(pool, ownerId, started.replayRunId);
     const replay = await listRunEvents(pool, ownerId, started.replayRunId);
@@ -591,6 +613,22 @@ export async function startConversationRun(
     };
   }
   if (!started.context) throw new Error('run context missing');
+  if (ownership) {
+    try {
+      deps.runDriver!.start(deps, started.context);
+    } catch (error) {
+      await deps.runDriver!.release(ownership);
+      throw error;
+    }
+    return {
+      conversationId: started.conversationId,
+      runId: started.runId,
+      replay: null,
+      context: null,
+      serverOwned: true,
+      afterSeq: null,
+    };
+  }
   return {
     conversationId: started.conversationId,
     runId: started.runId,

@@ -166,6 +166,36 @@ describe('durable goal result consumer', () => {
     expect(markup).not.toContain('data-testid="goal-result"');
   });
 
+  it('shows server-owned lifecycle from the admitted started event without request-bound warning', () => {
+    const started = ThreadEventSchema.parse({
+      protocol_version: 'v2',
+      seq: 1,
+      type: 'thread.started',
+      payload: {
+        conversation_id: cid,
+        run_id: rid,
+        stream_protocol_version: 'v2',
+        ruleset_id: 'rules-v1',
+        tzdb_version: '2026a',
+        authorization_revision: 'delegation/1',
+        execution_lifecycle: 'server-owned',
+      },
+      request_id: 'lifecycle-render',
+    });
+    const markup = renderToStaticMarkup(
+      createElement(RunStatusPanel, {
+        task: composerTask({
+          selected: { conversationId: cid, runId: rid },
+          streaming: true,
+          transcript: collectRunTranscripts([started]),
+        }),
+      }),
+    );
+    expect(markup).toContain('data-testid="server-owned-lifecycle"');
+    expect(markup).not.toContain('data-testid="request-bound-lifecycle"');
+    expect(markup).toContain('停止请使用停止按钮');
+  });
+
   it('keeps each durable goal status independent of Run done and preserves answer, outcomes, clarification and receipts without executing actions', () => {
     let actions = 0;
     for (const status of ['completed', 'partial', 'blocked', 'cancelled', 'unknown'] as const) {

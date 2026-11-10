@@ -69,7 +69,7 @@ describe('explicit delegation stream decoding', () => {
     expect(LegacyThreadEventSchema.safeParse(wire).success).toBe(false);
   });
 
-  it('requires trusted start revision and request-bound lifecycle rather than inferring them from v2', () => {
+  it('requires the trusted start revision and an explicit known lifecycle', () => {
     for (const field of ['authorization_revision', 'execution_lifecycle']) {
       const payload = { ...started.payload };
       delete payload[field];
@@ -77,7 +77,7 @@ describe('explicit delegation stream decoding', () => {
     }
     for (const patch of [
       { authorization_revision: 'legacy' },
-      { execution_lifecycle: 'server-owned' },
+      { execution_lifecycle: 'unknown' },
       { stream_protocol_version: 'v1' },
       { injected_authority: true },
     ]) {
@@ -86,6 +86,15 @@ describe('explicit delegation stream decoding', () => {
           .success,
       ).toBe(false);
     }
+  });
+
+  it('preserves the server-owned lifecycle in v2 without accepting it in v1', () => {
+    const input = {
+      ...started,
+      payload: { ...started.payload, execution_lifecycle: 'server-owned' },
+    };
+    expect<unknown>(ThreadEventSchema.parse(input)).toEqual(input);
+    expect(LegacyThreadEventSchema.safeParse(input).success).toBe(false);
   });
 
   it('keeps old-v1 decoding strict for new start fields, new terminal results and new versions', () => {
@@ -112,6 +121,7 @@ describe('explicit delegation stream decoding', () => {
     for (const patch of [
       { authorization_revision: 'delegation/1' },
       { execution_lifecycle: 'request-bound' },
+      { execution_lifecycle: 'server-owned' },
     ]) {
       expect(
         ThreadEventSchema.safeParse({
