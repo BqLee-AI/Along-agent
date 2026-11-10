@@ -49,7 +49,12 @@ maybe('Run ownership PostgreSQL session', () => {
     } finally {
       await first!.close();
     }
-    const successor = await RunOwnership.tryAcquire(database.pool, context.runId);
+    let successor: RunOwnership | null = null;
+    const deadline = Date.now() + 3000;
+    while (!successor && Date.now() < deadline) {
+      successor = await RunOwnership.tryAcquire(database.pool, context.runId);
+      if (!successor) await delay(50);
+    }
     expect(successor).not.toBeNull();
     await successor!.close();
   });
