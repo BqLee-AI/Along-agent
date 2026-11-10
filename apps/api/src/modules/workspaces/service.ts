@@ -622,8 +622,10 @@ export async function listWorkspaceFiles(
     (v) =>
       v.startsWith(prefix) && isWorkspaceReadablePath(ownerId, grant, v, authorizedCreatedPaths),
   );
-  if (!isWorkspaceReadableDirectory(ownerId, grant, directory, authorizedCreatedPaths))
-    throw new WorkspaceDeniedError();
+  if (!isWorkspaceReadableDirectory(ownerId, grant, directory, authorizedCreatedPaths)) {
+    if (!isWorkspaceOutputDirectory(grant, directory)) throw new WorkspaceDeniedError();
+    await getWorkspaceOutputIdentity(ownerId, grant, directory);
+  }
   const entries = new Map<string, { path: string; kind: 'file' | 'directory' }>();
   const failures: WorkspaceOperationError[] = [];
   for (const relative of paths) {
@@ -640,7 +642,13 @@ export async function listWorkspaceFiles(
       failures.push(operationFailure(relative, error));
     }
   }
-  return { kind: 'list' as const, path: directory, entries: [...entries.values()], failures };
+  return {
+    kind: 'list' as const,
+    path: directory,
+    ...(grant.output_directories ? { visibility: 'authorized_paths_only' as const } : {}),
+    entries: [...entries.values()],
+    failures,
+  };
 }
 export async function searchWorkspaceFiles(
   ownerId: string,

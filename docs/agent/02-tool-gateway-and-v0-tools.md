@@ -116,13 +116,13 @@ tasks 公共创建用例在同一事务写 task、created 事件和 schedule out
 
 本节表格描述 legacy 单 workspace 工具形状：仅显式 harness 且选择有效登记的 Run 获相应工具，参数不带 workspace_id。新 delegation 的 list/grep/read 必须显式指定冻结集合内的 workspace_id；无登记不开放资料工具，多项不默认第一项。所有路径均为登记范围内规范 POSIX 相对路径，不接受宿主 root 或绝对路径。
 
-| 工具                        | strict输入                                                      | 风险/执行                | 真实输出与约束                                                                                             |
-| --------------------------- | --------------------------------------------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| `workspace_list`            | `{path:string}`                                                 | low / read_only          | `kind=list`、直接子项及failures；不开放未登记路径                                                          |
-| `workspace_grep`            | `{path:string,literal:非空string}`                              | low / read_only          | `kind=search`，区分大小写逐行字面量matches、版本及failures                                                 |
-| `workspace_read`            | `{path:非空string}`                                             | low / read_only          | `kind=read`、精确全文、原字节SHA-256 version、byte_length                                                  |
-| `workspace_propose_replace` | `{read_invocation_id:UUID,old_text:非空string,new_text:string}` | medium / local           | `kind=document_approval`及冻结receipt；引用同Run接受全文，旧字面量必须恰好出现一次，允许删除为new_text空串 |
-| `workspace_apply_replace`   | `{approval_id:UUID}`                                            | high / non_transactional | 仅原Run已approved的冻结目标，绑定唯一invocation；`kind=applied`或明确零写`conflict`，不保证已完成回读      |
+| 工具                        | strict输入                                                      | 风险/执行                | 真实输出与约束                                                                                                                                                |
+| --------------------------- | --------------------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workspace_list`            | `{path:string}`                                                 | low / read_only          | `kind=list`、已授权的真实直接子项及 failures；不是完整目录清单，未列出不证明不存在；不开放未登记路径。冻结输出资格的结果含 `visibility:authorized_paths_only` |
+| `workspace_grep`            | `{path:string,literal:非空string}`                              | low / read_only          | `kind=search`，区分大小写逐行字面量matches、版本及failures                                                                                                    |
+| `workspace_read`            | `{path:非空string}`                                             | low / read_only          | `kind=read`、精确全文、原字节SHA-256 version、byte_length                                                                                                     |
+| `workspace_propose_replace` | `{read_invocation_id:UUID,old_text:非空string,new_text:string}` | medium / local           | `kind=document_approval`及冻结receipt；引用同Run接受全文，旧字面量必须恰好出现一次，允许删除为new_text空串                                                    |
+| `workspace_apply_replace`   | `{approval_id:UUID}`                                            | high / non_transactional | 仅原Run已approved的冻结目标，绑定唯一invocation；`kind=applied`或明确零写`conflict`，不保证已完成回读                                                         |
 
 新 delegation 的 `workspace_replace` 输入为 `{read_invocation_id,change}`，`change` 是 `{kind:'literal',old_text,new_text}` 或 `{kind:'full',new_content}`；新 profile 的 `workspace_propose_replace` 同样使用该形状，仅用于实际新增影响。目标工作区、路径和基线版本由同 Run 已接受的完整 `workspace_read` 推导，不能由模型另行指定。literal 须非空且恰好匹配一次；full 用于明确整篇重写，包含空文件场景。直接编辑返回 `edit_applied` 或真实零写 `edit_conflict`，不制造 approval；完成仍须独立新全文读回。路径/资格拒绝、pending/rejected/unknown 同目标障碍不得通过换工具、调用槽或 Run 绕过；仅已接受的零写版本冲突可重新读取、生成唯一后继。
 

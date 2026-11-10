@@ -156,6 +156,92 @@ maybe('delegated workspace gateway', () => {
       client.release();
     }
   });
+  it('lists only authorized output paths without hiding an exclusive-create conflict', async () => {
+    const actor = await seedAdmittedSession(database.pool, {});
+    const root = await mkdtemp(join(tmpdir(), 'along-output-list-'));
+    roots.push(root);
+    await mkdir(join(root, 'output'));
+    await writeFile(join(root, 'output', 'private.txt'), 'not registered');
+    await configureWorkspaceRegistry([
+      {
+        workspace_id: 'docs',
+        owner_id: actor.userId,
+        label: 'Docs',
+        root,
+        readable_paths: [],
+        writable_paths: [],
+        output_directories: ['output'],
+      },
+    ]);
+    const deps = {
+      pool: database.pool,
+      timeContext: loadTimeContext('fixture-v1'),
+      harness: {
+        binaryPath: '/unused',
+        maxIterations: 24,
+        maxTokens: 8000,
+        contextPolicy: createContextPolicy({ completionCap: 512, model: 'test' }),
+        model: async function* () {
+          throw new Error('model not used');
+        },
+      },
+    };
+    const start = async () => {
+      const run = await startConversationRun(
+        deps,
+        actor.userId,
+        randomUUID(),
+        {
+          execution: 'harness',
+          authorization_revision: 'delegation/1',
+          raw_text: 'List the output directory and create a file.',
+          idempotency_key: randomUUID(),
+        },
+        null,
+      );
+      if (!run.context) throw new Error('missing context');
+      const ctx = run.context;
+      let slot = 0;
+      return async (toolId: string, args: unknown) => {
+        const reserved = await reserveToolInvocation(database.pool, ctx, {
+          callKey: `output-list/${++slot}`,
+          toolId,
+          args,
+        });
+        return invokeTool(database.pool, ctx, { ...reserved, toolId, args });
+      };
+    };
+    const call = await start();
+    const listing = await call('workspace_list', { workspace_id: 'docs', path: 'output' });
+    expect(listing).toMatchObject({
+      status: 'ok',
+      result: {
+        kind: 'list',
+        path: 'output',
+        visibility: 'authorized_paths_only',
+        entries: [],
+        failures: [],
+      },
+    });
+    expect(JSON.stringify(listing)).not.toContain('private.txt');
+    const conflict = await call('workspace_create', {
+      workspace_id: 'docs',
+      output_directory: 'output',
+      filename: 'private.txt',
+      content: 'replacement',
+    });
+    expect(conflict).toMatchObject({
+      status: 'ok',
+      result: { kind: 'create_conflict', zero_write: true },
+    });
+    expect(await readFile(join(root, 'output', 'private.txt'), 'utf8')).toBe('not registered');
+
+    // A denied read hard-stops its run, so it must not share the conflict run.
+    const readCall = await start();
+    expect(
+      await readCall('workspace_read', { workspace_id: 'docs', path: 'output/private.txt' }),
+    ).toMatchObject({ status: 'denied' });
+  });
   it('projects creation collisions and requires a later independent MCP full read', async () => {
     const actor = await seedAdmittedSession(database.pool, {});
     const root = await mkdtemp(join(tmpdir(), 'along-create-projection-'));
@@ -163,6 +249,7 @@ maybe('delegated workspace gateway', () => {
     await mkdir(join(root, 'output'));
     await writeFile(join(root, 'output', 'occupied.txt'), 'existing');
     await writeFile(join(root, 'output', 'alias.txt'), 'new content');
+    await writeFile(join(root, 'output', 'private.txt'), 'not registered');
     await configureWorkspaceRegistry([
       {
         workspace_id: 'docs',
@@ -214,15 +301,15 @@ maybe('delegated workspace gateway', () => {
       path: 'output/alias.txt',
     });
     const listing = await call('workspace_list', { workspace_id: 'docs', path: 'output' });
-    expect(listing).toMatchObject({
-      status: 'ok',
-      result: {
-        kind: 'list',
-        entries: expect.arrayContaining([
-          expect.objectContaining({ path: 'output/occupied.txt', kind: 'file' }),
-        ]),
-      },
-    });
+    if (listing.status !== 'ok' || listing.result.kind !== 'list') {
+      throw new Error('expected a workspace listing');
+    }
+    expect(listing.result).toMatchObject({ visibility: 'authorized_paths_only' });
+    expect(listing.result.entries).toEqual([
+      { path: 'output/alias.txt', kind: 'file' },
+      { path: 'output/occupied.txt', kind: 'file' },
+    ]);
+    expect(JSON.stringify(listing)).not.toContain('private.txt');
     const search = await call('workspace_grep', {
       workspace_id: 'docs',
       path: 'output',

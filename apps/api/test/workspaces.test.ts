@@ -352,6 +352,25 @@ describe('frozen output directories and exclusive creation', () => {
     return { grant, target };
   }
 
+  test('output-only listing reports its restricted scope without disclosing existing files', async () => {
+    const { grant } = await setup();
+    await writeFile(path.join(root, 'output', 'private.txt'), 'not registered');
+    const result = await listWorkspaceFiles(owner, grant, 'output');
+    expect(result).toMatchObject({
+      kind: 'list',
+      path: 'output',
+      visibility: 'authorized_paths_only',
+      entries: [],
+      failures: [],
+    });
+    await expect(readWorkspaceFile(owner, grant, 'output/private.txt')).rejects.toThrow(
+      WorkspaceDeniedError,
+    );
+    await expect(
+      listWorkspaceFiles(owner, getWorkspaceGrant(owner, 'workspace-test'), 'output'),
+    ).rejects.toThrow(WorkspaceDeniedError);
+  });
+
   test('freezes output eligibility without expanding legacy grants or public identity', async () => {
     await mkdir(path.join(root, 'output'));
     const old = getWorkspaceGrant(owner, 'workspace-test');

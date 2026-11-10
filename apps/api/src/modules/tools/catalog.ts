@@ -15,7 +15,8 @@ const workspacePath = { type: 'string' };
 export const WORKSPACE_TOOL_DEFINITIONS = [
   {
     name: 'workspace_list',
-    description: '列出当前工作区授权目录的真实直接子项；根目录 path 使用空串。',
+    description:
+      '仅列出已授权的真实直接子项，不是目录完整清单；未列出不代表文件不存在。根目录 path 使用空串。',
     risk: 'low' as const,
     parameters: workspaceParameters({ path: workspacePath }, ['path']),
   },

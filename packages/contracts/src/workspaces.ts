@@ -55,6 +55,7 @@ export const workspaceListResultSchema = z
     kind: z.literal('list'),
     workspace_id: z.string().min(1).optional(),
     path: z.string(),
+    visibility: z.literal('authorized_paths_only').optional(),
     entries: z.array(z.object({ path: z.string(), kind: z.enum(['file', 'directory']) }).strict()),
     failures: z.array(workspaceOperationErrorSchema),
   })

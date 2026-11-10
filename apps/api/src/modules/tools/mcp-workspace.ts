@@ -10,6 +10,7 @@ import {
   canonicalRelativePath,
   getWorkspaceMcpConfiguration,
   hashBytes,
+  isWorkspaceOutputDirectory,
   isWorkspaceReadableDirectory,
   isWorkspaceReadablePath,
   utf8Bytes,
@@ -71,7 +72,8 @@ export async function callWorkspaceMcp(
   if (
     toolId === 'workspace_read'
       ? !isWorkspaceReadablePath(ctx.ownerId, grant, args.path, authorizedCreatedPaths)
-      : !isWorkspaceReadableDirectory(ctx.ownerId, grant, args.path, authorizedCreatedPaths)
+      : !isWorkspaceReadableDirectory(ctx.ownerId, grant, args.path, authorizedCreatedPaths) &&
+        !(toolId === 'workspace_list' && isWorkspaceOutputDirectory(grant, args.path))
   )
     throw new WorkspaceDeniedError();
   const configuration = getWorkspaceMcpConfiguration(ctx.ownerId, grant, authorizedCreatedPaths);
@@ -144,6 +146,8 @@ export async function callWorkspaceMcp(
         throw new ToolExecutionError();
     } else if (result.kind === 'list') {
       if (toolId !== 'workspace_list' || result.path !== args.path) throw new ToolExecutionError();
+      if (grant.output_directories && result.visibility !== 'authorized_paths_only')
+        throw new ToolExecutionError();
       const prefix = args.path ? `${args.path}/` : '';
       for (const entry of result.entries) {
         canonicalRelativePath(entry.path);
