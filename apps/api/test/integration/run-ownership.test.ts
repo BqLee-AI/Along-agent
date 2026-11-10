@@ -17,7 +17,7 @@ import {
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 import { seedContext, fileLines } from './tool-invocations-probe.js';
 import { appendFileEffect } from './tool-invocations-file-effect.js';
-import { createRunDriver, type RunDriver } from '../../src/modules/conversations/run-driver.js';
+import { createRunDriver, RunDriver } from '../../src/modules/conversations/run-driver.js';
 
 const maybe = databaseUrl ? describe : describe.skip;
 
@@ -291,6 +291,221 @@ maybe('Run ownership PostgreSQL session', () => {
       await owner!.close();
     }
   });
+
+  it('recovers orphan scanning after a candidate query is blackholed', async () => {
+    const original = await seedContext(database.pool);
+    const runId = randomUUID();
+    const attemptId = randomUUID();
+    await database.pool.query(
+      `INSERT INTO agent_runs(id,owner_id,conversation_id,agent_revision,mode,
+         budget_max_iterations,budget_max_tokens,frozen_context)
+       SELECT $2,owner_id,conversation_id,agent_revision,mode,
+         budget_max_iterations,budget_max_tokens,
+         jsonb_build_object('execution_lifecycle','server-owned')
+       FROM agent_runs WHERE id=$1`,
+      [original.runId, runId],
+    );
+    await database.pool.query(
+      'INSERT INTO run_attempts(id,owner_id,run_id,attempt_no) VALUES($1,$2,$3,1)',
+      [attemptId, original.ownerId, runId],
+    );
+    const source = new URL(database.connectionString);
+    const target = { host: source.hostname, port: Number(source.port) };
+    const sockets = new Set<ReturnType<typeof createConnection>>();
+    let trapped = false;
+    let blockedClosed = false;
+    const proxy = createServer((inbound) => {
+      const upstream = createConnection(target);
+      sockets.add(inbound);
+      sockets.add(upstream);
+      let blocked = false;
+      inbound.on('data', (chunk) => {
+        if (!trapped && chunk.includes(Buffer.from('SELECT id,owner_id,conversation_id'))) {
+          trapped = true;
+          blocked = true;
+        }
+        if (!blocked) upstream.write(chunk);
+      });
+      upstream.on('data', (chunk) => {
+        if (!blocked) inbound.write(chunk);
+      });
+      inbound.on('close', () => {
+        if (blocked) blockedClosed = true;
+        sockets.delete(inbound);
+        upstream.destroy();
+      });
+      upstream.on('close', () => {
+        sockets.delete(upstream);
+        inbound.destroy();
+      });
+      inbound.on('error', () => upstream.destroy());
+      upstream.on('error', () => inbound.destroy());
+    });
+    await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve));
+    const address = proxy.address();
+    if (!address || typeof address === 'string') throw new Error('missing proxy address');
+    source.hostname = '127.0.0.1';
+    source.port = String(address.port);
+    const ownership = new Pool({
+      connectionString: source.toString(),
+      max: 5,
+      connectionTimeoutMillis: 500,
+      query_timeout: 350,
+    });
+    const driver = new RunDriver(ownership, 4);
+    try {
+      let status = 'running';
+      const deadline = Date.now() + 8000;
+      while (status === 'running' && Date.now() < deadline) {
+        await delay(100);
+        status = (await database.pool.query('SELECT status FROM agent_runs WHERE id=$1', [runId]))
+          .rows[0]?.status;
+      }
+      expect(trapped).toBe(true);
+      expect(blockedClosed).toBe(true);
+      expect(status).toBe('failed');
+      expect(
+        (await database.pool.query('SELECT status FROM run_attempts WHERE id=$1', [attemptId]))
+          .rows[0]?.status,
+      ).toBe('fenced_out');
+      expect(
+        (
+          await database.pool.query(
+            "SELECT count(*)::int AS count FROM run_checkpoints WHERE attempt_id=$1 AND kind='thread.failed'",
+            [attemptId],
+          )
+        ).rows[0]?.count,
+      ).toBe(1);
+      expect(
+        (
+          await database.pool.query(
+            'SELECT count(*)::int AS count FROM tool_invocations WHERE run_id=$1',
+            [runId],
+          )
+        ).rows[0]?.count,
+      ).toBe(0);
+    } finally {
+      for (const socket of sockets) socket.destroy();
+      await driver.shutdown();
+      await new Promise<void>((resolve) => proxy.close(() => resolve()));
+    }
+  }, 15000);
+
+  it('retries scanning after a bounded wait for a pool connection', async () => {
+    const original = await seedContext(database.pool);
+    const runId = randomUUID();
+    const attemptId = randomUUID();
+    await database.pool.query(
+      `INSERT INTO agent_runs(id,owner_id,conversation_id,agent_revision,mode,
+         budget_max_iterations,budget_max_tokens,frozen_context)
+       SELECT $2,owner_id,conversation_id,agent_revision,mode,
+         budget_max_iterations,budget_max_tokens,
+         jsonb_build_object('execution_lifecycle','server-owned')
+       FROM agent_runs WHERE id=$1`,
+      [original.runId, runId],
+    );
+    await database.pool.query(
+      'INSERT INTO run_attempts(id,owner_id,run_id,attempt_no) VALUES($1,$2,$3,1)',
+      [attemptId, original.ownerId, runId],
+    );
+    const pool = new Pool({
+      connectionString: database.connectionString,
+      max: 1,
+      connectionTimeoutMillis: 300,
+      query_timeout: 1000,
+    });
+    const held = await pool.connect();
+    const driver = new RunDriver(pool, 1);
+    let released = false;
+    try {
+      await delay(700);
+      expect(pool.waitingCount).toBe(0);
+      expect(
+        (await database.pool.query('SELECT status FROM agent_runs WHERE id=$1', [runId])).rows[0]
+          ?.status,
+      ).toBe('running');
+      held.release();
+      released = true;
+      let status = 'running';
+      const deadline = Date.now() + 6000;
+      while (status === 'running' && Date.now() < deadline) {
+        await delay(100);
+        status = (await database.pool.query('SELECT status FROM agent_runs WHERE id=$1', [runId]))
+          .rows[0]?.status;
+      }
+      expect(status).toBe('failed');
+      expect(
+        (await database.pool.query('SELECT status FROM run_attempts WHERE id=$1', [attemptId]))
+          .rows[0]?.status,
+      ).toBe('fenced_out');
+    } finally {
+      if (!released) held.release();
+      await driver.shutdown();
+    }
+  }, 10000);
+
+  it('bounds shutdown while the candidate query is blackholed', async () => {
+    const source = new URL(database.connectionString);
+    const target = { host: source.hostname, port: Number(source.port) };
+    const trapped = Promise.withResolvers<void>();
+    const sockets = new Set<ReturnType<typeof createConnection>>();
+    const proxy = createServer((inbound) => {
+      const upstream = createConnection(target);
+      sockets.add(inbound);
+      sockets.add(upstream);
+      let blocked = false;
+      inbound.on('data', (chunk) => {
+        if (chunk.includes(Buffer.from('SELECT id,owner_id,conversation_id'))) {
+          blocked = true;
+          trapped.resolve();
+        }
+        if (!blocked) upstream.write(chunk);
+      });
+      upstream.on('data', (chunk) => {
+        if (!blocked) inbound.write(chunk);
+      });
+      inbound.on('close', () => {
+        sockets.delete(inbound);
+        upstream.destroy();
+      });
+      upstream.on('close', () => {
+        sockets.delete(upstream);
+        inbound.destroy();
+      });
+      inbound.on('error', () => upstream.destroy());
+      upstream.on('error', () => inbound.destroy());
+    });
+    await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve));
+    const address = proxy.address();
+    if (!address || typeof address === 'string') throw new Error('missing proxy address');
+    source.hostname = '127.0.0.1';
+    source.port = String(address.port);
+    const pool = new Pool({
+      connectionString: source.toString(),
+      max: 5,
+      connectionTimeoutMillis: 500,
+      query_timeout: 350,
+    });
+    const driver = new RunDriver(pool, 4);
+    let stopped = false;
+    try {
+      await Promise.race([
+        trapped.promise,
+        delay(3000).then(() => {
+          throw new Error('scan not dispatched');
+        }),
+      ]);
+      const start = Date.now();
+      await driver.shutdown();
+      stopped = true;
+      expect(Date.now() - start).toBeLessThan(2000);
+      expect(pool.totalCount).toBe(0);
+    } finally {
+      for (const socket of sockets) socket.destroy();
+      if (!stopped) await driver.shutdown();
+      await new Promise<void>((resolve) => proxy.close(() => resolve()));
+    }
+  }, 10000);
 
   it('only finalizes an orphan after its owning process crashes', async () => {
     const original = await seedContext(database.pool);

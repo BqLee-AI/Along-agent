@@ -20,7 +20,7 @@ export function createRunDriver(pool: Pool): RunDriver {
     keepAliveInitialDelayMillis: 1000,
   });
   ownershipPool.on('error', () => console.error('[run-owner] idle connection lost'));
-  return new RunDriver(pool, ownershipPool, 4);
+  return new RunDriver(ownershipPool, 4);
 }
 
 // The lock pool is separate from the control pool: cancellation and reads must
@@ -35,7 +35,6 @@ export class RunDriver {
   private scanAfter: string | null = null;
 
   constructor(
-    private readonly pool: Pool,
     private readonly ownershipPool: Pool,
     private readonly capacity = 4,
   ) {
@@ -113,8 +112,10 @@ export class RunDriver {
   private async scan(): Promise<void> {
     if (this.stopping || this.scanning) return;
     this.scanning = true;
+    // The fifth bounded ownership connection is reserved for recovery; using
+    // the unbounded control pool can strand every later scan on a blackhole.
     try {
-      const candidates = await this.pool.query<{
+      const candidates = await this.ownershipPool.query<{
         id: string;
         owner_id: string;
         conversation_id: string;

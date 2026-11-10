@@ -78,7 +78,7 @@ maybe('server-owned driver retains an in-flight workspace write', () => {
       ]);
       const control = database.connect();
       const ownership = new Pool({ connectionString: database.connectionString, max: 2 });
-      const driver = new RunDriver(control, ownership, 1);
+      const driver = new RunDriver(ownership, 1);
       const blocker = await database.pool.connect();
       const modelEntered = Promise.withResolvers<void>();
       const releaseModel = Promise.withResolvers<void>();

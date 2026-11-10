@@ -95,9 +95,10 @@ under `apps/web`.
   the subscription.
   confirm/reject/revise 后返回原标签页或原 Run 深链，先读取状态，再在“此运行的操作”中明确继续。文档批准页只授权，不写文件、不自动 resume；批准早于挂起或 `can_resume=false` 时保留授权事实，不能一概解释为尚未批准。普通挂起 EOF 不是成功或取消。
 - Resume requests retain the checkpoint and idempotency key in session storage.
-  Explicit same-key retry remains available for request-bound Runs. A
-  server-owned resume is not resent for the same checkpoint; read the original
-  Run to reconcile an uncertain result. **读取运行状态** is read-only.
+  After an uncertain result, read the original Run first. If the fresh state
+  still permits continuing the same checkpoint, the user may explicitly retry
+  with the same key; refresh and reconnect never resend it automatically.
+  **读取运行状态** is read-only.
 - **停止原运行** first posts the durable cancel action with a retained
   idempotency key, then aborts the stream. It does not undo accepted effects.
   The proxy forwards actual Next request cancellation and downstream reader
