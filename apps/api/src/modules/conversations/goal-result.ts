@@ -8,6 +8,7 @@ import {
   readRunCancelledReminders,
   readRunInterruptionEvidence,
   readRunGoalDocumentEvidence,
+  validateCreateResolutionEvidence,
 } from '../tools/query.js';
 import type { RunGoalDocumentEvidence } from '../tools/query.js';
 import { readCancellationScopeInput, readContinuationReceipts } from './target-continuation.js';
@@ -27,7 +28,17 @@ export function validateGoalDocuments(goal: GoalResult, documents: RunGoalDocume
     );
     if ((effect.status === 'applied' || effect.status === 'verified') && referenced.length === 0)
       throw stateConflict('goal omits an accepted document effect');
-    if (effect.status !== 'verified' && referenced.some((item) => item.status === 'achieved'))
+    if (
+      effect.status !== 'verified' &&
+      referenced.some(
+        (item) =>
+          item.status === 'achieved' &&
+          !(
+            effect.status === 'conflict' &&
+            item.create_resolution?.zero_write_invocation_ids.includes(effect.invocation_id)
+          ),
+      )
+    )
       throw stateConflict('goal claims an unverified document effect');
     if (
       effect.status === 'verified' &&
@@ -111,6 +122,80 @@ async function inheritedGoal(
   return { runId: continuation.run_id, goal: goal.data, cancellations };
 }
 
+async function applyCreateResolutions(
+  client: PoolClient,
+  binding: Binding,
+  goal: GoalResult,
+  documents: RunGoalDocumentEvidence,
+): Promise<void> {
+  const outcomes = goal.outcomes.filter((item) => item.create_resolution);
+  if (!outcomes.length) return;
+  const row = (
+    await client.query<{
+      input_message_id: string;
+      revision: string | null;
+      original_id: string | null;
+      original_text: string | null;
+    }>(
+      `SELECT input_message_id,frozen_context->>'createResolutionRevision' AS revision,
+        frozen_context->'trustedExecutionContext'->'continuation'->>'original_input_message_id' AS original_id,
+        frozen_context->'trustedExecutionContext'->'continuation'->>'original_text' AS original_text
+       FROM agent_runs WHERE id=$1 AND owner_id=$2 AND conversation_id=$3
+         AND frozen_context->>'authorization_revision'='delegation/1'`,
+      [binding.runId, binding.ownerId, binding.conversationId],
+    )
+  ).rows[0];
+  if (!row || row.revision !== 'create-resolution/1')
+    throw stateConflict('create resolution is not enabled for this run');
+  const messages = await client.query<{ id: string; content: string }>(
+    `SELECT id,content FROM messages WHERE owner_id=$1 AND conversation_id=$2
+       AND role='user' AND id=ANY($3::uuid[])`,
+    [
+      binding.ownerId,
+      binding.conversationId,
+      [row.input_message_id, ...(row.original_id ? [row.original_id] : [])],
+    ],
+  );
+  const used = new Set<string>();
+  for (const outcome of outcomes) {
+    const resolution = outcome.create_resolution!;
+    const source = messages.rows.find((message) => message.id === resolution.source_message_id);
+    const authenticOriginal =
+      source?.id === row.original_id && source.content === row.original_text;
+    if (
+      !source ||
+      (source.id !== row.input_message_id && !authenticOriginal) ||
+      !resolution.source_quote ||
+      !source.content.includes(resolution.source_quote)
+    )
+      throw stateConflict('invalid create resolution source');
+    const refs = [
+      ...resolution.zero_write_invocation_ids,
+      resolution.created_invocation_id,
+      resolution.read_invocation_id,
+    ];
+    if (
+      outcome.status !== 'achieved' ||
+      !resolution.zero_write_invocation_ids.length ||
+      new Set(refs).size !== refs.length ||
+      refs.some(
+        (ref) =>
+          used.has(ref) ||
+          !outcome.receipt_refs.includes(ref) ||
+          goal.outcomes.some((other) => other !== outcome && other.receipt_refs.includes(ref)),
+      )
+    )
+      throw stateConflict('invalid or reused create resolution references');
+    refs.forEach((ref) => used.add(ref));
+    await validateCreateResolutionEvidence(client, binding, resolution, documents);
+    for (const id of resolution.zero_write_invocation_ids)
+      documents.effects.find((effect) => effect.invocation_id === id)!.superseded = true;
+    documents.effects.find(
+      (effect) => effect.invocation_id === resolution.created_invocation_id,
+    )!.read_invocation_id = resolution.read_invocation_id;
+  }
+}
+
 export async function validateGoalResult(
   client: PoolClient,
   context: ToolContext,
@@ -189,6 +274,7 @@ export async function validateGoalResult(
       throw stateConflict('goal omits an accepted reminder cancellation');
   }
   const documents = await readRunGoalDocumentEvidence(client, context);
+  await applyCreateResolutions(client, context, goal, documents);
   validateGoalDocuments(goal, documents);
   if (
     states.some((row) => row.state === 'unknown') &&

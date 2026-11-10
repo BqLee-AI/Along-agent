@@ -401,6 +401,11 @@ export async function startConversationRun(
             version: 1,
             authorization_revision: 'delegation/1',
             execution_lifecycle: 'request-bound',
+            ...(execution === 'harness' &&
+            (allowlist as readonly string[]).includes('workspace_create') &&
+            (allowlist as readonly string[]).includes('workspace_read')
+              ? { create_resolution_revision: 'create-resolution/1' as const }
+              : {}),
             input_message_id: userMessageId,
             received_at_utc: receivedAtUtc,
             request_anchor_utc: targetContinuation?.anchor ?? reminderDate.anchor,
@@ -453,6 +458,11 @@ export async function startConversationRun(
         (!targetContinuation || targetContinuation.createdArtifactReadAllowed) &&
         workspaceSet.grants.some((grant) => (grant.output_directories?.length ?? 0) > 0)
           ? { createdArtifactReadRevision: 'owner-created/1' as const }
+          : {}),
+        ...(delegation &&
+        (allowlist as readonly string[]).includes('workspace_create') &&
+        (allowlist as readonly string[]).includes('workspace_read')
+          ? { createResolutionRevision: 'create-resolution/1' as const }
           : {}),
         ...(trustedExecutionContext
           ? {

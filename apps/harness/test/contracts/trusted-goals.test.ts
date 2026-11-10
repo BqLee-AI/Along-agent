@@ -1584,6 +1584,64 @@ test('creation is available only to delegated starts with frozen output director
   expect(old.at(-1)).toMatchObject({ type: 'finish', error: { code: 'TOOL_DENIED' } });
 });
 
+test('frozen creation resolution prompts only eligible runs and preserves structurally valid assertions', async () => {
+  const output = {
+    workspace_id: 'out',
+    label: 'Output',
+    readable_paths: [],
+    writable_paths: [],
+    output_directories: ['reports'],
+  };
+  const resolution = {
+    source_message_id: inputId,
+    source_quote: '创建报告',
+    zero_write_invocation_ids: [randomUUID()],
+    created_invocation_id: randomUUID(),
+    read_invocation_id: randomUUID(),
+  };
+  const result = {
+    ...goal(),
+    outcomes: [{ ...goal().outcomes[0], create_resolution: resolution }],
+  };
+  for (const enabled of [false, true]) {
+    const requests = await nativeCase({
+      start: {
+        trusted_context: {
+          ...trusted,
+          workspaces: [output],
+          ...(enabled ? { create_resolution_revision: 'create-resolution/1' } : {}),
+        },
+        tools: [workspaceTool('workspace_create'), workspaceTool('workspace_read')],
+      },
+      model: (request) => {
+        const messages = JSON.stringify(request.messages);
+        expect(messages.includes('mathematical proof')).toBe(enabled);
+        return call('finish_goal', enabled ? result : goal());
+      },
+    });
+    expect(requests.at(-1)).toMatchObject({
+      type: 'finish_goal',
+      goal_result: enabled ? result : goal(),
+    });
+  }
+  for (const zero_write_invocation_ids of [
+    [],
+    [resolution.zero_write_invocation_ids[0], resolution.zero_write_invocation_ids[0]],
+  ]) {
+    const invalid = {
+      ...result,
+      outcomes: [
+        { ...result.outcomes[0], create_resolution: { ...resolution, zero_write_invocation_ids } },
+      ],
+    };
+    const requests = await nativeCase({
+      start: { budget: { max_iterations: 1, max_tokens: 1000 } },
+      model: () => call('finish_goal', invalid),
+    });
+    expect(requests.some((request) => request.type === 'finish_goal')).toBe(false);
+  }
+});
+
 test('unknown creation stops without another reservation or model step', async () => {
   const output = {
     workspace_id: 'out',

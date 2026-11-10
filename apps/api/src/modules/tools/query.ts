@@ -219,7 +219,12 @@ async function readDocumentEvidence(
   binding: RunBinding,
 ): Promise<
   Omit<DocumentRunEvidence, 'reads'> & {
-    reads: Array<DocumentRunEvidence['reads'][number] & { frozen_grant: unknown }>;
+    reads: Array<
+      DocumentRunEvidence['reads'][number] & {
+        frozen_grant: unknown;
+        authorization_revision: string | undefined;
+      }
+    >;
   }
 > {
   const { rows } = await client.query<{
@@ -249,7 +254,12 @@ async function readDocumentEvidence(
      ORDER BY created_at,invocation_id`,
     [binding.ownerId, binding.conversationId, binding.runId],
   );
-  const reads: Array<DocumentRunEvidence['reads'][number] & { frozen_grant: unknown }> = [];
+  const reads: Array<
+    DocumentRunEvidence['reads'][number] & {
+      frozen_grant: unknown;
+      authorization_revision: string | undefined;
+    }
+  > = [];
   const applies: DocumentRunEvidence['applies'][number][] = [];
   for (const row of rows) {
     const grant = workspaceGrantSchema.parse(row.frozen_context.workspaceGrant);
@@ -277,6 +287,7 @@ async function readDocumentEvidence(
         reads.push({
           ...identity,
           frozen_grant: grant,
+          authorization_revision: row.frozen_context.authorizationRevision,
           kind: 'read',
           relative_path: accepted.result.path,
           result: accepted.result,
@@ -600,6 +611,106 @@ export async function readRunGoalDocumentEvidence(
     ),
     resolvedApprovalInvocationIds,
   };
+}
+
+// Validate explicit model-proposed create links against immutable same-Run facts.
+// Matching facts establish provenance, not the user's semantic permission.
+export async function validateCreateResolutionEvidence(
+  client: PoolClient,
+  binding: RunBinding,
+  resolution: {
+    zero_write_invocation_ids: string[];
+    created_invocation_id: string;
+    read_invocation_id: string;
+  },
+  documents: RunGoalDocumentEvidence,
+): Promise<void> {
+  const ids = [...resolution.zero_write_invocation_ids, resolution.created_invocation_id];
+  const { rows } = await client.query<{
+    invocation_id: string;
+    state: string;
+    args_hash: string;
+    frozen_context: {
+      authorizationRevision?: string;
+      workspaceGrant?: unknown;
+      documentCreate?: NonNullable<ToolContext['documentCreate']>;
+    };
+    accepted_result: unknown;
+    created_at: string;
+    accepted_at: string;
+  }>(
+    `SELECT invocation_id,state,args_hash,frozen_context,accepted_result,
+      to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS created_at,
+      coalesce(to_char(accepted_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),'') AS accepted_at
+     FROM tool_invocations WHERE owner_id=$1 AND conversation_id=$2 AND run_id=$3
+       AND tool_id='workspace_create' AND invocation_id=ANY($4::uuid[])`,
+    [binding.ownerId, binding.conversationId, binding.runId, ids],
+  );
+  const created = rows.find((row) => row.invocation_id === resolution.created_invocation_id);
+  const effect = documents.effects.find(
+    (item) => item.invocation_id === resolution.created_invocation_id,
+  );
+  if (
+    !created ||
+    created.state !== 'completed' ||
+    !created.frozen_context.documentCreate ||
+    created.frozen_context.authorizationRevision !== 'delegation/1' ||
+    !effect ||
+    effect.operation !== 'create' ||
+    effect.status !== 'verified'
+  )
+    throw stateConflict('create resolution requires a verified creation');
+  const target = created.frozen_context.documentCreate;
+  const grant = workspaceGrantSchema.parse(created.frozen_context.workspaceGrant);
+  const applied = hydrateWorkspaceReadResult(created.accepted_result);
+  if (applied.status !== 'ok' || applied.result.kind !== 'create_applied')
+    throw stateConflict('create resolution requires an accepted creation');
+  for (const id of resolution.zero_write_invocation_ids) {
+    const prior = rows.find((row) => row.invocation_id === id);
+    const priorTarget = prior?.frozen_context.documentCreate;
+    const priorEffect = documents.effects.find((item) => item.invocation_id === id);
+    if (
+      !prior ||
+      prior.state !== 'completed' ||
+      !priorTarget ||
+      prior.frozen_context.authorizationRevision !== 'delegation/1' ||
+      !priorEffect ||
+      priorEffect.operation !== 'create' ||
+      priorEffect.status !== 'conflict' ||
+      !isDeepStrictEqual(prior.frozen_context.workspaceGrant, grant) ||
+      priorTarget.output_directory !== target.output_directory ||
+      priorTarget.directory_identity !== target.directory_identity ||
+      priorTarget.relative_path === target.relative_path ||
+      priorTarget.new_version !== target.new_version ||
+      priorTarget.content_base64 !== target.content_base64 ||
+      !documentEvidenceLater(created.created_at, prior.accepted_at)
+    )
+      throw stateConflict('invalid create resolution predecessor');
+    const result = hydrateWorkspaceReadResult(prior.accepted_result);
+    if (
+      result.status !== 'ok' ||
+      result.result.kind !== 'create_conflict' ||
+      result.result.reason !== 'already_exists' ||
+      !result.result.zero_write
+    )
+      throw stateConflict('create resolution predecessor is not a zero-write collision');
+  }
+  const evidence = await readDocumentEvidence(client, binding);
+  const read = evidence.reads.find((item) => item.invocation_id === resolution.read_invocation_id);
+  const { bytes, content } = decodeWorkspaceContent(target.content_base64);
+  if (
+    !read ||
+    read.authorization_revision !== 'delegation/1' ||
+    !isDeepStrictEqual(read.frozen_grant, grant) ||
+    read.workspace_id !== grant.workspace_id ||
+    read.relative_path !== target.relative_path ||
+    read.result.version !== target.new_version ||
+    read.result.content !== content ||
+    read.result.byte_length !== bytes.length ||
+    !documentEvidenceLater(read.created_at, created.accepted_at) ||
+    !documentEvidenceLater(read.accepted_at, created.accepted_at)
+  )
+    throw stateConflict('create resolution requires an independent later full read');
 }
 
 // Metadata is fetched/projected in PostgreSQL before any large body is read.

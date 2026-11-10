@@ -105,6 +105,66 @@ test('finish_goal carries outcomes and receipts, not a plain Run done', () => {
   ).toBe(false);
 });
 
+test('creation resolution is optional, strict and requires unique nonempty collision references', () => {
+  const resolution = {
+    source_message_id: id,
+    source_quote: '创建报告',
+    zero_write_invocation_ids: [id],
+    created_invocation_id: '00000000-0000-4000-8000-000000000002',
+    read_invocation_id: '00000000-0000-4000-8000-000000000003',
+  };
+  const request = {
+    protocol: 'harness/v6',
+    type: 'finish_goal',
+    request_ref: 'finish',
+    usage: { iterations: 1, tokens: 1 },
+    goal_result: {
+      status: 'completed',
+      outcomes: [
+        {
+          description: '创建报告',
+          status: 'achieved',
+          receipt_refs: [],
+          create_resolution: resolution,
+        },
+      ],
+      clarification: null,
+      answer: '已创建。',
+    },
+  };
+  expect(HarnessRequestSchema.safeParse(request).success).toBe(true);
+  for (const patch of [
+    { zero_write_invocation_ids: [] },
+    { zero_write_invocation_ids: [id, id] },
+    { zero_write_invocation_ids: ['invalid'] },
+    { source_quote: '' },
+    { extra: true },
+  ]) {
+    const outcome = {
+      ...request.goal_result.outcomes[0],
+      create_resolution: { ...resolution, ...patch },
+    };
+    expect(
+      HarnessRequestSchema.safeParse({
+        ...request,
+        goal_result: { ...request.goal_result, outcomes: [outcome] },
+      }).success,
+    ).toBe(false);
+  }
+  expect(
+    HarnessStartSchema.safeParse({
+      ...start,
+      trusted_context: { ...trusted, create_resolution_revision: 'create-resolution/1' },
+    }).success,
+  ).toBe(true);
+  expect(
+    HarnessStartSchema.safeParse({
+      ...start,
+      trusted_context: { ...trusted, create_resolution_revision: 'future/1' },
+    }).success,
+  ).toBe(false);
+});
+
 test('task observations preserve complete pagination and actual cancellation state', () => {
   expect(
     HarnessToolPayloadSchema.safeParse({

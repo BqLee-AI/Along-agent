@@ -197,6 +197,15 @@ export function RunStatusPanel({ task }: { task: ConversationTask }) {
                           ? '创建未能发布，此次未写入。'
                           : '文件效果未知，可能已写入；不可自动重做。'}
                 </p>
+                {effect.status === 'conflict' &&
+                effect.operation === 'create' &&
+                goalResult?.outcomes.some((outcome) =>
+                  outcome.create_resolution?.zero_write_invocation_ids.includes(
+                    effect.invocation_id,
+                  ),
+                ) ? (
+                  <p>此次撞名未写入；该目标的改名结果见已核对的文件及最终答复。</p>
+                ) : null}
                 <details className="text-xs text-muted-foreground">
                   <summary className="min-h-8 content-center">查看文件证据</summary>
                   <p>

@@ -6,7 +6,7 @@
 >
 > 时间失败、有限真实规则与 Web 候选选择按 #30 合同；安全 spec Scenario 1.2 的 typed failed 不得改成 completed。合同与实际验收记录分开。
 
-> 本人委托：Web 普通 Agent 显式请求 `authorization_revision:'delegation/1'` 的 `harness`；合格新 Run 冻结本人登记集合，允许可选子集，具体工具由实际冻结 profile 决定。可信上下文、GoalResult、`harness/v6` 与 SSE `v2` 配套；省略授权修订仍为 legacy。生命周期为 `request-bound`，不承诺后台继续；有限新文件创建和 server-owned 均未实现，见 [design/20](../../design/20-goal-scoped-delegation.md)。合同不代表真实路径已验收。
+> 本人委托：Web 普通 Agent 显式请求 `authorization_revision:'delegation/1'` 的 `harness`；合格新 Run 冻结本人登记集合，允许可选子集，具体工具由实际冻结 profile 决定。可信上下文、GoalResult、`harness/v6` 与 SSE `v2` 配套；省略授权修订仍为 legacy。生命周期为 `request-bound`，不承诺后台继续；有限新文件创建须冻结输出目录资格，见 [design/20](../../design/20-goal-scoped-delegation.md)。合同不代表真实路径已验收。
 
 ## 1. 路由
 
@@ -58,6 +58,8 @@ Harness 正文来自真实 provider SSE：原生逐次提交增量，TS 持久�
 
 新委托的 v6 `start.trusted_context` 由服务端冻结身份关联、请求锚、偏好及真实能力后进入模型 system 层，不从用户文本或工具观察取得权威；legacy 在同一 v6 wire 显式传 `trusted_context:null`，继续原工具、预算、快照和批准语义。旧 v5 执行器不能消费 v6；snapshot 仍为2，不回写旧快照。新委托通过 `finish_goal` 提交 `GoalResult={status,outcomes,clarification,answer}`：状态为 completed/partial/blocked/cancelled/unknown，逐项状态为 achieved/not_done/blocked/unknown，`receipt_refs` 指向真实已接受调用 UUID，clarification 为空或 typed 缺口。TS 校验归属、接受结果和真实设置事实，将目标结果、最终 answer 消息、终结事件与 Run/attempt 终态原子保存；模型正文、工具完成或 Run done 均不独立证明目标完成。
 
+名称未固定时，目标结果可附带创建撞名恢复声明，引用真实用户消息、零写冲突、后续创建和独立全文回读。服务端验证来源和效果事实；声明反映模型对委托的理解，不能单凭引用或相同内容独立证明语义授权。原冲突不会改写为成功。
+
 新委托事件显式 `protocol_version:'v2'`：`thread.started` 带 `stream_protocol_version:'v2'`、`authorization_revision` 和 `execution_lifecycle`，三个终结事件均带持久 `goal_result`；legacy 和历史 `v1` 保持原 strict shape 可读，不能往 v1 暗塞字段。事件词和游标语义不变。
 
 GET/同入站键是只读补读，既不分配 attempt 也不启动 native/工具。running 同键409；suspended 可回已存前缀而不恢复。执行恢复只经 §3 的明确等待接口；checkpoint/fencing 不保证任意外部写恰好一次，unknown 不盲重放。
@@ -92,7 +94,7 @@ data: {"protocol_version":"v1","seq":12,"type":"approval_required","payload":{"c
 - `waiting=null | {checkpoint_id,invocation_id,approval_id}`；文档等待额外带 `approval_kind:"document"`，旧 task 等待不加此字段。`can_resume` 表示当前是否可显式继续，不泄漏凭据/内部推理；
 - 可选 `workspace={workspace_id,label,readable_paths,writable_paths}` 为接纳 Run 时冻结的安全摘要，不是当前登记的动态替代，也不返回 root/物理 identity/登记摘要。历史缺摘要不从当前登记补造；
 - 新 delegation 可投影 `workspaces:[{workspace_id,label,readable_paths,writable_paths}]`、`authorization_revision:'delegation/1'`、`execution_lifecycle:'request-bound'` 和 `goal_result:GoalResult|null`；均来自原 Run 冻结事实，不公开 owner、root、digest 或 root identity，不按当前登记补造。legacy 的 `workspace` 和历史 shape 不变。
-- `document_effects` 可选只读数组：每项含 `workspace_id,path,invocation_id,read_invocation_id,version,status`，其中 `read_invocation_id` 和 `version` 可空；状态为 `applied|verified|conflict|unknown`。applied 不是 verified；后者须同目标的独立新全文读取证据。此投影不是动作入口，Run done 也不等于目标完成。
+- `document_effects` 可选只读数组：每项含 `workspace_id,path,invocation_id,read_invocation_id,version,status` 和可选 `operation`，其中 `read_invocation_id` 和 `version` 可空；状态为 `applied|verified|conflict|failed|unknown`。applied 不是 verified；后者须同目标的独立新全文读取证据。此投影不是动作入口，Run done 也不等于目标完成。
 - `created_reminders` 为新 delegation 的可选只读数组，每项为真实 `task_created` 冻结结果加 `invocation_id`，包含 task ID、保存状态、原墙上时间/时区/fold/偏移/规则身份/UTC和备注。读取核对真实任务与接受结果，不读取模型自报事实。Web 提供任务详情链接和创建回执；此数组不声明实时排期、触发或通知状态。
 - `reminder_time_errors` 为该 delegation Run 的可选只读数组，每项含真实 `create_reminder` 接受结果中的 `invocation_id/error`，不表示成功创建。遇到已持久 time 澄清且实际 DST 候选唯一时，Web 复用 first/second 选择，保留原文及真实候选时区并显式关联前序 Run；提交的是用户选择，不是批准或前端计算的 UTC。不同候选来源不自动合并。
 - owner-scoped，不存在或他人 Run 返回404。读取不执行，不因状态可继续而自动唤醒。

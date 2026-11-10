@@ -206,14 +206,28 @@ maybe('workspace create once permit', () => {
       toolId: input.toolId,
       args: unknownArgs,
     });
-    await database.pool.query(
-      "UPDATE tool_invocations SET state='unknown' WHERE invocation_id=$1",
-      [unknown.invocationId],
-    );
+    await database.pool.query(`
+      CREATE FUNCTION fail_create_acceptance() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF OLD.state = 'unknown' AND NEW.state = 'completed' THEN
+          RAISE EXCEPTION 'injected acceptance failure';
+        END IF;
+        RETURN NEW;
+      END $$;
+      CREATE TRIGGER fail_create_acceptance BEFORE UPDATE ON tool_invocations
+        FOR EACH ROW EXECUTE FUNCTION fail_create_acceptance();
+    `);
+    const lost = await invokeTool(database.pool, ctx, {
+      ...unknown,
+      toolId: input.toolId,
+      args: unknownArgs,
+    });
+    expect(lost).toMatchObject({ status: 'unknown' });
+    expect(await readFile(join(root, 'out', 'nested', 'unknown.txt'), 'utf8')).toBe(args.content);
+    await database.pool.query('DROP TRIGGER fail_create_acceptance ON tool_invocations');
     expect(
       await invokeTool(database.pool, ctx, { ...unknown, toolId: input.toolId, args: unknownArgs }),
-    ).toMatchObject({ status: 'unknown' });
-    await expect(readFile(join(root, 'out', 'nested', 'unknown.txt'))).rejects.toThrow();
+    ).toMatchObject({ status: 'unknown', replayed: true });
     await expect(
       reserveToolInvocation(database.pool, ctx, {
         callKey: 'after-unknown',

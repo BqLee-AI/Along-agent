@@ -140,6 +140,36 @@ describe('explicit delegation stream decoding', () => {
     },
   );
 
+  it('preserves explicit creation resolutions and rejects malformed collision references', () => {
+    const resolution = {
+      source_message_id: conversationId,
+      source_quote: '创建报告',
+      zero_write_invocation_ids: [runId],
+      created_invocation_id: receiptId,
+      read_invocation_id: conversationId,
+    };
+    const completed = terminals[0]!;
+    const withResolution = (value: unknown) => ({
+      ...completed,
+      payload: {
+        ...completed.payload,
+        goal_result: { ...goal, outcomes: [{ ...goal.outcomes[0], create_resolution: value }] },
+      },
+    });
+    expect(ThreadEventSchema.safeParse(withResolution(resolution)).success).toBe(true);
+    for (const patch of [
+      { zero_write_invocation_ids: [] },
+      { zero_write_invocation_ids: [runId, runId] },
+      { zero_write_invocation_ids: ['invalid'] },
+      { source_quote: '' },
+      { extra: true },
+    ]) {
+      expect(ThreadEventSchema.safeParse(withResolution({ ...resolution, ...patch })).success).toBe(
+        false,
+      );
+    }
+  });
+
   it('rejects malformed receipt references and bounded or unknown goal fields', () => {
     const completed = terminals[0]!;
     for (const receipt_refs of [

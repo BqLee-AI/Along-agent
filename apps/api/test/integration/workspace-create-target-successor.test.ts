@@ -5,11 +5,17 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import { validateGoalDocuments } from '../../src/modules/conversations/goal-result.js';
+import {
+  validateGoalDocuments,
+  validateGoalResult,
+} from '../../src/modules/conversations/goal-result.js';
 import { startConversationRun } from '../../src/modules/conversations/service.js';
 import { loadTimeContext } from '../../src/modules/time/context.js';
 import { invokeTool, reserveToolInvocation } from '../../src/modules/tools/gateway.js';
-import { readRunGoalDocumentEvidence } from '../../src/modules/tools/query.js';
+import {
+  readRunGoalDocumentEvidence,
+  validateCreateResolutionEvidence,
+} from '../../src/modules/tools/query.js';
 import { configureWorkspaceRegistry } from '../../src/modules/workspaces/service.js';
 import {
   createIntegrationDatabase,
@@ -138,6 +144,110 @@ maybe('creation collision target identity', () => {
           answer: 'Created b.',
         });
         expect(() => validateGoalDocuments(completed, documents)).toThrow();
+        if (rawText.includes('both out/a.txt')) {
+          const partial = {
+            ...completed,
+            status: 'partial' as const,
+            outcomes: [
+              completed.outcomes[0]!,
+              {
+                description: 'Create a',
+                status: 'not_done' as const,
+                receipt_refs: [conflict.invocationId],
+              },
+            ],
+            answer: 'Created b; a already exists and was not overwritten.',
+          };
+          expect(await validateGoalResult(client, ctx, partial)).toEqual(partial);
+        }
+        if (rawText.includes('choose another name')) {
+          const run = await client.query<{ input_message_id: string }>(
+            'SELECT input_message_id FROM agent_runs WHERE id=$1',
+            [ctx.runId],
+          );
+          const resolution = {
+            source_message_id: run.rows[0]!.input_message_id,
+            source_quote: rawText,
+            zero_write_invocation_ids: [conflict.invocationId],
+            created_invocation_id: other.invocationId,
+            read_invocation_id: read.invocationId,
+          };
+          const resolved = {
+            ...completed,
+            outcomes: [
+              {
+                ...completed.outcomes[0]!,
+                receipt_refs: [conflict.invocationId, other.invocationId, read.invocationId],
+                create_resolution: resolution,
+              },
+            ],
+          };
+          expect(await validateGoalResult(client, ctx, resolved)).toEqual(resolved);
+          for (const patch of [
+            { source_message_id: randomUUID() },
+            { source_quote: 'not in the user message' },
+            { zero_write_invocation_ids: [randomUUID()] },
+            { created_invocation_id: conflict.invocationId },
+            { read_invocation_id: conflict.invocationId },
+          ]) {
+            const bad = {
+              ...resolved,
+              outcomes: [
+                {
+                  ...resolved.outcomes[0]!,
+                  create_resolution: { ...resolution, ...patch },
+                },
+              ],
+            };
+            await expect(validateGoalResult(client, ctx, bad)).rejects.toThrow();
+          }
+          const legacyClient = new Proxy(client, {
+            get(target, property) {
+              if (property !== 'query') return Reflect.get(target, property, target);
+              return async (text: string, values: unknown[]) => {
+                const result = await target.query(text, values);
+                if (text.includes('AS revision') && text.includes('original_id'))
+                  result.rows = result.rows.map((row) => ({ ...row, revision: null }));
+                return result;
+              };
+            },
+          });
+          await expect(validateGoalResult(legacyClient, ctx, resolved)).rejects.toThrow();
+          for (const scenario of ['unknown', 'old-read']) {
+            const alteredClient = new Proxy(client, {
+              get(target, property) {
+                if (property !== 'query') return Reflect.get(target, property, target);
+                return async (text: string, values: unknown[]) => {
+                  const result = await target.query(text, values);
+                  if (
+                    scenario === 'unknown' &&
+                    text.includes("tool_id='workspace_create' AND invocation_id=ANY")
+                  )
+                    result.rows = result.rows.map((row) =>
+                      row.invocation_id === conflict.invocationId
+                        ? { ...row, state: 'unknown' }
+                        : row,
+                    );
+                  if (
+                    scenario === 'old-read' &&
+                    text.includes("tool_id IN ('workspace_read','workspace_apply_replace')")
+                  )
+                    result.rows = result.rows.map((row) =>
+                      row.invocation_id === read.invocationId
+                        ? { ...row, created_at: '2000-01-01T00:00:00.000000Z' }
+                        : row,
+                    );
+                  return result;
+                };
+              },
+            });
+            await expect(validateGoalResult(alteredClient, ctx, resolved)).rejects.toThrow();
+          }
+          const after = await readRunGoalDocumentEvidence(client, ctx);
+          expect(
+            after.effects.find((item) => item.invocation_id === conflict.invocationId),
+          ).toMatchObject({ status: 'conflict', superseded: false });
+        }
         const stored = await client.query(
           `SELECT frozen_context->'documentCreate'->>'replaces_invocation_id' AS predecessor
            FROM tool_invocations WHERE invocation_id=$1`,
@@ -177,6 +287,37 @@ maybe('creation collision target identity', () => {
           ]),
         );
         expect(() => validateGoalDocuments(completed, historical)).toThrow();
+        if (rawText.includes('choose another name')) {
+          await writeFile(join(root, 'out', 'c.txt'), 'pre-existing');
+          const sameConflict = await call('workspace_create', create('c.txt'));
+          expect(sameConflict.result).toMatchObject({
+            status: 'ok',
+            result: { kind: 'create_conflict', zero_write: true },
+          });
+          await rm(join(root, 'out', 'c.txt'));
+          const sameCreate = await call('workspace_create', create('c.txt'));
+          expect(sameCreate.result).toMatchObject({
+            status: 'ok',
+            result: { kind: 'create_applied' },
+          });
+          const sameRead = await call('workspace_read', {
+            workspace_id: 'docs',
+            path: 'out/c.txt',
+          });
+          const current = await readRunGoalDocumentEvidence(client, ctx);
+          await expect(
+            validateCreateResolutionEvidence(
+              client,
+              ctx,
+              {
+                zero_write_invocation_ids: [sameConflict.invocationId],
+                created_invocation_id: sameCreate.invocationId,
+                read_invocation_id: sameRead.invocationId,
+              },
+              current,
+            ),
+          ).rejects.toThrow('invalid create resolution predecessor');
+        }
       } finally {
         client.release();
       }
