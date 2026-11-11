@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { createServer, type Server } from 'node:http';
+import { createServer } from 'node:http';
+import type { Server } from 'node:http';
 import { once } from 'node:events';
 import {
   cancellationAllowed,
@@ -13,9 +14,10 @@ import {
   taskEventsPath,
   taskFilter,
   taskListPath,
-  type PageSnapshot,
-} from '../src/features/reminders/data';
-import { TaskDetailSchema, type TaskEventItem, type TaskListItem } from '../src/lib/types';
+} from '../src/features/reminders/model/data';
+import type { PageSnapshot } from '../src/features/reminders/model/data';
+import { TaskDetailSchema } from '../src/features/reminders/model/types';
+import type { TaskEventItem, TaskListItem } from '../src/features/reminders/model/types';
 
 const taskId = '11111111-1111-4111-8111-111111111111';
 const otherId = '22222222-2222-4222-8222-222222222222';

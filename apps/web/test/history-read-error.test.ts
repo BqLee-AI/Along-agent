@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { readEnvelope } from '../src/lib/conversation-run';
+import { readEnvelope } from '../src/shared/http/client';
 
 describe('history public HTTP read errors', () => {
   it('retains HTTP category, public code and request_id for partial-resource feedback', async () => {

@@ -4,7 +4,7 @@ import type { LockedRun } from '../src/modules/conversations/repository.js';
 import { viewOf } from '../src/modules/conversations/run-state.js';
 import * as query from '../src/modules/tools/query.js';
 
-const client = {} as PoolClient;
+const client = { query: async () => ({ rows: [] }) } as unknown as PoolClient;
 const run = {
   id: 'run',
   owner_id: 'owner',
@@ -61,7 +61,7 @@ describe('document RunView projection', () => {
     const reminders = spyOn(query, 'readRunCreatedReminders').mockResolvedValue([]);
     const timeErrors = spyOn(query, 'readRunReminderTimeErrors').mockResolvedValue([]);
     try {
-      const view = await viewOf(client, locked);
+      const view = await viewOf(client, locked, false);
       expect(view.document_effects).toEqual([
         {
           status: 'verified',
@@ -115,7 +115,7 @@ describe('document RunView projection', () => {
     const reminders = spyOn(query, 'readRunCreatedReminders').mockResolvedValue([]);
     const timeErrors = spyOn(query, 'readRunReminderTimeErrors').mockResolvedValue([]);
     try {
-      expect((await viewOf(client, locked)).document_effects).toEqual([
+      expect((await viewOf(client, locked, false)).document_effects).toEqual([
         {
           status: 'failed',
           operation: 'create',
@@ -136,7 +136,11 @@ describe('document RunView projection', () => {
   it('does not add document effects or query document facts for old Runs', async () => {
     const projection = spyOn(query, 'readRunGoalDocumentEvidence');
     try {
-      const view = await viewOf(client, { ...locked, run: { ...run, frozen_context: null } });
+      const view = await viewOf(
+        client,
+        { ...locked, run: { ...run, frozen_context: null } },
+        false,
+      );
       expect(view.document_effects).toBeUndefined();
       expect(projection).not.toHaveBeenCalled();
     } finally {
@@ -151,7 +155,11 @@ describe('document RunView projection', () => {
     try {
       const frozen = { ...run.frozen_context! };
       delete frozen.workspaceGrants;
-      const view = await viewOf(client, { ...locked, run: { ...run, frozen_context: frozen } });
+      const view = await viewOf(
+        client,
+        { ...locked, run: { ...run, frozen_context: frozen } },
+        false,
+      );
       expect(view.document_effects).toBeUndefined();
       expect(view.workspaces).toBeUndefined();
       expect(projection).not.toHaveBeenCalled();

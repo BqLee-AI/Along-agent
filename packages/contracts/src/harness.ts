@@ -623,11 +623,25 @@ export const HarnessCancelSchema = z
     reason: z.string().max(512),
   })
   .strict();
+export const RunModelSelectionSchema = z.discriminatedUnion('state', [
+  z
+    .object({
+      state: z.literal('available'),
+      provider_id: uuid,
+      provider_name: z.string(),
+      model_id: z.string().min(1),
+    })
+    .strict(),
+  z.object({ state: z.literal('legacy_unavailable') }).strict(),
+  z.object({ state: z.literal('not_applicable') }).strict(),
+]);
+
 export const RunViewSchema = z
   .object({
     run_id: uuid,
     conversation_id: uuid,
     execution: ExecutionKindSchema,
+    model_selection: RunModelSelectionSchema,
     status: RunStatusSchema,
     attempt_id: uuid,
     attempt_no: z.number().int().positive(),

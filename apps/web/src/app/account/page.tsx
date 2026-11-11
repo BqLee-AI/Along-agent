@@ -1,9 +1,10 @@
-import AccountScreen from '@/features/account/AccountScreen';
-import type { PageQuery } from '../../lib/account-navigation';
+import AccountScreen from '@/features/account/view/AccountScreen';
+import { loadAccountScreen } from '@/features/account/viewmodel/account-screen';
+import type { PageQuery } from '@/shared/session/navigation';
 
 export const dynamic = 'force-dynamic';
 
 export default async function AccountPage({ searchParams }: { searchParams: Promise<PageQuery> }) {
   const query = await searchParams;
-  return <AccountScreen view="account" returnTo={query.returnTo} />;
+  return <AccountScreen state={await loadAccountScreen('account', query.returnTo)} />;
 }

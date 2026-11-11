@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import type { WorkspaceGrant } from '@along/contracts';
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
 import type { ConversationDeps } from '../../src/modules/conversations/contracts.js';
+import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
 import {
   cancelConversationRun,
   getRunView,
@@ -17,6 +18,7 @@ import {
   configureWorkspaceRegistry,
   resolveFrozenWorkspaceGrant,
 } from '../../src/modules/workspaces/service.js';
+import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import {
   createIntegrationDatabase,
   databaseUrl,
@@ -35,10 +37,11 @@ maybe('delegated conversation workspace admission against PostgreSQL', () => {
   let database: IntegrationDatabase;
   let deps: ConversationDeps;
   const directories: string[] = [];
+  const configuredOwners = new Set<string>();
 
   beforeAll(async () => {
     database = await createIntegrationDatabase();
-    deps = {
+    deps = controlledModelDeps({
       pool: database.pool,
       timeContext: loadTimeContext('fixture-v1'),
       harness: {
@@ -52,8 +55,8 @@ maybe('delegated conversation workspace admission against PostgreSQL', () => {
             reply: { message: { content: 'answer', tool_calls: [] }, usage: null },
           };
         },
-      },
-    };
+      } satisfies HarnessServices,
+    });
   });
   afterEach(async () => {
     await configureWorkspaceRegistry([]);
@@ -78,6 +81,10 @@ maybe('delegated conversation workspace admission against PostgreSQL', () => {
     };
   }
   async function start(ownerId: string, input: unknown = body, key: string | null = null) {
+    if (!configuredOwners.has(ownerId)) {
+      await configureTestModel(database.pool, ownerId, 'admission-test-model');
+      configuredOwners.add(ownerId);
+    }
     return startConversationRun(deps, ownerId, randomUUID(), input, key);
   }
   async function stored(runId: string) {

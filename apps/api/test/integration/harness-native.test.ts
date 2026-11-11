@@ -1,3 +1,4 @@
+import { configureTestModel } from '../helpers/model-selection.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
@@ -229,8 +230,9 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
             completionCap: 1024,
             model: 'fixture-transport-only',
           }),
-          model,
         },
+        // Controlled HTTP protocol fixture, not SDK or outbound-policy coverage.
+        modelTransport: async () => ({ model, measure: measureHarnessContext }),
       }).catch(() => res.destroy());
     });
     base = await listen(server);
@@ -248,6 +250,7 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
 
   async function actor() {
     const session = await seedSession(database.pool, { timezoneId: 'Europe/London' });
+    await configureTestModel(database.pool, session.userId, 'fixture-transport-only');
     return {
       session,
       headers: {
@@ -834,7 +837,6 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
         maxIterations: 8,
         maxTokens: 8000,
         contextPolicy,
-        model,
       },
       start: HarnessStartSchema.parse({
         protocol: HARNESS_PROTOCOL_VERSION,

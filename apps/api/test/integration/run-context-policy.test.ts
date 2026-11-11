@@ -12,14 +12,16 @@ import {
 import { readHarnessMessages } from '../../src/modules/conversations/repository.js';
 import { getRunView } from '../../src/modules/conversations/harness-authority.js';
 import type { ConversationDeps } from '../../src/modules/conversations/contracts.js';
+import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
 import { startConversationRun } from '../../src/modules/conversations/service.js';
 import { loadTimeContext } from '../../src/modules/time/context.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
+import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 
 const maybe = databaseUrl ? describe : describe.skip;
 const policy = createContextPolicy({ completionCap: 512, model: 'context-fixture' });
 function dependencies(pool: Pool, contextPolicy = policy): ConversationDeps {
-  return {
+  return controlledModelDeps({
     pool,
     timeContext: loadTimeContext('fixture-v1'),
     harness: {
@@ -33,8 +35,8 @@ function dependencies(pool: Pool, contextPolicy = policy): ConversationDeps {
           reply: { message: { content: 'unused', tool_calls: [] }, usage: null },
         };
       },
-    },
-  };
+    } satisfies HarnessServices,
+  });
 }
 
 maybe('harness frozen admission context', () => {
@@ -87,6 +89,7 @@ maybe('harness frozen admission context', () => {
       `${ownerId}@context.test`,
     ]);
     await admitTestUser(pool, ownerId);
+    await configureTestModel(pool, ownerId, 'context-fixture');
     await pool.query(
       `INSERT INTO conversations(id,owner_id,anchor_received_at_utc,confirmed_timezone_id)
       VALUES($1,$2,'2026-10-01T00:00:00Z','Asia/Shanghai')`,
@@ -158,6 +161,7 @@ maybe('harness frozen admission context', () => {
       `${ownerId}@context.test`,
     ]);
     await admitTestUser(database.pool, ownerId);
+    await configureTestModel(database.pool, ownerId, 'context-fixture');
     const body = { execution: 'harness', raw_text: 'frozen policy input' };
     const started = await startConversationRun(
       dependencies(database.pool),
@@ -174,13 +178,15 @@ maybe('harness frozen admission context', () => {
       model: 'changed-model',
       reserveTokens: 100,
     });
-    await expect(
-      startConversationRun(dependencies(database.pool, changed), ownerId, randomUUID(), body, key),
-    ).rejects.toMatchObject({
-      httpStatus: 409,
-      errorCode: 'STATE_CONFLICT',
-      details: { run_id: started.runId, status: 'running' },
-    });
+    const replay = await startConversationRun(
+      dependencies(database.pool, changed),
+      ownerId,
+      randomUUID(),
+      body,
+      key,
+    );
+    expect(replay.runId).toBe(started.runId);
+    expect(replay.context).toBeNull();
     expect(await readRunContextPolicy(database.pool, ownerId, started.runId)).toEqual(policy);
     expect(
       (await database.pool.query('SELECT * FROM agent_runs WHERE id=$1', [started.runId])).rows[0],

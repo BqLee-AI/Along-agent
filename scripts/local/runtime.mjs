@@ -204,7 +204,7 @@ async function runtimeReport(config, directory) {
     webUrl: config.origin,
     account: 'unverified',
     workspace,
-    model: config.model ? 'configured_unverified' : 'unconfigured',
+    model: 'user_managed_unverified',
   };
 }
 
@@ -284,7 +284,7 @@ export async function initializeInstallation(file, initialInput) {
           phase: 'prepared',
           schema,
           account: 'unverified',
-          model: config.model ? 'configured_unverified' : 'unconfigured',
+          model: 'user_managed_unverified',
           workspace: config.registryFile ? 'unverified' : 'unconfigured',
         };
       } finally {

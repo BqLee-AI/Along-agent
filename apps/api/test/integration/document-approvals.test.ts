@@ -38,8 +38,10 @@ import { readRunDocumentEvidence } from '../../src/modules/tools/query.js';
 import { seedAdmittedSession as seedSession } from './setup.js';
 import { startConversationRun } from '../../src/modules/conversations/service.js';
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
+import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
 import { loadTimeContext } from '../../src/modules/time/context.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
+import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 
 const maybe = databaseUrl ? describe : describe.skip;
 maybe('document approval PostgreSQL authority and frozen content', () => {
@@ -57,6 +59,7 @@ maybe('document approval PostgreSQL authority and frozen content', () => {
   });
   async function fresh(content = '\uFEFFprefix\r\nold  \r\nsuffix\n') {
     const actor = await seedSession(pool, {});
+    await configureTestModel(pool, actor.userId, 'approval-test-model');
     const root = await mkdtemp(join(tmpdir(), 'along-document-approval-test-'));
     roots.push(root);
     await writeFile(join(root, 'memo.txt'), content);
@@ -73,7 +76,7 @@ maybe('document approval PostgreSQL authority and frozen content', () => {
     ]);
     const workspaceGrant = getWorkspaceGrant(actor.userId, 'document-test');
     const started = await startConversationRun(
-      {
+      controlledModelDeps({
         pool,
         timeContext: loadTimeContext('fixture-v1'),
         harness: {
@@ -84,8 +87,8 @@ maybe('document approval PostgreSQL authority and frozen content', () => {
           model: async function* () {
             throw new Error('approval tests never invoke a model');
           },
-        },
-      },
+        } satisfies HarnessServices,
+      }),
       actor.userId,
       randomUUID(),
       {

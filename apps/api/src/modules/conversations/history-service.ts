@@ -28,6 +28,8 @@ import {
 } from './history-repository.js';
 import type { HistoryBoundary } from './history-repository.js';
 import { isActiveOwner } from '../identity/preferences.js';
+import { withClient } from '../../db/transaction.js';
+import { getRunSelections } from '../model-providers/service.js';
 
 async function requireEligibleHistoryOwner(pool: Pool, ownerId: string): Promise<void> {
   const client = await pool.connect();
@@ -198,11 +200,23 @@ export async function getConversationRuns(
   const cursor = cursorOf(raw, 'runs', ownerId, conversationId);
   const rows = await listRunHistory(pool, { ownerId, conversationId, cursor, limit, runId });
   if (runId && rows.length === 0) throw notFound('Run not found');
+  const selections = await withClient(pool, (client) =>
+    getRunSelections(
+      client,
+      ownerId,
+      rows.slice(0, limit).map((row) => row.run_id),
+    ),
+  );
   const items = rows.slice(0, limit).map((row) => ({
     run_id: row.run_id,
     conversation_id: row.conversation_id,
     execution: row.execution,
     status: row.status,
+    model_selection:
+      selections.get(row.run_id) ??
+      (row.execution === 'business'
+        ? { state: 'not_applicable' as const }
+        : { state: 'legacy_unavailable' as const }),
     created_at: row.created_at,
     ended_at: row.ended_at,
     original: row.original,

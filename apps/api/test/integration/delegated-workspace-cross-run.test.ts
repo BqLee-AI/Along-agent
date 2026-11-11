@@ -8,6 +8,7 @@ import { startConversationRun } from '../../src/modules/conversations/service.js
 import { loadTimeContext } from '../../src/modules/time/context.js';
 import { invokeTool, reserveToolInvocation } from '../../src/modules/tools/gateway.js';
 import { configureWorkspaceRegistry } from '../../src/modules/workspaces/service.js';
+import { configureTestModel } from '../helpers/model-selection.js';
 import {
   createIntegrationDatabase,
   databaseUrl,
@@ -31,6 +32,8 @@ maybe('cross-run created workspace files', () => {
   it('only exposes accepted creations to the same owner under current output authority and unchanged identities', async () => {
     const actor = await seedAdmittedSession(database.pool, {});
     const other = await seedAdmittedSession(database.pool, {});
+    await configureTestModel(database.pool, actor.userId, 'test');
+    await configureTestModel(database.pool, other.userId, 'test');
     const root = await mkdtemp(join(tmpdir(), 'along-cross-run-create-'));
     roots.push(root);
     await mkdir(join(root, 'output'));

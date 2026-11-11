@@ -51,7 +51,6 @@ import {
   findIdempotency,
   freezeConversationTimezone,
   getConversation,
-  getRunStatus,
   insertAttempt,
   insertIdempotency,
   insertMessage,
@@ -71,6 +70,7 @@ import { acceptTargetContinuation } from './target-continuation.js';
 import { isActiveOwner, readUserPreferences } from '../identity/preferences.js';
 import { writeAuthorizedEvent } from './stream-authorization.js';
 import { withRunTransaction, type RunOwnership } from './run-ownership.js';
+import { resolveSelection, bindRunSelection } from '../model-providers/service.js';
 
 const AGENT_REVISION = 'assistant/r1';
 const BUSINESS_MAX_ITERATIONS = 10;
@@ -109,6 +109,7 @@ function requestHashOf(input: {
   workspaceIds?: string[];
   clarificationOfRunId?: string;
   authorizationRevision?: 'delegation/1';
+  modelSelection?: { provider_id: string; model_id: string };
 }): string {
   const material: unknown[] = [
     input.conversationId ?? null,
@@ -120,6 +121,10 @@ function requestHashOf(input: {
   if (input.workspaceIds !== undefined) material.push([...input.workspaceIds].sort());
   if (input.clarificationOfRunId !== undefined) material.push(input.clarificationOfRunId);
   if (input.authorizationRevision) material.push(input.authorizationRevision);
+  if (input.modelSelection !== undefined)
+    material.push({
+      model_selection: [input.modelSelection.provider_id, input.modelSelection.model_id],
+    });
   const canonical = JSON.stringify(material);
   return createHash('sha256')
     .update(
@@ -162,6 +167,7 @@ export async function startConversationRun(
     timezone,
     fold: input.fold_choice,
     execution,
+    ...(input.model_selection !== undefined ? { modelSelection: input.model_selection } : {}),
     ...(input.authorization_revision
       ? { authorizationRevision: input.authorization_revision }
       : {}),
@@ -195,6 +201,11 @@ export async function startConversationRun(
     started = await withRunTransaction(pool, ownership, async (client: PoolClient) => {
       if (!(await isActiveOwner(client, ownerId, { lock: 'share' })))
         throw forbidden('owner authorization revoked');
+      // Serialize the owner/key before selection resolution so a concurrent
+      // replay never observes a changed or deleted default before the winner.
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+        JSON.stringify([ownerId, key]),
+      ]);
       const existing = await findIdempotency(client, ownerId, key);
       if (existing) {
         if (existing.request_hash !== requestHash) {
@@ -503,9 +514,20 @@ export async function startConversationRun(
         frozenContext,
         inputMessageId: userMessageId,
       });
+      const selected =
+        execution === 'harness'
+          ? await resolveSelection(client, ownerId, input.model_selection)
+          : null;
+      if (selected) await bindRunSelection(client, ownerId, runId, selected);
       const contextPolicy =
         execution === 'harness'
-          ? await ensureRunContextPolicy(client, ownerId, runId, deps.harness!.contextPolicy)
+          ? await ensureRunContextPolicy(client, ownerId, runId, {
+              ...deps.harness!.contextPolicy,
+              model_binding: {
+                ...deps.harness!.contextPolicy.model_binding,
+                model: selected!.model_id,
+              },
+            })
           : undefined;
       await insertAttempt(client, {
         attemptId,
@@ -567,7 +589,11 @@ export async function startConversationRun(
     if (ownership) await deps.runDriver!.release(ownership);
     const pgError = pgErrorOf(err);
     if (pgError?.code === '23505' && pgError.constraint === 'conversation_idempotency_pkey') {
-      const existing = await findIdempotency(pool, ownerId, key);
+      const existing = await withTransaction(pool, async (client) => {
+        if (!(await isActiveOwner(client, ownerId, { lock: 'share' })))
+          throw forbidden('owner authorization revoked');
+        return findIdempotency(client, ownerId, key);
+      });
       if (!existing) throw err;
       if (existing.request_hash !== requestHash) {
         throw stateConflict('idempotency key reused with a different body') as HttpError;
@@ -585,26 +611,7 @@ export async function startConversationRun(
 
   if (started.replayRunId && ownership) await deps.runDriver!.release(ownership);
   if (started.replayRunId) {
-    const status = await getRunStatus(pool, ownerId, started.replayRunId);
     const replay = await listRunEvents(pool, ownerId, started.replayRunId);
-    const terminal = replay.at(-1)?.type;
-    const hasTerminal =
-      terminal === 'thread.completed' ||
-      terminal === 'thread.failed' ||
-      terminal === 'thread.cancelled';
-    if ((status === 'running' || status === null) && !hasTerminal) {
-      throw stateConflict('run still in progress', {
-        conversation_id: started.conversationId,
-        run_id: started.runId,
-        status: status ?? 'missing',
-      }) as HttpError;
-    }
-    if (replay.length === 0) {
-      throw stateConflict('run has no replayable events', {
-        conversation_id: started.conversationId,
-        run_id: started.runId,
-      }) as HttpError;
-    }
     return {
       conversationId: started.conversationId,
       runId: started.runId,

@@ -429,11 +429,11 @@ beforeAll(async () => {
       completionCap: 1024,
       model: 'controlled-workspace-consumer',
     }),
-    model: createHarnessModelTransport({
-      baseUrl: `${base}/v1`,
-      model: 'controlled-workspace-consumer',
-    }),
   };
+  fixture.model = createHarnessModelTransport({
+    baseUrl: `${base}/v1`,
+    model: 'controlled-workspace-consumer',
+  });
 }, 30_000);
 
 afterAll(async () => {

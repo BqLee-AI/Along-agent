@@ -1,3 +1,4 @@
+import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -5,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { confirmDocumentApproval } from '../../src/modules/approvals/document-actions.js';
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
+import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
 import { startConversationRun } from '../../src/modules/conversations/service.js';
 import { loadTimeContext } from '../../src/modules/time/context.js';
 import { invokeTool, reserveToolInvocation } from '../../src/modules/tools/gateway.js';
@@ -31,6 +33,7 @@ maybe('delegated workspace gateway', () => {
   });
   it('uses real MCP, freezes the exact edit, and requires a fresh accepted read to verify', async () => {
     const actor = await seedAdmittedSession(database.pool, {});
+    await configureTestModel(database.pool, actor.userId, 'test');
     const root = await mkdtemp(join(tmpdir(), 'along-delegated-gateway-'));
     roots.push(root);
     await writeFile(join(root, 'memo.txt'), '\uFEFFold 中文\r\n');
@@ -158,6 +161,7 @@ maybe('delegated workspace gateway', () => {
   });
   it('lists only authorized output paths without hiding an exclusive-create conflict', async () => {
     const actor = await seedAdmittedSession(database.pool, {});
+    await configureTestModel(database.pool, actor.userId, 'test');
     const root = await mkdtemp(join(tmpdir(), 'along-output-list-'));
     roots.push(root);
     await mkdir(join(root, 'output'));
@@ -244,6 +248,7 @@ maybe('delegated workspace gateway', () => {
   });
   it('projects creation collisions and requires a later independent MCP full read', async () => {
     const actor = await seedAdmittedSession(database.pool, {});
+    await configureTestModel(database.pool, actor.userId, 'test');
     const root = await mkdtemp(join(tmpdir(), 'along-create-projection-'));
     roots.push(root);
     await mkdir(join(root, 'output'));
@@ -262,7 +267,7 @@ maybe('delegated workspace gateway', () => {
       },
     ]);
     const started = await startConversationRun(
-      {
+      controlledModelDeps({
         pool: database.pool,
         timeContext: loadTimeContext('fixture-v1'),
         harness: {
@@ -273,8 +278,8 @@ maybe('delegated workspace gateway', () => {
           model: async function* () {
             throw new Error('model not used');
           },
-        },
-      },
+        } satisfies HarnessServices,
+      }),
       actor.userId,
       randomUUID(),
       {

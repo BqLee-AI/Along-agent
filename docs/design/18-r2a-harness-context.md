@@ -40,11 +40,13 @@
 
 [Required] conversations 拥有按 Run 唯一、建后不可改的 `run_context_policies`，不修改 `agent_runs.frozen_context`。存储字段/约束以 [conversation schema 的 R2-A 节](../schema/conversation-and-runs-schema.md#r2-a-上下文策略83) 为准。
 
-策略 payload：`revision`（投影算法版本）、`completion_cap`、`model_window_tokens:number|null`、`input_meter`、`meter_revision`、`reserve_tokens`，以及不含凭据的 `model_binding`。整数为安全整数，C>=1、W>=1 或 null、S>=0；verified 必须有完整计量依据，但 W 可以未知。部署使用必填 `HARNESS_COMPLETION_CAP`、可选 `HARNESS_MODEL_WINDOW_TOKENS` 和默认0的 `HARNESS_CONTEXT_RESERVE_TOKENS`；本地私有配置对应 `model.completionCap/modelWindowTokens/reserveTokens`，不新增 Web/provider/BYOK 控件，不写仓库 .env。
+策略 payload：`revision`（投影算法版本）、`completion_cap`、`model_window_tokens:number|null`、`input_meter`、`meter_revision`、`reserve_tokens`，以及不含凭据的 `model_binding`。整数为安全整数，C>=1、W>=1 或 null、S>=0；verified 必须有完整计量依据，但 W 可以未知。部署使用必填 `HARNESS_COMPLETION_CAP`、可选 `HARNESS_MODEL_WINDOW_TOKENS` 和默认0的 `HARNESS_CONTEXT_RESERVE_TOKENS`；本地私有配置对应 `model.completionCap/modelWindowTokens/reserveTokens`。现行基线不新增 Web/provider/BYOK 控件；拟议扩展见 design/22，不写仓库 .env。
 
-`model_binding` 为 `{model:string,adapter_revision:string}`，均非空；不保存 endpoint/key。C 为部署必填值、无默认借用 Run 余额；W 默认未知、无可信 meter 时 input_meter=unavailable、reserve_tokens 可为0。部署变更影响模型身份/计量规则时不静默替换冻结绑定；不引入独立模型 registry。
+`model_binding` 为 `{model:string,adapter_revision:string}`，均非空；不保存 endpoint/key。C 为部署必填值、无默认借用 Run 余额；W 默认未知、无可信 meter 时 input_meter=unavailable、reserve_tokens 可为0。部署变更不静默替换冻结绑定。无独立模型 registry 是现行基线；拟议本人接入与独立 Run 版本引用见 [design/22](22-model-provider-settings.md)，不改此策略结构。
 
 新 harness Run 在原接纳事务同时插入策略；business 不插入。恢复读原策略，部署变更不能替换值。model_binding 或计量适配已不兼容时 HARNESS_UNAVAILABLE，先于新 attempt；若只是实时计量能力暂不可用，报告 unavailable，不冒用 frozen verified。策略记录能力依据，不保证每次都可得到精确计量。
+
+拟议模型接入切换后，新绑定 Run 的恢复按原配置版本核验，不与当前部署唯一模型或当前默认比较；旧 Run 的安全处置见 design/22 §4。此项为 Proposed，不表示当前恢复代码已切换。
 
 旧 Run 仅在显式恢复的有效等待点、原资格/预算/决议预检通过后，于分配唯一新 attempt 的同事务补入一次策略；同点并发只保留一个值，回滚不留孤儿策略。GET/同入站重放不创建策略。旧预算/revision/输入/allowlist/waiting 不改，新增工具绝不自动进入旧 allowlist。无回取资格的旧 Run 不省略唯一正文；原完整观察放不下就 HARNESS_CONTEXT_LIMIT。旧快照的限定读取迁移仍沿 design/09，不扩大恢复范围。
 

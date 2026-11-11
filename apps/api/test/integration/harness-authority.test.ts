@@ -1,3 +1,4 @@
+import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import { afterAll, beforeAll, describe, expect, it, spyOn } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -17,6 +18,7 @@ import type { ThreadEvent } from '@along/stream-protocol';
 import { withTransaction } from '../../src/db/transaction.js';
 import { HttpError } from '../../src/http/errors.js';
 import { startConversationRun } from '../../src/modules/conversations/service.js';
+import { getConversationRuns } from '../../src/modules/conversations/history-service.js';
 import {
   createContextPolicy,
   readRunContextPolicy,
@@ -26,6 +28,7 @@ import type {
   RunContext,
   StartResult,
 } from '../../src/modules/conversations/contracts.js';
+import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
 import {
   createHarnessSession,
   cancelConversationRun,
@@ -47,6 +50,11 @@ import { loadTimeContext } from '../../src/modules/time/context.js';
 import { confirmDocumentApproval } from '../../src/modules/approvals/document-actions.js';
 import { readDocumentApprovalDetail } from '../../src/modules/approvals/document-service.js';
 import { seedAdmittedSession as seedSession } from './setup.js';
+import {
+  deleteProvider,
+  isRunSelectionUsable,
+  updateProvider,
+} from '../../src/modules/model-providers/service.js';
 import type { SeededSession } from '../../src/modules/identity/seed.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 import {
@@ -107,7 +115,7 @@ maybe('harness durable authority against PostgreSQL', () => {
   let deps: ConversationDeps;
   beforeAll(async () => {
     database = await createIntegrationDatabase();
-    deps = {
+    deps = controlledModelDeps({
       pool: database.pool,
       timeContext,
       harness: {
@@ -122,15 +130,15 @@ maybe('harness durable authority against PostgreSQL', () => {
             reply: { message: { content: 'answer', tool_calls: [] }, usage: null },
           };
         },
-      },
-    };
+      } satisfies HarnessServices,
+    });
   });
   afterAll(async () => {
     await database?.close();
   });
 
   function modelDeps(answer: string): ConversationDeps {
-    return {
+    return controlledModelDeps({
       ...deps,
       harness: {
         ...deps.harness!,
@@ -141,11 +149,12 @@ maybe('harness durable authority against PostgreSQL', () => {
             reply: { message: { content: answer, tool_calls: [] }, usage: null },
           };
         },
-      },
-    };
+      } satisfies HarnessServices,
+    });
   }
-  async function fresh(legacyWithoutMessageRefs = false, modelAnswer = 'answer'): Promise<Fixture> {
+  async function fresh(modelAnswer = 'answer'): Promise<Fixture> {
     const actor = await seedSession(database.pool, {});
+    await configureTestModel(database.pool, actor.userId, 'authority-test-model');
     const started = await startConversationRun(
       deps,
       actor.userId,
@@ -159,30 +168,7 @@ maybe('harness durable authority against PostgreSQL', () => {
       null,
     );
     if (!started.context) throw new Error('fresh context missing');
-    let context = started.context;
-    if (legacyWithoutMessageRefs) {
-      // Insert the old accepted shape rather than rewriting immutable authority.
-      const runId = randomUUID();
-      const attemptId = randomUUID();
-      await database.pool.query(
-        `WITH legacy AS (
-           INSERT INTO agent_runs(id,owner_id,conversation_id,agent_revision,mode,status,
-             budget_max_iterations,budget_max_tokens,execution,tools_allowlist,frozen_context,input_message_id)
-           SELECT $2,owner_id,conversation_id,agent_revision,mode,'running',
-             budget_max_iterations,budget_max_tokens,execution,tools_allowlist,
-             frozen_context-'messageRefs',input_message_id FROM agent_runs WHERE id=$1
-           RETURNING id,owner_id
-         ) INSERT INTO run_attempts(id,owner_id,run_id,attempt_no,status)
-           SELECT $3,owner_id,id,1,'running' FROM legacy`,
-        [context.runId, runId, attemptId],
-      );
-      await database.pool.query(
-        `INSERT INTO run_context_policies(run_id,owner_id,policy,policy_hash)
-         SELECT $2,owner_id,policy,policy_hash FROM run_context_policies WHERE run_id=$1`,
-        [context.runId, runId],
-      );
-      context = { ...context, runId, attemptId };
-    }
+    const context = started.context;
     const events: ThreadEvent[] = [];
     const session = await createHarnessSession(
       modelDeps(modelAnswer),
@@ -247,8 +233,8 @@ maybe('harness durable authority against PostgreSQL', () => {
     );
     return { invocationId: reserved.invocation_id, outcome };
   }
-  async function waiting(legacyWithoutMessageRefs = false): Promise<WaitingFixture> {
-    const fixture = await fresh(legacyWithoutMessageRefs);
+  async function waiting(): Promise<WaitingFixture> {
+    const fixture = await fresh();
     const invoked = await invoke(fixture, 'propose_task', {
       raw_time_text: fixture.context.inputText,
       timezone_hint: 'Asia/Shanghai',
@@ -365,7 +351,7 @@ maybe('harness durable authority against PostgreSQL', () => {
     const fixture = await fresh();
     let calls = 0;
     const session = await createHarnessSession(
-      {
+      controlledModelDeps({
         ...deps,
         harness: {
           ...deps.harness!,
@@ -375,8 +361,8 @@ maybe('harness durable authority against PostgreSQL', () => {
             if (Array.isArray(step)) yield* step;
             else yield step;
           },
-        },
-      },
+        } satisfies HarnessServices,
+      }),
       fixture.context,
       async (event) => {
         fixture.events.push(event);
@@ -400,9 +386,10 @@ maybe('harness durable authority against PostgreSQL', () => {
     });
     return { ...fixture, session, frame, snapshot, calls: () => calls };
   }
-  async function workspaceWaiting(legacyWithoutSummary = false) {
+  async function workspaceWaiting() {
     const root = await mkdtemp(join(tmpdir(), 'along-run-history-'));
     const actor = await seedSession(database.pool, {});
+    await configureTestModel(database.pool, actor.userId, 'authority-test-model');
     const summary = {
       workspace_id: 'history',
       label: 'Original managed project',
@@ -424,31 +411,7 @@ maybe('harness durable authority against PostgreSQL', () => {
       null,
     );
     if (!started.context) throw new Error('workspace history context missing');
-    let context = started.context;
-    if (legacyWithoutSummary) {
-      // Reconstruct pre-summary accepted storage at INSERT, respecting the
-      // production trigger that forbids rewriting any Run's frozen authority.
-      const runId = randomUUID();
-      const attemptId = randomUUID();
-      await database.pool.query(
-        `WITH legacy AS (
-          INSERT INTO agent_runs (id,owner_id,conversation_id,agent_revision,mode,status,
-            budget_max_iterations,budget_max_tokens,execution,tools_allowlist,frozen_context,input_message_id)
-          SELECT $2,owner_id,conversation_id,agent_revision,mode,'running',
-            budget_max_iterations,budget_max_tokens,execution,tools_allowlist,
-            frozen_context-'workspaceSummary',input_message_id FROM agent_runs WHERE id=$1
-          RETURNING id,owner_id
-        ) INSERT INTO run_attempts (id,owner_id,run_id,attempt_no,status)
-          SELECT $3,owner_id,id,1,'running' FROM legacy`,
-        [context.runId, runId, attemptId],
-      );
-      await database.pool.query(
-        `INSERT INTO run_context_policies(run_id,owner_id,policy,policy_hash)
-         SELECT $2,owner_id,policy,policy_hash FROM run_context_policies WHERE run_id=$1`,
-        [context.runId, runId],
-      );
-      context = { ...context, runId, attemptId };
-    }
+    const context = started.context;
     const session = await createHarnessSession(
       deps,
       context,
@@ -633,7 +596,7 @@ maybe('harness durable authority against PostgreSQL', () => {
   });
 
   it('freezes visible message references when a new Run is accepted, before execution or later backdated messages', async () => {
-    const first = await fresh(false, 'accepted first answer');
+    const first = await fresh('accepted first answer');
     await acceptModelAnswer(first, 'accepted first answer');
     await first.frame(
       request('finish', {
@@ -695,8 +658,8 @@ maybe('harness durable authority against PostgreSQL', () => {
       ).rejects.toMatchObject({ errorCode: 'STATE_CONFLICT' });
   });
 
-  it('resumes a pre-history Run with only its original input even after later visible turns', async () => {
-    const fixture = await waiting(true);
+  it('resumes a bound Run with only its frozen input even after later visible turns', async () => {
+    const fixture = await waiting();
     const later = await startConversationRun(
       deps,
       fixture.actor.userId,
@@ -756,7 +719,7 @@ maybe('harness durable authority against PostgreSQL', () => {
       errorCode: 'STATE_CONFLICT',
       message: 'Run has unresolved approval',
     });
-    const clean = await fresh(false, 'accepted visible delta');
+    const clean = await fresh('accepted visible delta');
     await acceptModelAnswer(clean, 'accepted visible delta');
     const name = `terminal_fault_${clean.context.runId.replaceAll('-', '')}`;
     await database.pool.query(`CREATE FUNCTION ${name}() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -794,7 +757,7 @@ maybe('harness durable authority against PostgreSQL', () => {
   });
 
   it('validates actual snapshot references/counters/monotone usage and filters internal snapshots from both event consumers', async () => {
-    const fixture = await fresh(false, 'read result accepted');
+    const fixture = await fresh('read result accepted');
     const invocation = await invoke(fixture);
     const snapshot: HarnessSnapshot = {
       version: 2,
@@ -1000,6 +963,75 @@ maybe('harness durable authority against PostgreSQL', () => {
     );
     expect(attempts.rows[0]?.n).toBe(1);
   });
+
+  for (const action of ['clear', 'delete'] as const) {
+    it(`${action} revokes resume eligibility without changing historical model selection`, async () => {
+      const fixture = await waiting();
+      await rejectApproval({ pool: database.pool }, fixture.actor.userId, fixture.approvalId, {
+        idempotency_key: randomUUID(),
+      });
+      const binding = (
+        await database.pool.query<{ provider_id: string; version_id: string }>(
+          'SELECT provider_id, version_id FROM model_provider_run_bindings WHERE run_id=$1',
+          [fixture.context.runId],
+        )
+      ).rows[0]!;
+      // A read of eligibility must not require a valid ciphertext or encryption key.
+      await database.pool.query(
+        'UPDATE model_provider_versions SET credential_ciphertext=$1 WHERE id=$2',
+        ['not-a-valid-ciphertext', binding.version_id],
+      );
+      const readView = () =>
+        getRunView(
+          deps,
+          fixture.actor.userId,
+          fixture.context.conversationId,
+          fixture.context.runId,
+        );
+      const original = await readView();
+      expect(original.can_resume).toBe(true);
+      const client = await database.pool.connect();
+      try {
+        expect(await isRunSelectionUsable(client, randomUUID(), fixture.context.runId)).toBe(false);
+        expect(await isRunSelectionUsable(client, fixture.actor.userId, randomUUID())).toBe(false);
+      } finally {
+        client.release();
+      }
+      // A new current version does not revoke the version frozen by the run.
+      await updateProvider(database.pool, fixture.actor.userId, binding.provider_id, {
+        name: 'Renamed',
+      });
+      expect((await readView()).can_resume).toBe(true);
+      if (action === 'clear') {
+        await updateProvider(database.pool, fixture.actor.userId, binding.provider_id, {
+          credential: { action: 'clear' },
+        });
+      } else {
+        await deleteProvider(database.pool, fixture.actor.userId, binding.provider_id);
+      }
+      const revoked = await readView();
+      expect(revoked.can_resume).toBe(false);
+      expect(revoked.model_selection).toEqual(original.model_selection);
+      const history = await getConversationRuns(
+        deps,
+        fixture.actor.userId,
+        fixture.context.conversationId,
+        {},
+      );
+      expect(
+        history.items.find((item) => item.run_id === fixture.context.runId)?.model_selection,
+      ).toEqual(original.model_selection);
+      await expect(resume(fixture)).rejects.toMatchObject({
+        errorCode: 'STATE_CONFLICT',
+        message: 'model credential revoked',
+      });
+      const attempts = await database.pool.query(
+        'SELECT count(*)::int n FROM run_attempts WHERE run_id=$1',
+        [fixture.context.runId],
+      );
+      expect(attempts.rows[0]?.n).toBe(1);
+    });
+  }
 
   for (const status of ['consumed', 'rejected', 'expired', 'superseded'] as const) {
     it(`${status} resumes once with original decision truth, retaining Run/invocation and rejecting old attempt`, async () => {
@@ -1336,7 +1368,7 @@ maybe('harness durable authority against PostgreSQL', () => {
   });
 
   it('two terminal writers finish after both assistant inserts hold conversation foreign-key locks', async () => {
-    const first = await fresh(false, 'first assistant');
+    const first = await fresh('first assistant');
     const second = await startConversationRun(
       deps,
       first.actor.userId,
@@ -1679,7 +1711,7 @@ maybe('harness durable authority against PostgreSQL', () => {
     const fixture = await fresh();
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
-    const modelDeps: ConversationDeps = {
+    const modelDeps = controlledModelDeps({
       ...deps,
       harness: {
         ...deps.harness!,
@@ -1691,8 +1723,8 @@ maybe('harness durable authority against PostgreSQL', () => {
             reply: { message: { content: 'late model answer', tool_calls: [] }, usage: null },
           };
         },
-      },
-    };
+      } satisfies HarnessServices,
+    });
     const session = await createHarnessSession(
       modelDeps,
       fixture.context,
@@ -1937,22 +1969,42 @@ maybe('harness durable authority against PostgreSQL', () => {
     });
   }
   it('keeps legacy workspace Runs without a frozen summary readable and cancellable without substituting current metadata', async () => {
-    const f = await workspaceWaiting(true);
+    const f = await workspaceWaiting();
+    const runId = randomUUID();
+    const attemptId = randomUUID();
     try {
-      await revokeWorkspace(f, 'changed');
-      const view = await getRunView(
-        deps,
-        f.actor.userId,
-        f.context.conversationId,
-        f.context.runId,
+      await database.pool.query(
+        `WITH legacy AS (
+          INSERT INTO agent_runs (id,owner_id,conversation_id,agent_revision,mode,status,
+            budget_max_iterations,budget_max_tokens,execution,tools_allowlist,frozen_context,input_message_id)
+          SELECT $2,owner_id,conversation_id,agent_revision,mode,'running',
+            budget_max_iterations,budget_max_tokens,execution,tools_allowlist,
+            frozen_context-'workspaceSummary',input_message_id FROM agent_runs WHERE id=$1
+          RETURNING id,owner_id
+        ) INSERT INTO run_attempts (id,owner_id,run_id,attempt_no,status)
+          SELECT $3,owner_id,id,1,'running' FROM legacy`,
+        [f.context.runId, runId, attemptId],
       );
-      expect(view.status).toBe('suspended_approval');
+      await expect(
+        createHarnessSession(
+          deps,
+          { ...f.context, runId, attemptId },
+          async () => true,
+          new AbortController().signal,
+        ),
+      ).rejects.toMatchObject({
+        errorCode: 'STATE_CONFLICT',
+        message: 'legacy Run model binding unavailable; cannot resume',
+      });
+      await revokeWorkspace(f, 'changed');
+      const view = await getRunView(deps, f.actor.userId, f.context.conversationId, runId);
+      expect(view.status).toBe('running');
       expect(view.workspace).toBeUndefined();
       const cancelled = await cancelConversationRun(
         deps,
         f.actor.userId,
         f.context.conversationId,
-        f.context.runId,
+        runId,
         randomUUID(),
         { idempotency_key: randomUUID() },
       );
@@ -1969,6 +2021,7 @@ maybe('harness durable authority against PostgreSQL', () => {
       ['first-', 'second-', 'later-'].map((prefix) => mkdtemp(join(directory, prefix))),
     );
     const actor = await seedSession(database.pool, {});
+    await configureTestModel(database.pool, actor.userId, 'authority-test-model');
     const registrations = roots.map((root, index) => ({
       workspace_id: ['first', 'second', 'later'][index]!,
       label: `Workspace ${index}`,
@@ -2045,6 +2098,7 @@ maybe('harness durable authority against PostgreSQL', () => {
     const firstRoot = await mkdtemp(join(directory, 'first-'));
     const secondRoot = await mkdtemp(join(directory, 'second-'));
     const actor = await seedSession(database.pool, {});
+    await configureTestModel(database.pool, actor.userId, 'authority-test-model');
     const outsider = await seedSession(database.pool, {});
     const summary = {
       workspace_id: 'first',
@@ -2241,7 +2295,7 @@ maybe('harness durable authority against PostgreSQL', () => {
     const fixture = await fresh();
     let modelCalls = 0;
     const session = await createHarnessSession(
-      {
+      controlledModelDeps({
         ...deps,
         harness: {
           ...deps.harness!,
@@ -2252,8 +2306,8 @@ maybe('harness durable authority against PostgreSQL', () => {
               reply: { message: { content: 'unexpected', tool_calls: [] }, usage: null },
             };
           },
-        },
-      },
+        } satisfies HarnessServices,
+      }),
       fixture.context,
       async () => true,
       new AbortController().signal,
@@ -2433,7 +2487,7 @@ maybe('harness durable authority against PostgreSQL', () => {
   }
 
   for (const binding of ['model', 'adapter_revision'] as const) {
-    it(`rejects a changed frozen ${binding} before allocating a resumed attempt`, async () => {
+    it(`${binding === 'model' ? 'retains the selected model despite deployment changes' : 'rejects a changed adapter before allocating a resumed attempt'}`, async () => {
       const fixture = await waiting();
       await rejectApproval({ pool: database.pool }, fixture.actor.userId, fixture.approvalId, {
         idempotency_key: randomUUID(),
@@ -2457,7 +2511,7 @@ maybe('harness durable authority against PostgreSQL', () => {
           },
         },
       };
-      await expect(
+      const changedResume = () =>
         resumeConversationRun(
           changedDeps,
           fixture.actor.userId,
@@ -2465,27 +2519,34 @@ maybe('harness durable authority against PostgreSQL', () => {
           fixture.context.runId,
           randomUUID(),
           { checkpoint_id: fixture.checkpointId, idempotency_key: randomUUID() },
-        ),
-      ).rejects.toMatchObject({ errorCode: 'HARNESS_UNAVAILABLE' });
+        );
+      if (binding === 'model') {
+        const resumed = await changedResume();
+        expect(resumed.context?.contextPolicy).toEqual(frozen);
+      } else {
+        await expect(changedResume()).rejects.toMatchObject({ errorCode: 'HARNESS_UNAVAILABLE' });
+      }
       expect(
         (
           await database.pool.query('SELECT count(*)::int n FROM run_attempts WHERE run_id=$1', [
             fixture.context.runId,
           ])
         ).rows[0]?.n,
-      ).toBe(1);
+      ).toBe(binding === 'model' ? 2 : 1);
       expect(
         (
           await database.pool.query('SELECT count(*)::int n FROM harness_resumes WHERE run_id=$1', [
             fixture.context.runId,
           ])
         ).rows[0]?.n,
-      ).toBe(0);
+      ).toBe(binding === 'model' ? 1 : 0);
       expect(
         await readRunContextPolicy(database.pool, fixture.actor.userId, fixture.context.runId),
       ).toEqual(frozen);
-      const resumed = await resume(fixture);
-      expect(resumed.context?.contextPolicy).toEqual(frozen);
+      if (binding === 'adapter_revision') {
+        const resumed = await resume(fixture);
+        expect(resumed.context?.contextPolicy).toEqual(frozen);
+      }
     });
   }
 
@@ -2603,11 +2664,16 @@ maybe('harness durable authority against PostgreSQL', () => {
   });
 
   it('inspects pending historical waits without authorizing or changing them', async () => {
-    const compatible = await legacyWaiting();
+    const compatible = await waiting();
     const incompatible = await legacyWaiting(undefined, [
       ...BUSINESS_TOOL_IDS,
       'historical_unknown_tool',
     ]);
+    const policies = await Promise.all(
+      [compatible, incompatible].map((fixture) =>
+        readRunContextPolicy(database.pool, fixture.actor.userId, fixture.context.runId),
+      ),
+    );
     const report = await inspectReleaseWaiting(deps);
     expect(report).toContainEqual({ runId: compatible.context.runId, status: 'compatible' });
     expect(report).toContainEqual({
@@ -2615,10 +2681,10 @@ maybe('harness durable authority against PostgreSQL', () => {
       status: 'blocked',
       reason: 'STATE_CONFLICT',
     });
-    for (const fixture of [compatible, incompatible]) {
+    for (const [index, fixture] of [compatible, incompatible].entries()) {
       expect(
         await readRunContextPolicy(database.pool, fixture.actor.userId, fixture.context.runId),
-      ).toBeNull();
+      ).toEqual(policies[index]);
       const row = await database.pool.query(
         `SELECT status, (SELECT count(*)::int FROM run_attempts WHERE run_id=agent_runs.id) AS attempts,
          (SELECT count(*)::int FROM harness_resumes WHERE run_id=agent_runs.id) AS resumes
@@ -2629,8 +2695,26 @@ maybe('harness durable authority against PostgreSQL', () => {
     }
   });
 
-  it('projects the old installation administrator without persisting an admission during inspection', async () => {
+  it('reports unbound historical waits as blocked before the model binding migration', async () => {
     const fixture = await legacyWaiting();
+    await database.pool.query(
+      'ALTER TABLE model_provider_run_bindings RENAME TO model_provider_run_bindings_saved',
+    );
+    try {
+      expect(await inspectReleaseWaiting(deps)).toContainEqual({
+        runId: fixture.context.runId,
+        status: 'blocked',
+        reason: 'STATE_CONFLICT',
+      });
+    } finally {
+      await database.pool.query(
+        'ALTER TABLE model_provider_run_bindings_saved RENAME TO model_provider_run_bindings',
+      );
+    }
+  });
+
+  it('projects the old installation administrator without persisting an admission during inspection', async () => {
+    const fixture = await waiting();
     const before = await database.pool.query(
       'SELECT * FROM identity_account_admissions ORDER BY user_id',
     );
@@ -2679,7 +2763,7 @@ maybe('harness durable authority against PostgreSQL', () => {
     await expect(resume(fixture)).rejects.toMatchObject({ errorCode: 'STATE_CONFLICT' });
   });
 
-  it('backfills a legacy policy only on legal explicit resume without changing frozen authority or granting new tools', async () => {
+  it('rejects resuming an unbound legacy Run without backfilling policy or changing frozen authority', async () => {
     const fixture = await legacyWaiting();
     async function assertNoRoutingPolicy(): Promise<void> {
       const recorded = await database.pool.query(
@@ -2756,15 +2840,33 @@ maybe('harness durable authority against PostgreSQL', () => {
           fixture.context.runId,
         )
       ).can_resume,
-    ).toBe(true);
+    ).toBe(false);
     expect(
       await readRunContextPolicy(database.pool, fixture.actor.userId, fixture.context.runId),
     ).toBeNull();
-    const resumed = await resume(fixture);
-    if (!resumed.context) throw new Error('legacy resume context missing');
+    await expect(resume(fixture)).rejects.toMatchObject({
+      errorCode: 'STATE_CONFLICT',
+      message: 'legacy Run model binding unavailable; cannot resume',
+    });
     expect(
       await readRunContextPolicy(database.pool, fixture.actor.userId, fixture.context.runId),
-    ).toEqual(deps.harness!.contextPolicy);
+    ).toBeNull();
+    await assertNoRoutingPolicy();
+    expect(
+      (
+        await database.pool.query(
+          'SELECT count(*)::int n FROM model_provider_run_bindings WHERE run_id=$1',
+          [fixture.context.runId],
+        )
+      ).rows[0]?.n,
+    ).toBe(0);
+    expect(
+      (
+        await database.pool.query('SELECT count(*)::int n FROM harness_resumes WHERE run_id=$1', [
+          fixture.context.runId,
+        ])
+      ).rows[0]?.n,
+    ).toBe(0);
     expect(
       (
         await database.pool.query(
@@ -2773,60 +2875,13 @@ maybe('harness durable authority against PostgreSQL', () => {
         )
       ).rows[0],
     ).toEqual(before);
-    const session = await createHarnessSession(
-      deps,
-      resumed.context,
-      async () => true,
-      new AbortController().signal,
-    );
-    expect(session.start.routing_policy).toBeNull();
-    expect(session.start.eligible_phase).toBe('disabled');
-    await assertNoRoutingPolicy();
-    expect(session.start.tools.map((tool) => tool.name)).toEqual([...BUSINESS_TOOL_IDS]);
-    expect(session.start.snapshot).toEqual(fixture.snapshot);
-    expect(session.start.observations[0]).toMatchObject({
-      view: 'full',
-      invocation_id: fixture.snapshot.tool_refs[0],
-      tool_id: 'propose_task',
-    });
-    await expect(
-      session.handleRequest(
-        request('reserve', {
-          call_key: 'harness/2',
-          tool_id: 'list_tasks',
-          args: {},
-        }),
-      ),
-    ).resolves.toMatchObject({ invocation_id: expect.any(String) });
-    await expect(
-      session.handleRequest(
-        request('reserve', {
-          call_key: 'harness/3',
-          tool_id: 'read_run_observation',
-          args: {
-            source_invocation_id: fixture.snapshot.tool_refs[0],
-            field: 'content',
-            offset: 0,
-            limit: 1,
-          },
-        }),
-      ),
-    ).rejects.toBeInstanceOf(HttpError);
-    expect(
-      (
-        await database.pool.query(
-          'SELECT count(*)::int n FROM run_context_policies WHERE run_id=$1',
-          [fixture.context.runId],
-        )
-      ).rows[0]?.n,
-    ).toBe(1);
     expect(
       (
         await database.pool.query('SELECT count(*)::int n FROM run_attempts WHERE run_id=$1', [
           fixture.context.runId,
         ])
       ).rows[0]?.n,
-    ).toBe(2);
+    ).toBe(1);
   });
   for (const usage of [
     { iterations: 8, tokens: null },

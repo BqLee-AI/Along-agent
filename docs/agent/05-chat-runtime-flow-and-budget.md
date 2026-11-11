@@ -20,7 +20,7 @@
 ## 执行控制与持久化
 
 - HTTP 消息省略 `execution` 仍为 `business`：确定性提醒、取消和查询，无模型循环。Web 普通对话显式发送 `execution=harness`，不要求用户理解执行器或先选工具；提醒快捷入口保持 `business`，资料入口使用显式工作区的 `harness`。缺配置503，不接管/回退同一 Run。
-- 仓颉构造本次上下文、模型请求，解析提议并纳入工具观察，决定继续/等待/停止；TS model transport 只负责部署固定配置的 HTTP/协议转换，普通用户不配置 provider/BYOK。每响应只接受零或一个工具调用，native 明确逐次选择、等待真实结果再继续，独立读取也不并行。transport 发送 `parallel_tool_calls:false` 但不保证供应商遵守，provider/共享回复 schema 与 native 均严格拒绝多个调用。
+- 仓颉构造本次上下文、模型请求，解析提议并纳入工具观察，决定继续/等待/停止；TS model transport 使用 Run 冻结的本人 OpenAI-compatible 接入，走受控出站与协议转换，不回退部署固定模型。每响应只接受零或一个工具调用，native 明确逐次选择、等待真实结果再继续，独立读取也不并行。transport 发送 `parallel_tool_calls:false` 但不保证供应商遵守，provider/共享回复 schema 与 native 均严格拒绝多个调用。
 - 模型请求使用真实 `stream:true`；TS 有界解析 provider SSE，仓颉逐个接受增量并通过 `answer` 取得 TS 持久回执后再 `model_next` 拉取下一步。authority 只接受与当前 pending provider delta 逐字相等的 `answer`；direct 零模型 run 的正文只由 TS renderer 生成，native 不能自写答案。最终完整响应用于工具/历史/用量，不重发正文；工具参数组装完成并校验后才可执行。部分已接受正文可先于 provider 结束呈现，但不是成功或工具效果。取消/断连中止在途 provider，不以完整 JSON 或前端打字效果回退。
 - 默认系统上下文要求简体中文，用户明确要求其他语言时遵从；代码、标识符和专有名称不强制翻译。语言规则归原生上下文，普通交流和批准恢复一致，不给前端增加翻译或替代回答。
 - 新接受调用保留标准函数历史：`assistant.tool_calls` 与 `role=tool` 原 `tool_call_id` 成对。容量压力下仅仓颉按旧到新整体替换已向模型呈现过的调用对，以不可信普通资料保留来源；不伪造函数参数或留下孤立结果。恢复先发送可信有界视图，snapshot 保留全部事实引用，TS 只原样传输。

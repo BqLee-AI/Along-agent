@@ -70,6 +70,59 @@ async function privateAccess(path: string, directory: boolean) {
 }
 
 describe('strict local configuration', () => {
+  it('forwards only explicitly approved literal local model origins', () => {
+    const original = fixture();
+    const previous = process.env.MODEL_PROVIDER_ALLOWED_LOCAL_ORIGINS;
+    try {
+      process.env.MODEL_PROVIDER_ALLOWED_LOCAL_ORIGINS = 'http://127.0.0.1:9999';
+      expect(installationEnvironment(original).MODEL_PROVIDER_ALLOWED_LOCAL_ORIGINS).toBe('');
+      const origins = ['http://127.0.0.1:8080', 'https://192.168.1.2:8443', 'http://[::1]:8081'];
+      const configured = createConfig({ ...original, modelProviderAllowedLocalOrigins: origins });
+      expect(installationEnvironment(configured).MODEL_PROVIDER_ALLOWED_LOCAL_ORIGINS).toBe(
+        origins.join(','),
+      );
+      for (const invalid of [
+        'http://localhost:8080',
+        'http://169.254.169.254',
+        'http://8.8.8.8',
+        'http://127.0.0.1:8080/v1',
+        'http://user@127.0.0.1:8080',
+        'http://127.0.0.1:8080?x=1',
+        'http://127.0.0.1:8080,http://10.0.0.1',
+        'file:///tmp/model',
+      ]) {
+        expect(() =>
+          validateConfig({ ...original, modelProviderAllowedLocalOrigins: [invalid] }),
+        ).toThrow('CONFIG_INVALID');
+      }
+    } finally {
+      if (previous === undefined) delete process.env.MODEL_PROVIDER_ALLOWED_LOCAL_ORIGINS;
+      else process.env.MODEL_PROVIDER_ALLOWED_LOCAL_ORIGINS = previous;
+    }
+  });
+
+  it('accepts only exact HTTPS domain origins for fake DNS exceptions', () => {
+    const original = fixture();
+    const origin = 'https://provider.example:8443';
+    const configured = createConfig({ ...original, modelProviderAllowedFakeDnsOrigins: [origin] });
+    expect(installationEnvironment(configured).MODEL_PROVIDER_ALLOWED_FAKE_DNS_ORIGINS).toBe(
+      origin,
+    );
+    for (const invalid of [
+      'http://provider.example',
+      'https://127.0.0.1',
+      'https://localhost',
+      'https://provider.example/v1',
+      'https://user@provider.example',
+      'https://provider.example?x=1',
+      'https://provider.example,other.example',
+    ]) {
+      expect(() =>
+        validateConfig({ ...original, modelProviderAllowedFakeDnsOrigins: [invalid] }),
+      ).toThrow('CONFIG_INVALID');
+    }
+  });
+
   it('requires an explicit independent completion cap and forwards optional context policy limits', () => {
     const model = {
       baseUrl: 'https://authorized.invalid',
@@ -82,6 +135,9 @@ describe('strict local configuration', () => {
     const config = createConfig({ mode: 'new', tzdbVersion: '2025b', model });
     expect(config.model?.completionCap).toBe(512);
     const environment = installationEnvironment(config);
+    expect(environment.HARNESS_MODEL_BASE_URL).toBeUndefined();
+    expect(environment.HARNESS_MODEL).toBeUndefined();
+    expect(environment.HARNESS_MODEL_API_KEY).toBeUndefined();
     expect(environment.HARNESS_COMPLETION_CAP).toBe('512');
     expect(environment.HARNESS_MODEL_WINDOW_TOKENS).toBe('');
     expect(environment.HARNESS_CONTEXT_RESERVE_TOKENS).toBe('0');
@@ -119,7 +175,15 @@ describe('strict local configuration', () => {
       expect(() => createConfig({ ...config, model: { ...model, ...invalid } })).toThrow(
         'CONFIG_INVALID',
       );
-    expect(installationEnvironment(fixture()).HARNESS_COMPLETION_CAP).toBe('');
+    expect(installationEnvironment(fixture()).HARNESS_COMPLETION_CAP).toBe('4096');
+    expect(
+      installationEnvironment(
+        createConfig({ mode: 'new', tzdbVersion: '2025b', harnessCompletionCap: 1024 }),
+      ).HARNESS_COMPLETION_CAP,
+    ).toBe('1024');
+    expect(() => validateConfig({ ...fixture(), harnessCompletionCap: 0 })).toThrow(
+      'CONFIG_INVALID',
+    );
   });
 
   it('new installations fix independent identities and credentials once, then round-trip unchanged', async () => {
@@ -128,6 +192,32 @@ describe('strict local configuration', () => {
     const other = fixture();
     expect(config.installationId).not.toBe(other.installationId);
     expect(config.authSecret).not.toBe(other.authSecret);
+    expect(config.modelProviderEncryptionKey).not.toBe(other.modelProviderEncryptionKey);
+    expect(Buffer.from(config.modelProviderEncryptionKey, 'base64')).toHaveLength(32);
+    expect(installationEnvironment(config).MODEL_PROVIDER_ENCRYPTION_KEY).toBe(
+      config.modelProviderEncryptionKey,
+    );
+    expect(() => validateConfig({ ...config, modelProviderEncryptionKey: undefined })).toThrow(
+      'CONFIG_INVALID',
+    );
+    expect(() => validateConfig({ ...config, modelProviderEncryptionKey: 'invalid' })).toThrow(
+      'CONFIG_INVALID',
+    );
+    expect(() => validateConfig({ ...config, harnessCompletionCap: undefined })).toThrow(
+      'CONFIG_INVALID',
+    );
+    expect(createConfig(config).modelProviderEncryptionKey).toBe(config.modelProviderEncryptionKey);
+    const previousKey = process.env.MODEL_PROVIDER_ENCRYPTION_KEY;
+    try {
+      process.env.MODEL_PROVIDER_ENCRYPTION_KEY = 'ambient-private-value';
+      expect(hostEnvironment().MODEL_PROVIDER_ENCRYPTION_KEY).toBeUndefined();
+      expect(installationEnvironment(config).MODEL_PROVIDER_ENCRYPTION_KEY).toBe(
+        config.modelProviderEncryptionKey,
+      );
+    } finally {
+      if (previousKey === undefined) delete process.env.MODEL_PROVIDER_ENCRYPTION_KEY;
+      else process.env.MODEL_PROVIDER_ENCRYPTION_KEY = previousKey;
+    }
     expect(config.database.password).not.toBe(other.database.password);
     expect(config.postgresVolume).not.toBe(other.postgresVolume);
     expect(config.workspaceVolume).not.toBe(config.postgresVolume);
@@ -341,6 +431,7 @@ describe('strict local configuration', () => {
       workspaceMount: '/another/mount',
       database: { ...original.database, password: 'replacement-password' },
       authSecret: 'replacement-secret',
+      modelProviderEncryptionKey: fixture().modelProviderEncryptionKey,
     };
     for (const [key, value] of Object.entries(replacements)) {
       await expect(

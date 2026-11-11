@@ -6,6 +6,8 @@
 
 > Proposed 受邀账户：准入、加密联系人、一次凭证代次、邀请、邮件投递与持久限流归 identity，详见 [identity schema](identity-schema.md) 与 [design/21](../design/21-invited-account-access.md)。它们不是已存在表或已分配迁移；旧 ID/auth_email/credential/secret/owner 保留，生产只经后续获准的前向迁移生效。
 
+> Proposed 用户模型配置与 Run 冻结引用见 [模型接入数据合同](model-provider-schema.md)；旧部署只能明确指定 owner 导入，不自动复制共享。此项不代表已应用迁移。
+
 ## 落地顺序
 
 推荐 migration 落地顺序（v0）[Required]：

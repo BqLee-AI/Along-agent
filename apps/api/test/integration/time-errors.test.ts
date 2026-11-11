@@ -237,7 +237,7 @@ maybe('A4 real HTTP and database boundaries', () => {
         randomUUID(),
       );
       const key = randomUUID();
-      await startConversationRun(
+      const original = await startConversationRun(
         { pool, timeContext: healthy },
         ownerId,
         randomUUID(),
@@ -266,7 +266,10 @@ maybe('A4 real HTTP and database boundaries', () => {
       expect((await post(base, { ...proposal, raw_text: 'different 提醒我' }, key)).status).toBe(
         409,
       );
-      expect((await post(base, proposal, key)).status).toBe(409);
+      const replay = await post(base, proposal, key);
+      expect(replay.status).toBe(200);
+      expect(replay.headers.get('x-run-id')).toBe(original.runId);
+      await replay.text();
       deps.resolveActor = async () => ({
         ownerId: randomUUID(),
         sessionId: null,

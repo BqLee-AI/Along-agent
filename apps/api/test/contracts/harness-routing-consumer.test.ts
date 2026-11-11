@@ -31,12 +31,9 @@ beforeAll(async () => {
     },
   });
   expect(fixture.deps.routing.policy().mode).toBe('enforce');
-  fixture.deps.harness = {
-    ...fixture.deps.harness!,
-    model: async function* () {
-      providerCalls++;
-      throw new Error('direct L1 must not invoke provider');
-    },
+  fixture.model = async function* () {
+    providerCalls++;
+    throw new Error('direct L1 must not invoke provider');
   };
 }, 30000);
 afterAll(async () => {

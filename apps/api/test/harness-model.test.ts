@@ -66,6 +66,45 @@ async function rejected(baseUrl: string): Promise<HttpError> {
 }
 
 describe('harness incremental model HTTP transport', () => {
+  test('freezes model and credential at transport creation', async () => {
+    const captured = Promise.withResolvers<{ model: string; authorization?: string }>();
+    const baseUrl = await provider((req, res) => {
+      void (async () => {
+        const parts: Buffer[] = [];
+        for await (const bytes of req) parts.push(Buffer.from(bytes));
+        captured.resolve({
+          model: JSON.parse(Buffer.concat(parts).toString()).model,
+          authorization: req.headers.authorization,
+        });
+        res.writeHead(200, { 'content-type': 'text/event-stream' });
+        res.write(chunk({ content: 'ok' }));
+        complete(res);
+      })();
+    });
+    const config = { baseUrl, model: 'frozen-model', apiKey: 'frozen-key' };
+    const model = createHarnessModelTransport(config);
+    config.model = 'changed-model';
+    config.apiKey = 'changed-key';
+    await Array.fromAsync(
+      model(
+        {
+          protocol: HARNESS_PROTOCOL_VERSION,
+          type: 'model',
+          request_ref: 'm1',
+          messages: [{ role: 'user', content: 'hello' }],
+          remaining_tokens: 8000,
+          max_output_tokens: 512,
+        },
+        [],
+        new AbortController().signal,
+      ),
+    );
+    expect(await captured.promise).toEqual({
+      model: 'frozen-model',
+      authorization: 'Bearer frozen-key',
+    });
+  });
+
   test('delivers provider content before the provider finish/usage/DONE/EOF gate opens', async () => {
     const release = Promise.withResolvers<void>();
     let ended = false;

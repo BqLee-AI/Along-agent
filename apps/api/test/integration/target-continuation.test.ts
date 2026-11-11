@@ -1,3 +1,4 @@
+import { configureTestModel } from '../helpers/model-selection.js';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import type { GoalResult } from '@along/contracts';
@@ -68,6 +69,7 @@ async function fixture(
     [ownerId, `${ownerId}@target.test`],
   );
   await admitTestUser(db.pool, ownerId);
+  await configureTestModel(db.pool, ownerId, 'test');
   await db.pool.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
     conversationId,
     ownerId,

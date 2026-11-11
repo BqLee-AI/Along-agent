@@ -1,3 +1,4 @@
+import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
@@ -31,6 +32,7 @@ import {
 import type { ConversationDeps, RunContext } from '../../src/modules/conversations/contracts.js';
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
 import { createHarnessModelTransport } from '../../src/modules/conversations/harness-model.js';
+import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
 import { seedAdmittedSession as seedSession } from '../integration/setup.js';
 import type { SeededSession } from '../../src/modules/identity/seed.js';
 import { interruptedGoalResult } from '../../src/modules/conversations/goal-result.js';
@@ -338,29 +340,32 @@ beforeAll(async () => {
     );
   });
   const modelBase = await listen(modelServer);
+  const harness: HarnessServices = {
+    binaryPath,
+    libraryPath,
+    maxIterations: 8,
+    maxTokens: 8000,
+    contextPolicy: createContextPolicy({
+      completionCap: 1024,
+      model: 'timezone-controlled-provider',
+    }),
+    model: createHarnessModelTransport({
+      baseUrl: `${modelBase}/v1`,
+      model: 'timezone-controlled-provider',
+    }),
+  };
   deps = {
     pool: database.pool,
     timeContext: loadTimeContext('fixture-v1'),
-    harness: {
-      binaryPath,
-      libraryPath,
-      maxIterations: 8,
-      maxTokens: 8000,
-      contextPolicy: createContextPolicy({
-        completionCap: 1024,
-        model: 'timezone-controlled-provider',
-      }),
-      model: createHarnessModelTransport({
-        baseUrl: `${modelBase}/v1`,
-        model: 'timezone-controlled-provider',
-      }),
-    },
+    harness,
   };
+  controlledModelDeps(deps);
   apiServer = createServer((req, res) => {
     void handleRequest(req, res, {
       pool: database.pool,
       timeContext: deps.timeContext,
       harness: deps.harness,
+      modelTransport: deps.modelTransport,
     }).catch(() => res.destroy());
   });
   base = await listen(apiServer);
@@ -395,7 +400,9 @@ afterAll(async () => {
 }, 30_000);
 
 async function actor(mode: Mode): Promise<Actor> {
-  return { mode, session: await seedSession(database.pool, { timezoneId: 'Asia/Shanghai' }) };
+  const session = await seedSession(database.pool, { timezoneId: 'Asia/Shanghai' });
+  await configureTestModel(database.pool, session.userId, 'timezone-controlled-provider');
+  return { mode, session };
 }
 function input(value: Scenario, overrides: Record<string, unknown> = {}) {
   const descriptions: Record<Kind, string> = {

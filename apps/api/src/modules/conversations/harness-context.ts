@@ -5,39 +5,124 @@ import {
   type HarnessRequest,
   type HarnessTool,
 } from '@along/contracts';
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
+import type { LanguageModelV2, LanguageModelV2CallOptions } from '@ai-sdk/provider';
 
 type Candidate = Extract<HarnessRequest, { type: 'model' | 'measure_context' }>;
 type InputMeter = HarnessContextMeasurement['input_meter'];
 export type HarnessInputMeter = (body: string, policy: ContextPolicy) => InputMeter;
+export type HarnessSdkFetch = (...args: Parameters<typeof fetch>) => Promise<Response>;
 
-/** The HTTP body used for measurement is exactly the body sent by transport. */
-export function buildHarnessModelBody(
+export function createHarnessSdkModel(
+  baseUrl: string,
+  model: string,
+  apiKey: string | undefined,
+  fetcher: HarnessSdkFetch,
+): LanguageModelV2 {
+  return createOpenAICompatible({
+    name: 'harness',
+    baseURL: baseUrl.replace(/\/$/, ''),
+    ...(apiKey ? { apiKey } : {}),
+    includeUsage: true,
+    // Preserve runtime-specific static fetch properties (e.g. Bun preconnect)
+    // while routing every SDK request through the supplied boundary.
+    fetch: new Proxy(globalThis.fetch, {
+      apply(_target, _receiver, args: Parameters<typeof fetch>) {
+        return fetcher(...args);
+      },
+    }),
+    transformRequestBody: (body) => ({ ...body, parallel_tool_calls: false }),
+  }).chatModel(model);
+}
+
+export function harnessSdkOptions(
+  request: Candidate,
+  tools: readonly HarnessTool[],
+): LanguageModelV2CallOptions {
+  const prompt = request.messages.map((message) => {
+    if (message.role === 'system') return { role: 'system', content: message.content };
+    if (message.role === 'user')
+      return { role: 'user', content: [{ type: 'text', text: message.content }] };
+    if (message.role === 'tool')
+      return {
+        role: 'tool',
+        content: [
+          {
+            type: 'tool-result',
+            toolCallId: message.tool_call_id,
+            toolName: '',
+            output: { type: 'text', value: message.content },
+          },
+        ],
+      };
+    return {
+      role: 'assistant',
+      content: [
+        { type: 'text', text: message.content },
+        ...('tool_calls' in message
+          ? message.tool_calls.map((call) => ({
+              type: 'tool-call',
+              toolCallId: call.id,
+              toolName: call.function.name,
+              // The native loop may retain malformed arguments for correction.
+              // Provider metadata preserves their exact original wire string.
+              input: call.function.arguments,
+              providerOptions: {
+                openaiCompatible: {
+                  function: { name: call.function.name, arguments: call.function.arguments },
+                },
+              },
+            }))
+          : []),
+      ],
+    };
+  });
+  return {
+    prompt,
+    maxOutputTokens: request.max_output_tokens,
+    tools: tools.map((tool) => ({
+      type: 'function',
+      name: tool.name,
+      description: tool.description,
+      inputSchema: tool.parameters,
+    })),
+  } as LanguageModelV2CallOptions;
+}
+
+/** Ask the SDK to serialize without allowing an outbound request. */
+export async function buildHarnessModelBody(
   model: string,
   request: Candidate,
   tools: readonly HarnessTool[],
-): string {
-  return JSON.stringify({
-    model,
-    messages: request.messages,
-    tools: tools.map((tool) => ({
-      type: 'function',
-      function: { name: tool.name, description: tool.description, parameters: tool.parameters },
-    })),
-    stream: true,
-    stream_options: { include_usage: true },
-    parallel_tool_calls: false,
-    max_tokens: request.max_output_tokens,
-  });
+): Promise<string> {
+  let body: string | undefined;
+  const capture: HarnessSdkFetch = async (_url, init) => {
+    if (typeof init?.body !== 'string') throw new Error('SDK body is not text');
+    body = init.body;
+    throw new Error('local SDK serialization complete');
+  };
+  try {
+    await createHarnessSdkModel(
+      'https://measurement.invalid/v1',
+      model,
+      undefined,
+      capture,
+    ).doStream(harnessSdkOptions(request, tools));
+  } catch {
+    if (body === undefined) throw new Error('SDK request serialization failed');
+  }
+  if (body === undefined) throw new Error('SDK request serialization failed');
+  return body;
 }
 
 /** Local only: no network, durable usage, or model iteration. */
-export function measureHarnessContext(
+export async function measureHarnessContext(
   request: Candidate,
   tools: readonly HarnessTool[],
   policy: ContextPolicy,
   meter?: HarnessInputMeter,
-): HarnessContextMeasurement {
-  const body = buildHarnessModelBody(policy.model_binding.model, request, tools);
+): Promise<HarnessContextMeasurement> {
+  const body = await buildHarnessModelBody(policy.model_binding.model, request, tools);
   const httpBytes = Buffer.byteLength(body, 'utf8');
   const wireBytes = Buffer.byteLength(JSON.stringify({ ...request, type: 'model' }), 'utf8');
   let input: InputMeter = {
