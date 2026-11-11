@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import { createConfig, loadConfig, loadPrivateJsonSnapshot, saveConfig } from './config.mjs';
@@ -336,7 +337,49 @@ export async function stopInstallation(file) {
   });
 }
 
-export async function upgradeInstallation(file) {
+async function inspectWaitingForUpgrade(
+  config,
+  directory,
+  artifact,
+  database,
+  phase,
+  allowBlocked = false,
+) {
+  await database.assertLease();
+  await database.assertNoOtherClients();
+  const output = await compose(
+    config,
+    directory,
+    [
+      'run',
+      '--rm',
+      '--no-deps',
+      '-T',
+      '--entrypoint',
+      'bun',
+      'api',
+      'apps/api/dist/release-inspection.js',
+    ],
+    { image: artifact.image, source: artifact.source },
+  );
+  const waiting = JSON.parse(output);
+  if (
+    !Array.isArray(waiting) ||
+    waiting.some(
+      (item) =>
+        !item || typeof item.runId !== 'string' || !['compatible', 'blocked'].includes(item.status),
+    )
+  )
+    throw failure('WAITING_INSPECTION_INVALID');
+  await writeJson(path.join(directory, `waiting-inspection-${phase}.json`), waiting);
+  await database.assertNoOtherClients();
+  await database.assertLease();
+  if (!allowBlocked && waiting.some((item) => item.status === 'blocked'))
+    throw failure('WAITING_INSPECTION_BLOCKED');
+  return waiting;
+}
+
+export async function upgradeInstallation(file, { stopWaiting } = {}) {
   return withInstallation(file, async (config, directory) => {
     await verifyVolumes(config, directory);
     assertOwned(await projectContainers(config), config);
@@ -360,6 +403,64 @@ export async function upgradeInstallation(file) {
       });
       await stopWriters(config, directory);
       await database.assertNoOtherClients();
+      const waiting = await inspectWaitingForUpgrade(
+        config,
+        directory,
+        artifact,
+        database,
+        'before-migration',
+        Boolean(stopWaiting),
+      );
+      let selection;
+      if (stopWaiting) {
+        const blocked = waiting.filter((item) => item.status === 'blocked');
+        if (!blocked.length) throw failure('WAITING_INSPECTION_NO_BLOCKED');
+        stopWaiting.write(
+          '以下等待无法安全适配；只可明确选择一个 Run 停止，批准和已产生的提醒不会被撤销。',
+        );
+        for (const item of blocked) stopWaiting.write(`${item.runId} ${item.reason ?? ''}`);
+        const chosen = await stopWaiting.ask('输入要停止的完整 Run ID，留空退出');
+        if (!blocked.some((item) => item.runId === chosen))
+          throw failure('WAITING_SELECTION_INVALID');
+        const detail = JSON.parse(
+          await compose(
+            config,
+            directory,
+            [
+              'run',
+              '--rm',
+              '--no-deps',
+              '-T',
+              '--entrypoint',
+              'bun',
+              'api',
+              'apps/api/dist/release-waiting-detail.js',
+            ],
+            {
+              image: artifact.image,
+              source: artifact.source,
+              input: JSON.stringify({ runId: chosen }),
+            },
+          ),
+        );
+        if (detail?.runId !== chosen) throw failure('WAITING_INSPECTION_INVALID');
+        stopWaiting.write(JSON.stringify(detail, null, 2));
+        await database.assertLease();
+        await database.assertNoOtherClients();
+        const confirmed = await stopWaiting.ask(`输入 STOP ${chosen} 确认停止此 Run`);
+        if (confirmed !== `STOP ${chosen}`) throw failure('WAITING_SELECTION_INVALID');
+        selection = {
+          runId: chosen,
+          idempotencyKey: randomUUID(),
+          waiting: {
+            checkpoint: detail.checkpoint,
+            invocation: detail.invocation,
+            approval: detail.approvalId,
+          },
+        };
+        await database.assertLease();
+        await database.assertNoOtherClients();
+      }
       await backupInstallation(config, directory, postgres);
       await database.assertLease();
       await writeJson(path.join(directory, 'upgrade.json'), {
@@ -369,6 +470,37 @@ export async function upgradeInstallation(file) {
       await database.upgrade();
       const state = await database.classify();
       assertInstallationSchema(state, database.targetVersion);
+      if (selection) {
+        await database.assertLease();
+        await database.assertNoOtherClients();
+        const output = await compose(
+          config,
+          directory,
+          [
+            'run',
+            '--rm',
+            '--no-deps',
+            '-T',
+            '--entrypoint',
+            'bun',
+            'api',
+            'apps/api/dist/release-stop.js',
+          ],
+          { image: artifact.image, source: artifact.source, input: JSON.stringify(selection) },
+        );
+        const receipt = JSON.parse(output);
+        if (
+          receipt?.runId !== selection.runId ||
+          receipt?.status !== 'cancelled' ||
+          receipt?.idempotencyKey !== selection.idempotencyKey
+        )
+          throw failure('WAITING_STOP_RECEIPT_INVALID');
+        await writeJson(path.join(directory, 'waiting-stop-receipt.json'), receipt);
+        stopWaiting.write(`已停止所选 Run；停止回执已保存在私有安装目录。`);
+        await database.assertNoOtherClients();
+        await database.assertLease();
+      }
+      await inspectWaitingForUpgrade(config, directory, artifact, database, 'after-migration');
       await writeJson(path.join(directory, 'upgrade.json'), {
         phase: 'starting',
         target: artifact.digest,

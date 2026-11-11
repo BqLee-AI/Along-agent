@@ -30,8 +30,10 @@ import {
   createHarnessSession,
   cancelConversationRun,
   getRunView,
+  inspectReleaseWaiting,
   resumeConversationRun,
 } from '../../src/modules/conversations/harness-authority.js';
+import { stopReleaseWaiting } from '../../src/modules/conversations/release-stop.js';
 import type { HarnessSession } from '../../src/modules/conversations/harness-authority.js';
 import {
   listRunEvents,
@@ -280,7 +282,11 @@ maybe('harness durable authority against PostgreSQL', () => {
       checkpointId: checkpoint.checkpoint_ref,
     };
   }
-  async function legacyWaiting(usage: HarnessSnapshot['usage'] = { iterations: 1, tokens: null }) {
+  async function legacyWaiting(
+    usage: HarnessSnapshot['usage'] = { iterations: 1, tokens: null },
+    allowlist: readonly string[] = BUSINESS_TOOL_IDS,
+    invalidHistoricalReference = false,
+  ) {
     const source = await fresh();
     const runId = randomUUID();
     const attemptId = randomUUID();
@@ -294,9 +300,9 @@ maybe('harness durable authority against PostgreSQL', () => {
         FROM agent_runs WHERE id=$1 RETURNING id,owner_id
       ) INSERT INTO run_attempts(id,owner_id,run_id,attempt_no,status)
         SELECT $3,owner_id,id,1,'running' FROM legacy`,
-      [source.context.runId, runId, attemptId, JSON.stringify(BUSINESS_TOOL_IDS)],
+      [source.context.runId, runId, attemptId, JSON.stringify(allowlist)],
     );
-    const context = { ...source.context, runId, attemptId, allowlist: [...BUSINESS_TOOL_IDS] };
+    const context = { ...source.context, runId, attemptId, allowlist: [...allowlist] };
     const inboundKey = randomUUID();
     await database.pool.query(
       `INSERT INTO conversation_idempotency(owner_id,idempotency_key,request_hash,
@@ -334,7 +340,16 @@ maybe('harness durable authority against PostgreSQL', () => {
     await database.pool.query(
       `INSERT INTO run_checkpoints(id,owner_id,attempt_id,seq,kind,payload,stream_protocol_version)
        VALUES($1,$2,$3,1,'harness_snapshot',$4::jsonb,'harness/v2')`,
-      [checkpointId, context.ownerId, attemptId, JSON.stringify(snapshot)],
+      [
+        checkpointId,
+        context.ownerId,
+        attemptId,
+        JSON.stringify(
+          invalidHistoricalReference
+            ? { ...snapshot, version: 1, tool_refs: [randomUUID()] }
+            : snapshot,
+        ),
+      ],
     );
     await database.pool.query(
       `UPDATE agent_runs SET status='suspended_approval',waiting_checkpoint_id=$2,
@@ -2474,6 +2489,196 @@ maybe('harness durable authority against PostgreSQL', () => {
     });
   }
 
+  it('does not resume a historical waiting point by silently dropping an unsupported frozen tool', async () => {
+    const fixture = await legacyWaiting(undefined, [
+      ...BUSINESS_TOOL_IDS,
+      'historical_unknown_tool',
+    ]);
+    await rejectApproval({ pool: database.pool }, fixture.actor.userId, fixture.approvalId, {
+      idempotency_key: randomUUID(),
+    });
+    expect(
+      (
+        await getRunView(
+          deps,
+          fixture.actor.userId,
+          fixture.context.conversationId,
+          fixture.context.runId,
+        )
+      ).can_resume,
+    ).toBe(false);
+    await expect(resume(fixture)).rejects.toMatchObject({ errorCode: 'STATE_CONFLICT' });
+    const result = await database.pool.query(
+      `SELECT status, waiting_checkpoint_id,
+         (SELECT count(*)::int FROM run_attempts WHERE run_id=agent_runs.id) AS attempts,
+         (SELECT count(*)::int FROM harness_resumes WHERE run_id=agent_runs.id) AS resumes
+       FROM agent_runs WHERE id=$1`,
+      [fixture.context.runId],
+    );
+    expect(result.rows[0]).toEqual({
+      status: 'suspended_approval',
+      waiting_checkpoint_id: fixture.checkpointId,
+      attempts: 1,
+      resumes: 0,
+    });
+    expect(
+      await readRunContextPolicy(database.pool, fixture.actor.userId, fixture.context.runId),
+    ).toBeNull();
+  });
+
+  it('explicitly stops only the selected incompatible historical wait and preserves its approval', async () => {
+    const selected = await legacyWaiting(undefined, [
+      ...BUSINESS_TOOL_IDS,
+      'historical_unknown_tool',
+    ]);
+    const untouched = await legacyWaiting(undefined, [
+      ...BUSINESS_TOOL_IDS,
+      'historical_unknown_tool',
+    ]);
+    const key = randomUUID();
+    const waiting = {
+      checkpoint: selected.checkpointId,
+      invocation: selected.snapshot.waiting!.invocation_id,
+      approval: selected.approvalId,
+    };
+    await expect(
+      stopReleaseWaiting(deps, {
+        runId: selected.context.runId,
+        idempotencyKey: randomUUID(),
+        waiting: { ...waiting, approval: randomUUID() },
+      }),
+    ).rejects.toMatchObject({ errorCode: 'STATE_CONFLICT' });
+    expect(
+      (
+        await database.pool.query('SELECT status FROM agent_runs WHERE id=$1', [
+          selected.context.runId,
+        ])
+      ).rows[0]?.status,
+    ).toBe('suspended_approval');
+    expect(
+      await stopReleaseWaiting(deps, {
+        runId: selected.context.runId,
+        idempotencyKey: key,
+        waiting,
+      }),
+    ).toEqual({ runId: selected.context.runId, status: 'cancelled', idempotencyKey: key });
+    const runs = await database.pool.query(
+      'SELECT id,status FROM agent_runs WHERE id=ANY($1::uuid[]) ORDER BY id',
+      [[selected.context.runId, untouched.context.runId]],
+    );
+    expect(new Map(runs.rows.map((row) => [row.id, row.status]))).toEqual(
+      new Map([
+        [selected.context.runId, 'cancelled'],
+        [untouched.context.runId, 'suspended_approval'],
+      ]),
+    );
+    const approvals = await database.pool.query(
+      'SELECT id,state,consumed_task_id FROM approvals WHERE id=ANY($1::uuid[])',
+      [[selected.approvalId, untouched.approvalId]],
+    );
+    expect(approvals.rows).toHaveLength(2);
+    expect(
+      approvals.rows.every((row) => row.state === 'pending' && row.consumed_task_id === null),
+    ).toBe(true);
+    expect(
+      (await listRunEvents(database.pool, selected.actor.userId, selected.context.runId)).filter(
+        (event) => event.type === 'thread.cancelled',
+      ),
+    ).toHaveLength(1);
+    expect(
+      (
+        await database.pool.query(
+          'SELECT count(*)::int n FROM harness_cancellations WHERE run_id=$1 AND idempotency_key=$2',
+          [selected.context.runId, key],
+        )
+      ).rows[0]?.n,
+    ).toBe(1);
+    await expect(
+      stopReleaseWaiting(deps, {
+        runId: selected.context.runId,
+        idempotencyKey: randomUUID(),
+        waiting,
+      }),
+    ).rejects.toMatchObject({ errorCode: 'STATE_CONFLICT' });
+  });
+
+  it('inspects pending historical waits without authorizing or changing them', async () => {
+    const compatible = await legacyWaiting();
+    const incompatible = await legacyWaiting(undefined, [
+      ...BUSINESS_TOOL_IDS,
+      'historical_unknown_tool',
+    ]);
+    const report = await inspectReleaseWaiting(deps);
+    expect(report).toContainEqual({ runId: compatible.context.runId, status: 'compatible' });
+    expect(report).toContainEqual({
+      runId: incompatible.context.runId,
+      status: 'blocked',
+      reason: 'STATE_CONFLICT',
+    });
+    for (const fixture of [compatible, incompatible]) {
+      expect(
+        await readRunContextPolicy(database.pool, fixture.actor.userId, fixture.context.runId),
+      ).toBeNull();
+      const row = await database.pool.query(
+        `SELECT status, (SELECT count(*)::int FROM run_attempts WHERE run_id=agent_runs.id) AS attempts,
+         (SELECT count(*)::int FROM harness_resumes WHERE run_id=agent_runs.id) AS resumes
+         FROM agent_runs WHERE id=$1`,
+        [fixture.context.runId],
+      );
+      expect(row.rows[0]).toEqual({ status: 'suspended_approval', attempts: 1, resumes: 0 });
+    }
+  });
+
+  it('projects the old installation administrator without persisting an admission during inspection', async () => {
+    const fixture = await legacyWaiting();
+    const before = await database.pool.query(
+      'SELECT * FROM identity_account_admissions ORDER BY user_id',
+    );
+    await database.pool.query('INSERT INTO installation_admin(user_id) VALUES($1)', [
+      fixture.actor.userId,
+    ]);
+    await database.pool.query(
+      'ALTER TABLE identity_account_admissions RENAME TO identity_account_admissions_saved',
+    );
+    try {
+      const report = await inspectReleaseWaiting(deps);
+      expect(report).toContainEqual({ runId: fixture.context.runId, status: 'compatible' });
+      expect(
+        (
+          await database.pool.query(
+            'SELECT * FROM identity_account_admissions_saved ORDER BY user_id',
+          )
+        ).rows,
+      ).toEqual(before.rows);
+    } finally {
+      await database.pool.query(
+        'ALTER TABLE identity_account_admissions_saved RENAME TO identity_account_admissions',
+      );
+      await database.pool.query('DELETE FROM installation_admin WHERE user_id=$1', [
+        fixture.actor.userId,
+      ]);
+    }
+  });
+
+  it('keeps a historical waiting point readable when its snapshot cannot be adapted', async () => {
+    const fixture = await legacyWaiting(undefined, BUSINESS_TOOL_IDS, true);
+    await rejectApproval({ pool: database.pool }, fixture.actor.userId, fixture.approvalId, {
+      idempotency_key: randomUUID(),
+    });
+    const view = await getRunView(
+      deps,
+      fixture.actor.userId,
+      fixture.context.conversationId,
+      fixture.context.runId,
+    );
+    expect(view).toMatchObject({
+      status: 'suspended_approval',
+      can_resume: false,
+      waiting: { checkpoint_id: fixture.checkpointId },
+    });
+    await expect(resume(fixture)).rejects.toMatchObject({ errorCode: 'STATE_CONFLICT' });
+  });
+
   it('backfills a legacy policy only on legal explicit resume without changing frozen authority or granting new tools', async () => {
     const fixture = await legacyWaiting();
     async function assertNoRoutingPolicy(): Promise<void> {
@@ -2632,6 +2837,16 @@ maybe('harness durable authority against PostgreSQL', () => {
       await rejectApproval({ pool: database.pool }, fixture.actor.userId, fixture.approvalId, {
         idempotency_key: randomUUID(),
       });
+      expect(
+        (
+          await getRunView(
+            deps,
+            fixture.actor.userId,
+            fixture.context.conversationId,
+            fixture.context.runId,
+          )
+        ).can_resume,
+      ).toBe(false);
       await expect(resume(fixture)).rejects.toMatchObject({ errorCode: 'BUDGET_EXCEEDED' });
       expect(
         await readRunContextPolicy(database.pool, fixture.actor.userId, fixture.context.runId),

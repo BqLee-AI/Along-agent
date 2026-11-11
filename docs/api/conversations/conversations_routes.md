@@ -110,6 +110,7 @@ strict body `{idempotency_key,reason?}`，可选 reason 长度1–200个 UTF-16 
 ### 有限批准恢复
 
 strict body `{checkpoint_id,idempotency_key}`，仅 harness Run 的最后有效批准等待点；business、他人、旧点、普通 checkpoint、取消或其他终态不可新启动。pending 决议409；确认可以早于 suspend，继续时读取原批准真实当前决议，不依赖通知。
+恢复只使用原冻结工具集合；若目标构件不支持其中任一工具，返回状态冲突，不静默删除该工具后继续。快照引用不匹配、已用尽的累计预算或已经使用的等待点不能继续；历史事实仍供读取。`can_resume` 是只读时点的资格提示，不代替接纳事务中对时间规则、模型绑定、登记和并发状态的重新核验。
 
 - consumed：同 Run 新递增 attempt，将原 invocation/批准和真实 task ID 交给 native，原接受结果不改写、不重执行；
 - rejected/expired/superseded：将决议交给 native 停止原动作，不追 successor/同义绕拒绝；
