@@ -29,7 +29,9 @@
 
 真实混合样本应明确目标、唯一测试材料、允许的文件和提醒效果、到点时间及等待窗口，并分别保存 completed、partial、blocked、unknown 的实际结果；执行者拟定的预期须经独立人工审定，不能由执行者冒充。design/20 §10 要求独立人工审定目标和预期效果，**不要求逐样本事前盲审**；已审定的历史预期按其实际范围和时间复用。若护栏、旧等待资格或本次人工预期不具备，不发送可能写入的原账户请求，也不把隔离样本称作原安装验收。
 
-**待独立人工审定的混合样本草案（未执行）**：以经核实并登记的任务自有输出目录为唯一文件范围，请求在其中新建 `along-104-acceptance.md`，内容为“本次验收检查文件创建与三分钟提醒。”；同时从该请求的可信接纳锚起 180 秒创建一条事项为“检查 along-104-acceptance 文件”的本人提醒，并等待自然站内通知。预期文件效果仅为创建该精确文件并独立回读；若已存在或目录身份不符，应停止该文件目标而非覆盖或换名。提醒效果仅为一条来源绑定的 task、created 事件和排期命令，并记录真实排期及自然站内通知；不修改其他文件、设置、旧任务或 pending，不宣称设备送达。记录实际接纳锚与到点，拟观察至接纳锚后 360 秒；仍未观察到通知时如实记录，不把该窗口当成产品送达保证。未到点、失败或 unknown 分别如实记录。这个草案由执行者提出，**尚未通过独立人工审定**；真实目录、冻结 grant 物理身份及完整护栏尚未核实，不能据此访问或写入原安装。
+**用户独立审定的混合样本预期（尚未执行）**：[用户确认记录](https://github.com/BqLee-AI/Along-agent/pull/139#issuecomment-6794910139)时间为 2026-11-11 11:44:24 UTC：在已核实登记的测试输出目录新建 `along-104-acceptance.md`，内容为“本次验收检查文件创建与三分钟提醒。”；创建“检查 along-104-acceptance 文件”提醒，触发时间为请求接纳锚加 180 秒；观察到接纳后 360 秒，分别核对文件独立回读、任务和实际站内通知。文件已存在或目录身份不符时不覆盖、不换名；不得修改其他文件、设置、旧任务或旧 pending。通知仅按实际站内记录表述。360 秒是观察窗口，不是送达保证。
+
+独立审定只确认目标与预期，**不代表已执行或验收通过**，也不替代完整护栏、受管升级及旧等待资格检查；真实目录和冻结 grant 物理身份尚未核实。技术合同另要求核对来源绑定、task 的 `created` 事件、排期命令及实际回执，未到点、失败或 unknown 须分别如实记录；这些合同检查不能由 gold 确认代替。
 
 ### 可复用的具体样本
 
@@ -100,3 +102,25 @@ FUSE 可用性另在无网络、自有容器内探测：显式映射 `/dev/fuse`
 - **目标级文件**：Linux [Landlock 文件权限](https://docs.kernel.org/userspace-api/landlock.html#filesystem-flags)针对文件层级及目录内容，创建和替换要对同一父目录允许临时文件创建与 `link`/`rename`；目录规则不能按目标文件名单独授权。该判断来自内核文档与源码，并非本机 Landlock 实测。目标单文件挂载的 `EBUSY`、同身份 DAC 绕过和仅裸 FUSE 挂载的证据见上，不代表所有内核机制都不可行。独立发布进程是候选，但当前 gateway 在 API 进程内直接发布；需要独立核验冻结授权与许可，并阻止运行进程绕过发布者，再以真实派发、原注册 grant 的根及输出目录 `dev:ino`、并发和在途效果验证。替换前会校验原目标 inode；原子 rename 后目标变为新 inode，本身不是身份失败。
 
 当前没有可直接接入、已端到端验证的独立边界。缺的是独立来源与授权凭证、可信准入/发布组件和启动前分离连接与文件访问的实际部署方式，以及真实原挂载的身份事实；扩大权限、禁用后台或把受控代理当独立授权，都不能代替这些前置。是否构建上述组件或采用其他机制需要具体设计和验证；本记录不宣称原理上不存在其他方案。
+
+### 独立发布进程隔离原型
+
+以源码 `9e487995774346a9d3f9252851cdd5e3c35b4308` 的 workspace 模块，在无网络任务自有 Linux 容器 overlay 中实验；镜像为 `sha256:356b0557a9a7302ffea7005eec257862fc1902b033564f369cba1a4d44ae9676`。UID 1001 的独立发布进程在同一底层文件系统注册并冻结一次测试 grant，UID 1002 通过 Unix socket 递交经独立测试签发者 HMAC 授权的请求；发布进程调用真实 `publishWorkspaceCreate`/`publishWorkspaceReplace`，分别经 `link`/`rename` 成功创建和替换，产品读取函数及容器父进程分别读回。注册前后无重注册或换挂载，冻结的 root 和 output `dev:ino` 始终不变；目标文件替换后的 inode 按原子替换机制改变。
+
+无授权、伪造签名、篡改已签路径或内容以及成功请求的进程内重放均被拒；UID 1002 直接写目标、相邻文件、新建文件、通过符号链接写入、rename 覆盖和向外硬链接均遭 `EACCES`，相邻文件读回不变。这证明该隔离夹具的 IPC 及文件身份边界，不是正式产品 gateway 派发：签发者是测试父进程，advisory lock 为替身、无真实 PG 一次许可，重放状态仅在发布进程内存；重启、崩溃、并发撤销、在途效果、实际原安装挂载及 grant 均未证明。首次容器初始化因缺 `DAC_OVERRIDE` 失败；第二次发布探针运行后因缺 `KILL` 清理失败、整体退出 1；补齐实验容器 capability 后第三次退出 0，任务自有容器及 overlay 随退出删除。不得将实验的容器权限扩展当作原安装护栏。
+
+### 事务内独立准入隔离原型
+
+以源码 `9e487995774346a9d3f9252851cdd5e3c35b4308`、任务自有 PostgreSQL 16.15 和迁移 0001–0027 验证：独立 issuer 为合成 owner、source 和部分效果预登记一次性凭证；无 superuser/`BYPASSRLS` 的独立运行进程不能写凭证表，且不持 issuer 或管理员连接。测试适配器在真实 `createTaskWithinTransaction` 生成随机 task ID 后、实际插入前调用 `SECURITY DEFINER`，在同一产品事务内检查凭证及其事务内 source、登记新 ID 并消费凭证。真实函数创建两个随机 task，各有 `created` 和 pending outbox；一次创建后整体回滚，再使用同一凭证重试成功并生成不同 ID。
+
+伪造凭证、变更 source、跨 owner、变更凭证绑定的 note、指定旧 task 或重放已消费凭证被拒；同 owner 旧 task 更新为零行。**但测试还实际发现绕过**：运行角色能更新获权 task 的 outbox 命令中的 `fire_at_utc`，因为该实验策略只按 task/owner 限制 outbox 而未绑定命令内容；该绕过在隔离事务内回滚。source 由运行进程按 issuer 预授权的合成声明在事务内构造；声明一致不证明 issuer 独立核验了真实请求或运行进程不能伪造来源。测试没有调用完整 `startConversationRun`、gateway、worker 或真实派发，也没有覆盖全部效果字段、表或连接；因此不是完整执行层护栏。
+
+原型前两次分别因策略类型不匹配、复用同一 source 触发产品唯一约束而失败；调整实验策略和独立 source 后获得上述结果，均不是产品行为 Red。任务自有 PostgreSQL 容器和网络已删除；不能将该策略部署到原安装。
+
+### 正式 gateway 接缝补验
+
+- **文件创建**：在独立 PG 和容器 overlay 中，临时 gateway 副本仅把 `workspace_create` 的发布调用改接 Unix socket，其余 gateway 逻辑沿用源码。UID 1002 经真实 `startConversationRun`、`reserveToolInvocation` 和 `invokeTool` 派发；独立发布者在 PG 中观察到同调用 ID 的 `unknown` 许可和匹配的参数哈希，持真实 PG advisory lock 调用 `publishWorkspaceCreate`。获测试签名的目标实际创建并独立读回，调用账最终为 `completed`；同调用重放返回既有结果、没有第二次发布。经真实 gateway 预约的另一目标被发布者拒绝，文件不存在；拒绝发生在一次许可提交后，gateway 返回 `TOOL_EFFECT_UNKNOWN`、调用账保留 `unknown`，不能称为确定零写回执。运行 UID 直接创建遭 `EACCES`；发布者和 gateway 各按同一测试配置注册，前后 root/output `dev:ino` 一致且未换挂载。
+- 这是临时 IPC 适配器的可达性证明：测试父进程预签固定目标，gateway 持 bearer 票据；发布者对 `unknown` 及参数哈希的检查不能证明请求者是持许可的执行栈，也没有限制运行角色伪造数据库事实。PG 使用隔离合成管理员，不覆盖真实 native、provider、撤销、崩溃或原安装 grant。镜像中 192 个相关源码、fixture、迁移、package manifest 与 `9e487995` 逐文件比对一致；镜像预构建 package `dist` 和第三方依赖的完整构件对应关系未证明。首次先运行越权例后，Run 的 unknown 阻止后续预约；调整顺序后完成上述正反实验，均保留结果。
+- **提醒创建**：另在独立 PG 的非 superuser 运行角色上，调用正式 `reserveToolInvocation` 和 `invokeTool(create_reminder)`；临时 pool 适配器在产品事务的 task INSERT 前调用上述 `SECURITY DEFINER`。测试 issuer 在预约后按预设合成 fixture 签发；真实 gateway 创建 task、`created` 和 outbox，同调用重放返回既有结果，同 owner 旧 task 更新为零行。该次正式 gateway 样本也实际复现运行角色修改新 task outbox 的 `fire_at_utc`，随后回滚；没有运行 worker 或自然触发。source 表可由运行角色写入，合成 issuer 不代表独立用户认证；并未覆盖新 Run 接纳、全表及调度器实际执行。
+
+两项补验均为任务自有环境的受控实验，不是完整护栏。最小后续缺口是独立来源认证与授权交付、对 outbox 等**最终效果**的不可绕过约束，以及跨 gateway/发布者/worker 的许可归属、撤销和崩溃恢复；随后还需在真实挂载身份与所有运行连接上做正反验证。不能以已审定 gold、受控样本或扩大角色权限放行原安装。
