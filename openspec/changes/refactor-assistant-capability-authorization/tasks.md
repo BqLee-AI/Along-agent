@@ -27,7 +27,7 @@
 - [x] 3.2 D1/D2/D7/D8/A4：elapsed 锚+180秒、无时区不问、TZDB坏但UTC依据真实；墙上时间/DST/过窗不顺延；新旧冻结与今日投影边缘，不能造规则版本。历史真实样本及最终源码隔离补验的版本和边界见证据矩阵。
 - [x] 3.3 D3/D4/D5/D8/A1/A2：本地事务任一步失败全回滚；同入站/同调用/异参、并发取消和接续；明确相同新请求不吞并，既成效果不重做。复用原事务及接续证据，另以隔离 PG 验证同键并发取消；见证据矩阵。
 - [x] 3.4 D8/D9/D10/A3：文件许可/响应丢失/真实回读、零写冲突自主修正、unknown不换身份重写；运行失联/停止/预算门不发后续动作，任务仍守取消优先/真实回执。按 [#104 证据矩阵](../../../docs/verification/assistant-delegation-104-evidence-matrix.md) 分别复用真实文件和受控故障样本，不以真实 provider 故障注入或额外原账户隔离护栏作为本项门槛。
-- [x] 3.5 A1–A4/D1–D10：复用适用证据，在已有产品安装完成真实 Web→native→TS/MCP→PG/文件→自然通知混合目标；分别呈现 completed/partial/blocked/unknown，不以 Run done 或受控响应代替真实结果。指定独立测试安装的样本、历史真实结果和受控 unknown 展示各自边界见证据矩阵；不称原安装。
+- [ ] 3.5 A1–A4/D1–D10：复用适用证据，在已有产品安装完成真实 Web→native→TS/MCP→PG/文件→自然通知混合目标；分别呈现 completed/partial/blocked/unknown，不以 Run done 或受控响应代替真实结果。指定独立测试安装的混合样本及历史真实 partial/blocked 已记录；unknown 仅有受控消费者与静态展示，尚无真实 provider 页面旅程，不满足本项；不称原安装。
 - [ ] 3.6 集成负责人核对所有合同/代码/API/schema/PRD/规则、当前五门与真实模型评估；只在整体实施/验收收口授权后 archive 本 change，不因规范先合入关闭 #104/#105。
 
 ## Verification
