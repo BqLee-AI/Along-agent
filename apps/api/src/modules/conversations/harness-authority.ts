@@ -414,6 +414,11 @@ export async function cancelConversationRun(
   runId: string,
   requestId: string,
   body: unknown,
+  expectedWaiting?: {
+    checkpoint: string | null;
+    invocation: string | null;
+    approval: string | null;
+  },
 ): Promise<RunView> {
   const parsed = CancelRunBodySchema.safeParse(body);
   if (!parsed.success) throw validationError('invalid cancel body');
@@ -425,6 +430,14 @@ export async function cancelConversationRun(
     conversationId,
     runId,
     async (client, locked) => {
+      if (
+        expectedWaiting &&
+        (locked.run.status !== 'suspended_approval' ||
+          locked.run.waiting_checkpoint_id !== expectedWaiting.checkpoint ||
+          locked.run.waiting_invocation_id !== expectedWaiting.invocation ||
+          locked.run.waiting_approval_id !== expectedWaiting.approval)
+      )
+        throw stateConflict('selected waiting point changed');
       const previous = (
         await client.query<{ run_id: string; reason: string }>(
           'SELECT run_id,reason FROM harness_cancellations WHERE owner_id=$1 AND idempotency_key=$2',

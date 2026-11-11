@@ -33,6 +33,7 @@ import {
   inspectReleaseWaiting,
   resumeConversationRun,
 } from '../../src/modules/conversations/harness-authority.js';
+import { stopReleaseWaiting } from '../../src/modules/conversations/release-stop.js';
 import type { HarnessSession } from '../../src/modules/conversations/harness-authority.js';
 import {
   listRunEvents,
@@ -2523,6 +2524,82 @@ maybe('harness durable authority against PostgreSQL', () => {
     expect(
       await readRunContextPolicy(database.pool, fixture.actor.userId, fixture.context.runId),
     ).toBeNull();
+  });
+
+  it('explicitly stops only the selected incompatible historical wait and preserves its approval', async () => {
+    const selected = await legacyWaiting(undefined, [
+      ...BUSINESS_TOOL_IDS,
+      'historical_unknown_tool',
+    ]);
+    const untouched = await legacyWaiting(undefined, [
+      ...BUSINESS_TOOL_IDS,
+      'historical_unknown_tool',
+    ]);
+    const key = randomUUID();
+    const waiting = {
+      checkpoint: selected.checkpointId,
+      invocation: selected.snapshot.waiting!.invocation_id,
+      approval: selected.approvalId,
+    };
+    await expect(
+      stopReleaseWaiting(deps, {
+        runId: selected.context.runId,
+        idempotencyKey: randomUUID(),
+        waiting: { ...waiting, approval: randomUUID() },
+      }),
+    ).rejects.toMatchObject({ errorCode: 'STATE_CONFLICT' });
+    expect(
+      (
+        await database.pool.query('SELECT status FROM agent_runs WHERE id=$1', [
+          selected.context.runId,
+        ])
+      ).rows[0]?.status,
+    ).toBe('suspended_approval');
+    expect(
+      await stopReleaseWaiting(deps, {
+        runId: selected.context.runId,
+        idempotencyKey: key,
+        waiting,
+      }),
+    ).toEqual({ runId: selected.context.runId, status: 'cancelled', idempotencyKey: key });
+    const runs = await database.pool.query(
+      'SELECT id,status FROM agent_runs WHERE id=ANY($1::uuid[]) ORDER BY id',
+      [[selected.context.runId, untouched.context.runId]],
+    );
+    expect(new Map(runs.rows.map((row) => [row.id, row.status]))).toEqual(
+      new Map([
+        [selected.context.runId, 'cancelled'],
+        [untouched.context.runId, 'suspended_approval'],
+      ]),
+    );
+    const approvals = await database.pool.query(
+      'SELECT id,state,consumed_task_id FROM approvals WHERE id=ANY($1::uuid[])',
+      [[selected.approvalId, untouched.approvalId]],
+    );
+    expect(approvals.rows).toHaveLength(2);
+    expect(
+      approvals.rows.every((row) => row.state === 'pending' && row.consumed_task_id === null),
+    ).toBe(true);
+    expect(
+      (await listRunEvents(database.pool, selected.actor.userId, selected.context.runId)).filter(
+        (event) => event.type === 'thread.cancelled',
+      ),
+    ).toHaveLength(1);
+    expect(
+      (
+        await database.pool.query(
+          'SELECT count(*)::int n FROM harness_cancellations WHERE run_id=$1 AND idempotency_key=$2',
+          [selected.context.runId, key],
+        )
+      ).rows[0]?.n,
+    ).toBe(1);
+    await expect(
+      stopReleaseWaiting(deps, {
+        runId: selected.context.runId,
+        idempotencyKey: randomUUID(),
+        waiting,
+      }),
+    ).rejects.toMatchObject({ errorCode: 'STATE_CONFLICT' });
   });
 
   it('inspects pending historical waits without authorizing or changing them', async () => {

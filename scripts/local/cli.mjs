@@ -12,7 +12,8 @@ const usage = `本机生命周期（Bun 1.4.2 / Windows + Docker Linux x64）
   bun --no-env-file run local:init --adopt [--config <私有 JSON>]
   bun --no-env-file run local:start [--config <私有 JSON>]
   bun --no-env-file run local:stop [--config <私有 JSON>]
-  bun --no-env-file run local:upgrade [--config <私有 JSON>]
+  bun --no-env-file run local:upgrade [--stop-waiting] [--config <私有 JSON>]
+  --stop-waiting：在交互终端选择并确认停止一个无法适配的等待，再前向升级
   bun --no-env-file run local:account [--admit | --workspace | --reset-password] [--config <私有 JSON>]
   --admit：明确选择原普通用户并验证/设置本人凭证后准入，不绑定管理员
   --workspace：明确选择已准入 owner，有限新增工作区，保留全部原登记
@@ -24,7 +25,14 @@ function options(args) {
   const [action, ...rest] = args;
   if (!['init', 'start', 'stop', 'upgrade', 'account'].includes(action))
     throw failure('ARGUMENT_INVALID');
-  const value = { action, mode: null, operation: 'administrator', file: null, help: false };
+  const value = {
+    action,
+    mode: null,
+    operation: 'administrator',
+    stopWaiting: false,
+    file: null,
+    help: false,
+  };
   for (let index = 0; index < rest.length; index++) {
     const flag = rest[index];
     if (flag === '--help' || flag === '-h') value.help = true;
@@ -32,6 +40,8 @@ function options(args) {
       value.file = path.resolve(rest[++index]);
     else if (['--new', '--adopt'].includes(flag) && !value.mode && action === 'init')
       value.mode = flag.slice(2);
+    else if (flag === '--stop-waiting' && action === 'upgrade' && !value.stopWaiting)
+      value.stopWaiting = true;
     else if (
       ['--admit', '--workspace', '--reset-password'].includes(flag) &&
       value.operation === 'administrator' &&
@@ -182,6 +192,9 @@ const explanations = {
     '存在不能安全适配的批准等待；保持停写，查看私有安装目录中的 waiting-inspection 清点结果，在原合同下处理后显式重试升级。',
   WAITING_INSPECTION_INVALID:
     '等待清点结果无效；保持停写，核对目标成套产物和数据库状态，不跳过清点。',
+  WAITING_INSPECTION_NO_BLOCKED: '当前没有可选择的不可适配等待；未停止任何 Run。',
+  WAITING_SELECTION_INVALID: '未明确选择并确认一个不可适配等待；未停止任何 Run。',
+  WAITING_STOP_RECEIPT_INVALID: '未能确认停止回执；保持停写并读取原 Run 状态，不重复提交。',
   DATABASE_UNSUPPORTED:
     '数据库不是完整受支持基线；先备份并人工核对，不猜版本、stamp、重放全量或清库。',
   CONFIG_LOCATION_INVALID: '配置必须位于 checkout 外的专用私有目录，不能把秘密放入代码仓库。',
@@ -263,7 +276,20 @@ try {
         stop: runtime.stopInstallation,
         upgrade: runtime.upgradeInstallation,
       };
-      const result = await actions[request.action](file, initialInput);
+      let io;
+      let result;
+      try {
+        if (request.stopWaiting) {
+          const { createAccountTerminalIO } = await import('./account.mjs');
+          io = createAccountTerminalIO();
+        }
+        result = await actions[request.action](
+          file,
+          request.action === 'upgrade' ? { stopWaiting: io } : initialInput,
+        );
+      } finally {
+        io?.close();
+      }
       console.log(
         result.phase === 'prepared'
           ? result.schema.upgradeRequired
