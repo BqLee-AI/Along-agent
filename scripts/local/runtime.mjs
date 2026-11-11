@@ -336,6 +336,40 @@ export async function stopInstallation(file) {
   });
 }
 
+async function inspectWaitingForUpgrade(config, directory, artifact, database, phase) {
+  await database.assertLease();
+  await database.assertNoOtherClients();
+  const output = await compose(
+    config,
+    directory,
+    [
+      'run',
+      '--rm',
+      '--no-deps',
+      '-T',
+      '--entrypoint',
+      'bun',
+      'api',
+      'apps/api/dist/release-inspection.js',
+    ],
+    { image: artifact.image, source: artifact.source },
+  );
+  const waiting = JSON.parse(output);
+  if (
+    !Array.isArray(waiting) ||
+    waiting.some(
+      (item) =>
+        !item || typeof item.runId !== 'string' || !['compatible', 'blocked'].includes(item.status),
+    )
+  )
+    throw failure('WAITING_INSPECTION_INVALID');
+  await writeJson(path.join(directory, `waiting-inspection-${phase}.json`), waiting);
+  await database.assertNoOtherClients();
+  await database.assertLease();
+  if (waiting.some((item) => item.status === 'blocked'))
+    throw failure('WAITING_INSPECTION_BLOCKED');
+}
+
 export async function upgradeInstallation(file) {
   return withInstallation(file, async (config, directory) => {
     await verifyVolumes(config, directory);
@@ -360,6 +394,7 @@ export async function upgradeInstallation(file) {
       });
       await stopWriters(config, directory);
       await database.assertNoOtherClients();
+      await inspectWaitingForUpgrade(config, directory, artifact, database, 'before-migration');
       await backupInstallation(config, directory, postgres);
       await database.assertLease();
       await writeJson(path.join(directory, 'upgrade.json'), {
@@ -369,6 +404,7 @@ export async function upgradeInstallation(file) {
       await database.upgrade();
       const state = await database.classify();
       assertInstallationSchema(state, database.targetVersion);
+      await inspectWaitingForUpgrade(config, directory, artifact, database, 'after-migration');
       await writeJson(path.join(directory, 'upgrade.json'), {
         phase: 'starting',
         target: artifact.digest,

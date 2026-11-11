@@ -178,6 +178,10 @@ const explanations = {
     '源码、运行产物或数据库版本不一致；使用显式 local:upgrade，不在普通启动中迁移。',
   UPGRADE_INCOMPLETE:
     '上次升级未完成，写者保持停止；核对备份、账本和失败阶段后显式重试 local:upgrade。',
+  WAITING_INSPECTION_BLOCKED:
+    '存在不能安全适配的批准等待；保持停写，查看私有安装目录中的 waiting-inspection 清点结果，在原合同下处理后显式重试升级。',
+  WAITING_INSPECTION_INVALID:
+    '等待清点结果无效；保持停写，核对目标成套产物和数据库状态，不跳过清点。',
   DATABASE_UNSUPPORTED:
     '数据库不是完整受支持基线；先备份并人工核对，不猜版本、stamp、重放全量或清库。',
   CONFIG_LOCATION_INVALID: '配置必须位于 checkout 外的专用私有目录，不能把秘密放入代码仓库。',

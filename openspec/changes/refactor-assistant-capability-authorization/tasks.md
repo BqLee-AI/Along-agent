@@ -34,6 +34,13 @@
 
 #105 合同与 #107 实施分别记录在各自小节。仅勾选已有对应实现及验收证据的切片；不因此声明整体重构或后续能力完成。
 
+### #137 历史协议与恢复预检补证
+
+- 验证负责人：本阶段集成负责人。旧版源码 `76f8b78bd334e025fc98b6c75cf4d9c7bb7b19ed` 的正式 Dockerfile `harness-artifact` 阶段构建出 v5 native，二进制 SHA-256 为 `ce580258c3f9985e8c876903972fda497a7d5fefc05c3939e6817a734219a320`。隔离无网络容器直接向该二进制 stdin 输入经当前共享 schema 接受的完整 v6 start：退出码 2、`HARNESS_PROTOCOL_ERROR`、零请求；同二进制以有效 v5 start 和受控模型帧正控制完整走过 measure_context、model、answer、model_next、snapshot、finish，退出码 0。没有调用真实 provider 或执行工具。
+- 隔离 PostgreSQL 16、Bun 1.4.4：未知冻结工具原先被过滤后成功恢复，真实 Red 为预期拒绝却成功接纳；修复后拒绝且原等待、原 attempt 和无策略追加保持。旧等待预算耗尽时 RunView 原先仍显示可继续，两项真实 Red；修复后按原 snapshot 引用和累计迭代/token 判定。无效历史引用仍可读取等待但不能恢复。最终 `harness-authority.test.ts` 为 47 通过、0 失败、355 断言；API typecheck 通过。
+- 旧源码在隔离 PG 中产生正式账户和旧等待，目标 Linux/Bun 1.4.2 先只读清点，再由受管数据库组件将 0020 升至 0027，原 Run、attempt、checkpoint、调用和批准的完整行摘要不变；目标原生进程在测试批准后经受控模型恢复，原 allowlist/冻结上下文不变。拒绝批准的另一隔离旅程按原合同以 `APPROVAL_rejected` 失败终结。此前清点旧身份 schema 因缺表实际失败，修正后对原管理员预测准入并在迁移后重查；两个非管理员旧等待被阻断。Compose 一次性清点容器另验证成功。详见 [历史发布记录](../../../docs/verification/legacy-forward-release-137.md)。
+- 2.8 和第 3 节仍未完成。原安装清点与制品身份、完整受管升级及阻断后的旧等待处置、旧文档批准/文件真实路径、原账户写护栏和真实混合目标尚无本次证据；[整体验收矩阵](../../../docs/verification/assistant-delegation-104-evidence-matrix.md)逐项区分历史证据与缺口。
+
 ### #105 首轮文档状态验证（2026-11-02，合同提交512df82）
 
 - 策略：纯规范，不适用业务 TDD；不把文档校验当实现或真实用户验收。检查范围为本 change、design/20、两份交接输入及必要跟随文档，共47个 Markdown 文件。

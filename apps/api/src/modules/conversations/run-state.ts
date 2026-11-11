@@ -1,4 +1,5 @@
 import type { PoolClient } from 'pg';
+import { ZodError } from 'zod';
 import {
   HistoricalHarnessSnapshotSchema,
   GoalResultSchema,
@@ -10,7 +11,7 @@ import {
   ThreadEventSchema,
   type ThreadEvent,
 } from '@along/stream-protocol';
-import { stateConflict } from '../../http/errors.js';
+import { HttpError, stateConflict } from '../../http/errors.js';
 import {
   appendCheckpoint,
   finishAttempt,
@@ -22,7 +23,15 @@ import type { RunContext } from './contracts.js';
 import { readApprovalDecision, readDocumentApprovalDecision } from '../approvals/decision.js';
 import { getDocumentApproval } from '../approvals/document-query.js';
 import { readRunInvocationStates } from '../tools/invocations.js';
-import { BUSINESS_TOOL_IDS } from '../tools/contracts.js';
+import {
+  BUSINESS_TOOL_IDS,
+  DELEGATION_TOOL_IDS,
+  DELEGATION_WORKSPACE_READ_TOOL_IDS,
+  DELEGATION_WORKSPACE_WRITE_TOOL_IDS,
+  DELEGATION_WORKSPACE_CREATE_TOOL_IDS,
+  HARNESS_BASE_TOOL_IDS,
+  TOOL_IDS,
+} from '../tools/contracts.js';
 import { validateWorkspaceGrant, WorkspaceDeniedError } from '../workspaces/service.js';
 import { interruptedGoalResult } from './goal-result.js';
 import {
@@ -177,6 +186,24 @@ export async function readRunApprovalDecision(
   return readApprovalDecision(client, binding.ownerId, approvalId);
 }
 
+const delegationTools: readonly string[] = [
+  ...DELEGATION_TOOL_IDS,
+  ...DELEGATION_WORKSPACE_READ_TOOL_IDS,
+  ...DELEGATION_WORKSPACE_WRITE_TOOL_IDS,
+  ...DELEGATION_WORKSPACE_CREATE_TOOL_IDS,
+];
+
+export function supportsFrozenTools(run: RunRow): boolean {
+  const frozen = run.frozen_context;
+  if (!frozen) return false;
+  const supported: readonly string[] = frozen.authorization_revision
+    ? delegationTools
+    : frozen.workspaceGrant
+      ? TOOL_IDS
+      : HARNESS_BASE_TOOL_IDS;
+  return run.tools_allowlist.every((name) => supported.includes(name));
+}
+
 export async function viewOf(client: PoolClient, locked: LockedRun): Promise<RunView> {
   const { run, attempt } = locked;
   const waiting =
@@ -207,7 +234,8 @@ export async function viewOf(client: PoolClient, locked: LockedRun): Promise<Run
     run.execution === 'harness' &&
     run.status === 'suspended_approval' &&
     decision !== null &&
-    decision.status !== 'pending';
+    decision.status !== 'pending' &&
+    supportsFrozenTools(run);
   // Eligibility reflects current authority without making historical reads
   // depend on it. Resume itself still validates before allocating an attempt.
   if (canResume && run.frozen_context?.workspaceGrant) {
@@ -245,7 +273,9 @@ export async function viewOf(client: PoolClient, locked: LockedRun): Promise<Run
         }
       }
     }
-    if (canResume && waiting) {
+  }
+  if (canResume && waiting) {
+    try {
       const snapshot = await readSnapshot(client, run, waiting.checkpoint_id);
       const used = await client.query('SELECT 1 FROM harness_resumes WHERE checkpoint_id=$1', [
         waiting.checkpoint_id,
@@ -256,6 +286,9 @@ export async function viewOf(client: PoolClient, locked: LockedRun): Promise<Run
         snapshot.usage.iterations < run.budget_max_iterations &&
         (snapshot.usage.tokens === null || snapshot.usage.tokens < run.budget_max_tokens) &&
         !used.rowCount;
+    } catch (error) {
+      if (!(error instanceof HttpError) && !(error instanceof ZodError)) throw error;
+      canResume = false;
     }
   }
   const documentEffects =

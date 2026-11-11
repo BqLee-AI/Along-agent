@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
+import { ZodError } from 'zod';
 import {
   HARNESS_PROTOCOL_VERSION,
   HARNESS_MAX_FRAME_BYTES,
@@ -41,14 +42,6 @@ import {
   readRunDocumentEvidence,
 } from '../tools/query.js';
 import type { ToolContext, ToolPayload } from '../tools/contracts.js';
-import {
-  HARNESS_BASE_TOOL_IDS,
-  DELEGATION_TOOL_IDS,
-  DELEGATION_WORKSPACE_READ_TOOL_IDS,
-  DELEGATION_WORKSPACE_WRITE_TOOL_IDS,
-  DELEGATION_WORKSPACE_CREATE_TOOL_IDS,
-  TOOL_IDS,
-} from '../tools/contracts.js';
 import { HARNESS_TOOL_DEFINITIONS, DELEGATION_TOOL_DEFINITIONS } from '../tools/catalog.js';
 import { GOAL_CONTROL_TOOL } from './goal-control.js';
 import { validateGoalResult } from './goal-result.js';
@@ -86,6 +79,7 @@ import {
   commitTerminal,
   readSnapshot,
   readRunApprovalDecision,
+  supportsFrozenTools,
   viewOf,
 } from './run-state.js';
 
@@ -97,12 +91,6 @@ export interface HarnessSession {
 
 const active = new Map<string, AbortController>();
 const sessionAborts = new Map<string, Set<AbortController>>();
-const DELEGATION_ALLOWED_TOOLS: readonly string[] = [
-  ...DELEGATION_TOOL_IDS,
-  ...DELEGATION_WORKSPACE_READ_TOOL_IDS,
-  ...DELEGATION_WORKSPACE_WRITE_TOOL_IDS,
-  ...DELEGATION_WORKSPACE_CREATE_TOOL_IDS,
-];
 
 function poolOf(deps: ConversationDeps): Pool {
   if (!deps.pool) throw notReady();
@@ -161,6 +149,7 @@ async function contextOf(
   attemptId: string,
   requestId: string,
   checkpointId?: string,
+  candidatePolicy?: { tableExists: boolean },
 ): Promise<RunContext> {
   const frozen = run.frozen_context;
   if (!frozen || !run.input_message_id) throw stateConflict('Run accepted input missing');
@@ -179,7 +168,11 @@ async function contextOf(
   )
     throw new HttpError(503, 503, 'TZDB_UNAVAILABLE', '接纳时的时间规则暂不可用。');
   if (frozen.workspaceGrant) validateWorkspaceGrant(run.owner_id, frozen.workspaceGrant);
-  const contextPolicy = await readRunContextPolicy(client, run.owner_id, run.id);
+  const contextPolicy = candidatePolicy
+    ? ((candidatePolicy.tableExists
+        ? await readRunContextPolicy(client, run.owner_id, run.id)
+        : null) ?? deps.harness?.contextPolicy)
+    : await readRunContextPolicy(client, run.owner_id, run.id);
   const deployed = deps.harness?.contextPolicy;
   if (
     !contextPolicy ||
@@ -188,6 +181,7 @@ async function contextOf(
     contextPolicy.model_binding.adapter_revision !== deployed.model_binding.adapter_revision
   )
     throw unavailable();
+  if (!supportsFrozenTools(run)) throw stateConflict('unsupported frozen tool in historical Run');
   const messageRefs = frozen.messageRefs ?? [run.input_message_id];
   const messages = await readHarnessMessages(
     client,
@@ -214,15 +208,7 @@ async function contextOf(
     timeContext: deps.timeContext,
     maxIterations: run.budget_max_iterations,
     maxTokens: run.budget_max_tokens,
-    allowlist: run.tools_allowlist.filter((name) =>
-      (
-        (frozen.authorization_revision
-          ? DELEGATION_ALLOWED_TOOLS
-          : frozen.workspaceGrant
-            ? TOOL_IDS
-            : HARNESS_BASE_TOOL_IDS) as readonly string[]
-      ).includes(name),
-    ),
+    allowlist: run.tools_allowlist,
     ...(frozen.workspaceGrant ? { workspaceGrant: frozen.workspaceGrant } : {}),
     ...(frozen.workspaceGrants ? { workspaceGrants: frozen.workspaceGrants } : {}),
     ...(frozen.authorization_revision
@@ -296,6 +282,120 @@ function buildHarnessStart(
   if (Buffer.byteLength(JSON.stringify(start), 'utf8') > HARNESS_MAX_FRAME_BYTES)
     throw new HttpError(422, 422, 'HARNESS_CONTEXT_LIMIT', '工具上下文超过安全范围，已停下。');
   return HarnessStartSchema.parse(start);
+}
+
+// Read-only release inspection is not an authorization to resume. The caller
+// must run it again after stopping writers and resume revalidates under locks.
+export async function inspectReleaseWaiting(
+  deps: ConversationDeps,
+): Promise<Array<{ runId: string; status: 'compatible' | 'blocked'; reason?: string }>> {
+  const client = await poolOf(deps).connect();
+  let temporaryAdmissions = false;
+  try {
+    const identity = await client.query<{ admissions: boolean; administrator: boolean }>(
+      `SELECT to_regclass('identity_account_admissions') IS NOT NULL AS admissions,
+              to_regclass('installation_admin') IS NOT NULL AS administrator`,
+    );
+    if (!identity.rows[0]!.admissions) {
+      // Migration 0024 admits precisely the existing administrator. This
+      // session-local view forecasts eligibility without changing stored facts.
+      await client.query(
+        identity.rows[0]!.administrator
+          ? 'CREATE TEMP VIEW identity_account_admissions AS SELECT user_id FROM installation_admin'
+          : 'CREATE TEMP VIEW identity_account_admissions AS SELECT NULL::uuid AS user_id WHERE false',
+      );
+      temporaryAdmissions = true;
+    }
+    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    const table = await client.query<{ present: boolean }>(
+      "SELECT to_regclass('run_context_policies') IS NOT NULL AS present",
+    );
+    const runs = await client.query<RunRow>(
+      "SELECT * FROM agent_runs WHERE execution='harness' AND status='suspended_approval' ORDER BY id",
+    );
+    const results: Array<{ runId: string; status: 'compatible' | 'blocked'; reason?: string }> = [];
+    for (const run of runs.rows) {
+      try {
+        if (!run.waiting_checkpoint_id || !run.waiting_invocation_id || !run.waiting_approval_id)
+          throw stateConflict('incomplete waiting point');
+        const attempt = await client.query(
+          'SELECT 1 FROM run_attempts WHERE run_id=$1 AND owner_id=$2',
+          [run.id, run.owner_id],
+        );
+        if (!attempt.rowCount) throw stateConflict('Run attempt missing');
+        const snapshot = await readSnapshot(client, run, run.waiting_checkpoint_id);
+        if (
+          snapshot.waiting?.invocation_id !== run.waiting_invocation_id ||
+          snapshot.waiting?.approval_id !== run.waiting_approval_id
+        )
+          throw stateConflict('waiting checkpoint reference conflict');
+        const decision = await readRunApprovalDecision(
+          client,
+          { ownerId: run.owner_id, conversationId: run.conversation_id, runId: run.id },
+          run.waiting_invocation_id,
+          run.waiting_approval_id,
+        );
+        if (
+          snapshot.usage.iterations >= run.budget_max_iterations ||
+          (snapshot.usage.tokens !== null && snapshot.usage.tokens >= run.budget_max_tokens)
+        )
+          throw stateConflict('waiting point budget exhausted');
+        if (
+          run.frozen_context?.authorization_revision === 'delegation/1' &&
+          decision.kind === 'document'
+        ) {
+          if (decision.status === 'rejected') throw stateConflict('document approval rejected');
+          const approval = await getDocumentApproval(client, run.owner_id, decision.approval_id);
+          const grant = workspaceGrantSchema.parse(approval.workspace_grant);
+          if (
+            approval.conversation_id !== run.conversation_id ||
+            approval.run_id !== run.id ||
+            !run.frozen_context.workspaceGrants?.some(
+              (member) =>
+                JSON.stringify(workspaceGrantSchema.parse(member)) === JSON.stringify(grant),
+            )
+          )
+            throw forbidden('document approval workspace differs from frozen Run grants');
+          validateWorkspaceGrant(run.owner_id, grant);
+        }
+        const used = await client.query('SELECT 1 FROM harness_resumes WHERE checkpoint_id=$1', [
+          run.waiting_checkpoint_id,
+        ]);
+        if (used.rowCount) throw stateConflict('approval waiting point already resumed');
+        const context = await contextOf(
+          client,
+          deps,
+          run,
+          randomUUID(),
+          randomUUID(),
+          run.waiting_checkpoint_id,
+          { tableExists: table.rows[0]!.present },
+        );
+        const observations = await readRunContextObservations(
+          client,
+          toolContext(context),
+          snapshot.tool_refs,
+          { project: context.allowlist.includes('read_run_observation') },
+        );
+        buildHarnessStart(context, snapshot, observations, decision);
+        results.push({ runId: run.id, status: 'compatible' });
+      } catch (error) {
+        if (!(error instanceof HttpError) && !(error instanceof ZodError)) throw error;
+        results.push({
+          runId: run.id,
+          status: 'blocked',
+          reason: error instanceof HttpError ? error.errorCode : 'INVALID_HISTORICAL_SCHEMA',
+        });
+      }
+    }
+    await client.query('COMMIT');
+    return results;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release(temporaryAdmissions);
+  }
 }
 
 export async function getRunView(
