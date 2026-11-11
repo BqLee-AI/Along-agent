@@ -41,4 +41,31 @@
 
 原始材料核对：#90 私有验收索引将摘要与按资料创建分别指向 R04、R05 的原始页面快照；只读检查的快照时间分别为 2026-11-03 03:58:03 UTC 和 04:00:49 UTC，页面文本均包含目标完成标识，R05 还包含创建标识。页面文本本身不能证明零设置、零创建或数据库状态，以上效果结论仍依赖阶段验收记录及其数据库证据；原始页面含私有内容，不纳入仓库。九项预期的公开审定记录早于上述页面快照；确认是一次九项选择，不是用户逐样本亲笔标注。
 
-同键异参的当前测试源码 `apps/api/test/integration/timezone-preferences.test.ts` 覆盖预约冲突和调用拒绝，并核对原偏好不变；本次只审读源码，没有运行该测试。#90 的原始证据索引另指向入站重放和同文独立请求的页面快照；历史报告记录两次独立任务及各自事件，不将页面存在等同重新验证了数据库事实。
+同键异参的当前测试源码 `apps/api/test/integration/timezone-preferences.test.ts` 覆盖预约冲突和调用拒绝，并核对原偏好不变；本次只审读源码，没有运行该测试。#90 私有原始证据中的数据库事实摘要记录两条来源独立的任务各有一条 created 事件和一条 schedule 命令，并记录原有任务、事件、outbox、批准、Run、调用和通知保持；这是当时的聚合记录，本次没有重新读取原库逐行核验，也不代表当前版本的真实旅程。
+
+### 最终源码的隔离补验
+
+main `85026e3` 与 PR 138 的最终 head `d077786` 具有相同 Git tree `3aa026fe9143c695d04b55c72ce158494d810cbd`；`cd6af58d` 至 main 的 `apps`、`packages`、`infra`、`scripts` 无差异。这支持复用这些目录内未变代码的历史证据，不改变历史构件、模型或安装的限定。
+
+以 `85026e3` 导出的源码在 Linux x86_64、Bun 1.4.2、任务自有 PostgreSQL 16.15 和合成账户执行以下隔离检查；复用既有 native，未在本轮重建。模型传输为受控 fixture，不是真实 provider。原始日志保留了命令和输出，首次 3.1、3.4 分别因缺少测试专用认证配置而失败；补入合成测试值后两组重跑通过，环境失败不算行为 Red。
+
+- **3.1**：`delegated-workspace-admission`、`delegated-document-rejection`、`context-observation-sources` 共 17 pass、0 fail，覆盖冻结集合/子集、跨 owner 与撤权拒绝、旧 Run 不扩权和越权来源拒绝；不代替真实模型注入评估。
+- **3.2**：`elapsed-zone-followup` 7 pass；`brief`、`tool-projections`、`time-errors`、`reminder-date-anchors` 42 pass，均 0 fail。覆盖真实锚计算、规则故障的 UTC 与显式时区分支、浏览日与冻结时区边界及规则故障就绪状态；不代替原安装自然通知。
+- **3.3**：`target-continuation` 23 pass，`direct-reminder` 与 `tool-invocations` 63 pass，均 0 fail。覆盖接受/审计故障回滚、并发重放、异参冲突、同文独立请求、唯一后继和既成回执；不声称语义去重或 PG 与文件的全局事务。
+- **3.4**：`workspace-create-target-successor`、`server-owned-permit-race`、`server-owned-driver-effect-race`、`scheduler-recovery`、`tasks-cancel` 共 28 pass、0 fail；覆盖零写接续、许可前停止、迟到追账、失权 unknown、在途写入及取消后的实际通知调用与正控制。受控 fixture 不代替真实 provider 或设备送达。
+
+以上合计 180 pass、0 fail，输出未显示 skip；不能因此勾选完整第 3 节或替代 3.5 原安装混合旅程。
+
+### 任务自有文件挂载护栏实验
+
+Linux 隔离容器以只读根和旧资料挂载、独立可写编辑及输出卷、无网络和无 capabilities 运行目标源码的 `publishWorkspaceCreate`、`publishWorkspaceReplace` 与读取函数；使用模拟 advisory lock，而非真实 PG 许可或完整 native/gateway 派发。允许的文件实际创建、替换和独立容器读回；旧资料直接写入/重命名遭 `EROFS`，业务入口拒绝未授权目标、符号链接、硬链接和路径穿越，已有文件创建及陈旧版本替换返回零写冲突。
+
+但容器内直接 OS 写入同一可写编辑目录的其他文件、在输出目录创建未授权文件均成功，故该方案不能限制到唯一目标。额外探针将任务文件作为单文件卷子路径挂载：产品替换函数在原子 `rename` 时返回 `EBUSY`，文件版本不变；不能用这种挂载既隔离该文件又保持现有替换路径。旧资料、编辑目录和输出目录切回只读后实测不可写，另对仅任务自有卷恢复可写并验证；这不证明原安装挂载切换、冻结 grant 的物理身份或在途效果安全。一个额外探针在完成 Unix socket 访问观察后因重复清理 socket 返回 `ENOENT` 并以 1 退出，保留该失败；网络隔离也不等于封锁同容器 IPC。
+
+### 任务自有数据库作用域实验
+
+在独立 PostgreSQL 16.15、迁移 0001–0027、Bun 1.4.2 环境中构造非 owner、非 superuser、无 `BYPASSRLS` 的运行角色，对 35 张 public 表启用 `RLS + FORCE RLS`，仅为固定测试 owner、Run、task 和关联事实设置白名单，其余默认拒绝。实验连接实际进入目标源码的 driver、scheduler 和独立通知接收池；测试数据是直接构造的隔离 fixture，依赖及包构件未证明与最终源码完全一致，不是真实 provider 的新提醒。
+
+受限角色运行真实 driver 后，白名单 Run 的 attempt 为 `fenced_out`、Run 为 `failed`；同 owner 旧 Run 和另一 owner Run 均保留 `running`。真实 scheduler 使白名单任务从 `saved` 到 `fired` 并产生站内 `sent`，两个旧任务仍为 `saved`、原 schedule outbox 仍 pending；另一逾期样本只将白名单任务记为 `missed`。改用隔离 superuser 的反向对照后，两个旧 Run 均被 fence、两个旧任务均被标记 missed。跨 owner 插入、绕过 RLS、设置 replica 和 `TRUNCATE` 均被权限拒绝；同 owner 旧任务和另一 owner Run 的更新影响零行。identity-mail 仅验证一条过期 rate-limit 维护行在受限角色下保留、管理员下删除，没有验证邮件投递。
+
+该策略**不能用于原安装**：固定 ID 不允许正常接纳时生成的新 Run/task，其他表默认拒绝也阻断登录及完整调用；仅按 owner 放行则不能保护同 owner 的历史对象。受管入口现有迁移与运行共用 superuser，实验角色执行迁移被拒；所有实际连接、身份、调用账、审批、外发、并发、崩溃、将来的表和迁移仍无完整可逆策略。首次实验缺 sequence 权限导致 driver 事务回滚，补权并重建隔离库后才取得上述结果；夹具缺来源及字段的失败也保留，均不是产品行为 Red。该实验既没有部署到原库，也不覆盖文件系统护栏。

@@ -15,7 +15,7 @@
 
 授权修订、实际能力和执行生命周期是独立事实：`delegation/1` 只定义目标内自主策略，不证明后台执行已交付。每个新 Run 同时冻结 `execution_lifecycle:'request-bound'|'server-owned'`，由 conversations 持有，并经可信 start、Run 只读投影和 Web 如实呈现。早期设置等完整切片可以采用 request-bound，沿现行请求绑定的断连取消语义，不承诺离开/退出后继续；仅在 §8 所有权与故障验收完成后，新接纳的相应 Run 才可冻结 server-owned。已接纳 Run（包括早期 delegation/1）不随部署升级、当前开关或批准恢复改变生命周期；缺此字段的 legacy 仍沿原合同读取，不回填。这里只增加两种具体生命周期，不建立通用 profile/权限平台。最终重构必须完成 server-owned 订阅解耦及其真实验收，不能以 request-bound 阶段替代收口。
 
-本人委托采用显式接纳：`execution:'harness'` 且 `authorization_revision:'delegation/1'` 的新请求进入该 profile，普通 Web Agent 提交此字段。可选 `workspace_ids` 只收窄本人登记集合，与 legacy 的单 `workspace_id` 互斥；省略修订的 API 调用、业务提醒和资料快捷入口保留 legacy。实际工具及工作区集合随新 Run 冻结，空集合不阻断其他已有能力；旧 settings-only Run、snapshot2 和批准不因部署扩权。生命周期仍为 request-bound；wire 为 v6，legacy start 明确传 `trusted_context:null`，SSE v2 与 legacy v1 分读。提醒创建只证明保存，不证明排期、触发或通知。
+本人委托采用显式接纳：`execution:'harness'` 且 `authorization_revision:'delegation/1'` 的新请求进入该 profile，普通 Web Agent 提交此字段。可选 `workspace_ids` 只收窄本人登记集合，与 legacy 的单 `workspace_id` 互斥；省略修订的 API 调用、业务提醒和资料快捷入口保留 legacy。实际工具及工作区集合随新 Run 冻结，空集合不阻断其他已有能力；旧 settings-only Run、snapshot2 和批准不因部署扩权。生命周期按接纳时实际执行资格冻结为 request-bound 或 server-owned，不从授权修订推断；wire 为 v6，legacy start 明确传 `trusted_context:null`，SSE v2 与 legacy v1 分读。提醒创建只证明保存，不证明排期、触发或通知。
 
 ## 2. 规则的唯一所有者
 

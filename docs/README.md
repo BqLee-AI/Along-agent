@@ -142,7 +142,7 @@ R2-B 的完整目标及多轮自主查询边界见[design/19 §4、§6](design/1
 ## 十一、OpenSpec 行为契约与 ADR
 
 - [OpenSpec 说明](../openspec/README.md)：`openspec/specs/` 为可验收行为契约真源（SHALL + Scenario），`docs/design/` 为设计真源；spec 只写行为并引用 design 章节，不复制字段/路由表。
-- [本人目标内委托（#105）](design/20-goal-scoped-delegation.md) 定义分阶段目标合同，行为增量见 [change](../openspec/changes/refactor-assistant-capability-authorization/proposal.md)。本人登记集合内的资料编辑、有限创建与 legacy 单工作区批准分别约束；授权修订、实际能力和生命周期独立，旧 Run 不随部署扩权。合格新 Run 可冻结 server-owned；合同不代替受控或真实用户验收。
+- [本人目标内委托（#105）](design/20-goal-scoped-delegation.md) 定义分阶段目标合同，行为增量见 [change](../openspec/changes/refactor-assistant-capability-authorization/proposal.md)，验收要求见 [PRD](prd/04-acceptance-open-questions.md#本人目标内委托104105)。本人登记集合内的资料编辑、有限创建与 legacy 单工作区批准分别约束；授权修订、实际能力和生命周期独立，旧 Run 不随部署扩权。合格新 Run 可冻结 server-owned；合同不代替受控或真实用户验收。
 - [会话与 Web 任务体验主规格](../openspec/specs/conversations/spec.md)约束入口、真实状态、显式动作、流式对话和一致首屏；[体验设计与实施归档](../openspec/changes/archive/2026-10-30-close-r1-web-task-experience/)保留方案、任务及分版本证据。
 - [ADR 决策记录](adr/README.md)：0000 模板、0001–0005 种子 ADR、[0006 Bun + Ox 工具链](adr/0006-bun-ox-toolchain.md)（取代 0002）、[0007 CI 关键路径局部修订](adr/0007-ci-critical-path.md)（调整 0006 的编排/失败传播）及 [0008 static 内部调度](adr/0008-static-scheduling.md)（局部修订 0007 的内部并发边界）；Bun/Ox 选型和五门全成功不变，冻结决策正文保留，改口径另起新 ADR。
 - [ADR0009](adr/0009-cangjie-harness-ts-capabilities.md) 确定仓颉唯一 Harness/TS 长期能力，并局部修订0003的 outbox/确认事务绝对范围；历史 ADR/验收保留其适用边界。同步公共用例/DTO、只读投影、确认创建/取消单事务和可靠异步 outbox 分列，D1 不证明 SQL 所有权。正式实现与分级验收见 design/09/11，[native 构建/运行说明](../apps/harness/README.md) 不等于真实 provider/完整 R1 验收。
