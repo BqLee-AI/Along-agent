@@ -2,7 +2,7 @@
 
 > 状态：业务与正式 Harness 存储合同。范围：对话/Run/attempt、只追加事件/有限快照、冻结执行权威与调用接受结果。不包含：任意崩溃自动恢复或通用 exactly-once。TS 长期持有 PostgreSQL 与事实，仓颉组织循环和本次上下文（design/09/11）。
 
-> Run 在 `frozen_context` 独立冻结授权修订、实际能力、工作区资格和 request-bound 生命周期，供 v6 trusted start 与只读投影；`0021_trusted_execution_goals.sql` 增加根列 `agent_runs.goal_result`。旧 Run/pending/快照/模板/hash/accepted result 不迁写或扩权，历史结果保持 NULL；snapshot 仍为2。新委托 SSE 为 v2，legacy/v1 历史保持。server-owned 不属于 request-bound 合同；本页不构成运行验收。
+> 新委托 Run 在 `frozen_context` 独立冻结授权修订、实际能力、工作区资格和实际 `request-bound` 或 `server-owned` 生命周期，供 v6 trusted start 与只读投影；`0021_trusted_execution_goals.sql` 增加根列 `agent_runs.goal_result`。旧 Run/pending/快照/模板/hash/accepted result 不迁写或扩权，历史结果保持 NULL；snapshot 仍为2。新委托 SSE 为 v2，legacy/v1 历史保持。本页不构成运行验收。
 
 ## 设计依据
 
@@ -221,7 +221,7 @@ snapshot2 原字段/集合不变，typed views/context_slice 不写入快照正�
 
 - [Required] 只追加，禁 `UPDATE`/`DELETE`。
 - [Required] `payload` 不存敏感值原文；tool 参数摘要脱敏。
-- [Required] 新写入/执行仅 `harness/v5`、snapshot `version=2`；harness_snapshot 保存已接受消息/工具结果引用、usage/next_call_no/等待引用，不保存 raw args、provider body、密钥或完整推理链。真实模型增量沿既有message.delta持久，不新建数据表。TS 验证同 owner/Run、真实接受事实与单调进度；旧 task snapshot1 的限定读取迁移见本篇 R1 节。
+- [Required] 新写入/执行使用 `harness/v6`、snapshot `version=2`；harness_snapshot 保存已接受消息/工具结果引用、usage/next_call_no/等待引用，不保存 raw args、provider body、密钥或完整推理链。真实模型增量沿既有 message.delta 持久，不新建数据表。TS 验证同 owner/Run、真实接受事实与单调进度；旧 task snapshot1 的限定读取迁移见本篇 R1 节。
 - [Required] 同 conversation 先持 NO KEY UPDATE 锁再分配游标，并保持至提交，避免小游标晚提交被客户端永久漏掉，并与终态消息插入取得的外键 KEY SHARE 兼容。内部快照不交给外部 ThreadEventSchema；GET/同入站键只读不启动执行。
 
 ## R2-B 路由策略与内部执行记录（已实现，默认 off，#88）
