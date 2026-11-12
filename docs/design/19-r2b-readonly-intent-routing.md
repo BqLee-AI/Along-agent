@@ -17,6 +17,8 @@
 
 [Required · 实施交付边界] 默认 `off` 的实施 PR 可独立交付三类只读路由、v5/迁移、来源与原子展示保护及其有效验证，使用 `Refs #88`；不以自然 shadow、受控接管或最终归档全部完成为前置，也不因此标记这些验收通过。实施相关消费者与既有门禁须有覆盖最终变更的有效证据；自然质量、保守净收益、逐意图授权与完整镜像/依赖分发清算仍各自保留门槛，不自动部署、发布、archive 或关闭 #88。
 
+[Required · 本人委托兼容] `harness/v6` 的 legacy 与本人委托均可使用冻结的路由策略；委托 direct 以唯一已接受只读回执及经过哈希核对的完整渲染构造 `GoalResult`。澄清续接不分类，off、原授权与旧数据保持不变。本机启用方式见[本地指南](../guides/local-lifecycle.md)，默认不启用。
+
 ## 2. 现状与证据
 
 [Observed，规范编写时的基线] HTTP 接纳冻结输入、execution、allowlist 和预算；基线 native 在首轮构造/计量上下文后请求模型，内部 wire 为 `harness/v4`、快照为 version 2。R2-B 的后继 v5 与路由分支见 §7。TS 的模型 transport 不决定下一工具；三个现成只读工具是 `list_tasks`、`get_user_prefs`、`read_brief_cards`。源码入口见 §14；历史静态核对不充当运行验收。

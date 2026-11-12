@@ -263,10 +263,8 @@ function buildHarnessStart(
     trusted_context: context.trustedExecutionContext ?? null,
     messages: context.messages,
     context_policy: context.contextPolicy,
-    routing_policy: context.authorizationRevision
-      ? { revision: 'r2b/1', mode: 'off' }
-      : routingPolicy,
-    eligible_phase: context.authorizationRevision ? 'disabled' : eligiblePhase,
+    routing_policy: routingPolicy,
+    eligible_phase: eligiblePhase,
     tools: (context.authorizationRevision
       ? DELEGATION_TOOL_DEFINITIONS.map((tool) =>
           tool.name === 'list_tasks' &&
@@ -744,7 +742,7 @@ export async function createHarnessSession(
       [context.attemptId],
     );
     const eligible =
-      !context.authorizationRevision &&
+      !context.trustedExecutionContext?.continuation &&
       locked.attempt.attempt_no === 1 &&
       !resume &&
       !snapshot &&
@@ -1191,7 +1189,8 @@ export async function createHarnessSession(
                     text: context.inputText,
                     messages: context.messages!.map(({ role, content }) => ({ role, content })),
                     hasPendingApproval,
-                    workspaceSelected: !!context.workspaceGrant,
+                    workspaceSelected:
+                      !!context.workspaceGrant || !!context.workspaceGrants?.length,
                   },
                   policy!,
                 ),
@@ -1712,7 +1711,11 @@ export async function createHarnessSession(
           return { accepted: true };
         }
         if (request.type !== 'finish') throw stateConflict('unsupported terminal control');
-        if (context.authorizationRevision && request.outcome === 'done')
+        if (
+          context.authorizationRevision &&
+          request.outcome === 'done' &&
+          routingDecision?.payload.decision !== 'direct'
+        )
           throw stateConflict('delegated goal requires finish_goal');
         if (
           modelStarted &&
@@ -1811,9 +1814,43 @@ export async function createHarnessSession(
             )
               throw stateConflict('zero-model completion requires accepted routing render receipt');
           }
+          let goalResult;
+          if (request.outcome === 'done' && context.authorizationRevision) {
+            const render = await readRoutingRecord<RoutingRenderPayload>(
+              client,
+              context,
+              'harness_routing_render',
+            );
+            if (!render) throw stateConflict('routing render missing');
+            const deltas = await client.query<{ delta: string }>(
+              `SELECT c.payload->'payload'->>'delta' AS delta FROM run_checkpoints c
+               JOIN run_attempts a ON a.id=c.attempt_id
+               WHERE a.run_id=$1 AND c.kind='message.delta' ORDER BY c.event_seq`,
+              [context.runId],
+            );
+            const answer = deltas.rows.map((row) => row.delta).join('');
+            if (routingHash(answer) !== render.payload.body_sha256)
+              throw stateConflict('routing answer differs from accepted render');
+            goalResult = await validateGoalResult(client, toolContext(context), {
+              status: 'completed',
+              outcomes: [
+                {
+                  description: '完成本次有限只读查询',
+                  status: 'achieved',
+                  receipt_refs: [render.payload.invocation_ref],
+                },
+              ],
+              clarification: null,
+              answer,
+            });
+          }
           const payload =
             request.outcome === 'done'
-              ? { ...eventPayload(context), approval_id: null }
+              ? {
+                  ...eventPayload(context),
+                  approval_id: null,
+                  ...(goalResult ? { goal_result: goalResult } : {}),
+                }
               : request.outcome === 'cancelled'
                 ? { ...eventPayload(context), reason: 'harness_cancelled' }
                 : {

@@ -175,7 +175,9 @@ strict body `{checkpoint_id,idempotency_key}`，仅 harness Run 的最后有效�
 
 ## 8. R2-B 只读路由的公开边界（已实现，默认 off，#88）
 
-本节跟随 [design/19](../../design/19-r2b-readonly-intent-routing.md) 的只读路由合同，不替换 §1–§7。路由阶段原 v5 设计现由配套 `harness/v6` 承载，legacy `trusted_context:null` 保留原策略；新 delegation 不启用该旁路。路由默认 off、未启用接管，direct 渲染来源只在 legacy Run 冻结策略为 enforce 且命中时使用。
+本节跟随 [design/19](../../design/19-r2b-readonly-intent-routing.md) 的只读路由合同，不替换 §1–§7。配套 `harness/v6` 支持 legacy 和新 delegation；默认 off，只有新 Run 冻结策略为 enforce 且命中时才执行 direct。委托直达的目标结果绑定唯一真实读取回执与已展示正文；续接仍不分类。
+
+委托 Run 的冻结工作区集合非空时，即使请求看似符合只读意图，也不走 direct；未显式选择时该集合默认为本人有效登记。无有效登记的空集合不阻止路由；legacy 仍按单个冻结工作区判断。
 
 - R2-B 本身不新增 HTTP 路由、execution 值、请求策略字段、RunView 字段或 SSE 词；business/省略 execution 仍原业务，显式 harness 仍正式 native，不新增 auto，不用路由掩盖 `HARNESS_UNAVAILABLE`。内部路由帧和 routing checkpoint 不传给浏览器；§2 的授权修订与 v2 目标结果不代表路由开启。
 - 新接纳 harness Run 冻结路由策略（默认 off），仅 fresh 首 attempt 首模型前可分类一次。off、缺策略旧 Run、所有 GET/历史补读、同入站键重放及批准 resume 零分类、不补路由策略；R2-A 上下文策略的独立恢复规则不受此限制替换。shadow 只记潜在候选，不调用候选旁路业务工具，最终仍原模型回答。

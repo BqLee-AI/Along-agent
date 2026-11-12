@@ -155,6 +155,12 @@ bun --no-env-file run local:start
 
 本版本配套使用 `harness/v6` API/native/Web：新委托冻结可信上下文，legacy 明确传 `trusted_context:null`；新委托 SSE v2 与旧 v1 历史同读，snapshot仍为2。数据库须按迁移账本前向升级并核验实际结构；旧 Run 和批准不因部署扩权。新授权或其他新语义事实产生后，不能交回不理解这些事实的旧写者；按原安装显式升级，不另建安装或替换原认证密钥。
 
+### 可选只读路由
+
+默认不配置路由，普通对话走原模型。隔离验证或满足逐意图开启条件后，可在本安装私有 JSON 中增加 `routing`：`mode` 为 `shadow` 或 `enforce`，`bundleFile` 为宿主上的冻结 bundle 绝对路径，`encoderUrl` 为 API 容器可访问的私有编码服务 origin，`intents` 为要启用的 `task_list_bounded`、`prefs_timezone_read`、`brief_cards_read` 子集。bundle 只读挂载；编码服务须使用与 bundle 绑定的固定资产，权重不随应用镜像分发。通过同一安装的重载生效；删除此配置恢复 off。运行时路由配置不可用时回退 off；私有 JSON 格式错误或 bundle 挂载缺失可能阻止启动，须修复配置或移除该项。
+
+在“对话”直接发送本人时区、活动提醒列表或单日简报问题；`/timezone`、`/reminders 2` 和 `/brief 2026-10-31` 是精确命令。shadow 只观察、不旁路执行；enforce 命中后直接读取并展示，未命中交原模型。语义路由已有跨意图及复合目标误接历史，合成回归不能证明自然请求无误；存在已知实质误接时不要在实际使用中开启对应意图。配置或启动服务不修改旧提醒、旧 pending 或旧 Run。
+
 对话旁可展开今日安排和提醒，账户与模型服务位于设置面板；窄屏使用底部导航切换对话与工作区。各页恢复方式见 [Web 使用说明](../../apps/web/README.md)。提醒任务与活动页不充当资料任务历史，文档批准从原 Run 的修改与结果进入。
 
 ## 显式升级与失败维护

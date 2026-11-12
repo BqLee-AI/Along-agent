@@ -39,7 +39,7 @@
 | 16   | [R1 账户与正式登录](design/16-r1-account-access.md)                      | #68 唯一管理员、原身份转正、库适配、固定会话、401 只读恢复及本机登记收尾合同；独立实验与验收                                      |
 | 17   | [R1 会话历史与只读恢复](design/17-r1-conversation-history.md)            | #69 服务端会话发现、原话/多 Run、稳定分页及零执行恢复；#91 当前 Harness 提醒完整冻结审阅、明确确认并继续，不扩展 business 或文档  |
 | 18   | [R2-A 单 Run 有界上下文](design/18-r2a-harness-context.md)               | #83 四种额度、可信计量与未知输入的后验超额边界、不可变策略、来源投影/分页回取及有界批准恢复；实现、受控消费者、真实模型分级取证   |
-| 19   | [R2-B 有限只读意图路由](design/19-r2b-readonly-intent-routing.md)        | #88：BGE INT8、三类只读、仓颉首轮决议、默认关闭、来源/资产/落盘原子性与逐意图验证；当前配套 v6 保留 legacy 路由合同，不自动接管   |
+| 19   | [R2-B 有限只读意图路由](design/19-r2b-readonly-intent-routing.md)        | #88：BGE INT8、三类只读、仓颉首轮决议、默认关闭；兼容 legacy 和本人委托，不自动接管                                               |
 | 20   | [本人目标内委托与授权](design/20-goal-scoped-delegation.md)              | 冻结实际能力与本人登记集合、资料编辑及有限创建、撞名恢复、v6/SSE v2 和执行生命周期；按事先明确的合同或预期核对真实效果            |
 | 21   | [受邀账户准入与恢复](design/21-invited-account-access.md)                | #112 显式准入/有限管理、停用后的流式披露边界、邀请/恢复/会话与前向升级；#131 本机口令重置；隔离实现证据与真实外部放行分列         |
 | 22   | [用户模型接入与运行绑定](design/22-model-provider-settings.md)           | Proposed：本人模型配置、加密凭据、冻结决议、SDK 受控流式出站与受限 Fake-IP 例外；真实外部验收独立                                 |

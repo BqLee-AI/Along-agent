@@ -77,6 +77,10 @@ export function installationEnvironment(config, image = 'along-local:unprepared'
     HARNESS_COMPLETION_CAP: String(config.harnessCompletionCap),
     HARNESS_MODEL_WINDOW_TOKENS:
       config.model?.modelWindowTokens == null ? '' : String(config.model.modelWindowTokens),
+    HARNESS_ROUTING_MODE: config.routing?.mode ?? 'off',
+    HARNESS_ROUTING_BUNDLE: config.routing ? '/run/along-routing-bundle.json' : '',
+    HARNESS_ROUTING_ENCODER_URL: config.routing?.encoderUrl ?? '',
+    HARNESS_ROUTING_INTENTS: config.routing?.intents.join(',') ?? '',
     HARNESS_CONTEXT_RESERVE_TOKENS: String(config.model?.reserveTokens ?? 0),
     WORKSPACE_REGISTRY_FILE: config.registryFile ? '/run/along-registry.json' : '',
   });
@@ -118,6 +122,17 @@ export async function compose(
             }
           : {}),
         volumes: [
+          ...(config.routing
+            ? [
+                {
+                  type: 'bind',
+                  source: config.routing.bundleFile,
+                  target: '/run/along-routing-bundle.json',
+                  read_only: true,
+                  bind: { create_host_path: false },
+                },
+              ]
+            : []),
           ...(readableRegistration
             ? [
                 {

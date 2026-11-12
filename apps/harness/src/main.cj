@@ -577,7 +577,7 @@ class Harness {
         keys(goal, ["status", "outcomes", "clarification", "answer"])
         let status = ref(field(goal, "status"))
         require(status == "completed" || status == "partial" || status == "blocked" || status == "cancelled" || status == "unknown")
-        nonempty(field(goal, "answer"), 8192)
+        nonempty(field(goal, "answer"), if (checkReceipts) { 8192 } else { FRAME_LIMIT })
         let outcomes = field(goal, "outcomes").asArray()
         require(outcomes.size() > 0 && outcomes.size() <= 64)
         var achieved: Int64 = 0
@@ -759,7 +759,7 @@ class Harness {
         routingPolicyCheck(routingPolicy)
         let phase = ref(field(start, "eligible_phase"))
         require(phase == "fresh_first_step" || phase == "disabled")
-        routingEligible = !delegated && phase == "fresh_first_step" && isNull(field(start, "snapshot")) && isNull(field(start, "approval"))
+        routingEligible = phase == "fresh_first_step" && isNull(field(start, "snapshot")) && isNull(field(start, "approval"))
         let budget = field(start, "budget").asObject()
         keys(budget, ["max_iterations", "max_tokens"])
         maxIterations = integer(field(budget, "max_iterations"), 1)
@@ -1187,7 +1187,7 @@ class Harness {
         require(kind == expectedKind)
         checkpoint()
         pipe.ack("render_route_result", obj([("decision_ref", text(decisionRef)), ("invocation_ref", text(id)), ("template_revision", field(policy, "renderer_revision"))]), "rendered")
-        finish("done", "")
+        pipe.ack("finish", obj([("outcome", text("done")), ("usage", usage())]), "accepted")
         return true
     }
     func loop(): Unit {
