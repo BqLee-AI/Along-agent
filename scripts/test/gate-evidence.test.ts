@@ -27,13 +27,13 @@ function fixture({ fullManifest = false, consumerCases = cases as unknown } = {}
     scope: 'Current native local/HTTP consumers, bounded approval and unknown-core contracts.',
     remaining: { status: 'partial', scope: 'Other tool seams and product unknown recovery.' },
     enforced_by: {
-      job: 'contracts-dual',
+      job: 'integration',
       evidence: ['consumer.test.ts'],
       consumer_cases: consumerCases,
     },
   };
   writeFileSync(join(target, 'ci/gates.json'), JSON.stringify(manifest));
-  writeFileSync(join(target, '.github/workflows/ci.yml'), 'jobs:\n  contracts-dual:\n');
+  writeFileSync(join(target, '.github/workflows/ci.yml'), 'jobs:\n  checks:\n  integration:\n');
   writeFileSync(join(target, 'consumer.test.ts'), '// Declaration fixture, not native evidence.\n');
   return { target, manifest };
 }

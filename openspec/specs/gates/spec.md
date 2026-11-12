@@ -2,7 +2,7 @@
 
 ## Purpose
 
-定义 D1–D10 的机读声明、执行证据、统一验证入口及五门隔离规则，使绿色检查对应实际执行的消费者和已限定的行为保证。
+定义 D1–D10 的机读声明、执行证据、统一验证入口及按变更范围选择的 CI 检查，使绿色结果对应实际执行的消费者和已限定的行为保证。
 
 ## Requirements
 
@@ -18,7 +18,7 @@
 #### Scenario: D8 的有限执行声明
 
 - WHEN D8 声明有限范围 enforced
-- THEN 清单包含 contracts-dual 执行指向、真实证据文件和唯一必需消费者 ID；未覆盖范围明确保留 partial，不以非空 scope 或旧 healthz 通过扩大保证（映射 D8；design/13 §4.2）
+- THEN 清单包含 integration 执行指向、真实证据文件和唯一必需消费者 ID；未覆盖范围明确保留 partial，不以非空 scope 或旧 healthz 通过扩大保证（映射 D8；design/13 §4.2）
 
 ### Requirement: 缺执行即红
 
@@ -50,7 +50,7 @@
 
 ### Requirement: D8 正式跨语言消费者与本次执行证据
 
-根 `test:contracts` 与 `contracts-dual` SHALL 运行同一正式合同入口，从当前树构建并启动锁定 native，在同一生产 runtime、真实隔离 PG16 与签名身份上验证生产者和消费者；保留既有 healthz 双跑与契约包。声明范围和执行证据 SHALL 一致，不以跳过、旧产物或旧报告替代。
+完整范围的 CI 与根 `test:contracts` SHALL 运行同一正式合同入口，从当前树构建并启动锁定 native，在同一生产 runtime、真实隔离 PG16 与签名身份上验证生产者和消费者；保留既有 healthz 双跑与契约包。声明范围和执行证据 SHALL 一致，不以跳过、旧产物或旧报告替代。
 
 #### Scenario: 同一业务在两入口消费真实结果
 
@@ -65,7 +65,7 @@
 #### Scenario: 省略消费者不能借旧集合变绿
 
 - WHEN 本次构建/启动、消费者执行或必需 case 被省略，报告缺失、损坏、包含重复/跳过/失败的必需 case，或消费者进程失败
-- THEN 根入口和 contracts-dual 非零失败；只有本次实际报告中每个必需 ID 唯一通过且消费者成功才可通过，既有 healthz/契约包通过不能补足（映射 D8）
+- THEN 根入口和完整范围的 integration 非零失败；只有本次实际报告中每个必需 ID 唯一通过且消费者成功才可通过，既有 healthz/契约包通过不能补足（映射 D8）
 
 #### Scenario: 必要业务步骤缺失导致行为变红
 
@@ -74,17 +74,17 @@
 
 ### Requirement: verify 主链覆盖
 
-一键 verify SHALL 以 `bun run verify` 为本地与 CI 的共同入口，按既有顺序执行 lint、typecheck、depcruise、gate-manifest、gates-executable、frozen-names、copy-claims、unit、OpenSpec 严格校验与阻塞式 format:check；构建前置不得省略门，任一步失败即停并报告步名及非零退出码。同次执行中成功 typecheck 准备的 packages SHALL 被 unit 复用；独立入口及未执行 typecheck 的路径仍自行完成真实构建，不依据旧 dist、跨 job 产物或持久完成标记判定已准备。
+一键 verify SHALL 以 `bun run verify` 为本地与代码变更 CI 的共同入口，按既有顺序执行 lint、typecheck、depcruise、gate-manifest、gates-executable、frozen-names、copy-claims、unit、OpenSpec 严格校验与阻塞式 format:check；构建前置不得省略门，任一步失败即停并报告步名及非零退出码。同次执行中成功 typecheck 准备的 packages SHALL 被 unit 复用；独立入口及未执行 typecheck 的路径仍自行完成真实构建，不依据旧 dist、跨 job 产物或持久完成标记判定已准备。
 
 #### Scenario: 本地与 CI 同一阻塞主链
 
-- WHEN 在干净安装后运行 `bun run verify`，或 static job 调用该入口
+- WHEN 在干净安装后运行 `bun run verify`，或代码变更的 checks job 调用该入口
 - THEN 相同门以相同顺序执行，gates-executable 位于 gate-manifest 之后；成功 typecheck 完成的 packages 前置不在 unit 重复执行，全部门成功才返回 0（映射 D1/D2/D10）
 
 #### Scenario: 格式错误不是非阻塞警告
 
 - WHEN 被检查文件存在 oxfmt 格式错误
-- THEN format:check、verify 与 static 返回失败，不使用 continue-on-error 或退出码吞并放行
+- THEN format:check、verify 与 checks 返回失败，不使用 continue-on-error 或退出码吞并放行
 
 #### Scenario: 治理脚本失败阻止后续步骤
 
@@ -112,17 +112,17 @@
 
 #### Scenario: D1/D2/D10 映射
 
-- WHEN 删除 static job，或分别删除 D1 的 .dependency-cruiser.cjs / D2 的 presentation.test.ts / D10 的 scan-copy-claims.mjs evidence（演练后恢复）
-- THEN 新脚本对受影响的 D1/D2/D10 报红（对应 D1 时间唯一权威、D2 展示禁算时间、D10 口径天花板）；static job 缺失时三项均红
+- WHEN 删除 checks job，或分别删除 D1 的 .dependency-cruiser.cjs / D2 的 presentation.test.ts / D10 的 scan-copy-claims.mjs evidence（演练后恢复）
+- THEN 脚本对受影响的 D1/D2/D10 报红；checks job 缺失时三项均红
 
 #### Scenario: D3–D6 映射
 
-- WHEN 删 migration-scan job 或任一 scripts/db evidence（演练后恢复）
+- WHEN 删 integration job 或任一 scripts/db evidence（演练后恢复）
 - THEN 新脚本对 D3/D4/D5/D6 报红（对应 D3 唯一约束、D4 后继唯一、D5 只追加、D6 不可变）
 
 #### Scenario: D7/D9 映射
 
-- WHEN 分别删 compose-smoke job 或 compose-smoke.sh / scheduler-fault job 或 scheduler-fault.test.ts（演练后恢复）
+- WHEN 删除 integration job 或分别删除 compose-smoke.sh / scheduler-fault.test.ts（演练后恢复）
 - THEN 新脚本对 D7/D9 报红（对应 D7 空环境冒烟、D9 取消后触发数=0）
 
 ### Requirement: API 模块存储实现隔离
@@ -254,13 +254,13 @@ D2 SHALL 在 Oxlint 1.89.0 的 JS 插件内直接使用原 selector `NewExpressi
 
 #### Scenario: 契约入口真实包含两种传输
 
-- WHEN 执行根 `bun run test:contracts` 或 contracts-dual job
+- WHEN 执行根 `bun run test:contracts` 或完整范围的 integration job
 - THEN API contracts.test.ts 中进程内与 HTTP 两组测试以及既有契约包测试均实际运行；任一组失败即该入口失败，不因 API 缺少旧 test:contracts 脚本而漏掉 HTTP（映射 D8 契约双跑）
 
 #### Scenario: 数据库与故障测试仍使用真实约束
 
-- WHEN 执行 integration 与 scheduler-fault 集合
-- THEN 现有 9 个 DB 文件在真实 PostgreSQL 16、原迁移和明确测试环境下执行；唯一性/只追加/取消窗口断言不跳过，重复注册的 case 与独立声明数明确区分（映射 D3–D6/D9）
+- WHEN 执行 integration 与 scheduler 故障集合
+- THEN 数据库集成文件在真实 PostgreSQL 16、原迁移和明确测试环境下执行；唯一性/只追加/取消窗口断言不跳过，重复注册的 case 与独立声明数明确区分（映射 D3–D6/D9）
 
 ### Requirement: D1 出边断言保留 Bun 执行路径
 
@@ -278,7 +278,7 @@ dependency-cruiser SHALL 在 Bun 下继续执行现有出边配置，保留 time
 
 ### Requirement: Docker 实际使用 Bun 工具链
 
-Docker/Compose SHALL 使用固定 Bun 的冻结安装、工作区构建与服务运行路径，保持角色和 D7 健康/就绪行为。Compose 宿主只准备 shell/Docker/HTTP 探测所需环境，不安装无消费者的 Bun 依赖；实际镜像内冻结安装和依赖优先构建不可因此省略。
+Docker/Compose SHALL 使用固定 Bun 的冻结安装、工作区构建与服务运行路径，保持角色和 D7 健康/就绪行为。实际镜像内冻结安装和依赖优先构建不可因宿主依赖而省略。
 
 #### Scenario: 从无旧产物的上下文构建服务镜像
 
@@ -297,28 +297,39 @@ Docker/Compose SHALL 使用固定 Bun 的冻结安装、工作区构建与服务
 #### Scenario: D2 新证据真实存在
 
 - WHEN 读取迁移后 D2 的 enforced_by
-- THEN job 指向 static，evidence 指向存在的 Oxlint 配置、D2 插件及展示测试；可执行检查通过且原 ESLint 配置不再作为活动证据（映射 D2 执行指向）
+- THEN job 指向 checks，evidence 指向存在的 Oxlint 配置、D2 插件及展示测试；可执行检查通过且原 ESLint 配置不再作为活动证据（映射 D2 执行指向）
 
 #### Scenario: 删迁移后的执行证据仍红
 
 - WHEN 在演练中移除受影响 gate 的 job、Oxlint 配置/插件或其他任一必需 evidence
 - THEN gates-executable 报对应门与缺项并非零退出，恢复后通过，当前文档/模板的 Bun 命令与该执行链一致（映射 D1–D10 的证据完整性）
 
-### Requirement: CI 静态门后独立验证
+### Requirement: CI 按变更范围验证
 
-CI SHALL 保留 static、migration-scan、scheduler-fault、contracts-dual、compose-smoke 五个 required checks。static 运行统一 verify；其余四 job 只依赖 static 并各自独立运行，使用独立数据库/镜像与所需构建前置。合并 SHALL 要求五项全部成功；任一失败、取消、跳过或仅 Compose 成功都不能视为合并门通过。
+CI SHALL 保留 checks 和 integration 两个 required checks；两个 job 均须成功。PR 按 base 与 checkout 的实际 diff 决定检查范围，main push 和无法确定的变更执行完整集合。被跳过的测试不作为本次执行证据。
 
-#### Scenario: static 失败阻止下游
+#### Scenario: 文档与 Web 变更
 
-- WHEN lint、typecheck、依赖边界、治理、单元、OpenSpec 或格式检查令 static 失败
-- THEN 四条下游不能作为成功验证放行，合并条件不满足
+- WHEN PR 仅修改允许的文档路径
+- THEN 运行文案、OpenSpec 和格式检查，不构建应用或启动数据库、native 与 Compose
+- WHEN PR 仅修改 Web 源码或测试及允许的文档
+- THEN 运行完整 verify 和 Web 构建，不运行无关的重集成
 
-#### Scenario: 四条验证链独立执行
+#### Scenario: 已知 API 业务源码或数据库测试变更
 
-- WHEN static 成功且有可用 runner
-- THEN migration-scan、scheduler-fault、contracts-dual、compose-smoke 可独立启动；Compose 不等待前三者完成，也不消费其产物；不共享可变数据库状态
+- WHEN PR 只修改已列出的非 identity API 业务模块 TypeScript 源码，可混合允许的文档或 API 集成测试
+- THEN 保留数据库约束、完整 API 集成、native 合同及 Compose 检查，跳过不依赖这些源码的历史升级测试
+- WHEN PR 只修改允许的独立 API 数据库集成测试，可混合允许的文档
+- THEN 使用真实 PostgreSQL 和原迁移运行每个修改的测试文件，不运行未选中的测试、历史升级、native 合同或 Compose
+- WHEN 变更同时包含 Web 和 API，或者触及 identity、数据库共享设施、迁移、升级实现或 native 测试
+- THEN 回退完整范围
 
-#### Scenario: 独立完成不替代其他必过检查
+#### Scenario: 未知或完整范围
 
-- WHEN 四条下游中任一失败、取消或跳过，即使 Compose 成功
-- THEN 五检查成功的合并条件仍不满足，不使用 always、continue-on-error 或退出码吞并把未通过验证包装为成功
+- WHEN PR 涉及其他路径、删除或重命名、无效或不可用 base、空 diff，或运行不是 PR
+- THEN 运行完整 verify、构建、真实数据库与调度、正式 native 消费者及 Compose 全新卷检查
+
+#### Scenario: 完整范围任一检查失败
+
+- WHEN 完整范围的数据库、调度、契约、Compose 或静态检查中任一失败或取消
+- THEN 对应 job 不成功，两个 required checks 的合并条件不满足；并行运行不共享可变数据库，不用退出码吞并放行

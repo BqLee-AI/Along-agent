@@ -45,7 +45,7 @@ TS 模块化单体（`apps/api` 内按模块分目录，单镜像 `api|worker|al
 1. [Required] 表/迁移按领域归属管理；现有物理布局以已合并迁移为准，不为文档对齐改迁移。
 2. [Required] 写入规则归所属模块；只读投影必须明确跨模块来源、owner 范围和输出契约，不把存储行当可写共享对象。受控事务沿 §1，不是任意跨模块事务豁免。
 3. [Required] 需要事务后可靠异步执行的命令/领域事件（如 schedule/cancel/send）在业务事务内写 outbox，由 worker claim、核对版本和回执；不是所有同步用例、读取、流事件和工具请求都改 outbox。幂等投递不证明任意外部效果恰好一次。
-4. [Required] 真实新增/变化的跨进程合同在既有 contracts-dual 入口验证；D8 只按正式消费者及必要步骤负例限定 enforced，未覆盖接缝继续 partial，不把 healthz 双跑当仓颉合同证明（13 §4.2）。
+4. [Required] 真实新增/变化的跨进程合同在根 `test:contracts` 入口验证；D8 只按正式消费者及必要步骤负例限定 enforced，未覆盖接缝继续 partial，不把 healthz 双跑当仓颉合同证明（13 §4.2）。
 
 ### D1 与 SQL 所有权（Observed / Required）
 

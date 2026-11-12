@@ -39,7 +39,7 @@
 - [Required] 仓颉组织本次上下文和执行转移，经 TS 接口保存/读取运行快照与已接受结果；TS 存储不独立选择下一模型/工具步骤，仓颉不另建可独立裁决的事实库。
 - [Required] 仓颉强制累计迭代/可得 usage，缺 usage 保留未知；TS 冻结预算和执行资格，不复制循环、不字符估算。时间/费用 SLA 随真实 provider/负载单独验收。
 - [Required] 敏感工具经 TS 冻结批准门。harness 在有限快照后挂起，同 Run 显式恢复原调用及可信typed决议：task consumed带真实task_id，document approved仅授权原批准的唯一apply。拒绝/过期/替代不跟 successor 或同义绕拒绝；确定零写文档冲突后的新读/新批准是14限定路径。确定性 business 提议后结束，不伪称同 Run 模型等待。
-- [Required] 跨语言消费者门复用 contracts-dual；D8 按实际 fresh 构建/生产者消费者/结果纳入/执行资格拒绝证据限定升级，最小 healthz 双跑本身仍只证明 partial。
+- [Required] 跨语言消费者门复用 `test:contracts`；D8 按实际 fresh 构建/生产者消费者/结果纳入/执行资格拒绝证据限定升级，最小 healthz 双跑本身仍只证明 partial。
 - [Deferred] 多 Agent 线性协同、`@execution` 自定义 plan：远期，不在本契约加方法。
 
 ### 实施与验证边界
