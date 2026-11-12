@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
 import type { ConversationDeps } from '../../src/modules/conversations/contracts.js';
 import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
@@ -114,7 +115,7 @@ suite('model selection admission and historical projection', () => {
       [
         process.execPath,
         '--no-env-file',
-        'apps/api/src/bin/import-model-provider.ts',
+        fileURLToPath(new URL('../../src/bin/import-model-provider.ts', import.meta.url)),
         owner.userId,
       ],
       {

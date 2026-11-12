@@ -41,7 +41,12 @@ suite('draft model provider probe', () => {
       "CREATE TABLE schema_migrations(version text PRIMARY KEY); INSERT INTO schema_migrations(version) VALUES ('0027')",
     );
     await pool.query('CREATE TABLE agent_runs(id uuid PRIMARY KEY, owner_id uuid NOT NULL)');
-    await pool.query(await readFile('infra/migrations/0028_model_providers.sql', 'utf8'));
+    await pool.query(
+      await readFile(
+        new URL('../../../../infra/migrations/0028_model_providers.sql', import.meta.url),
+        'utf8',
+      ),
+    );
   });
   afterAll(async () => {
     delete process.env.MODEL_PROVIDER_ENCRYPTION_KEY;
