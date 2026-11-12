@@ -1,9 +1,11 @@
 import type { PoolClient } from 'pg';
+import { isDeepStrictEqual } from 'node:util';
 import { HarnessObservationSchema, workspaceGrantSchema } from '@along/contracts';
 import { HttpError, forbidden } from '../../http/errors.js';
 import { assertToolRunBinding } from '../conversations/tool-binding.js';
 import { validateWorkspaceGrant } from '../workspaces/service.js';
 import { isActiveOwner } from '../identity/preferences.js';
+import { hydrateWorkspaceReadResult } from './accepted-result.js';
 import type { ToolContext } from './contracts.js';
 
 export function contextSourceCorrupt(): HttpError {
@@ -22,10 +24,11 @@ export interface ContextSourceMetadata {
   source: unknown;
   shape_valid: boolean;
   slice_length: number | null;
+  encoded_result: unknown | null;
 }
 
-// These predicates inspect JSON in PostgreSQL. Only scalar metadata/counts cross
-// the boundary; bootstrap never materializes the omitted arrays or text in JS.
+// Ordinary metadata is projected in PostgreSQL without materializing large
+// bodies. JSONB-incompatible results use a private encoded ledger envelope.
 const validFailures = `NOT EXISTS (
   SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p->'failures')='array' THEN p->'failures' ELSE '[]'::jsonb END) AS f(v)
   WHERE CASE WHEN jsonb_typeof(v)='object' THEN (v - ARRAY['kind','path','reason']) <> '{}'::jsonb ELSE true END
@@ -56,6 +59,8 @@ export async function readContextSourceMetadata(
            'failures_total',CASE WHEN jsonb_typeof(p->'failures')='array' THEN jsonb_array_length(p->'failures') END)
          WHEN 'context_slice' THEN p-ARRAY['content','items']
          ELSE NULL END AS source,
+       CASE WHEN accepted_result ? 'encoding' OR accepted_result ? 'data'
+         THEN accepted_result ELSE NULL END AS encoded_result,
        CASE WHEN p->>'kind'='context_slice' THEN
          CASE WHEN jsonb_typeof(p->'content')='string' THEN char_length(p->>'content')
            WHEN jsonb_typeof(p->'items')='array' THEN jsonb_array_length(p->'items') END END AS slice_length,
@@ -86,6 +91,43 @@ export async function readContextSourceMetadata(
      WHERE invocation_id=ANY($1::uuid[]) AND owner_id=$2 AND conversation_id=$3 AND run_id=$4`,
     [invocationIds, ctx.ownerId, ctx.conversationId, ctx.runId],
   );
+  for (const row of rows) {
+    if (row.encoded_result == null) continue;
+    try {
+      const accepted = hydrateWorkspaceReadResult(row.encoded_result);
+      row.result_status = accepted.status;
+      row.shape_valid = true;
+      if (accepted.status !== 'ok') {
+        row.encoded_result = null;
+        continue;
+      }
+      const payload = accepted.result;
+      row.kind = payload.kind;
+      if (payload.kind === 'read') {
+        const { content, ...source } = payload;
+        row.source = { ...source, content_total: [...content].length };
+      } else if (payload.kind === 'list') {
+        const { entries, failures, ...source } = payload;
+        row.source = { ...source, entries_total: entries.length, failures_total: failures.length };
+      } else if (payload.kind === 'search') {
+        const { matches, failures, ...source } = payload;
+        row.source = { ...source, matches_total: matches.length, failures_total: failures.length };
+      } else if (payload.kind === 'context_slice') {
+        if ('content' in payload) {
+          const { content, ...source } = payload;
+          row.source = source;
+          row.slice_length = [...content].length;
+        } else {
+          const { items, ...source } = payload;
+          row.source = source;
+          row.slice_length = items.length;
+        }
+      }
+    } catch {
+      row.shape_valid = false;
+    }
+    row.encoded_result = null;
+  }
   return new Map(rows.map((row) => [row.invocation_id, row]));
 }
 
@@ -93,16 +135,32 @@ export function authorizeContextSource(ctx: ToolContext, row: ContextSourceMetad
   if (ctx.signal?.aborted || !ctx.allowlist.includes(row.tool_id)) throw forbidden();
   if (row.tool_id.startsWith('workspace_')) {
     const parsed = workspaceGrantSchema.safeParse(row.frozen_context.workspaceGrant);
-    const current = ctx.workspaceGrant;
+    const current =
+      ctx.authorizationRevision === 'delegation/1'
+        ? ctx.workspaceGrants?.find(
+            (grant) => grant.workspace_id === (parsed.success ? parsed.data.workspace_id : ''),
+          )
+        : ctx.workspaceGrant;
     if (!parsed.success || !current) throw forbidden();
     const grant = parsed.data;
     if (
       grant.workspace_id !== current.workspace_id ||
       grant.owner_id !== current.owner_id ||
       grant.registration_digest !== current.registration_digest ||
-      grant.root_identity !== current.root_identity
+      grant.root_identity !== current.root_identity ||
+      !isDeepStrictEqual(grant, current)
     )
       throw forbidden();
+    if (
+      ctx.authorizationRevision === 'delegation/1' &&
+      row.result_status === 'ok' &&
+      (row.kind === 'read' || row.kind === 'list' || row.kind === 'search') &&
+      (!row.source ||
+        typeof row.source !== 'object' ||
+        !('workspace_id' in row.source) ||
+        row.source.workspace_id !== grant.workspace_id)
+    )
+      throw contextSourceCorrupt();
     validateWorkspaceGrant(ctx.ownerId, grant);
   }
 }
@@ -154,6 +212,8 @@ export async function authorizeSliceOrigin(
   });
   if (!original.success || original.data.view !== 'projected') throw contextSourceCorrupt();
   const fact = original.data.source;
+  if ('workspace_id' in fact && source.workspace_id !== fact.workspace_id)
+    throw contextSourceCorrupt();
   let total: number;
   if (
     fact.kind === 'read' &&

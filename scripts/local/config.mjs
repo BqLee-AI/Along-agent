@@ -1,10 +1,17 @@
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { chmod, link, lstat, mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
+import { isIP } from 'node:net';
 import { dirname, isAbsolute, join, posix, resolve } from 'node:path';
 import { z } from 'zod';
 import { withInstallationLock } from './lock.mjs';
+
+export function localModelProxyToken(config) {
+  return createHmac('sha256', Buffer.from(config.modelProviderEncryptionKey, 'base64'))
+    .update('along-local-model-proxy-v1')
+    .digest('hex');
+}
 
 const text = z
   .string()
@@ -13,6 +20,47 @@ const text = z
 const volume = text.refine((value) => /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value));
 const port = z.number().int().min(1).max(65535);
 const databaseSchema = z.object({ user: text, password: text, name: text }).strict();
+const encryptionKey = z
+  .string()
+  .refine(
+    (value) =>
+      /^[A-Za-z0-9+/]{43}=$/.test(value) &&
+      Buffer.from(value, 'base64').length === 32 &&
+      Buffer.from(value, 'base64').toString('base64') === value,
+  );
+const localModelOrigin = z.string().refine((value) => {
+  try {
+    const url = new URL(value);
+    if (!['http:', 'https:'].includes(url.protocol) || value !== url.origin) return false;
+    const address = url.hostname.replace(/^\[|\]$/g, '');
+    const family = isIP(address);
+    if (family === 4) {
+      const [a, b] = address.split('.').map(Number);
+      return a === 127 || a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+    }
+    if (family === 6) {
+      const first = parseInt(address.split(':')[0] || '0', 16);
+      return address === '::1' || (first >= 0xfc00 && first <= 0xfdff);
+    }
+    return false;
+  } catch {
+    return false;
+  }
+});
+const fakeDnsModelOrigin = z.string().refine((value) => {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === 'https:' &&
+      value === url.origin &&
+      !value.includes(',') &&
+      isIP(url.hostname) === 0 &&
+      url.hostname.includes('.')
+    );
+  } catch {
+    return false;
+  }
+});
 const modelSchema = z
   .object({
     baseUrl: z
@@ -51,8 +99,21 @@ const configSchema = z
       .refine((value) => /^http:\/\/(?:localhost|127\.0\.0\.1)(?::[0-9]+)?$/i.test(value)),
     database: databaseSchema,
     authSecret: text,
+    modelProviderEncryptionKey: encryptionKey,
+    modelProviderAllowedLocalOrigins: z.array(localModelOrigin).optional(),
+    modelProviderAllowedFakeDnsOrigins: z.array(fakeDnsModelOrigin).optional(),
+    harnessCompletionCap: z.number().int().positive().safe(),
     tzdbVersion: text,
     model: modelSchema.nullable(),
+    routing: z
+      .object({
+        mode: z.enum(['shadow', 'enforce']),
+        bundleFile: text.refine((value) => isAbsolute(value)),
+        encoderUrl: z.string().url().pipe(text),
+        intents: z.array(z.enum(['task_list_bounded', 'prefs_timezone_read', 'brief_cards_read'])),
+      })
+      .strict()
+      .optional(),
     registryFile: text.refine((value) => isAbsolute(value)).nullable(),
     identityKeyringFile: text
       .refine((value) => isAbsolute(value))
@@ -138,8 +199,18 @@ export function createConfig(input) {
     workspaceVolume: values.workspaceVolume ?? `${project}_workspace_data`,
     workspaceMount: values.workspaceMount ?? '/var/lib/along/workspaces',
     authSecret: values.authSecret ?? randomBytes(48).toString('base64url'),
+    modelProviderEncryptionKey:
+      values.modelProviderEncryptionKey ?? randomBytes(32).toString('base64'),
+    harnessCompletionCap: values.harnessCompletionCap ?? values.model?.completionCap ?? 4096,
+    ...(values.modelProviderAllowedLocalOrigins !== undefined
+      ? { modelProviderAllowedLocalOrigins: values.modelProviderAllowedLocalOrigins }
+      : {}),
+    ...(values.modelProviderAllowedFakeDnsOrigins !== undefined
+      ? { modelProviderAllowedFakeDnsOrigins: values.modelProviderAllowedFakeDnsOrigins }
+      : {}),
     tzdbVersion: values.tzdbVersion,
     model: values.model ?? null,
+    ...(values.routing !== undefined ? { routing: values.routing } : {}),
     registryFile: values.registryFile ?? null,
     ...(values.identityKeyringFile !== undefined
       ? { identityKeyringFile: values.identityKeyringFile }
@@ -315,6 +386,7 @@ const fixedFields = [
   'workspaceMount',
   'database',
   'authSecret',
+  'modelProviderEncryptionKey',
 ];
 
 /**

@@ -71,7 +71,7 @@ test('R2-A sends the independent completion cap rather than the cumulative balan
   });
 });
 
-test('verified complete input enforces both window reserve and cumulative balance before a request', () => {
+test('verified complete input enforces both window reserve and cumulative balance before a request', async () => {
   const policy = createContextPolicy({
     completionCap: 37,
     model: 'bounded',
@@ -93,21 +93,21 @@ test('verified complete input enforces both window reserve and cumulative balanc
     input_tokens: 100,
     meter_revision: 'complete-fixture/1',
   });
-  expect(measureHarnessContext(candidate, [], policy, meter)).toMatchObject({
+  expect(await measureHarnessContext(candidate, [], policy, meter)).toMatchObject({
     output_ceiling: 1,
     limit_reason: null,
   });
   expect(
-    measureHarnessContext({ ...candidate, remaining_tokens: 100 }, [], policy, meter),
+    await measureHarnessContext({ ...candidate, remaining_tokens: 100 }, [], policy, meter),
   ).toMatchObject({ output_ceiling: 0, limit_reason: 'budget' });
   expect(
-    measureHarnessContext({ ...candidate, remaining_tokens: 101 }, [], policy, meter),
+    await measureHarnessContext({ ...candidate, remaining_tokens: 101 }, [], policy, meter),
   ).toMatchObject({ output_ceiling: 1, limit_reason: null });
   expect(
-    measureHarnessContext(candidate, [], { ...policy, model_window_tokens: 120 }, meter),
+    await measureHarnessContext(candidate, [], { ...policy, model_window_tokens: 120 }, meter),
   ).toMatchObject({ output_ceiling: 0, limit_reason: 'context' });
   expect(
-    measureHarnessContext(
+    await measureHarnessContext(
       { ...candidate, remaining_tokens: 0 },
       [],
       { ...policy, model_window_tokens: 120 },
@@ -116,7 +116,7 @@ test('verified complete input enforces both window reserve and cumulative balanc
   ).toMatchObject({ limit_reason: 'budget' });
 });
 
-test('missing current meter and missing provider usage remain unknown rather than inventing capacity', () => {
+test('missing current meter and missing provider usage remain unknown rather than inventing capacity', async () => {
   const policy = createContextPolicy({
     completionCap: 37,
     model: 'bounded',
@@ -132,9 +132,76 @@ test('missing current meter and missing provider usage remain unknown rather tha
     remaining_tokens: null,
     max_output_tokens: 37,
   };
-  expect(measureHarnessContext(candidate, [], policy)).toMatchObject({
+  expect(await measureHarnessContext(candidate, [], policy)).toMatchObject({
     output_ceiling: 37,
     limit_reason: null,
     input_meter: { quality: 'unavailable', input_tokens: null, meter_revision: 'unavailable/1' },
   });
+});
+
+test('SDK preflight meters the exact body later sent without contacting the provider', async () => {
+  let requests = 0;
+  let sent = '';
+  const server = createServer(async (req, res) => {
+    requests++;
+    const parts: Buffer[] = [];
+    for await (const part of req) parts.push(Buffer.from(part));
+    sent = Buffer.concat(parts).toString('utf8');
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.end(
+      'data: {"choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
+    );
+  });
+  servers.push(server);
+  const listening = Promise.withResolvers<void>();
+  server.listen(0, '127.0.0.1', listening.resolve);
+  await listening.promise;
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('missing port');
+  const policy = createContextPolicy({
+    completionCap: 37,
+    model: 'opaque/model',
+    inputMeter: 'verified',
+    meterRevision: 'capture/1',
+  });
+  const candidate: Extract<HarnessRequest, { type: 'model' }> = {
+    protocol: 'harness/v6',
+    type: 'model',
+    request_ref: 'm1',
+    messages: [
+      { role: 'system', content: '系统' },
+      { role: 'user', content: '你好😀' },
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [
+          {
+            id: 'call-1',
+            type: 'function',
+            function: { name: 'lookup', arguments: '{malformed' },
+          },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'call-1', content: '结果' },
+    ],
+    remaining_tokens: 1000,
+    max_output_tokens: 37,
+  };
+  let measured = '';
+  const measurement = await measureHarnessContext(candidate, [], policy, (body) => {
+    measured = body;
+    return { quality: 'verified', input_tokens: 10, meter_revision: 'capture/1' };
+  });
+  expect(requests).toBe(0);
+  const transport = createHarnessModelTransport({
+    baseUrl: `http://127.0.0.1:${address.port}/v1`,
+    model: 'opaque/model',
+  });
+  expect(
+    (await Array.fromAsync(transport(candidate, [], new AbortController().signal))).at(-1),
+  ).toMatchObject({ type: 'complete' });
+  expect(requests).toBe(1);
+  expect(sent).toBe(measured);
+  expect(JSON.parse(sent).messages[2].tool_calls[0].function.arguments).toBe('{malformed');
+  expect(measurement.http_bytes).toBe(Buffer.byteLength(sent, 'utf8'));
 });

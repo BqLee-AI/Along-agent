@@ -33,6 +33,8 @@ identity 增加单实例管理员绑定 `installation_admin`，字段与约束�
 
 无有效会话时，正式部署者入口为 `bun --no-env-file run local:account --config <私有配置>`。它通过原配置及 identity 公共维护用例展示有限候选摘要，由部署者明确选择并再次确认；内部使用原 ID，不让用户复制或手填 owner ID，不根据“唯一/最新 seed”自动认领。口令隐藏输入，不放 argv、普通输出或日志。该入口也负责检查及完成工作区登记收尾，不运行常驻宿主服务；具体操作见[本机使用指南](../guides/local-lifecycle.md)。
 
+本机口令重置（#131）是与转正分开的维护：邮箱找回不可用时，`local:account --reset-password` 在受信交互终端（同 TTY/隐藏输入规则，要求同一配置的 `local:start` 已起 PG 并通过完整目标基线）显示有限候选摘要，部署者明确选序号并输入 `CONFIRM <序号>`，无默认、不显示或接受 owner ID。仅 active、已准入且恰有一个 credential 的账户（已绑定管理员或已准入普通用户）可选；disabled、deleted_requested、未准入或 credential 冲突拒绝且不改任何事实。新口令（8–128 字符、不 trim、隐藏输入两次）经同一 Better Auth 哈希/credential 写路径，与撤销该用户全部会话、递增 credential revision、作废未消费挑战及排队邮件同属一个 PG 事务；失败整体回滚，旧口令保持。users.id、登录名、管理员绑定、联系邮箱、业务 owner 数据、登记与私有配置不变，不新增表、迁移、环境变量或审计事件。
+
 ## 4. 库适配、固定会话与可信退出
 
 - 登录名由服务端复用 trim/lowercase 规范化及 deriveAuthEmail，生成现有不透明 auth_email；不作为邮件渠道。不改认证 secret。长度与输入详见 API 合同。

@@ -49,6 +49,25 @@
 - **WHEN** 目标已有密码、credential 不一致、登录名/绑定冲突、账户不活跃或历史 owner 缺用户
 - **THEN** 停止有冲突的转正并给有资格入口可操作说明，不覆盖口令、激活账户、合并或重写业务 owner；已有合法口令须验证后明确绑定
 
+### Requirement: 本机已准入账户口令重置
+
+系统 SHALL 在邮箱找回不可用时，仅允许部署者经受信本机交互维护入口（`local:account --reset-password`）显式选择 active、已准入且恰有一个 credential 的账户重置口令；新口令经同一库哈希/credential 写路径，并与撤销该用户全部会话、递增 credential revision、作废未消费挑战及排队邮件同属一个事务。不新增表、迁移或环境变量，不接受 argv 口令或远程/非交互重置。详见 design/16 §3（#131）。
+
+#### Scenario: 明确选择并重置
+
+- **WHEN** 部署者在受信交互终端明确选择候选序号、输入 `CONFIRM <序号>`，并两次隐藏输入合法新口令
+- **THEN** 新口令可登录且旧口令失效，该用户全部旧会话撤销；用户 ID、业务 owner 数据、登记、私有配置与其他用户保持不变，输出不含口令或哈希
+
+#### Scenario: 缺少确认或候选不合格
+
+- **WHEN** 序号无效、确认文本不符、两次口令不一致、口令不符合 8–128 字符规则，或账户为 disabled、deleted_requested、未准入、无口令或 credential 冲突
+- **THEN** 不写任何事实，旧口令保持有效；不默认选择，不显示或接受 owner ID
+
+#### Scenario: 事务失败
+
+- **WHEN** 口令写入或会话/挑战撤销任一步失败
+- **THEN** 整体回滚，旧口令与旧会话保持，不报告成功
+
 ### Requirement: 库 credential 与 Cookie 兼容
 
 系统 SHALL 复用锁定 Better Auth 的密码哈希/验证和 Cookie、现有 HMAC resolver；提供相容的标准字段、UUID、credential account_id 与真实 client-bound transaction。PG 仅存 token HMAC，HTTP JSON 不披露原 token/hash。详见 design/16 §4、§7（AC3；D1/D6/D8）。
@@ -65,7 +84,29 @@
 
 ### Requirement: 固定会话与可信退出
 
-系统 SHALL 创建固定七天会话且不滑动续期，退出以服务端已确认撤销为成功依据，随后才清 Cookie；过期重登保留原身份。详见 design/16 §4（AC4；D6/D8）。
+系统 SHALL 保持固定七天会话及服务端确认撤销后清Cookie；按 [design/20 §1、§8](../../../docs/design/20-goal-scoped-delegation.md) 分开授权修订、会话访问和冻结生命周期。server-owned退出/到期不取消已接纳执行，request-bound不承诺退出后继续并按原连接策略收尾；账户禁用/明确撤权阻止新动作。退出不是取消task或回滚既成效果。
+
+#### Scenario: 七天过期与只读重登（D6/D8）
+
+- WHEN 反复读取页面后到固定期限再访问并重登
+- THEN GET不延长会话，过期401；同owner重登只读原事实，不重发业务POST、不创造新运行
+
+#### Scenario: 正常退出与已接纳委托（D6/D8/D9）
+
+- WHEN 用户正确会话/Origin/CSRF提交退出，服务端确认PG撤销，且读取到原Run的冻结生命周期
+- THEN 清Cookie且旧Cookie访问/me为401；server-owned只断订阅不撤委托，request-bound仍按原连接策略收尾，不因delegation/1宣称后台继续；都不取消既成提醒或回滚偏好/文件
+
+#### Scenario: 撤销依赖失败（D6/D8/D10）
+
+- WHEN 会话撤销失败或提交结果未知，即使认证库报告success
+- THEN 返回真实依赖错误，不伪报完整退出或先清Cookie；明确再次操作核对事实，不以本地状态代替撤销
+
+#### Scenario: 账户禁用（D6/D8/D9）
+
+- WHEN 已接纳委托运行期间owner被disabled或明确资源撤权
+- THEN 阻止后续新动作，保留既成/未知效果，不把禁用等同普通session轮换，也不披露已撤权内容
+
+以下保留原会话合同的场景：
 
 #### Scenario: 七天过期后原账户重登
 
@@ -166,3 +207,22 @@
 
 - **WHEN** 对锁定库适配、新身份迁移及账户交付执行验收
 - **THEN** 先隔离确认字段/真实事务/token/撤销/proxy风险，配套新增迁移核验与扫描规则；原迁移冻结，五门和认证/CSRF/owner/批准/取消/unknown 不回归，未执行项如实保留
+
+### Requirement: 本人默认时区真实保存与清除
+
+identity SHALL 拥有本人默认时区的窄公共用例；新profile按 [design/20 §4.1、§6.1](../../../docs/design/20-goal-scoped-delegation.md) 在明确委托内直接保存/清除，与工具接受结果/审计原子提交，返回真实事实而非提议或虚构记忆；不开放任意账户patch或宿主配置。
+
+#### Scenario: 同一委托保存并使用（A1/D4/D8）
+
+- WHEN 用户让记住上海时区并按它建立明确提醒
+- THEN 无二次批准真实保存，后续尚未冻结动作可引用刚接受的设置回执，后续请求也可读真实值；写或结果失败全回滚
+
+#### Scenario: 单次时区和清除（A4/D2/D8）
+
+- WHEN 用户只这次按纽约，或明确清除本人默认时区
+- THEN 单次不改偏好，清除返回真实null且后续动作不沿被清除值；本次明确值优先于设置回执/接纳偏好，旧task/approval不改
+
+#### Scenario: 非本人或越界设置（D1/D6/D8）
+
+- WHEN 模型带owner/任意账户字段或资料自行要求改偏好
+- THEN 拒绝确定性越界，摘要委托不执行额外设置；消息ID/hash不是语义授权证明，未知/不支持时区不静默保存为别处

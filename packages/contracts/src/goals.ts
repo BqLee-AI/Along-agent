@@ -1,7 +1,10 @@
 import { z } from 'zod';
+import { workspaceSummarySchema } from './workspaces.js';
 
 const uuid = z.string().uuid();
 const text = z.string().min(1).max(8192);
+export const ExecutionLifecycleSchema = z.enum(['request-bound', 'server-owned']);
+
 export const ElapsedTimeBasisSchema = z
   .object({
     kind: z.literal('elapsed'),
@@ -26,6 +29,20 @@ export const GoalResultSchema = z
               .array(uuid)
               .max(64)
               .refine((refs) => new Set(refs).size === refs.length),
+            create_resolution: z
+              .object({
+                source_message_id: uuid,
+                source_quote: text,
+                zero_write_invocation_ids: z
+                  .array(uuid)
+                  .min(1)
+                  .max(64)
+                  .refine((refs) => new Set(refs).size === refs.length),
+                created_invocation_id: uuid,
+                read_invocation_id: uuid,
+              })
+              .strict()
+              .optional(),
           })
           .strict(),
       )
@@ -38,7 +55,10 @@ export const GoalResultSchema = z
       })
       .strict()
       .nullable(),
-    answer: text,
+    answer: z
+      .string()
+      .min(1)
+      .max(1024 * 1024),
   })
   .strict()
   .superRefine((goal, ctx) => {
@@ -78,7 +98,8 @@ export const TrustedExecutionContextSchema = z
   .object({
     version: z.literal(1),
     authorization_revision: z.literal('delegation/1'),
-    execution_lifecycle: z.literal('request-bound'),
+    execution_lifecycle: ExecutionLifecycleSchema,
+    create_resolution_revision: z.enum(['create-resolution/1', 'create-resolution/2']).optional(),
     input_message_id: uuid,
     received_at_utc: z.string().datetime({ precision: 0 }),
     request_anchor_utc: z.string().datetime({ precision: 0 }),
@@ -119,7 +140,7 @@ export const TrustedExecutionContextSchema = z
           .nullable(),
       })
       .strict(),
-    workspaces: z.array(z.never()).max(0),
+    workspaces: z.array(workspaceSummarySchema),
   })
   .strict();
 export type GoalResult = z.infer<typeof GoalResultSchema>;

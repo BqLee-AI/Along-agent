@@ -6,7 +6,7 @@ import type {
 } from '@along/contracts';
 import { stateConflict, validationError } from '../../http/errors.js';
 import type { DocumentApplyEvidence, DocumentReadEvidence } from './document-evidence.js';
-import type { DocumentApprovalRow } from './document-repository.js';
+import type { DocumentApprovalRow } from './document-query.js';
 
 export function documentContentVersion(content: string): string {
   return createHash('sha256').update(content, 'utf8').digest('hex');

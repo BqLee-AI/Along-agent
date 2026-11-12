@@ -1,3 +1,4 @@
+import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
@@ -14,6 +15,7 @@ import { startConversationRun, executeRun } from '../../src/modules/conversation
 import type { ConversationDeps } from '../../src/modules/conversations/contracts.js';
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
 import { createHarnessModelTransport } from '../../src/modules/conversations/harness-model.js';
+import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
 import { seedAdmittedSession as seedSession } from '../integration/setup.js';
 import { invokeTool, reserveToolInvocation } from '../../src/modules/tools/gateway.js';
 import type { ToolContext } from '../../src/modules/tools/contracts.js';
@@ -130,26 +132,29 @@ beforeAll(async () => {
     });
   });
   const modelBase = await listen(modelServer);
+  const harness: HarnessServices = {
+    binaryPath,
+    libraryPath,
+    maxIterations: 8,
+    maxTokens: 8000,
+    contextPolicy: createContextPolicy({ completionCap: 1024, model: 'hard-denial-controlled' }),
+    model: createHarnessModelTransport({
+      baseUrl: `${modelBase}/v1`,
+      model: 'hard-denial-controlled',
+    }),
+  };
   deps = {
     pool: database.pool,
     timeContext: loadTimeContext('fixture-v1'),
-    harness: {
-      binaryPath,
-      libraryPath,
-      maxIterations: 8,
-      maxTokens: 8000,
-      contextPolicy: createContextPolicy({ completionCap: 1024, model: 'hard-denial-controlled' }),
-      model: createHarnessModelTransport({
-        baseUrl: `${modelBase}/v1`,
-        model: 'hard-denial-controlled',
-      }),
-    },
+    harness,
   };
+  controlledModelDeps(deps);
   apiServer = createServer((req, res) => {
     void handleRequest(req, res, {
       pool: database.pool,
       timeContext: deps.timeContext,
       harness: deps.harness,
+      modelTransport: deps.modelTransport,
     }).catch(() => res.destroy());
   });
   base = await listen(apiServer);
@@ -169,6 +174,7 @@ afterAll(async () => {
 
 async function fresh(): Promise<ToolContext> {
   const session = await seedSession(database.pool, { timezoneId: 'Asia/Shanghai' });
+  await configureTestModel(database.pool, session.userId, 'hard-denial-controlled');
   const run = await startConversationRun(
     deps,
     session.userId,
@@ -285,6 +291,7 @@ for (const mode of ['local', 'http']) {
   for (const partial of [false, true]) {
     test(`${mode} native/PG hard denial blocks later setting and terminates once as ${partial ? 'partial' : 'blocked'}`, async () => {
       const session = await seedSession(database.pool, { timezoneId: 'Asia/Shanghai' });
+      await configureTestModel(database.pool, session.userId, 'hard-denial-controlled');
       const id = randomUUID();
       const value: Scenario = { partial, requests: 0, denialSeen: false, receipt: null };
       scenarios.set(id, value);

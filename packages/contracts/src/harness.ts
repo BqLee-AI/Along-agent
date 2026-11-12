@@ -6,6 +6,7 @@ import {
 } from './document-approvals.js';
 import { RoutingPolicySchema, RoutingIntentSchema } from './routing.js';
 import {
+  ExecutionLifecycleSchema,
   ElapsedTimeBasisSchema,
   GoalResultSchema,
   TrustedExecutionContextSchema,
@@ -242,7 +243,11 @@ export const HarnessToolResultSchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('failed'), error: toolFailure }).strict(),
   z.object({ status: z.literal('unknown'), error: toolFailure }).strict(),
 ]);
-const source = { result_version: z.literal(1), omitted: z.literal(true) };
+const source = {
+  result_version: z.literal(1),
+  omitted: z.literal(true),
+  workspace_id: z.string().min(1).optional(),
+};
 const sourceVersion = z.string().regex(/^[a-f0-9]{64}$/);
 const projectedSource = z
   .discriminatedUnion('kind', [
@@ -618,11 +623,25 @@ export const HarnessCancelSchema = z
     reason: z.string().max(512),
   })
   .strict();
+export const RunModelSelectionSchema = z.discriminatedUnion('state', [
+  z
+    .object({
+      state: z.literal('available'),
+      provider_id: uuid,
+      provider_name: z.string(),
+      model_id: z.string().min(1),
+    })
+    .strict(),
+  z.object({ state: z.literal('legacy_unavailable') }).strict(),
+  z.object({ state: z.literal('not_applicable') }).strict(),
+]);
+
 export const RunViewSchema = z
   .object({
     run_id: uuid,
     conversation_id: uuid,
     execution: ExecutionKindSchema,
+    model_selection: RunModelSelectionSchema,
     status: RunStatusSchema,
     attempt_id: uuid,
     attempt_no: z.number().int().positive(),
@@ -640,10 +659,26 @@ export const RunViewSchema = z
       ])
       .nullable(),
     workspace: workspaceSummarySchema.optional(),
+    workspaces: z.array(workspaceSummarySchema).optional(),
     can_resume: z.boolean(),
     authorization_revision: z.literal('delegation/1').optional(),
-    execution_lifecycle: z.literal('request-bound').optional(),
+    execution_lifecycle: ExecutionLifecycleSchema.optional(),
     goal_result: GoalResultSchema.nullable().optional(),
+    document_effects: z
+      .array(
+        z
+          .object({
+            workspace_id: z.string().min(1),
+            path: z.string(),
+            invocation_id: uuid,
+            read_invocation_id: uuid.nullable(),
+            version: z.string().nullable(),
+            operation: z.enum(['create', 'replace']).optional(),
+            status: z.enum(['applied', 'verified', 'conflict', 'failed', 'unknown']),
+          })
+          .strict(),
+      )
+      .optional(),
     created_reminders: z
       .array(
         taskCreatedSchema

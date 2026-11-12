@@ -3,6 +3,7 @@ import type { TimeContext } from '../time/context.js';
 import type { TimeFailure } from '../time/normalize.js';
 import type { WorkspaceGrant, WorkspaceResult } from '@along/contracts';
 import type { DocumentApprovalReceipt, ElapsedTimeBasis } from '@along/contracts';
+import type { RunOwnership } from '../conversations/run-ownership.js';
 
 export const BUSINESS_TOOL_IDS = [
   'propose_task',
@@ -18,6 +19,17 @@ export const WORKSPACE_TOOL_IDS = [
   'workspace_propose_replace',
   'workspace_apply_replace',
 ] as const;
+export const DELEGATION_WORKSPACE_READ_TOOL_IDS = [
+  'workspace_list',
+  'workspace_grep',
+  'workspace_read',
+] as const;
+export const DELEGATION_WORKSPACE_WRITE_TOOL_IDS = [
+  'workspace_replace',
+  'workspace_propose_replace',
+  'workspace_apply_replace',
+] as const;
+export const DELEGATION_WORKSPACE_CREATE_TOOL_IDS = ['workspace_create'] as const;
 export const CONTEXT_TOOL_IDS = ['read_run_observation'] as const;
 export const HARNESS_BASE_TOOL_IDS = [...BUSINESS_TOOL_IDS, ...CONTEXT_TOOL_IDS] as const;
 export const DELEGATION_TOOL_IDS = [
@@ -31,7 +43,11 @@ export const DELEGATION_TOOL_IDS = [
   'read_run_observation',
 ] as const;
 export const TOOL_IDS = [...BUSINESS_TOOL_IDS, ...WORKSPACE_TOOL_IDS, ...CONTEXT_TOOL_IDS] as const;
-export type ToolId = (typeof TOOL_IDS)[number] | (typeof DELEGATION_TOOL_IDS)[number];
+export type ToolId =
+  | (typeof TOOL_IDS)[number]
+  | (typeof DELEGATION_TOOL_IDS)[number]
+  | (typeof DELEGATION_WORKSPACE_WRITE_TOOL_IDS)[number]
+  | (typeof DELEGATION_WORKSPACE_CREATE_TOOL_IDS)[number];
 
 export const TASK_STATES = [
   'saved',
@@ -48,6 +64,7 @@ export interface ToolContext {
   conversationId: string;
   runId: string;
   attemptId: string;
+  ownership?: RunOwnership;
   requestId: string;
   allowlist: readonly string[];
   authorizationRevision?: 'delegation/1';
@@ -57,6 +74,24 @@ export interface ToolContext {
   foldChoice: 'first' | 'second' | 'none';
   timeContext: TimeContext;
   workspaceGrant?: WorkspaceGrant | null;
+  workspaceGrants?: WorkspaceGrant[];
+  documentEdit?: {
+    base_read_invocation_id: string;
+    relative_path: string;
+    base_version: string;
+    exact_new_content?: string;
+    new_version?: string;
+    operation_error?: 'literal_not_found' | 'literal_not_unique' | 'unchanged';
+    replaces_invocation_id?: string;
+  };
+  documentCreate?: {
+    output_directory: string;
+    directory_identity: string;
+    relative_path: string;
+    content_base64: string;
+    new_version: string;
+    replaces_invocation_id?: string;
+  };
   signal?: AbortSignal;
 }
 export interface ApprovalPayload {

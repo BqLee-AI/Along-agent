@@ -24,7 +24,7 @@ export interface HarnessServices {
     request: Extract<HarnessRequest, { type: 'measure_context' }>,
     tools: readonly HarnessTool[],
     policy: ContextPolicy,
-  ) => HarnessContextMeasurement;
+  ) => HarnessContextMeasurement | Promise<HarnessContextMeasurement>;
   model: (
     request: Extract<HarnessRequest, { type: 'model' }>,
     tools: readonly HarnessTool[],
@@ -33,11 +33,12 @@ export interface HarnessServices {
 }
 
 export interface NativeHarnessOptions {
-  services: HarnessServices;
+  services: Omit<HarnessServices, 'model' | 'measure'>;
   start: HarnessStart;
   signal: AbortSignal;
   handleRequest: (request: HarnessRequest) => Promise<unknown>;
   onExit?: () => void | Promise<void>;
+  detachOnAbort?: boolean;
 }
 
 function protocolError(): HttpError {
@@ -170,7 +171,21 @@ export async function runNativeHarness(options: NativeHarnessOptions): Promise<v
         seenReferences.add(request.request_ref);
         let reply: unknown;
         try {
-          const result = await handleRequest(request);
+          let result: unknown;
+          if (options.detachOnAbort) {
+            signal.throwIfAborted();
+            const aborted = Promise.withResolvers<never>();
+            const rejectOnAbort = () => aborted.reject(new Error('harness attempt aborted'));
+            signal.addEventListener('abort', rejectOnAbort, { once: true });
+            try {
+              if (signal.aborted) rejectOnAbort();
+              result = await Promise.race([handleRequest(request), aborted.promise]);
+            } finally {
+              signal.removeEventListener('abort', rejectOnAbort);
+            }
+          } else {
+            result = await handleRequest(request);
+          }
           if (result === undefined) throw protocolError();
           reply = {
             protocol: HARNESS_PROTOCOL_VERSION,
@@ -181,7 +196,11 @@ export async function runNativeHarness(options: NativeHarnessOptions): Promise<v
           terminal =
             request.type === 'suspend' ||
             request.type === 'finish' ||
-            request.type === 'finish_goal';
+            (request.type === 'finish_goal' &&
+              typeof result === 'object' &&
+              result !== null &&
+              'accepted' in result &&
+              result.accepted === true);
         } catch (error) {
           if (!(error instanceof HttpError)) throw error;
           reply = {

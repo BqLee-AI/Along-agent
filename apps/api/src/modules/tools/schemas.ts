@@ -92,6 +92,41 @@ export const WorkspaceProposeReplaceInputSchema = z
 export const WorkspaceApplyReplaceInputSchema = z
   .object({ approval_id: z.string().uuid() })
   .strict();
+export const DelegatedWorkspaceListInputSchema = WorkspaceListInputSchema.extend({
+  workspace_id: z.string().min(1),
+});
+export const DelegatedWorkspaceGrepInputSchema = WorkspaceGrepInputSchema.extend({
+  workspace_id: z.string().min(1),
+});
+export const DelegatedWorkspaceReadInputSchema = WorkspaceReadInputSchema.extend({
+  workspace_id: z.string().min(1),
+});
+export const WorkspaceChangeSchema = z.discriminatedUnion('kind', [
+  z
+    .object({ kind: z.literal('literal'), old_text: z.string().min(1), new_text: z.string() })
+    .strict(),
+  z.object({ kind: z.literal('full'), new_content: z.string() }).strict(),
+]);
+export const WorkspaceReplaceInputSchema = z
+  .object({
+    read_invocation_id: z.string().uuid(),
+    change: WorkspaceChangeSchema,
+  })
+  .strict();
+export const WorkspaceCreateInputSchema = z
+  .object({
+    workspace_id: z.string().min(1),
+    output_directory: z.string(),
+    filename: z.string().min(1),
+    content: z.string(),
+  })
+  .strict();
+export const DelegatedWorkspaceProposeInputSchema = WorkspaceReplaceInputSchema;
+export const DELEGATED_WORKSPACE_READ_SCHEMAS = {
+  workspace_list: DelegatedWorkspaceListInputSchema,
+  workspace_grep: DelegatedWorkspaceGrepInputSchema,
+  workspace_read: DelegatedWorkspaceReadInputSchema,
+} as const;
 
 export const ReadRunObservationInputSchema = z
   .object({
@@ -117,6 +152,8 @@ export const TOOL_INPUT_SCHEMAS = {
   workspace_grep: WorkspaceGrepInputSchema,
   workspace_read: WorkspaceReadInputSchema,
   workspace_propose_replace: WorkspaceProposeReplaceInputSchema,
+  workspace_replace: WorkspaceReplaceInputSchema,
+  workspace_create: WorkspaceCreateInputSchema,
   workspace_apply_replace: WorkspaceApplyReplaceInputSchema,
   read_run_observation: ReadRunObservationInputSchema,
 } as const;

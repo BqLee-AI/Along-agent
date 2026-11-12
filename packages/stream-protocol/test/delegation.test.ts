@@ -69,7 +69,7 @@ describe('explicit delegation stream decoding', () => {
     expect(LegacyThreadEventSchema.safeParse(wire).success).toBe(false);
   });
 
-  it('requires trusted start revision and request-bound lifecycle rather than inferring them from v2', () => {
+  it('requires the trusted start revision and an explicit known lifecycle', () => {
     for (const field of ['authorization_revision', 'execution_lifecycle']) {
       const payload = { ...started.payload };
       delete payload[field];
@@ -77,7 +77,7 @@ describe('explicit delegation stream decoding', () => {
     }
     for (const patch of [
       { authorization_revision: 'legacy' },
-      { execution_lifecycle: 'server-owned' },
+      { execution_lifecycle: 'unknown' },
       { stream_protocol_version: 'v1' },
       { injected_authority: true },
     ]) {
@@ -86,6 +86,15 @@ describe('explicit delegation stream decoding', () => {
           .success,
       ).toBe(false);
     }
+  });
+
+  it('preserves the server-owned lifecycle in v2 without accepting it in v1', () => {
+    const input = {
+      ...started,
+      payload: { ...started.payload, execution_lifecycle: 'server-owned' },
+    };
+    expect<unknown>(ThreadEventSchema.parse(input)).toEqual(input);
+    expect(LegacyThreadEventSchema.safeParse(input).success).toBe(false);
   });
 
   it('keeps old-v1 decoding strict for new start fields, new terminal results and new versions', () => {
@@ -112,6 +121,7 @@ describe('explicit delegation stream decoding', () => {
     for (const patch of [
       { authorization_revision: 'delegation/1' },
       { execution_lifecycle: 'request-bound' },
+      { execution_lifecycle: 'server-owned' },
     ]) {
       expect(
         ThreadEventSchema.safeParse({
@@ -140,6 +150,48 @@ describe('explicit delegation stream decoding', () => {
     },
   );
 
+  it('preserves explicit creation resolutions and rejects malformed collision references', () => {
+    const resolution = {
+      source_message_id: conversationId,
+      source_quote: '创建报告',
+      zero_write_invocation_ids: [runId],
+      created_invocation_id: receiptId,
+      read_invocation_id: conversationId,
+    };
+    const completed = terminals[0]!;
+    const withResolution = (value: unknown) => ({
+      ...completed,
+      payload: {
+        ...completed.payload,
+        goal_result: { ...goal, outcomes: [{ ...goal.outcomes[0], create_resolution: value }] },
+      },
+    });
+    expect(ThreadEventSchema.safeParse(withResolution(resolution)).success).toBe(true);
+    for (const patch of [
+      { zero_write_invocation_ids: [] },
+      { zero_write_invocation_ids: [runId, runId] },
+      { zero_write_invocation_ids: ['invalid'] },
+      { source_quote: '' },
+      { extra: true },
+    ]) {
+      expect(ThreadEventSchema.safeParse(withResolution({ ...resolution, ...patch })).success).toBe(
+        false,
+      );
+    }
+  });
+
+  it.each(terminals)('decodes a complete bounded answer in $type', (terminal) => {
+    for (const length of [8193, 1024 * 1024]) {
+      const answer = 'x'.repeat(length);
+      const input = {
+        ...terminal,
+        payload: { ...terminal.payload, goal_result: { ...goal, answer } },
+      };
+      const wire: unknown = JSON.parse(JSON.stringify(input));
+      expect<unknown>(ThreadEventSchema.parse(wire)).toEqual(input);
+    }
+  });
+
   it('rejects malformed receipt references and bounded or unknown goal fields', () => {
     const completed = terminals[0]!;
     for (const receipt_refs of [
@@ -161,7 +213,8 @@ describe('explicit delegation stream decoding', () => {
       { ...goal, outcomes: [] },
       { ...goal, outcomes: Array(65).fill(goal.outcomes[0]) },
       { ...goal, answer: '' },
-      { ...goal, answer: 'x'.repeat(8193) },
+      { ...goal, answer: 'x'.repeat(1024 * 1024 + 1) },
+      { ...goal, outcomes: [{ ...goal.outcomes[0], description: 'x'.repeat(8193) }] },
       { ...goal, status: 'done' },
       { ...goal, extra: true },
       { ...goal, outcomes: [{ ...goal.outcomes[0], extra: true }] },

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
+import { ZodError } from 'zod';
 import {
   HARNESS_PROTOCOL_VERSION,
   HARNESS_MAX_FRAME_BYTES,
@@ -8,6 +9,7 @@ import {
   HarnessStartSchema,
   HarnessModelStepSchema,
   HarnessRequestSchema,
+  workspaceGrantSchema,
   type HarnessModelStep,
   type HarnessRequest,
   type HarnessSnapshot,
@@ -31,6 +33,7 @@ import {
   validationError,
 } from '../../http/errors.js';
 import { validateDocumentApprovalsDone } from '../approvals/document-service.js';
+import { getDocumentApproval, hasRejectedDocumentApproval } from '../approvals/document-query.js';
 import { invokeTool, reserveToolInvocation } from '../tools/gateway.js';
 import { readRunInvocationStates, readInvocationSnapshots } from '../tools/invocations.js';
 import {
@@ -39,17 +42,16 @@ import {
   readRunDocumentEvidence,
 } from '../tools/query.js';
 import type { ToolContext, ToolPayload } from '../tools/contracts.js';
-import { HARNESS_BASE_TOOL_IDS, DELEGATION_TOOL_IDS, TOOL_IDS } from '../tools/contracts.js';
 import { HARNESS_TOOL_DEFINITIONS, DELEGATION_TOOL_DEFINITIONS } from '../tools/catalog.js';
 import { GOAL_CONTROL_TOOL } from './goal-control.js';
 import { validateGoalResult } from './goal-result.js';
 import { validateWorkspaceGrant } from '../workspaces/service.js';
 import { runNativeHarness } from './harness-process.js';
 import type { ConversationDeps, EventWriter, RunContext, StartResult } from './contracts.js';
-import { ensureRunContextPolicy, readRunContextPolicy } from './context-policy.js';
-import { measureHarnessContext } from './harness-context.js';
+import { readRunContextPolicy } from './context-policy.js';
 import { CancelRunBodySchema, ResumeRunBodySchema } from './schemas.js';
 import { routingRuntimeOf } from './harness-config.js';
+import { withRunTransaction, type RunOwnership } from './run-ownership.js';
 import {
   readRoutingPolicy,
   readRoutingRecord,
@@ -76,8 +78,10 @@ import {
   commitTerminal,
   readSnapshot,
   readRunApprovalDecision,
+  supportsFrozenTools,
   viewOf,
 } from './run-state.js';
+import { resolveRunSelection } from '../model-providers/service.js';
 
 export interface HarnessSession {
   start: HarnessStart;
@@ -113,12 +117,14 @@ async function withLatest<T>(
   runId: string,
   action: (client: PoolClient, locked: LockedRun) => Promise<T>,
   authorize = true,
+  ownership?: RunOwnership,
 ): Promise<T> {
   const pool = poolOf(deps);
   for (;;) {
     const attemptId = await latestAttemptId(pool, ownerId, runId);
     try {
-      return await withTransaction(pool, async (client) => {
+      return await withRunTransaction(pool, ownership, async (client) => {
+        if (ownership) await ownership.assert(client, runId);
         const locked = await lockRun(
           client,
           { ownerId, conversationId, runId, attemptId },
@@ -143,6 +149,7 @@ async function contextOf(
   attemptId: string,
   requestId: string,
   checkpointId?: string,
+  candidatePolicy?: { tableExists: boolean; modelBindingsExist: boolean },
 ): Promise<RunContext> {
   const frozen = run.frozen_context;
   if (!frozen || !run.input_message_id) throw stateConflict('Run accepted input missing');
@@ -161,15 +168,25 @@ async function contextOf(
   )
     throw new HttpError(503, 503, 'TZDB_UNAVAILABLE', '接纳时的时间规则暂不可用。');
   if (frozen.workspaceGrant) validateWorkspaceGrant(run.owner_id, frozen.workspaceGrant);
-  const contextPolicy = await readRunContextPolicy(client, run.owner_id, run.id);
-  const deployed = deps.harness?.contextPolicy;
+  if (candidatePolicy && !candidatePolicy.modelBindingsExist)
+    throw stateConflict('legacy Run model binding unavailable; cannot resume');
+  const contextPolicy = candidatePolicy
+    ? ((candidatePolicy.tableExists
+        ? await readRunContextPolicy(client, run.owner_id, run.id)
+        : null) ?? deps.harness?.contextPolicy)
+    : await readRunContextPolicy(client, run.owner_id, run.id);
+  const selected = await resolveRunSelection(client, run.owner_id, run.id);
+  if (!selected) throw stateConflict('legacy Run model binding unavailable; cannot resume');
   if (
     !contextPolicy ||
-    !deployed ||
-    contextPolicy.model_binding.model !== deployed.model_binding.model ||
-    contextPolicy.model_binding.adapter_revision !== deployed.model_binding.adapter_revision
+    !deps.harness ||
+    contextPolicy.model_binding.model !== selected.model_id ||
+    contextPolicy.model_binding.adapter_revision !==
+      deps.harness.contextPolicy.model_binding.adapter_revision
   )
     throw unavailable();
+  if (!supportsFrozenTools(run)) throw stateConflict('unsupported frozen tool in historical Run');
+  if (!deps.modelTransport) throw unavailable();
   const messageRefs = frozen.messageRefs ?? [run.input_message_id];
   const messages = await readHarnessMessages(
     client,
@@ -196,16 +213,9 @@ async function contextOf(
     timeContext: deps.timeContext,
     maxIterations: run.budget_max_iterations,
     maxTokens: run.budget_max_tokens,
-    allowlist: run.tools_allowlist.filter((name) =>
-      (
-        (frozen.authorization_revision
-          ? DELEGATION_TOOL_IDS
-          : frozen.workspaceGrant
-            ? TOOL_IDS
-            : HARNESS_BASE_TOOL_IDS) as readonly string[]
-      ).includes(name),
-    ),
+    allowlist: run.tools_allowlist,
     ...(frozen.workspaceGrant ? { workspaceGrant: frozen.workspaceGrant } : {}),
+    ...(frozen.workspaceGrants ? { workspaceGrants: frozen.workspaceGrants } : {}),
     ...(frozen.authorization_revision
       ? {
           authorizationRevision: frozen.authorization_revision,
@@ -253,10 +263,8 @@ function buildHarnessStart(
     trusted_context: context.trustedExecutionContext ?? null,
     messages: context.messages,
     context_policy: context.contextPolicy,
-    routing_policy: context.authorizationRevision
-      ? { revision: 'r2b/1', mode: 'off' }
-      : routingPolicy,
-    eligible_phase: context.authorizationRevision ? 'disabled' : eligiblePhase,
+    routing_policy: routingPolicy,
+    eligible_phase: eligiblePhase,
     tools: (context.authorizationRevision
       ? DELEGATION_TOOL_DEFINITIONS.map((tool) =>
           tool.name === 'list_tasks' &&
@@ -279,13 +287,133 @@ function buildHarnessStart(
   return HarnessStartSchema.parse(start);
 }
 
+// Read-only release inspection is not an authorization to resume. The caller
+// must run it again after stopping writers and resume revalidates under locks.
+export async function inspectReleaseWaiting(
+  deps: ConversationDeps,
+): Promise<Array<{ runId: string; status: 'compatible' | 'blocked'; reason?: string }>> {
+  const client = await poolOf(deps).connect();
+  let temporaryAdmissions = false;
+  try {
+    const identity = await client.query<{ admissions: boolean; administrator: boolean }>(
+      `SELECT to_regclass('identity_account_admissions') IS NOT NULL AS admissions,
+              to_regclass('installation_admin') IS NOT NULL AS administrator`,
+    );
+    if (!identity.rows[0]!.admissions) {
+      // Migration 0024 admits precisely the existing administrator. This
+      // session-local view forecasts eligibility without changing stored facts.
+      await client.query(
+        identity.rows[0]!.administrator
+          ? 'CREATE TEMP VIEW identity_account_admissions AS SELECT user_id FROM installation_admin'
+          : 'CREATE TEMP VIEW identity_account_admissions AS SELECT NULL::uuid AS user_id WHERE false',
+      );
+      temporaryAdmissions = true;
+    }
+    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    const table = await client.query<{ present: boolean; modelBindingsExist: boolean }>(
+      `SELECT to_regclass('run_context_policies') IS NOT NULL AS present,
+              to_regclass('model_provider_run_bindings') IS NOT NULL AS "modelBindingsExist"`,
+    );
+    const runs = await client.query<RunRow>(
+      "SELECT * FROM agent_runs WHERE execution='harness' AND status='suspended_approval' ORDER BY id",
+    );
+    const results: Array<{ runId: string; status: 'compatible' | 'blocked'; reason?: string }> = [];
+    for (const run of runs.rows) {
+      try {
+        if (!run.waiting_checkpoint_id || !run.waiting_invocation_id || !run.waiting_approval_id)
+          throw stateConflict('incomplete waiting point');
+        const attempt = await client.query(
+          'SELECT 1 FROM run_attempts WHERE run_id=$1 AND owner_id=$2',
+          [run.id, run.owner_id],
+        );
+        if (!attempt.rowCount) throw stateConflict('Run attempt missing');
+        const snapshot = await readSnapshot(client, run, run.waiting_checkpoint_id);
+        if (
+          snapshot.waiting?.invocation_id !== run.waiting_invocation_id ||
+          snapshot.waiting?.approval_id !== run.waiting_approval_id
+        )
+          throw stateConflict('waiting checkpoint reference conflict');
+        const decision = await readRunApprovalDecision(
+          client,
+          { ownerId: run.owner_id, conversationId: run.conversation_id, runId: run.id },
+          run.waiting_invocation_id,
+          run.waiting_approval_id,
+        );
+        if (
+          snapshot.usage.iterations >= run.budget_max_iterations ||
+          (snapshot.usage.tokens !== null && snapshot.usage.tokens >= run.budget_max_tokens)
+        )
+          throw stateConflict('waiting point budget exhausted');
+        if (
+          run.frozen_context?.authorization_revision === 'delegation/1' &&
+          decision.kind === 'document'
+        ) {
+          if (decision.status === 'rejected') throw stateConflict('document approval rejected');
+          const approval = await getDocumentApproval(client, run.owner_id, decision.approval_id);
+          const grant = workspaceGrantSchema.parse(approval.workspace_grant);
+          if (
+            approval.conversation_id !== run.conversation_id ||
+            approval.run_id !== run.id ||
+            !run.frozen_context.workspaceGrants?.some(
+              (member) =>
+                JSON.stringify(workspaceGrantSchema.parse(member)) === JSON.stringify(grant),
+            )
+          )
+            throw forbidden('document approval workspace differs from frozen Run grants');
+          validateWorkspaceGrant(run.owner_id, grant);
+        }
+        const used = await client.query('SELECT 1 FROM harness_resumes WHERE checkpoint_id=$1', [
+          run.waiting_checkpoint_id,
+        ]);
+        if (used.rowCount) throw stateConflict('approval waiting point already resumed');
+        const context = await contextOf(
+          client,
+          deps,
+          run,
+          randomUUID(),
+          randomUUID(),
+          run.waiting_checkpoint_id,
+          {
+            tableExists: table.rows[0]!.present,
+            modelBindingsExist: table.rows[0]!.modelBindingsExist,
+          },
+        );
+        const observations = await readRunContextObservations(
+          client,
+          toolContext(context),
+          snapshot.tool_refs,
+          { project: context.allowlist.includes('read_run_observation') },
+        );
+        buildHarnessStart(context, snapshot, observations, decision);
+        results.push({ runId: run.id, status: 'compatible' });
+      } catch (error) {
+        if (!(error instanceof HttpError) && !(error instanceof ZodError)) throw error;
+        results.push({
+          runId: run.id,
+          status: 'blocked',
+          reason: error instanceof HttpError ? error.errorCode : 'INVALID_HISTORICAL_SCHEMA',
+        });
+      }
+    }
+    await client.query('COMMIT');
+    return results;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release(temporaryAdmissions);
+  }
+}
+
 export async function getRunView(
   deps: ConversationDeps,
   ownerId: string,
   conversationId: string,
   runId: string,
 ): Promise<RunView> {
-  return withLatest(deps, ownerId, conversationId, runId, viewOf);
+  return withLatest(deps, ownerId, conversationId, runId, (client, locked) =>
+    viewOf(client, locked, !!deps.modelTransport),
+  );
 }
 
 export async function cancelConversationRun(
@@ -295,6 +423,11 @@ export async function cancelConversationRun(
   runId: string,
   requestId: string,
   body: unknown,
+  expectedWaiting?: {
+    checkpoint: string | null;
+    invocation: string | null;
+    approval: string | null;
+  },
 ): Promise<RunView> {
   const parsed = CancelRunBodySchema.safeParse(body);
   if (!parsed.success) throw validationError('invalid cancel body');
@@ -306,6 +439,14 @@ export async function cancelConversationRun(
     conversationId,
     runId,
     async (client, locked) => {
+      if (
+        expectedWaiting &&
+        (locked.run.status !== 'suspended_approval' ||
+          locked.run.waiting_checkpoint_id !== expectedWaiting.checkpoint ||
+          locked.run.waiting_invocation_id !== expectedWaiting.invocation ||
+          locked.run.waiting_approval_id !== expectedWaiting.approval)
+      )
+        throw stateConflict('selected waiting point changed');
       const previous = (
         await client.query<{ run_id: string; reason: string }>(
           'SELECT run_id,reason FROM harness_cancellations WHERE owner_id=$1 AND idempotency_key=$2',
@@ -338,7 +479,7 @@ export async function cancelConversationRun(
         locked.run.waiting_approval_id = null;
         locked.attempt.status = 'failed';
       }
-      return viewOf(client, locked);
+      return viewOf(client, locked, !!deps.modelTransport);
     },
     false,
   );
@@ -360,102 +501,192 @@ export async function resumeConversationRun(
   const parsed = ResumeRunBodySchema.safeParse(body);
   if (!parsed.success) throw validationError('invalid resume body');
   const input = parsed.data;
-  return withLatest(deps, ownerId, conversationId, runId, async (client, locked) => {
-    const prior = (
-      await client.query<{ run_id: string; checkpoint_id: string; attempt_id: string }>(
-        'SELECT run_id,checkpoint_id,attempt_id FROM harness_resumes WHERE owner_id=$1 AND idempotency_key=$2',
-        [ownerId, input.idempotency_key],
-      )
-    ).rows[0];
-    if (prior) {
-      if (prior.run_id !== runId || prior.checkpoint_id !== input.checkpoint_id)
-        throw stateConflict('resume idempotency key conflict');
-      const attempt = (
-        await client.query<{ status: string }>('SELECT status FROM run_attempts WHERE id=$1', [
-          prior.attempt_id,
-        ])
-      ).rows[0];
-      if (attempt?.status === 'running')
-        throw stateConflict('resumed Run still running', {
-          status: 'running',
-          run_id: runId,
-          attempt_id: prior.attempt_id,
-        });
-      const events = await listRunEvents(client, ownerId, runId);
-      const seqs = (
-        await client.query<{ event_seq: string }>(
-          'SELECT event_seq FROM run_checkpoints WHERE attempt_id=$1',
-          [prior.attempt_id],
-        )
-      ).rows.map((row) => Number(row.event_seq));
-      const selected = new Set(seqs);
-      return {
-        conversationId,
-        runId,
-        context: null,
-        replay: events.filter((event) => selected.has(event.seq)),
-      };
-    }
-    const run = locked.run;
-    if (
-      run.execution !== 'harness' ||
-      run.status !== 'suspended_approval' ||
-      run.waiting_checkpoint_id !== input.checkpoint_id ||
-      !run.waiting_approval_id
+  const pool = poolOf(deps);
+  const current = (
+    await pool.query<{ lifecycle: string | null; prior: boolean }>(
+      `SELECT frozen_context->>'execution_lifecycle' AS lifecycle,
+       EXISTS (SELECT 1 FROM harness_resumes WHERE owner_id=$1 AND idempotency_key=$4) AS prior
+     FROM agent_runs WHERE owner_id=$1 AND conversation_id=$2 AND id=$3`,
+      [ownerId, conversationId, runId, input.idempotency_key],
     )
-      throw stateConflict('Run has no matching approval waiting point', { status: run.status });
-    const used = await client.query('SELECT 1 FROM harness_resumes WHERE checkpoint_id=$1', [
-      input.checkpoint_id,
-    ]);
-    if (used.rowCount) throw stateConflict('approval waiting point already resumed');
-    const snapshot = await readSnapshot(client, run, input.checkpoint_id);
-    if (
-      !snapshot.waiting ||
-      snapshot.waiting.invocation_id !== run.waiting_invocation_id ||
-      snapshot.waiting.approval_id !== run.waiting_approval_id
-    )
-      throw stateConflict('waiting checkpoint reference conflict');
-    const decision = await readRunApprovalDecision(
-      client,
-      { ownerId, conversationId, runId },
-      snapshot.waiting.invocation_id,
-      run.waiting_approval_id,
-    );
-    if (decision.status === 'pending')
-      throw stateConflict('approval still pending', { status: 'pending' });
-    if (!deps.harness) throw unavailable();
-    if (
-      snapshot.usage.iterations >= run.budget_max_iterations ||
-      (snapshot.usage.tokens !== null && snapshot.usage.tokens >= run.budget_max_tokens)
-    )
-      throw new HttpError(429, 429, 'BUDGET_EXCEEDED', '原运行预算已用完，不能继续。');
-    const attemptId = randomUUID();
-    await ensureRunContextPolicy(client, ownerId, runId, deps.harness.contextPolicy);
-    const context = await contextOf(client, deps, run, attemptId, requestId, input.checkpoint_id);
-    const observations = await readRunContextObservations(
-      client,
-      toolContext(context),
-      snapshot.tool_refs,
-      { project: context.allowlist.includes('read_run_observation') },
-    );
-    buildHarnessStart(context, snapshot, observations, decision);
-    await insertAttempt(client, {
-      attemptId,
+  ).rows[0];
+  let ownership: RunOwnership | undefined;
+  if (current?.lifecycle === 'server-owned' && !current.prior) {
+    if (!deps.runDriver) throw unavailable();
+    ownership = await deps.runDriver.acquire(runId, true);
+  }
+  let result: StartResult;
+  try {
+    result = await withLatest(
+      deps,
       ownerId,
+      conversationId,
       runId,
-      attemptNo: locked.attempt.attempt_no + 1,
-    });
-    await client.query(
-      'INSERT INTO harness_resumes(owner_id,idempotency_key,run_id,checkpoint_id,attempt_id) VALUES($1,$2,$3,$4,$5)',
-      [ownerId, input.idempotency_key, runId, input.checkpoint_id, attemptId],
-    );
-    await client.query(
-      `UPDATE agent_runs SET status='running',waiting_checkpoint_id=NULL,
+      async (client, locked) => {
+        const prior = (
+          await client.query<{ run_id: string; checkpoint_id: string; attempt_id: string }>(
+            'SELECT run_id,checkpoint_id,attempt_id FROM harness_resumes WHERE owner_id=$1 AND idempotency_key=$2',
+            [ownerId, input.idempotency_key],
+          )
+        ).rows[0];
+        if (prior) {
+          if (prior.run_id !== runId || prior.checkpoint_id !== input.checkpoint_id)
+            throw stateConflict('resume idempotency key conflict');
+          const attempt = (
+            await client.query<{ status: string }>('SELECT status FROM run_attempts WHERE id=$1', [
+              prior.attempt_id,
+            ])
+          ).rows[0];
+          if (attempt?.status === 'running')
+            throw stateConflict('resumed Run still running', {
+              status: 'running',
+              run_id: runId,
+              attempt_id: prior.attempt_id,
+            });
+          const events = await listRunEvents(client, ownerId, runId);
+          const seqs = (
+            await client.query<{ event_seq: string }>(
+              'SELECT event_seq FROM run_checkpoints WHERE attempt_id=$1',
+              [prior.attempt_id],
+            )
+          ).rows.map((row) => Number(row.event_seq));
+          const selected = new Set(seqs);
+          return {
+            conversationId,
+            runId,
+            context: null,
+            replay: events.filter((event) => selected.has(event.seq)),
+          };
+        }
+        const run = locked.run;
+        if (run.frozen_context?.execution_lifecycle === 'server-owned' && !ownership)
+          throw stateConflict('Run ownership required');
+        if (
+          run.execution !== 'harness' ||
+          run.status !== 'suspended_approval' ||
+          run.waiting_checkpoint_id !== input.checkpoint_id ||
+          !run.waiting_approval_id
+        )
+          throw stateConflict('Run has no matching approval waiting point', { status: run.status });
+        const used = await client.query('SELECT 1 FROM harness_resumes WHERE checkpoint_id=$1', [
+          input.checkpoint_id,
+        ]);
+        if (used.rowCount) throw stateConflict('approval waiting point already resumed');
+        const snapshot = await readSnapshot(client, run, input.checkpoint_id);
+        if (
+          !snapshot.waiting ||
+          snapshot.waiting.invocation_id !== run.waiting_invocation_id ||
+          snapshot.waiting.approval_id !== run.waiting_approval_id
+        )
+          throw stateConflict('waiting checkpoint reference conflict');
+        const decision = await readRunApprovalDecision(
+          client,
+          { ownerId, conversationId, runId },
+          snapshot.waiting.invocation_id,
+          run.waiting_approval_id,
+        );
+        if (decision.status === 'pending')
+          throw stateConflict('approval still pending', { status: 'pending' });
+        if (
+          run.frozen_context?.authorization_revision === 'delegation/1' &&
+          decision.kind === 'document' &&
+          decision.status !== 'approved'
+        )
+          throw stateConflict('rejected document approval cannot resume');
+        if (
+          run.frozen_context?.authorization_revision === 'delegation/1' &&
+          decision.kind === 'document'
+        ) {
+          const approval = await getDocumentApproval(client, ownerId, decision.approval_id);
+          const grant = workspaceGrantSchema.parse(approval.workspace_grant);
+          if (
+            approval.conversation_id !== conversationId ||
+            approval.run_id !== runId ||
+            !run.frozen_context.workspaceGrants?.some(
+              (member) =>
+                JSON.stringify(workspaceGrantSchema.parse(member)) === JSON.stringify(grant),
+            )
+          )
+            throw forbidden('document approval workspace differs from frozen Run grants');
+          validateWorkspaceGrant(ownerId, grant);
+        }
+        if (!deps.harness) throw unavailable();
+        if (
+          snapshot.usage.iterations >= run.budget_max_iterations ||
+          (snapshot.usage.tokens !== null && snapshot.usage.tokens >= run.budget_max_tokens)
+        )
+          throw new HttpError(429, 429, 'BUDGET_EXCEEDED', '原运行预算已用完，不能继续。');
+        const attemptId = randomUUID();
+        const context = await contextOf(
+          client,
+          deps,
+          run,
+          attemptId,
+          requestId,
+          input.checkpoint_id,
+        );
+        if (ownership) context.ownership = ownership;
+        const afterSeq = ownership
+          ? Number(
+              (
+                await client.query<{ seq: string }>(
+                  `SELECT COALESCE(max(c.event_seq),0)::text AS seq FROM run_checkpoints c
+           JOIN run_attempts a ON a.id=c.attempt_id WHERE a.run_id=$1`,
+                  [runId],
+                )
+              ).rows[0]!.seq,
+            )
+          : null;
+        const observations = await readRunContextObservations(
+          client,
+          toolContext(context),
+          snapshot.tool_refs,
+          { project: context.allowlist.includes('read_run_observation') },
+        );
+        buildHarnessStart(context, snapshot, observations, decision);
+        await insertAttempt(client, {
+          attemptId,
+          ownerId,
+          runId,
+          attemptNo: locked.attempt.attempt_no + 1,
+          ...(ownership ? { leaseToken: ownership.token } : {}),
+        });
+        await client.query(
+          'INSERT INTO harness_resumes(owner_id,idempotency_key,run_id,checkpoint_id,attempt_id) VALUES($1,$2,$3,$4,$5)',
+          [ownerId, input.idempotency_key, runId, input.checkpoint_id, attemptId],
+        );
+        await client.query(
+          `UPDATE agent_runs SET status='running',waiting_checkpoint_id=NULL,
       waiting_invocation_id=NULL,waiting_approval_id=NULL WHERE id=$1`,
-      [runId],
+          [runId],
+        );
+        return { conversationId, runId, context, replay: null, ...(ownership ? { afterSeq } : {}) };
+      },
+      true,
+      ownership,
     );
-    return { conversationId, runId, context, replay: null };
-  });
+  } catch (error) {
+    if (ownership) await deps.runDriver!.release(ownership);
+    throw error;
+  }
+  if (ownership && result.context) {
+    try {
+      deps.runDriver!.start(deps, result.context);
+    } catch (error) {
+      await deps.runDriver!.release(ownership);
+      throw error;
+    }
+    return {
+      conversationId,
+      runId,
+      context: null,
+      replay: null,
+      serverOwned: true,
+      afterSeq: result.afterSeq ?? null,
+    };
+  }
+  if (ownership) await deps.runDriver!.release(ownership);
+  return result;
 }
 
 // The public test seam exercises the same guarded frame handler used by the
@@ -467,7 +698,7 @@ export async function createHarnessSession(
   signal: AbortSignal,
 ): Promise<HarnessSession> {
   const pool = poolOf(deps);
-  const initial = await withTransaction(pool, async (client) => {
+  const initial = await withRunTransaction(pool, supplied.ownership, async (client) => {
     const locked = await lockRun(client, supplied);
     if (locked.run.execution !== 'harness') throw stateConflict('not a harness Run');
     const resume = (
@@ -484,6 +715,7 @@ export async function createHarnessSession(
       supplied.requestId,
       resume?.checkpoint_id,
     );
+    if (supplied.ownership) context.ownership = supplied.ownership;
     const snapshot = resume ? await readSnapshot(client, locked.run, resume.checkpoint_id) : null;
     const observations = snapshot
       ? await readRunContextObservations(client, toolContext(context), snapshot.tool_refs, {
@@ -510,7 +742,7 @@ export async function createHarnessSession(
       [context.attemptId],
     );
     const eligible =
-      !context.authorizationRevision &&
+      !context.trustedExecutionContext?.continuation &&
       locked.attempt.attempt_no === 1 &&
       !resume &&
       !snapshot &&
@@ -532,6 +764,7 @@ export async function createHarnessSession(
   );
   const tools = context.authorizationRevision ? [...start.tools, GOAL_CONTROL_TOOL] : start.tools;
   let stopped = false;
+  let correctingGoal = false;
   let lastSnapshot = initial.snapshot;
   const delivered = new Set(initial.snapshot?.tool_refs ?? []);
   const cumulative = { ...(initial.snapshot?.usage ?? { iterations: 0, tokens: 0 }) };
@@ -561,7 +794,9 @@ export async function createHarnessSession(
     const current = modelStream;
     modelStream = null;
     // The pending next() owns any transport error; cleanup must not replace it.
-    await current?.iterator.return().catch(() => undefined);
+    const closing = current?.iterator.return().catch(() => undefined);
+    if (context.ownership && sessionSignal.aborted) void closing;
+    else await closing;
   }
   async function nextModelStep(): Promise<HarnessModelStep> {
     const current = modelStream;
@@ -569,6 +804,7 @@ export async function createHarnessSession(
       throw stateConflict('model continuation requires an acknowledged previous delta');
     current.pulling = true;
     try {
+      await guarded(assertActionAuthority);
       const next = await current.iterator.next();
       if (next.done)
         throw new HttpError(502, 502, 'HARNESS_PROTOCOL_ERROR', 'model ended without completion');
@@ -576,7 +812,7 @@ export async function createHarnessSession(
       if (!parsed.success)
         throw new HttpError(502, 502, 'HARNESS_PROTOCOL_ERROR', 'model step rejected');
       const step = parsed.data;
-      await guarded(async () => undefined);
+      await guarded(assertActionAuthority);
       if (step.type === 'delta') current.pendingDelta = step.delta;
       else {
         cumulative.iterations++;
@@ -602,12 +838,19 @@ export async function createHarnessSession(
     action: (client: PoolClient, locked: LockedRun) => Promise<T>,
   ): Promise<T> {
     if (stopped || sessionSignal.aborted) throw stateConflict('harness attempt stopped');
-    return withTransaction(pool, async (client) => {
+    return withRunTransaction(pool, context.ownership, async (client) => {
       const locked = await lockRun(client, context);
       if (stopped || sessionSignal.aborted) throw stateConflict('harness attempt stopped');
       if (context.workspaceGrant) validateWorkspaceGrant(context.ownerId, context.workspaceGrant);
       return action(client, locked);
     });
+  }
+  async function assertActionAuthority(client: PoolClient): Promise<void> {
+    if (
+      context.authorizationRevision === 'delegation/1' &&
+      (await hasRejectedDocumentApproval(client, context))
+    )
+      throw forbidden('rejected document approval cannot authorize another action');
   }
   async function routingEligible(client: PoolClient, locked: LockedRun): Promise<void> {
     if (
@@ -946,7 +1189,8 @@ export async function createHarnessSession(
                     text: context.inputText,
                     messages: context.messages!.map(({ role, content }) => ({ role, content })),
                     hasPendingApproval,
-                    workspaceSelected: !!context.workspaceGrant,
+                    workspaceSelected:
+                      !!context.workspaceGrant || !!context.workspaceGrants?.length,
                   },
                   policy!,
                 ),
@@ -1180,7 +1424,14 @@ export async function createHarnessSession(
             throw stateConflict('model balance must match accepted cumulative usage');
           if (cumulative.iterations >= context.maxIterations)
             throw new HttpError(429, 429, 'BUDGET_EXCEEDED', '本轮推理预算用完，已停下。');
-          const measurement = (deps.harness.measure ?? measureHarnessContext)(
+          if (!deps.modelTransport) throw unavailable();
+          const selected = await guarded((client) =>
+            resolveRunSelection(client, context.ownerId, context.runId),
+          );
+          if (!selected) throw stateConflict('legacy Run model binding unavailable');
+          if (selected.model_id !== context.contextPolicy.model_binding.model) throw unavailable();
+          const transport = await deps.modelTransport(selected);
+          const measurement = await transport.measure(
             { ...request, type: 'measure_context' },
             tools,
             context.contextPolicy,
@@ -1198,6 +1449,7 @@ export async function createHarnessSession(
             );
           }
           await guarded(async (client) => {
+            await assertActionAuthority(client);
             const states = await readRunInvocationStates(client, toolContext(context));
             if (states.some((row) => row.state === 'unknown' || row.outcome_kind === 'failed'))
               throw stateConflict('Run has unresolved tool effects');
@@ -1212,7 +1464,7 @@ export async function createHarnessSession(
           });
           modelStream = {
             ref: request.request_ref,
-            iterator: deps.harness.model(request, tools, modelSignal)[Symbol.asyncIterator](),
+            iterator: transport.model(request, tools, modelSignal)[Symbol.asyncIterator](),
             pendingDelta: null,
             pulling: false,
           };
@@ -1220,6 +1472,8 @@ export async function createHarnessSession(
           return nextModelStep();
         }
         if (request.type === 'reserve') {
+          if (correctingGoal)
+            throw stateConflict('goal correction cannot reserve business actions');
           if (!approvalAuthorizesActions(initial.approval))
             throw forbidden('rejected approval cannot authorize another action');
           if (!context.allowlist.includes(request.tool_id))
@@ -1232,6 +1486,7 @@ export async function createHarnessSession(
           )
             throw forbidden('routing direct must reserve original unique tool and arguments');
           await guarded(async (client) => {
+            await assertActionAuthority(client);
             if (routingDecision?.payload.decision === 'direct') {
               const states = await readRunInvocationStates(client, toolContext(context));
               if (
@@ -1280,6 +1535,7 @@ export async function createHarnessSession(
           return { invocation_id: reserved.invocationId };
         }
         if (request.type === 'invoke') {
+          if (correctingGoal) throw stateConflict('goal correction cannot invoke business actions');
           if (!approvalAuthorizesActions(initial.approval))
             throw forbidden('rejected approval cannot authorize another action');
           if (
@@ -1291,6 +1547,7 @@ export async function createHarnessSession(
           if (initial.snapshot?.tool_refs.includes(request.invocation_id))
             throw stateConflict('resume consumes stored observations without reinvoking them');
           await guarded(async (client) => {
+            await assertActionAuthority(client);
             if (routingDecision?.payload.decision === 'direct')
               await directInvocation(client, request.invocation_id);
             const states = await readRunInvocationStates(client, toolContext(context));
@@ -1355,6 +1612,7 @@ export async function createHarnessSession(
         }
         if (request.type === 'suspend') {
           await guarded(async (client, locked) => {
+            await assertActionAuthority(client);
             const latest = (
               await client.query<{ id: string }>(
                 `SELECT id FROM run_checkpoints WHERE attempt_id=$1 AND kind='harness_snapshot' ORDER BY seq DESC LIMIT 1`,
@@ -1417,13 +1675,20 @@ export async function createHarnessSession(
             (request.usage.tokens !== null && request.usage.tokens > context.maxTokens)
           )
             throw new HttpError(429, 429, 'BUDGET_EXCEEDED', '本轮推理预算用完，已停下。');
-          const event = await guarded(async (client) => {
-            const goal = await validateGoalResult(
-              client,
-              toolContext(context),
-              request.goal_result,
-            );
-            return commitTerminal(
+          const result = await guarded(async (client) => {
+            let goal;
+            try {
+              goal = await validateGoalResult(client, toolContext(context), request.goal_result);
+            } catch (error) {
+              if (error instanceof HttpError && error.errorCode === 'STATE_CONFLICT')
+                return {
+                  accepted: false as const,
+                  code: 'INVALID_GOAL_RESULT',
+                  message: error.message,
+                };
+              throw error;
+            }
+            const event = await commitTerminal(
               client,
               context,
               goal.status === 'cancelled' ? 'cancelled' : 'done',
@@ -1435,13 +1700,22 @@ export async function createHarnessSession(
                 goal_result: goal,
               },
             );
+            return { accepted: true as const, event };
           });
+          if (!result.accepted) {
+            correctingGoal = true;
+            return result;
+          }
           stopped = true;
-          await send(event);
+          await send(result.event);
           return { accepted: true };
         }
         if (request.type !== 'finish') throw stateConflict('unsupported terminal control');
-        if (context.authorizationRevision && request.outcome === 'done')
+        if (
+          context.authorizationRevision &&
+          request.outcome === 'done' &&
+          routingDecision?.payload.decision !== 'direct'
+        )
           throw stateConflict('delegated goal requires finish_goal');
         if (
           modelStarted &&
@@ -1540,9 +1814,43 @@ export async function createHarnessSession(
             )
               throw stateConflict('zero-model completion requires accepted routing render receipt');
           }
+          let goalResult;
+          if (request.outcome === 'done' && context.authorizationRevision) {
+            const render = await readRoutingRecord<RoutingRenderPayload>(
+              client,
+              context,
+              'harness_routing_render',
+            );
+            if (!render) throw stateConflict('routing render missing');
+            const deltas = await client.query<{ delta: string }>(
+              `SELECT c.payload->'payload'->>'delta' AS delta FROM run_checkpoints c
+               JOIN run_attempts a ON a.id=c.attempt_id
+               WHERE a.run_id=$1 AND c.kind='message.delta' ORDER BY c.event_seq`,
+              [context.runId],
+            );
+            const answer = deltas.rows.map((row) => row.delta).join('');
+            if (routingHash(answer) !== render.payload.body_sha256)
+              throw stateConflict('routing answer differs from accepted render');
+            goalResult = await validateGoalResult(client, toolContext(context), {
+              status: 'completed',
+              outcomes: [
+                {
+                  description: '完成本次有限只读查询',
+                  status: 'achieved',
+                  receipt_refs: [render.payload.invocation_ref],
+                },
+              ],
+              clarification: null,
+              answer,
+            });
+          }
           const payload =
             request.outcome === 'done'
-              ? { ...eventPayload(context), approval_id: null }
+              ? {
+                  ...eventPayload(context),
+                  approval_id: null,
+                  ...(goalResult ? { goal_result: goalResult } : {}),
+                }
               : request.outcome === 'cancelled'
                 ? { ...eventPayload(context), reason: 'harness_cancelled' }
                 : {
@@ -1583,11 +1891,15 @@ export async function executeHarness(
   const pool = poolOf(deps);
   if (!deps.harness) throw unavailable();
   const controller = new AbortController();
+  const ownershipLost = () => controller.abort();
+  context.ownership?.signal.addEventListener('abort', ownershipLost, { once: true });
+  if (context.ownership?.signal.aborted) controller.abort();
   active.set(context.runId, controller);
   let cancellation: Promise<unknown> | undefined;
   let cancellationFailure: { error: unknown } | undefined;
   let cancellationProjected = false;
   let closeSession: (() => Promise<void>) | undefined;
+  const inFlight = new Set<Promise<unknown>>();
   const disconnected = () => {
     cancellation ??= cancelConversationRun(
       deps,
@@ -1623,7 +1935,7 @@ export async function executeHarness(
     );
     closeSession = session.close;
     if (session.start.snapshot === null) {
-      const event = await withTransaction(pool, async (client) => {
+      const event = await withRunTransaction(pool, context.ownership, async (client) => {
         await lockRun(client, context);
         return appendEvent(client, context, 'thread.started', {
           ...eventPayload(context),
@@ -1642,18 +1954,29 @@ export async function executeHarness(
       services: deps.harness,
       start: session.start,
       signal: controller.signal,
+      detachOnAbort: !!context.ownership,
       onExit: session.close,
-      handleRequest: async (request) => {
-        // No next native action may overtake a disconnect's durable decision.
-        await cancellation;
-        if (cancellationFailure) throw cancellationFailure.error;
-        return session.handleRequest(request);
+      handleRequest: (request) => {
+        const pending = (async () => {
+          // No next native action may overtake a disconnect's durable decision.
+          await cancellation;
+          if (cancellationFailure) throw cancellationFailure.error;
+          return session.handleRequest(request);
+        })();
+        if (context.ownership) {
+          inFlight.add(pending);
+          void pending.then(
+            () => inFlight.delete(pending),
+            () => inFlight.delete(pending),
+          );
+        }
+        return pending;
       },
     });
   } catch (error) {
     await cancellation;
     try {
-      const failed = await withTransaction(pool, async (client) => {
+      const failed = await withRunTransaction(pool, context.ownership, async (client) => {
         // Revocation rejects execution, but may not prevent recording its failure.
         await lockRun(client, context, true, false);
         const code = error instanceof HttpError ? error.errorCode : 'INTERNAL_ERROR';
@@ -1674,15 +1997,20 @@ export async function executeHarness(
       // Stale/terminal authority wins; revoked readers receive no failure content.
     }
   } finally {
-    await closeSession?.();
-    signal?.removeEventListener('abort', disconnected);
-    if (active.get(context.runId) === controller) active.delete(context.runId);
-    // An explicit stop commits on another HTTP request. Project that existing
-    // receipt to the still-open stream; never create a second terminal fact.
-    if (controller.signal.aborted && !signal?.aborted && !cancellationProjected) {
-      const events = await listRunEvents(pool, context.ownerId, context.runId);
-      const cancelled = events.find((event) => event.type === 'thread.cancelled');
-      if (cancelled) await write(cancelled);
+    try {
+      await closeSession?.();
+      signal?.removeEventListener('abort', disconnected);
+      context.ownership?.signal.removeEventListener('abort', ownershipLost);
+      if (active.get(context.runId) === controller) active.delete(context.runId);
+      // Project the committed stop before waiting for already-dispatched effects.
+      if (controller.signal.aborted && !signal?.aborted && !cancellationProjected) {
+        const events = await listRunEvents(pool, context.ownerId, context.runId);
+        const cancelled = events.find((event) => event.type === 'thread.cancelled');
+        if (cancelled) await write(cancelled);
+      }
+    } finally {
+      // Keep the execution slot and control pool alive through late accounting.
+      await Promise.allSettled(inFlight);
     }
   }
 }

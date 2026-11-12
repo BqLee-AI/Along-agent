@@ -28,6 +28,28 @@ export const GOAL_CONTROL_TOOL: HarnessTool = {
               uniqueItems: true,
               items: { type: 'string', format: 'uuid' },
             },
+            create_resolution: object(
+              {
+                source_message_id: { type: 'string', format: 'uuid' },
+                source_quote: text,
+                zero_write_invocation_ids: {
+                  type: 'array',
+                  minItems: 1,
+                  maxItems: 64,
+                  uniqueItems: true,
+                  items: { type: 'string', format: 'uuid' },
+                },
+                created_invocation_id: { type: 'string', format: 'uuid' },
+                read_invocation_id: { type: 'string', format: 'uuid' },
+              },
+              [
+                'source_message_id',
+                'source_quote',
+                'zero_write_invocation_ids',
+                'created_invocation_id',
+                'read_invocation_id',
+              ],
+            ),
           },
           ['description', 'status', 'receipt_refs'],
         ),

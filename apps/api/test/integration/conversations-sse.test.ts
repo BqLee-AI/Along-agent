@@ -471,25 +471,20 @@ maybe('conversation runtime', () => {
     expect(second.conversationId).not.toBe(first.conversationId);
   });
 
-  it('concurrent requests with one key create a single run; the loser gets 409', async () => {
+  it('concurrent requests with one key create one run and replay the stored prefix', async () => {
     const ownerId = await seedUser(pool);
     const key = randomUUID();
     const body = { raw_text: '明天 9:20 提醒我喝水', confirmed_timezone: 'Asia/Shanghai' };
-    const settled = await Promise.allSettled([
+    const results = await Promise.all([
       startConversationRun({ pool, timeContext }, ownerId, randomUUID(), body, key),
       startConversationRun({ pool, timeContext }, ownerId, randomUUID(), body, key),
     ]);
-    const winners = settled.filter(
-      (entry): entry is PromiseFulfilledResult<StartResult> => entry.status === 'fulfilled',
-    );
-    expect(winners).toHaveLength(1);
-    const loser = settled.find((entry) => entry.status === 'rejected');
-    if (!loser || loser.status !== 'rejected') throw new Error('expected one loser');
-    expect(loser.reason).toMatchObject({ httpStatus: 409 });
-
-    const winner = winners[0];
-    if (!winner) throw new Error('expected one winner');
-    const events = await collect(pool, winner.value);
+    expect(results[0]!.runId).toBe(results[1]!.runId);
+    const winner = results.find((result) => result.context !== null);
+    const duplicate = results.find((result) => result.replay !== null);
+    if (!winner || !duplicate) throw new Error('expected one acceptance and one replay');
+    expect(duplicate.replay).toEqual([]);
+    const events = await collect(pool, winner);
     expect(events.at(-1)?.type).toBe('thread.completed');
     const replay = await startConversationRun(
       { pool, timeContext },
@@ -501,7 +496,7 @@ maybe('conversation runtime', () => {
     expect(replay.replay).toEqual(events);
   });
 
-  it('retrying while the original run is still running returns 409', async () => {
+  it('retrying while the original run is still running returns its stored prefix', async () => {
     const ownerId = await seedUser(pool);
     const key = randomUUID();
     const body = { raw_text: '明天 9:20 提醒我喝水', confirmed_timezone: 'Asia/Shanghai' };
@@ -512,8 +507,15 @@ maybe('conversation runtime', () => {
       body,
       key,
     );
-    const retry = startConversationRun({ pool, timeContext }, ownerId, randomUUID(), body, key);
-    await expect(retry).rejects.toMatchObject({ httpStatus: 409 });
+    const retry = await startConversationRun(
+      { pool, timeContext },
+      ownerId,
+      randomUUID(),
+      body,
+      key,
+    );
+    expect(retry.runId).toBe(first.runId);
+    expect(retry.replay).toEqual([]);
     const { rows } = await pool.query('SELECT status FROM agent_runs WHERE id = $1', [first.runId]);
     expect(rows[0]?.status).toBe('running');
   });
@@ -879,5 +881,91 @@ maybe('conversation runtime', () => {
       'thread.completed',
     ]);
     expect(events[0]?.protocol_version).toBe('v1');
+  });
+  it('GET run events follows the durable cursor without executing again', async () => {
+    const ownerId = await seedUser(pool);
+    const started = await startConversationRun(
+      { pool, timeContext },
+      ownerId,
+      randomUUID(),
+      { raw_text: '你好', confirmed_timezone: 'Asia/Shanghai' },
+      randomUUID(),
+    );
+    const original = await collect(pool, started);
+    const path = `/api/v1/conversations/${started.conversationId}/runs/${started.runId}/events?after_seq=${original[0]!.seq}`;
+    const server = createServer((req, res) => {
+      void handleConversationRoute(req, res, new URL(req.url ?? '/', 'http://localhost'), {
+        pool,
+        timeContext,
+        resolveActor: async () => ({
+          ownerId,
+          sessionId: null,
+          displayName: 'tester',
+          timezoneId: 'Asia/Shanghai',
+        }),
+      });
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    try {
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('missing server address');
+      const response = await fetch(`http://127.0.0.1:${address.port}${path}`);
+      expect(response.status).toBe(200);
+      const replay = (await response.text())
+        .split('\n\n')
+        .filter((frame) => frame.startsWith('data: '))
+        .map((frame) => ThreadEventSchema.parse(JSON.parse(frame.slice(6))));
+      expect(replay).toEqual(original.slice(1));
+      expect(await listRunEvents(pool, ownerId, started.runId)).toEqual(original);
+    } finally {
+      server.closeAllConnections();
+      const { promise, resolve } = Promise.withResolvers<void>();
+      server.close(() => resolve());
+      await promise;
+    }
+  });
+  it('closes an idle HTTP subscription after session revocation without cancelling the run', async () => {
+    const session = await seedAdmittedSession(pool);
+    const started = await startConversationRun(
+      { pool, timeContext },
+      session.userId,
+      randomUUID(),
+      { raw_text: '你好', confirmed_timezone: 'Asia/Shanghai' },
+      randomUUID(),
+    );
+    const path = `/api/v1/conversations/${started.conversationId}/runs/${started.runId}/events`;
+    const server = createServer((req, res) => {
+      void handleConversationRoute(req, res, new URL(req.url ?? '/', 'http://localhost'), {
+        pool,
+        timeContext,
+        resolveActor: async () => ({
+          ownerId: session.userId,
+          sessionId: session.sessionId,
+          displayName: 'tester',
+          timezoneId: 'Asia/Shanghai',
+        }),
+      });
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    try {
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('missing server address');
+      const response = await fetch(`http://127.0.0.1:${address.port}${path}`);
+      expect(response.status).toBe(200);
+      await pool.query('UPDATE sessions SET revoked_at=clock_timestamp() WHERE id=$1', [
+        session.sessionId,
+      ]);
+      const events = await collect(pool, started);
+      expect(events.at(-1)?.type).toBe('thread.completed');
+      expect(await response.text()).toBe('');
+      expect(await listRunEvents(pool, session.userId, started.runId)).toEqual(events);
+    } finally {
+      server.closeAllConnections();
+      const { promise, resolve } = Promise.withResolvers<void>();
+      server.close(() => resolve());
+      await promise;
+    }
   });
 });

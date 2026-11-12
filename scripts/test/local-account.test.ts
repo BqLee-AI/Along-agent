@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { hostEnvironment } from '../local/commands.mjs';
-import { mkdir, mkdtemp, rename, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rename, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { maintainAccount } from '../local/account.mjs';
@@ -41,7 +41,8 @@ function fixture({
     files.set(registryFile, JSON.stringify(registry, null, 3));
   const events: string[] = [],
     messages: string[] = [],
-    prompts: Array<{ label: string; secret: boolean }> = [];
+    prompts: Array<{ label: string; secret: boolean }> = [],
+    resets: string[] = [];
   let locked = false,
     connections = 0,
     bindCalls = 0,
@@ -115,6 +116,23 @@ function fixture({
     async getAdmittedLocalOwner(userId: string) {
       expect(userId).toBe('ordinary-owner');
       return { userId, displayName: 'ordinary' };
+    },
+    async listPasswordResetCandidates() {
+      return [
+        {
+          selection: 'reset-handle',
+          displayName: 'forgot\nname',
+          status: eligible ? 'active' : 'disabled',
+          installationAdmin: true,
+          eligible,
+        },
+      ];
+    },
+    async resetLocalPassword(input: { selection: string; confirmed: boolean; password: string }) {
+      expect(input.selection).toBe('reset-handle');
+      expect(input.confirmed).toBe(true);
+      resets.push(input.password);
+      return { reset: true };
     },
   };
   const dependencies = {
@@ -225,6 +243,9 @@ function fixture({
     get admitCalls() {
       return admitCalls;
     },
+    get resets() {
+      return resets;
+    },
     get config() {
       return config;
     },
@@ -236,6 +257,7 @@ const configureAnswers = [
   '/var/lib/along/workspaces/documents',
   'My documents',
   '["notes.txt"]',
+  '[]',
   '[]',
   'REGISTER',
 ];
@@ -399,7 +421,7 @@ describe('local:account explicit maintenance and non-atomic recovery', () => {
     expect(f.messages).toContain('[registry_loaded]');
   });
 
-  it('requires a managed subdirectory and explicit finite readable paths', async () => {
+  it('requires a managed subdirectory and at least one readable path or output directory', async () => {
     for (const root of ['/var/lib/along/workspaces', '/outside/documents']) {
       const f = fixture({ configured: false, registry: null, answers: ['CONFIGURE', root] });
       await expect(maintainAccount(file, f.io, f.dependencies)).rejects.toMatchObject({
@@ -410,12 +432,56 @@ describe('local:account explicit maintenance and non-atomic recovery', () => {
     const f = fixture({
       configured: false,
       registry: null,
-      answers: ['CONFIGURE', '/var/lib/along/workspaces/documents', 'docs', '[]', '[]'],
+      answers: ['CONFIGURE', '/var/lib/along/workspaces/documents', 'docs', '[]', '[]', '[]'],
     });
     await expect(maintainAccount(file, f.io, f.dependencies)).rejects.toMatchObject({
       code: 'WORKSPACE_REGISTRY_INVALID',
     });
     expect(f.counts.publishes).toBe(0);
+  });
+
+  it('registers an output-only workspace for the selected owner without changing existing registrations', async () => {
+    const f = fixture({
+      answers: [
+        '1',
+        'CONFIRM 1',
+        'ADD',
+        '/var/lib/along/workspaces/ordinary',
+        'Outputs',
+        '[]',
+        '[]',
+        '["outputs"]',
+        'REGISTER',
+      ],
+    });
+    const original = f.files.get(registryFile);
+    await maintainAccount(file, f.io, f.dependencies, { operation: 'workspace' });
+    expect(f.files.get(registryFile)).toBe(original);
+    const rows = JSON.parse(f.files.get(f.config.registryFile!)!);
+    expect(rows[0]).toEqual(registration());
+    expect(rows[1]).toMatchObject({
+      owner_id: 'ordinary-owner',
+      readable_paths: [],
+      writable_paths: [],
+      output_directories: ['outputs'],
+    });
+    expect(f.counts.publishes).toBe(1);
+    expect(f.counts.reloads).toBe(1);
+  });
+
+  it('rejects malformed output directory input before publishing', async () => {
+    for (const output of ['not-json', '"outputs"', '{}']) {
+      const f = fixture({
+        configured: false,
+        registry: null,
+        answers: ['CONFIGURE', '/var/lib/along/workspaces/documents', 'docs', '[]', '[]', output],
+      });
+      await expect(maintainAccount(file, f.io, f.dependencies)).rejects.toMatchObject({
+        code: 'WORKSPACE_REGISTRY_INVALID',
+      });
+      expect(f.counts.publishes).toBe(0);
+      expect(f.counts.reloads).toBe(0);
+    }
   });
 
   it('admits an explicitly selected ordinary legacy owner without administrator binding or workspace side effects', async () => {
@@ -443,6 +509,7 @@ describe('local:account explicit maintenance and non-atomic recovery', () => {
       '/var/lib/along/workspaces/ordinary',
       'Ordinary',
       '["notes.txt"]',
+      '[]',
       '[]',
       'REGISTER',
     ];
@@ -479,6 +546,7 @@ describe('local:account explicit maintenance and non-atomic recovery', () => {
         'Ordinary',
         '["notes.txt"]',
         '[]',
+        '[]',
         'REGISTER',
       ],
     });
@@ -507,6 +575,7 @@ describe('local:account explicit maintenance and non-atomic recovery', () => {
         '/var/lib/along/workspaces/ordinary',
         'Ordinary',
         '["notes.txt"]',
+        '[]',
         '[]',
         'REGISTER',
       ],
@@ -561,5 +630,148 @@ describe('local:account explicit maintenance and non-atomic recovery', () => {
       await configureWorkspaceRegistry([]);
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  it('uses the real registry validator for output-only directories and rejects unsafe paths', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'along-output-registry-'));
+    try {
+      const root = path.join(directory, 'workspace');
+      await mkdir(root);
+      await mkdir(path.join(root, 'outputs'));
+      await symlink(path.join(root, 'outputs'), path.join(root, 'linked'), 'dir');
+      const outputOnly = {
+        ...registration(),
+        root,
+        readable_paths: [],
+        output_directories: ['outputs'],
+      };
+      expect((await configureWorkspaceRegistry([outputOnly])).state).toBe('loaded');
+      for (const invalid of ['../outside', 'linked', 'missing']) {
+        expect(
+          (await configureWorkspaceRegistry([{ ...outputOnly, output_directories: [invalid] }]))
+            .state,
+        ).toBe('invalid');
+      }
+    } finally {
+      await configureWorkspaceRegistry([]);
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  describe('--reset-password maintenance', () => {
+    const newPassword = ' brand new reset password ';
+    const accepted = ['1', 'CONFIRM 1', newPassword, newPassword];
+
+    it('lists a limited summary, then resets only after explicit index, CONFIRM and a repeated hidden password', async () => {
+      const f = fixture({ answers: [...accepted] });
+      expect(
+        await maintainAccount(file, f.io, f.dependencies, { operation: 'reset-password' }),
+      ).toEqual({ account: 'password_reset' });
+      expect(f.resets).toEqual([newPassword]);
+      const output = f.messages.join('\n');
+      expect(output).not.toContain(newPassword.trim());
+      expect(output).not.toContain('reset-handle');
+      expect(output).not.toContain(admin.userId);
+      expect(f.prompts.map((item) => item.secret)).toEqual([false, false, true, true]);
+      expect(f.messages).toContain('[password_reset]');
+      expect(f.counts.connections).toBe(0);
+    });
+
+    it('touches neither the registry, the private config nor the running installation', async () => {
+      const f = fixture({ answers: [...accepted] });
+      const registry = f.files.get(registryFile);
+      await maintainAccount(file, f.io, f.dependencies, { operation: 'reset-password' });
+      expect(f.files.get(registryFile)).toBe(registry);
+      expect(f.counts).toEqual({
+        bindCalls: 0,
+        publishes: 0,
+        updates: 0,
+        reloads: 0,
+        connections: 0,
+      });
+      expect(f.admitCalls).toBe(0);
+      expect(f.events).toEqual(['prepare', 'db-open', 'db-close']);
+    });
+
+    it('does not need a readable workspace registry to recover account access', async () => {
+      const f = fixture({ registry: { not: 'an array' }, answers: [...accepted] });
+      await maintainAccount(file, f.io, f.dependencies, { operation: 'reset-password' });
+      expect(f.resets).toEqual([newPassword]);
+    });
+
+    it('never defaults, accepts an owner ID, or resets after an unconfirmed or mismatched entry', async () => {
+      const cases: Array<[string[], string | null]> = [
+        [[''], null],
+        [[admin.userId], 'ACCOUNT_SELECTION_INVALID'],
+        [['2'], 'ACCOUNT_SELECTION_INVALID'],
+        [['1', 'yes'], 'ACCOUNT_CONFIRMATION_REQUIRED'],
+        [['1', 'CONFIRM 2'], 'ACCOUNT_CONFIRMATION_REQUIRED'],
+        [['1', 'CONFIRM 1', newPassword, `${newPassword}x`], 'ACCOUNT_PASSWORD_MISMATCH'],
+      ];
+      for (const [answers, code] of cases) {
+        const f = fixture({ answers: [...answers] });
+        const run = maintainAccount(file, f.io, f.dependencies, { operation: 'reset-password' });
+        if (code) await expect(run).rejects.toMatchObject({ code });
+        else expect(await run).toEqual({ account: 'unconfigured' });
+        expect(f.resets).toEqual([]);
+        expect(f.counts.connections).toBe(0);
+        expect(f.messages.join('\n')).not.toContain(newPassword.trim());
+      }
+    });
+
+    it('refuses an ineligible candidate before any password is requested', async () => {
+      const f = fixture({ eligible: false, answers: ['1'] });
+      await expect(
+        maintainAccount(file, f.io, f.dependencies, { operation: 'reset-password' }),
+      ).rejects.toMatchObject({ code: 'ACCOUNT_SELECTION_INVALID' });
+      expect(f.prompts.filter((item) => item.secret)).toEqual([]);
+      expect(f.resets).toEqual([]);
+    });
+
+    it('reports a failed commit without claiming a reset and leaves no connection open', async () => {
+      const f = fixture({ answers: [...accepted] });
+      f.service.resetLocalPassword = async () => {
+        throw Object.assign(new Error('NOT_READY'), { code: 'NOT_READY' });
+      };
+      await expect(
+        maintainAccount(file, f.io, f.dependencies, { operation: 'reset-password' }),
+      ).rejects.toMatchObject({ code: 'NOT_READY' });
+      expect(f.messages).not.toContain('[password_reset]');
+      expect(f.counts.connections).toBe(0);
+    });
+
+    it.each([
+      ['VALIDATION_ERROR', 'ACCOUNT_PASSWORD_INVALID'],
+      ['STATE_CONFLICT', 'ACCOUNT_RESET_INELIGIBLE'],
+    ])('maps the public %s refusal to the stable local code %s', async (errorCode, code) => {
+      const f = fixture({ answers: [...accepted] });
+      f.service.resetLocalPassword = async () => {
+        throw Object.assign(new Error('refused'), { code: 400, errorCode });
+      };
+      await expect(
+        maintainAccount(file, f.io, f.dependencies, { operation: 'reset-password' }),
+      ).rejects.toMatchObject({ code });
+      expect(f.messages).not.toContain('[password_reset]');
+    });
+
+    it('is a separate CLI option that cannot be combined with other operations', () => {
+      const cli = path.resolve(import.meta.dirname, '../local/cli.mjs');
+      const help = execFileSync(process.execPath, ['--no-env-file', cli, 'account', '--help'], {
+        encoding: 'utf8',
+        env: hostEnvironment(),
+      });
+      expect(help).toContain('--reset-password');
+      for (const args of [
+        ['--reset-password', '--admit'],
+        ['--workspace', '--reset-password'],
+      ]) {
+        const result = spawnSync(process.execPath, ['--no-env-file', cli, 'account', ...args], {
+          encoding: 'utf8',
+          env: hostEnvironment(),
+        });
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('[ARGUMENT_INVALID]');
+      }
+    });
   });
 });

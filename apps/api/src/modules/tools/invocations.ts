@@ -2,7 +2,24 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { z } from 'zod';
 import { workspaceGrantSchema } from '@along/contracts';
-import { validateWorkspaceGrant } from '../workspaces/service.js';
+import {
+  resolveFrozenWorkspaceGrant,
+  validateWorkspaceGrant,
+  hashBytes,
+  utf8Bytes,
+  canonicalWorkspaceFilename,
+  getWorkspaceOutputIdentity,
+} from '../workspaces/service.js';
+import { compileWorkspaceEdit } from '../workspaces/replace.js';
+import {
+  documentEvidenceLater,
+  isDocumentApplied,
+  matchingDocumentApply,
+  verifiedDocumentRead,
+} from '../approvals/document-rules.js';
+import { getDocumentApproval, listDocumentApprovals } from '../approvals/document-query.js';
+import { readRunDocumentEvidence } from './query.js';
+import type { DocumentReadEvidence } from '../approvals/document-evidence.js';
 import { isActiveOwner } from '../identity/preferences.js';
 import { withTransaction } from '../../db/transaction.js';
 import { forbidden, notFound, stateConflict, HttpError } from '../../http/errors.js';
@@ -12,6 +29,7 @@ import {
   lockToolRunBinding as lockConversationToolBinding,
   lockToolEffectAcceptanceBinding,
 } from '../conversations/tool-binding.js';
+import { withRunTransaction } from '../conversations/run-ownership.js';
 import type {
   InvocationInput,
   ReservationInput,
@@ -22,9 +40,16 @@ import type {
 import { parseResult, resultKind } from './result-schema.js';
 import { bindDocumentApprovalApply } from '../approvals/document-service.js';
 import { readDocumentApprovalReceipt } from '../approvals/decision.js';
-import { ReadRunObservationInputSchema, WorkspaceApplyReplaceInputSchema } from './schemas.js';
+import {
+  ReadRunObservationInputSchema,
+  WorkspaceApplyReplaceInputSchema,
+  WorkspaceReplaceInputSchema,
+  DELEGATED_WORKSPACE_READ_SCHEMAS,
+  DelegatedWorkspaceProposeInputSchema,
+  WorkspaceCreateInputSchema,
+} from './schemas.js';
 import { assertContextSourceAuthorized } from './context-source.js';
-import { readAcceptedInvocationResult } from './accepted-result.js';
+import { hydrateWorkspaceReadResult, readAcceptedInvocationResult } from './accepted-result.js';
 
 const HASH_DOMAIN = 'along/tool-args/v1\0';
 const frozenSchema = z
@@ -40,6 +65,33 @@ const frozenSchema = z
     workspaceGrant: workspaceGrantSchema.nullable().optional(),
     documentApprovalId: z.string().uuid().optional(),
     authorizationRevision: z.literal('delegation/1').optional(),
+    documentEdit: z
+      .object({
+        base_read_invocation_id: z.string().uuid(),
+        relative_path: z.string(),
+        base_version: z.string(),
+        exact_new_content: z.string().optional(),
+        new_version: z.string().optional(),
+        operation_error: z
+          .enum(['literal_not_found', 'literal_not_unique', 'unchanged'])
+          .optional(),
+        replaces_invocation_id: z.string().uuid().optional(),
+      })
+      .strict()
+      .optional(),
+    documentCreate: z
+      .object({
+        output_directory: z.string(),
+        directory_identity: z.string(),
+        relative_path: z.string(),
+        content_base64: z
+          .string()
+          .regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
+        new_version: z.string(),
+        replaces_invocation_id: z.string().uuid().optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 const invocationSchema = z.object({
@@ -118,9 +170,10 @@ async function lockToolRunBinding(client: PoolClient, ctx: ToolContext) {
   const result = await client.query<{ denied: boolean }>(
     `SELECT EXISTS (
        SELECT 1 FROM tool_invocations
-       WHERE owner_id=$1 AND conversation_id=$2 AND run_id=$3 AND state='completed'
-         AND accepted_result->>'status'='denied'
-         AND accepted_result->'error'->>'code' IN ('TOOL_FORBIDDEN','TOOL_DENIED')
+       WHERE owner_id=$1 AND conversation_id=$2 AND run_id=$3
+         AND (state='unknown' OR (state='completed'
+           AND accepted_result->>'status'='denied'
+           AND accepted_result->'error'->>'code' IN ('TOOL_FORBIDDEN','TOOL_DENIED')))
      ) AS denied`,
     [ctx.ownerId, ctx.conversationId, ctx.runId],
   );
@@ -144,7 +197,13 @@ function freezeContext(ctx: ToolContext): z.infer<typeof frozenSchema> {
 function workspaceAuthorized(ctx: ToolContext, row: Invocation): boolean {
   if (!row.tool_id.startsWith('workspace_')) return true;
   const grant = row.frozen_context.workspaceGrant;
-  if (!grant || canonicalJson(grant) !== canonicalJson(ctx.workspaceGrant ?? null)) return false;
+  if (
+    !grant ||
+    (ctx.authorizationRevision === 'delegation/1'
+      ? !ctx.workspaceGrants?.some((item) => canonicalJson(item) === canonicalJson(grant))
+      : canonicalJson(grant) !== canonicalJson(ctx.workspaceGrant ?? null))
+  )
+    return false;
   try {
     validateWorkspaceGrant(ctx.ownerId, grant);
     return true;
@@ -157,7 +216,14 @@ function executionContext(ctx: ToolContext, row: Invocation): ToolContext {
   const frozen = row.frozen_context;
   if (ctx.authorizationRevision !== frozen.authorizationRevision)
     throw forbidden('authorization revision differs from frozen invocation');
-  if (canonicalJson(frozen.workspaceGrant ?? null) !== canonicalJson(ctx.workspaceGrant ?? null))
+  if (
+    frozen.workspaceGrant &&
+    (ctx.authorizationRevision === 'delegation/1'
+      ? !ctx.workspaceGrants?.some(
+          (item) => canonicalJson(item) === canonicalJson(frozen.workspaceGrant),
+        )
+      : canonicalJson(frozen.workspaceGrant) !== canonicalJson(ctx.workspaceGrant ?? null))
+  )
     throw forbidden('workspace grant differs from frozen invocation');
   if (frozen.workspaceGrant) validateWorkspaceGrant(ctx.ownerId, frozen.workspaceGrant);
   if (
@@ -172,6 +238,8 @@ function executionContext(ctx: ToolContext, row: Invocation): ToolContext {
   return {
     ...ctx,
     workspaceGrant: frozen.workspaceGrant ?? null,
+    documentEdit: frozen.documentEdit,
+    documentCreate: frozen.documentCreate,
     confirmedTimezone: frozen.confirmedTimezone,
     anchorReceivedAtUtc: frozen.anchorReceivedAtUtc,
     receivedAtUtc: frozen.receivedAtUtc,
@@ -187,6 +255,138 @@ function executionContext(ctx: ToolContext, row: Invocation): ToolContext {
   };
 }
 
+// The caller holds the Run lock. Every cross-path target decision is serialized
+// with reservation, including conflict successors and unattempted approvals.
+export async function assertDocumentTargetAvailable(
+  client: PoolClient,
+  ctx: ToolContext,
+  read: DocumentReadEvidence,
+  options: { proposal?: boolean } = {},
+): Promise<string | undefined> {
+  const creates = await client.query<{
+    state: string;
+    accepted_result: unknown;
+    frozen_context: { documentCreate?: NonNullable<ToolContext['documentCreate']> };
+    accepted_at: string;
+  }>(
+    `SELECT state,accepted_result,frozen_context,
+      coalesce(to_char(accepted_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),'') accepted_at
+     FROM tool_invocations WHERE owner_id=$1 AND conversation_id=$2 AND run_id=$3
+       AND tool_id='workspace_create' AND frozen_context->'workspaceGrant'->>'workspace_id'=$4
+       AND frozen_context->'documentCreate'->>'relative_path'=$5`,
+    [ctx.ownerId, ctx.conversationId, ctx.runId, read.workspace_id, read.relative_path],
+  );
+  for (const create of creates.rows) {
+    if (create.state !== 'completed') throw stateConflict('same-target create not settled');
+    const result = hydrateWorkspaceReadResult(create.accepted_result);
+    if (result.status !== 'ok') throw stateConflict('same-target create not settled');
+    if (result.result.kind === 'create_conflict' || result.result.kind === 'create_failed')
+      continue;
+    if (
+      result.result.kind !== 'create_applied' ||
+      !documentEvidenceLater(read.created_at, create.accepted_at) ||
+      !documentEvidenceLater(read.accepted_at, create.accepted_at) ||
+      read.result.version !== result.result.version ||
+      utf8Bytes(read.result.content).toString('base64') !==
+        create.frozen_context.documentCreate?.content_base64 ||
+      read.result.byte_length !== result.result.byte_length
+    )
+      throw stateConflict('same-target create requires a fresh verified read');
+  }
+  const approvals = await listDocumentApprovals(client, ctx.ownerId, ctx.conversationId, ctx.runId);
+  const matching = approvals.filter(
+    (a) => a.workspace_id === read.workspace_id && a.relative_path === read.relative_path,
+  );
+  if (!options.proposal && matching.length) {
+    const evidence = await readRunDocumentEvidence(client, ctx);
+    const replaced = new Set(
+      matching.flatMap((item) => (item.replaces_approval_id ? [item.replaces_approval_id] : [])),
+    );
+    const tails = matching.filter((item) => !replaced.has(item.id));
+    if (tails.length !== 1) throw stateConflict('ambiguous approval chain');
+    const approval = tails[0]!;
+    const apply = matchingDocumentApply(approval, evidence.applies);
+    const verified =
+      apply && isDocumentApplied(approval, apply)
+        ? verifiedDocumentRead(approval, apply, evidence.reads)
+        : null;
+    if (
+      !verified ||
+      !apply ||
+      read.result.version !== approval.new_version ||
+      read.result.content !== approval.exact_new_content ||
+      !documentEvidenceLater(read.created_at, apply.accepted_at) ||
+      !documentEvidenceLater(read.accepted_at, apply.accepted_at)
+    )
+      throw stateConflict('same-target approval requires a verified completed action');
+  }
+  const pendingProposals = await client.query(
+    `SELECT 1 FROM tool_invocations WHERE owner_id=$1 AND conversation_id=$2 AND run_id=$3
+       AND tool_id='workspace_propose_replace' AND state<>'completed'
+       AND frozen_context->'workspaceGrant'->>'workspace_id'=$4
+       AND frozen_context->'documentEdit'->>'relative_path'=$5`,
+    [ctx.ownerId, ctx.conversationId, ctx.runId, read.workspace_id, read.relative_path],
+  );
+  if (pendingProposals.rowCount) throw stateConflict('same-target proposal not settled');
+  const { rows } = await client.query<{
+    invocation_id: string;
+    state: string;
+    accepted_result: unknown;
+    frozen_context: { documentEdit?: NonNullable<ToolContext['documentEdit']> };
+    accepted_at: string;
+  }>(
+    `SELECT invocation_id,state,accepted_result,frozen_context,
+      coalesce(to_char(accepted_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),'') accepted_at
+      FROM tool_invocations WHERE owner_id=$1 AND conversation_id=$2 AND run_id=$3
+      AND tool_id='workspace_replace' AND frozen_context->'workspaceGrant'->>'workspace_id'=$4
+      AND frozen_context->'documentEdit'->>'relative_path'=$5
+      AND (state <> 'completed' OR accepted_result->'result'->>'kind' IS DISTINCT FROM 'operation_error')
+      ORDER BY created_at,invocation_id`,
+    [ctx.ownerId, ctx.conversationId, ctx.runId, read.workspace_id, read.relative_path],
+  );
+  const predecessors = new Set(
+    rows.flatMap((row) =>
+      row.frozen_context.documentEdit?.replaces_invocation_id
+        ? [row.frozen_context.documentEdit.replaces_invocation_id]
+        : [],
+    ),
+  );
+  const { rows: proposalLinks } = await client.query<{ predecessor: string }>(
+    `SELECT frozen_context->'documentEdit'->>'replaces_invocation_id' AS predecessor
+     FROM tool_invocations WHERE owner_id=$1 AND conversation_id=$2 AND run_id=$3
+       AND tool_id='workspace_propose_replace' AND state='completed' AND approval_id IS NOT NULL
+       AND frozen_context->'documentEdit'->>'replaces_invocation_id' IS NOT NULL`,
+    [ctx.ownerId, ctx.conversationId, ctx.runId],
+  );
+  for (const link of proposalLinks) predecessors.add(link.predecessor);
+  const tails = rows.filter((row) => !predecessors.has(row.invocation_id));
+  if (tails.length > 1) throw stateConflict('ambiguous document edit chain');
+  const prior = tails[0];
+  if (!prior) return undefined;
+  if (prior.state !== 'completed') throw stateConflict('same-target edit not settled');
+  const result = parseResult(prior.accepted_result);
+  if (result.status !== 'ok') throw stateConflict('same-target edit not settled');
+  if (result.result.kind === 'operation_error') return undefined;
+  if (
+    result.result.kind === 'edit_conflict' &&
+    result.result.zero_write &&
+    result.result.reason === 'version_changed' &&
+    documentEvidenceLater(read.created_at, prior.accepted_at) &&
+    documentEvidenceLater(read.accepted_at, prior.accepted_at)
+  )
+    return prior.invocation_id;
+  if (
+    result.result.kind === 'edit_applied' &&
+    documentEvidenceLater(read.created_at, prior.accepted_at) &&
+    documentEvidenceLater(read.accepted_at, prior.accepted_at) &&
+    read.result.version === result.result.version &&
+    read.result.content === prior.frozen_context.documentEdit?.exact_new_content &&
+    read.result.byte_length === result.result.byte_length
+  )
+    return prior.invocation_id;
+  throw stateConflict('same-target edit requires a fresh verified read');
+}
+
 export async function reserveInvocation(
   pool: Pool,
   ctx: ToolContext,
@@ -195,7 +395,7 @@ export async function reserveInvocation(
   const digest = digestInvocationArgs(input.args);
   if (input.callKey.length === 0 || input.callKey.length > 200)
     throw stateConflict('invalid tool call slot');
-  return withTransaction(pool, async (client) => {
+  return withRunTransaction(pool, ctx.ownership, async (client) => {
     const binding = await lockToolRunBinding(client, ctx);
     const existing = await client.query(
       'SELECT * FROM tool_invocations WHERE run_id = $1 AND call_key = $2 FOR UPDATE',
@@ -215,7 +415,114 @@ export async function reserveInvocation(
       return { invocationId: row.invocation_id };
     }
     if (!binding.canExecute) throw stateConflict('Run/attempt cannot reserve new tool execution');
-    if (ctx.workspaceGrant) validateWorkspaceGrant(ctx.ownerId, ctx.workspaceGrant);
+    if (input.toolId === 'workspace_create' && ctx.authorizationRevision !== 'delegation/1')
+      throw forbidden();
+    let selected = ctx.workspaceGrant ?? null;
+    let documentEdit: ToolContext['documentEdit'];
+    let documentCreate: ToolContext['documentCreate'];
+    if (ctx.authorizationRevision === 'delegation/1' && input.toolId.startsWith('workspace_')) {
+      const grants = ctx.workspaceGrants ?? [];
+      if (
+        input.toolId === 'workspace_list' ||
+        input.toolId === 'workspace_grep' ||
+        input.toolId === 'workspace_read'
+      ) {
+        const args = DELEGATED_WORKSPACE_READ_SCHEMAS[input.toolId].parse(input.args);
+        selected = resolveFrozenWorkspaceGrant(ctx.ownerId, grants, args.workspace_id);
+      } else if (input.toolId === 'workspace_apply_replace') {
+        const args = WorkspaceApplyReplaceInputSchema.parse(input.args);
+        const approval = await getDocumentApproval(client, ctx.ownerId, args.approval_id);
+        if (approval.conversation_id !== ctx.conversationId || approval.run_id !== ctx.runId)
+          throw forbidden();
+        selected = resolveFrozenWorkspaceGrant(ctx.ownerId, grants, approval.workspace_id);
+        if (canonicalJson(selected) !== canonicalJson(approval.workspace_grant)) throw forbidden();
+      } else if (input.toolId === 'workspace_create') {
+        if (!ctx.allowlist.includes(input.toolId) || input.executionKind !== 'non_transactional')
+          throw forbidden();
+        const args = WorkspaceCreateInputSchema.parse(input.args);
+        selected = resolveFrozenWorkspaceGrant(ctx.ownerId, grants, args.workspace_id);
+        const directoryIdentity = await getWorkspaceOutputIdentity(
+          ctx.ownerId,
+          selected,
+          args.output_directory,
+        );
+        const filename = canonicalWorkspaceFilename(args.filename);
+        const relativePath = args.output_directory
+          ? `${args.output_directory}/${filename}`
+          : filename;
+        const bytes = utf8Bytes(args.content);
+        const contentBase64 = bytes.toString('base64');
+        const approvals = (
+          await listDocumentApprovals(client, ctx.ownerId, ctx.conversationId, ctx.runId)
+        ).filter(
+          (item) => item.workspace_id === args.workspace_id && item.relative_path === relativePath,
+        );
+        const actions = await client.query(
+          `SELECT 1 FROM tool_invocations WHERE owner_id=$1 AND conversation_id=$2 AND run_id=$3
+           AND frozen_context->'workspaceGrant'->>'workspace_id'=$4
+           AND ((tool_id IN ('workspace_replace','workspace_propose_replace')
+             AND frozen_context->'documentEdit'->>'relative_path'=$5)
+             OR (tool_id='workspace_create' AND frozen_context->'documentCreate'->>'relative_path'=$5))
+           AND (state<>'completed' OR coalesce(accepted_result->'result'->>'kind','') NOT IN ('create_conflict','create_failed','operation_error'))`,
+          [ctx.ownerId, ctx.conversationId, ctx.runId, args.workspace_id, relativePath],
+        );
+        if (approvals.length || actions.rowCount) {
+          const evidence = await readRunDocumentEvidence(client, ctx);
+          const read = evidence.reads
+            .filter(
+              (item) =>
+                item.workspace_id === args.workspace_id &&
+                item.relative_path === relativePath &&
+                item.registration_digest === selected!.registration_digest,
+            )
+            .at(-1);
+          if (!read) throw stateConflict('same-target action requires a fresh verified read');
+          await assertDocumentTargetAvailable(client, ctx, read);
+        }
+        documentCreate = {
+          output_directory: args.output_directory,
+          directory_identity: directoryIdentity,
+          relative_path: relativePath,
+          content_base64: contentBase64,
+          new_version: hashBytes(bytes),
+        };
+      } else if (
+        input.toolId === 'workspace_replace' ||
+        input.toolId === 'workspace_propose_replace'
+      ) {
+        const args = (
+          input.toolId === 'workspace_replace'
+            ? WorkspaceReplaceInputSchema
+            : DelegatedWorkspaceProposeInputSchema
+        ).parse(input.args);
+        const evidence = await readRunDocumentEvidence(client, ctx);
+        const read = evidence.reads.find((item) => item.invocation_id === args.read_invocation_id);
+        if (!read) throw forbidden('edit requires accepted same-Run full read');
+        selected = resolveFrozenWorkspaceGrant(ctx.ownerId, grants, read.workspace_id);
+        const summary = validateWorkspaceGrant(ctx.ownerId, selected);
+        if (
+          read.registration_digest !== selected.registration_digest ||
+          !summary.writable_paths.includes(read.relative_path) ||
+          hashBytes(utf8Bytes(read.result.content)) !== read.result.version ||
+          utf8Bytes(read.result.content).length !== read.result.byte_length
+        )
+          throw forbidden();
+        const replaces = await assertDocumentTargetAvailable(client, ctx, read, {
+          proposal: input.toolId === 'workspace_propose_replace',
+        });
+        const compiled = compileWorkspaceEdit(read.result.content, args.change);
+        documentEdit = {
+          base_read_invocation_id: read.invocation_id,
+          relative_path: read.relative_path,
+          base_version: read.result.version,
+          ...(compiled.ok
+            ? { exact_new_content: compiled.exact_new_content, new_version: compiled.new_version }
+            : { operation_error: compiled.reason }),
+          ...(replaces ? { replaces_invocation_id: replaces } : {}),
+        };
+      } else throw forbidden();
+    }
+    if (selected) validateWorkspaceGrant(ctx.ownerId, selected);
     const invocationId = randomUUID();
     await client.query(
       `INSERT INTO tool_invocations (invocation_id, owner_id, conversation_id, run_id, call_key,
@@ -234,7 +541,9 @@ export async function reserveInvocation(
         digest.argsBytes,
         input.executionKind,
         JSON.stringify({
-          ...freezeContext(ctx),
+          ...freezeContext({ ...ctx, workspaceGrant: selected }),
+          ...(documentEdit ? { documentEdit } : {}),
+          ...(documentCreate ? { documentCreate } : {}),
           ...(input.toolId === 'workspace_apply_replace'
             ? { documentApprovalId: WorkspaceApplyReplaceInputSchema.parse(input.args).approval_id }
             : {}),
@@ -243,12 +552,12 @@ export async function reserveInvocation(
     );
     if (input.toolId === 'workspace_apply_replace') {
       const args = WorkspaceApplyReplaceInputSchema.parse(input.args);
-      if (!ctx.workspaceGrant || input.executionKind !== 'non_transactional') throw forbidden();
+      if (!selected || input.executionKind !== 'non_transactional') throw forbidden();
       await bindDocumentApprovalApply(client, {
         ownerId: ctx.ownerId,
         conversationId: ctx.conversationId,
         runId: ctx.runId,
-        workspaceGrant: ctx.workspaceGrant,
+        workspaceGrant: selected,
         approvalId: args.approval_id,
         invocationId,
       });
@@ -411,11 +720,41 @@ async function accept(
   value: ToolResult,
   recordKind: string,
   evidenceRef: string | null = null,
+  fileIdentity?: string,
 ): Promise<ToolResult> {
   const result = parseResult(value);
   if (result.status === 'unknown') throw stateConflict('unknown is not a completed tool result');
+  if (
+    result.status === 'ok' &&
+    (result.result.kind === 'create_applied' ||
+      result.result.kind === 'create_conflict' ||
+      result.result.kind === 'create_failed')
+  ) {
+    const target = row.frozen_context.documentCreate;
+    const grant = row.frozen_context.workspaceGrant;
+    const payload = result.result;
+    if (
+      row.tool_id !== 'workspace_create' ||
+      row.frozen_context.authorizationRevision !== 'delegation/1' ||
+      !target ||
+      !grant ||
+      payload.workspace_id !== grant.workspace_id ||
+      payload.path !== target.relative_path ||
+      payload.invocation_id !== row.invocation_id ||
+      payload.args_hash !== row.args_hash ||
+      (payload.kind === 'create_applied' &&
+        (!fileIdentity ||
+          payload.version !== target.new_version ||
+          payload.byte_length !== Buffer.from(target.content_base64, 'base64').length ||
+          payload.evidence_ref !== `workspace-create:${row.invocation_id}:${target.new_version}` ||
+          evidenceRef !== payload.evidence_ref))
+    )
+      throw stateConflict('invalid create effect evidence');
+  }
   let stored: unknown = result;
   let approvalId: string | null = null;
+  if (result.status === 'ok' && result.result.kind === 'create_applied')
+    stored = { ...result, file_identity: fileIdentity };
   if (result.status === 'ok' && result.result.kind === 'approval') {
     const approval = result.result.approval;
     const receipt = {
@@ -458,14 +797,16 @@ async function accept(
     row.tool_id !== 'read_run_observation'
   )
     throw stateConflict('context result requires observation reader');
-  const serialized = JSON.stringify(stored);
-  if (Buffer.byteLength(serialized, 'utf8') > 240000)
-    throw stateConflict('tool result exceeds safe snapshot bound');
-  if (
-    result.status === 'ok' &&
-    result.result.kind === 'context_slice' &&
-    Buffer.byteLength(serialized, 'utf8') > 16384
-  )
+  const logical = JSON.stringify(stored);
+  const logicalBytes = Buffer.byteLength(logical, 'utf8');
+  const serialized = logical.includes('\\u0000')
+    ? JSON.stringify({
+        encoding: 'json-base64/1',
+        data: Buffer.from(logical, 'utf8').toString('base64'),
+      })
+    : logical;
+  if (logicalBytes > 240000) throw stateConflict('tool result exceeds safe snapshot bound');
+  if (result.status === 'ok' && result.result.kind === 'context_slice' && logicalBytes > 16384)
     throw stateConflict('context page exceeds safe snapshot bound');
   await client.query(
     `UPDATE tool_invocations SET state = 'completed', outcome_kind = $2, result_version = 1,
@@ -571,7 +912,7 @@ export async function executeLocalInvocation(
   input: InvocationInput,
   execute: (client: PoolClient, frozenContext: ToolContext) => Promise<ToolResult>,
 ): Promise<ToolOutcome> {
-  return withTransaction(pool, async (client) => {
+  return withRunTransaction(pool, ctx.ownership, async (client) => {
     const { row, canExecute } = await loadInvocation(client, ctx, input);
     const gated = await gate(client, ctx, row, input, canExecute);
     if (gated) return gated;
@@ -611,7 +952,7 @@ export async function executeReadOnlyInvocation(
   input: InvocationInput,
   execute: (frozenContext: ToolContext) => Promise<ToolResult>,
 ): Promise<ToolOutcome> {
-  const qualified = await withTransaction(pool, async (client) => {
+  const qualified = await withRunTransaction(pool, ctx.ownership, async (client) => {
     const { row, canExecute } = await loadInvocation(client, ctx, input);
     const gated = await gate(client, ctx, row, input, canExecute);
     if (gated) return { outcome: gated, frozen: null };
@@ -628,7 +969,7 @@ export async function executeReadOnlyInvocation(
     if (!(error instanceof ToolExecutionError) && !ctx.signal?.aborted) throw error;
     observed = failed;
   }
-  return withTransaction(pool, async (client) => {
+  return withRunTransaction(pool, ctx.ownership, async (client) => {
     const { row, canExecute } = await loadInvocation(client, ctx, input);
     // Revalidate before replay, too: a read which was already in flight must
     // not disclose its peer's accepted content after cancellation/revocation.
@@ -655,6 +996,7 @@ export interface EffectBinding {
 export interface EffectEvidence extends EffectBinding {
   evidenceRef: string;
   result: ToolResult;
+  fileIdentity?: string;
 }
 export interface NotAppliedEvidence extends EffectBinding {
   evidenceRef: string;
@@ -676,6 +1018,7 @@ const evidenceSchema = z.union([
       argsHash: z.string().regex(/^[a-f0-9]{64}$/),
       evidenceRef: z.string().min(1).max(512),
       result: z.unknown(),
+      fileIdentity: z.string().min(1).optional(),
     })
     .strict(),
   z
@@ -697,7 +1040,7 @@ export async function executeNonTransactionalInvocation(
   capabilities: NonTransactionalCapabilities,
 ): Promise<ToolOutcome> {
   let permitPrepared = false;
-  const dispatch = await withTransaction(pool, async (client) => {
+  const dispatch = await withRunTransaction(pool, ctx.ownership, async (client) => {
     const { row, canExecute } = await loadInvocation(client, ctx, input);
     const gated = await gate(client, ctx, row, input, canExecute);
     if (gated)
@@ -735,6 +1078,14 @@ export async function executeNonTransactionalInvocation(
   if (dispatch.outcome) return dispatch.outcome;
   let observed: EffectEvidence | NotAppliedEvidence | null;
   if (dispatch.permission) {
+    if (ctx.ownership) {
+      await withRunTransaction(pool, ctx.ownership, async (client) => {
+        const binding = await lockConversationToolBinding(client, ctx);
+        if (!binding.canExecute) throw stateConflict('Run cannot dispatch tool execution');
+      });
+      ctx.signal?.throwIfAborted();
+      ctx.ownership.signal.throwIfAborted();
+    }
     try {
       observed = await capabilities.execute(dispatch.binding);
     } catch {
@@ -761,7 +1112,13 @@ export async function executeNonTransactionalInvocation(
     throw stateConflict('invalid external effect evidence');
   if (
     result.status === 'ok' &&
-    (result.result.kind === 'applied' || result.result.kind === 'conflict')
+    (result.result.kind === 'applied' ||
+      result.result.kind === 'conflict' ||
+      result.result.kind === 'edit_applied' ||
+      result.result.kind === 'edit_conflict' ||
+      result.result.kind === 'create_applied' ||
+      result.result.kind === 'create_conflict' ||
+      result.result.kind === 'create_failed')
   ) {
     if (
       result.result.invocation_id !== dispatch.binding.invocationId ||
@@ -769,9 +1126,10 @@ export async function executeNonTransactionalInvocation(
     )
       throw stateConflict('workspace effect payload does not bind invocation/content');
   }
-  return withTransaction(pool, async (client) => {
+  const accounted = await withTransaction(pool, async (client) => {
     const { row, canExecute } = await loadInvocation(client, ctx, input, true);
     const disclose =
+      !ctx.ownership &&
       (await isActiveOwner(client, ctx.ownerId)) &&
       ctx.allowlist.includes(row.tool_id) &&
       workspaceAuthorized(ctx, row) &&
@@ -797,6 +1155,7 @@ export async function executeNonTransactionalInvocation(
       result,
       dispatch.permission ? 'accepted' : 'reconciled',
       evidence.evidenceRef,
+      'result' in evidence ? evidence.fileIdentity : undefined,
     );
     if (!disclose) {
       await audit(client, ctx, row, 'denied', permissionDenied);
@@ -804,9 +1163,34 @@ export async function executeNonTransactionalInvocation(
     }
     return { ...accepted, invocationId: row.invocation_id, replayed: false };
   }).catch((error: unknown) => {
-    if (error instanceof HttpError) throw error;
+    if (
+      error instanceof HttpError &&
+      input.toolId !== 'workspace_replace' &&
+      input.toolId !== 'workspace_create'
+    )
+      throw error;
     // A durable once-permit already committed. Acceptance/COMMIT failure does
     // not permit redispatch, nor can it turn external evidence into success.
     return { ...unknown, invocationId: input.invocationId, replayed: false };
   });
+  if (!ctx.ownership || accounted.status === 'unknown') return accounted;
+  try {
+    return await withRunTransaction(pool, ctx.ownership, async (client) => {
+      ctx.signal?.throwIfAborted();
+      const { row, canExecute } = await loadInvocation(client, ctx, input);
+      if (
+        !canExecute ||
+        row.state !== 'completed' ||
+        !ctx.allowlist.includes(row.tool_id) ||
+        !workspaceAuthorized(ctx, row)
+      )
+        return { ...permissionDenied, invocationId: row.invocation_id, replayed: false };
+      const accepted = await readAcceptedInvocationResult(client, ctx, row);
+      if (canonicalJson(accepted) !== canonicalJson(result))
+        throw stateConflict('conflicting external effect evidence');
+      return { ...accepted, invocationId: row.invocation_id, replayed: !dispatch.permission };
+    });
+  } catch {
+    return { ...permissionDenied, invocationId: input.invocationId, replayed: false };
+  }
 }

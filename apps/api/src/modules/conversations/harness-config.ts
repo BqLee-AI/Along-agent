@@ -1,8 +1,8 @@
 import { accessSync, constants } from 'node:fs';
-import { createHarnessModelTransport } from './harness-model.js';
-import type { HarnessServices } from './harness-process.js';
+import { createUserConfiguredHarnessModelTransport } from './harness-model.js';
 import { createContextPolicy } from './context-policy.js';
 import { measureHarnessContext } from './harness-context.js';
+import { outboundFetch } from '../model-providers/outbound.js';
 import type { ConversationDeps } from './contracts.js';
 import { createRoutingRuntime, type RoutingRuntime } from './routing/index.js';
 
@@ -22,19 +22,13 @@ export function routingRuntimeOf(deps: ConversationDeps): RoutingRuntime {
 /** Called once by server startup. Missing configuration never enables a fixture. */
 export function loadHarnessServices(
   environment: NodeJS.ProcessEnv = process.env,
-): HarnessServices | null {
-  const baseUrl = environment.HARNESS_MODEL_BASE_URL;
-  const model = environment.HARNESS_MODEL;
-  if (!baseUrl || !model) return null;
+): NonNullable<ConversationDeps['harness']> | null {
   const binaryPath = environment.HARNESS_BINARY || '/app/harness/bin/along-harness';
   try {
-    const url = new URL(baseUrl);
-    if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
     accessSync(binaryPath, constants.X_OK);
   } catch {
     return null;
   }
-  const apiKey = environment.HARNESS_MODEL_API_KEY;
   // Deployment service budgets are frozen at acceptance and cumulative across
   // approval attempts. The document loop needs more than eight model rounds.
   const maxIterations = Number(environment.HARNESS_MAX_ITERATIONS ?? 24);
@@ -49,7 +43,8 @@ export function loadHarnessServices(
   let contextPolicy;
   try {
     contextPolicy = createContextPolicy({
-      model,
+      // The accepted user selection replaces this template before persistence.
+      model: 'unbound',
       completionCap: Number(environment.HARNESS_COMPLETION_CAP),
       ...(!environment.HARNESS_MODEL_WINDOW_TOKENS
         ? {}
@@ -67,7 +62,25 @@ export function loadHarnessServices(
     maxIterations,
     maxTokens,
     contextPolicy,
-    measure: measureHarnessContext,
-    model: createHarnessModelTransport({ baseUrl, model, ...(apiKey ? { apiKey } : {}) }),
   };
 }
+
+/** The selected version is the only model source for Run and probe calls. */
+export const createUserModelTransport: NonNullable<ConversationDeps['modelTransport']> = async (
+  config,
+) => ({
+  model: createUserConfiguredHarnessModelTransport(
+    {
+      baseUrl: config.base_url,
+      model: config.model_id,
+      ...(config.api_key === null ? {} : { apiKey: config.api_key }),
+    },
+    outboundFetch,
+  ),
+  measure: async (request, tools, policy) => {
+    if (policy.model_binding.model !== config.model_id) {
+      throw new Error('model measurement binding mismatch');
+    }
+    return measureHarnessContext(request, tools, policy);
+  },
+});

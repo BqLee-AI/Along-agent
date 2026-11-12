@@ -283,6 +283,30 @@
                 "type": "array",
                 "maxItems": 64,
                 "items": { "$ref": "#/definitions/uuid" }
+              },
+              "create_resolution": {
+                "type": "object",
+                "required": [
+                  "source_message_id",
+                  "source_quote",
+                  "zero_write_invocation_ids",
+                  "created_invocation_id",
+                  "read_invocation_id"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "source_message_id": { "$ref": "#/definitions/uuid" },
+                  "source_quote": { "$ref": "#/definitions/goalText" },
+                  "zero_write_invocation_ids": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 64,
+                    "uniqueItems": true,
+                    "items": { "$ref": "#/definitions/uuid" }
+                  },
+                  "created_invocation_id": { "$ref": "#/definitions/uuid" },
+                  "read_invocation_id": { "$ref": "#/definitions/uuid" }
+                }
               }
             }
           }
@@ -330,7 +354,7 @@
                 "ruleset_id": { "type": "string", "minLength": 1, "maxLength": 200 },
                 "tzdb_version": { "type": "string", "minLength": 1, "maxLength": 100 },
                 "authorization_revision": { "const": "delegation/1" },
-                "execution_lifecycle": { "const": "request-bound" }
+                "execution_lifecycle": { "enum": ["request-bound", "server-owned"] }
               }
             }
           }

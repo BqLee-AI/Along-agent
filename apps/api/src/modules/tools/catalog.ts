@@ -15,7 +15,8 @@ const workspacePath = { type: 'string' };
 export const WORKSPACE_TOOL_DEFINITIONS = [
   {
     name: 'workspace_list',
-    description: '列出当前工作区授权目录的真实直接子项；根目录 path 使用空串。',
+    description:
+      '仅列出已授权的真实直接子项，不是目录完整清单；未列出不代表文件不存在。根目录 path 使用空串。',
     risk: 'low' as const,
     parameters: workspaceParameters({ path: workspacePath }, ['path']),
   },
@@ -161,6 +162,87 @@ export const DELEGATION_TOOL_DEFINITIONS = [
         }
       : tool,
   ),
+  ...WORKSPACE_TOOL_DEFINITIONS.slice(0, 3).map((tool) => ({
+    ...tool,
+    description: `${tool.description} workspace_id 必须来自本 Run 冻结的资料集合。`,
+    parameters: {
+      ...tool.parameters,
+      properties: { ...(tool.parameters.properties as object), workspace_id: { type: 'string' } },
+      required: [...(tool.parameters.required as string[]), 'workspace_id'],
+    },
+  })),
+  {
+    name: 'workspace_create',
+    description:
+      '仅在本 Run 冻结的输出目录内创建新普通文件，绝不覆盖。固定名称碰撞时不得擅自改名；允许换名时仅在确定零写碰撞后使用新调用。效果未知时停止，不得重试；创建成功后必须独立新调用全文回读核验。',
+    risk: 'high' as const,
+    parameters: workspaceParameters(
+      {
+        workspace_id: { type: 'string', minLength: 1 },
+        output_directory: { type: 'string' },
+        filename: { type: 'string', minLength: 1 },
+        content: { type: 'string' },
+      },
+      ['workspace_id', 'output_directory', 'filename', 'content'],
+    ),
+  },
+  {
+    name: 'workspace_replace',
+    description:
+      '引用本 Run 接受的完整读取，直接精确编辑现有文件；冲突仅在零写后重新读取，未知不得重试，成功须独立新读取核验。',
+    risk: 'high' as const,
+    parameters: workspaceParameters(
+      {
+        read_invocation_id: { type: 'string', format: 'uuid' },
+        change: {
+          oneOf: [
+            workspaceParameters(
+              {
+                kind: { const: 'literal' },
+                old_text: { type: 'string', minLength: 1 },
+                new_text: { type: 'string' },
+              },
+              ['kind', 'old_text', 'new_text'],
+            ),
+            workspaceParameters({ kind: { const: 'full' }, new_content: { type: 'string' } }, [
+              'kind',
+              'new_content',
+            ]),
+          ],
+        },
+      },
+      ['read_invocation_id', 'change'],
+    ),
+  },
+  {
+    name: 'workspace_propose_replace',
+    description:
+      '仅当修改引入用户未授权的新增影响时，引用全文提出精确替换，等待批准；批准不是写入。',
+    risk: 'medium' as const,
+    parameters: workspaceParameters(
+      {
+        read_invocation_id: { type: 'string', format: 'uuid' },
+        change: {
+          oneOf: [
+            workspaceParameters(
+              {
+                kind: { const: 'literal' },
+                old_text: { type: 'string', minLength: 1 },
+                new_text: { type: 'string' },
+              },
+              ['kind', 'old_text', 'new_text'],
+            ),
+            workspaceParameters({ kind: { const: 'full' }, new_content: { type: 'string' } }, [
+              'kind',
+              'new_content',
+            ]),
+          ],
+        },
+      },
+      ['read_invocation_id', 'change'],
+    ),
+  },
+  WORKSPACE_TOOL_DEFINITIONS[4]!,
   {
     name: 'get_task',
     description: '读取当前用户提醒的完整内容以定位目标。',

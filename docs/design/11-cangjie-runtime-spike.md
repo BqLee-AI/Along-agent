@@ -52,7 +52,7 @@ TS 事实与只追加事件 → SSE / GET 补读 → Web
 
 - `bun run harness:prepare` 准备锁定工具链；`bun run build:harness` 构建正式源。完整用法、平台前置与运行库位置见 [README](../../apps/harness/README.md)。
 - 镜像采用独立 Debian 编译阶段，真实安装 binutils/GCC/C++/libc 开发闭包；不能把裸 Bun runtime 能执行旧 ELF 当作 fresh 编译成功。runtime 只复制生产产物、必要动态库和适用 SDK/stdx/第三方 notices。
-- TS 固定 OpenAI-compatible chat-completions transport；`HARNESS_MODEL_BASE_URL/HARNESS_MODEL` 由部署服务端指定兼容端点和模型，`HARNESS_MODEL_API_KEY` 可选且只留 TS。普通用户不配置 provider/BYOK；实际供应商、计费与质量不在此决定。
+- 现行基线的 TS OpenAI-compatible chat-completions transport 使用部署指定的 `HARNESS_MODEL_BASE_URL/HARNESS_MODEL` 和可选 `HARNESS_MODEL_API_KEY`。拟议用户接入与按 Run 冻结选择见 [design/22](22-model-provider-settings.md)：旧部署只能由管理员明确指定目标用户导入，不自动共享或启用；SDK 单次传输另须通过安全与真实消费者门。实际供应商、计费与质量不在此决定。
 - `HARNESS_BINARY` 默认 `/app/harness/bin/along-harness`，`HARNESS_LIBRARY_PATH` 默认 `/app/harness/lib`。缺配置或不可执行时新 harness Run 返回503，无写入/SSE、无 fixture 回退。部署者设置变量，不写真实值到仓库 `.env`。
 - `HARNESS_MAX_ITERATIONS/HARNESS_MAX_TOKENS` 是部署服务配置，默认24/64000，均须为正安全整数；不是 Web/模型请求字段。预算在 Run 接纳时冻结、持久化，native 跨批准恢复 attempt 累计，恢复不重置，也不读取新的部署额度。缺失 usage 的累计值保持未知；默认值不代替真实 R1 负载校准。
 - 帧/HTTP 模型响应实施1MiB字节边界，协议/进程/provider错误脱敏；不记录原始 stderr、请求/响应或完整推理链。未知 usage 保留未知，不承诺不可证明的 token/费用上限。

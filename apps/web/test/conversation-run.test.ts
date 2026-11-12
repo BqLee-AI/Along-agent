@@ -1,17 +1,20 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { ThreadEventSchema, type ThreadEvent } from '@along/stream-protocol';
+import { ThreadEventSchema } from '@along/stream-protocol';
+import type { ThreadEvent } from '@along/stream-protocol';
 import type { GoalResult } from '@along/contracts';
 import { NextRequest } from 'next/server';
 import {
   collectRunTranscripts,
   consumeThreadStream,
+  followRunEvents,
   mergeThreadEvents,
-  readEnvelope,
-} from '../src/lib/conversation-run';
-import { createServer, type Server } from 'node:http';
+} from '../src/features/conversations/model/conversation-run';
+import { readEnvelope } from '../src/shared/http/client';
+import { createServer } from 'node:http';
+import type { Server } from 'node:http';
 import { once } from 'node:events';
 import type { GET as ProxyGet } from '../src/app/api/[...path]/route';
-import { MeSchema } from '../src/lib/types';
+import { MeSchema } from '../src/shared/session/identity';
 
 const cid = '11111111-1111-4111-8111-111111111111';
 const rid = '22222222-2222-4222-8222-222222222222';
@@ -43,6 +46,94 @@ function request(path: string, init?: { signal?: AbortSignal }): NextRequest {
 // These exercise the browser's actual event/read consumers and proxy stream,
 // not source text. Browser action/DOM evidence is collected by integration.
 describe('Run event consumers', () => {
+  it('reconnects only with GET and the accepted persisted cursor, without duplicating deltas', async () => {
+    const calls: Array<{ url: string; method: string | undefined }> = [];
+    const accepted: ThreadEvent[] = [];
+    const started = event(1, 'thread.started');
+    const delta = event(4, 'message.delta', { delta: '继续' });
+    const done = event(7, 'thread.completed');
+    const responses = [
+      [started, delta],
+      [delta, done],
+    ];
+    await followRunEvents({
+      conversationId: cid,
+      runId: rid,
+      signal: new AbortController().signal,
+      cursor: () => accepted.at(-1)?.seq ?? 0,
+      onEvent: (value) => accepted.push(value),
+      readStatus: async () => (calls.length === 1 ? 'running' : 'done'),
+      retryDelay: 0,
+      fetchEvents: async (url, init) => {
+        calls.push({ url: String(url), method: init?.method });
+        return new Response(
+          responses[calls.length - 1]!.map((value) => `data: ${JSON.stringify(value)}\n\n`).join(
+            '',
+          ),
+        );
+      },
+    });
+    expect(calls.map((call) => call.method)).toEqual(['GET', 'GET']);
+    expect(
+      calls.map((call) => new URL(call.url, 'http://web.test').searchParams.get('after_seq')),
+    ).toEqual(['0', '4']);
+    expect(accepted.map((value) => value.seq)).toEqual([1, 4, 7]);
+  });
+
+  it('bounds disconnection retries and rejects events from a different Run', async () => {
+    let calls = 0;
+    const accepted: ThreadEvent[] = [];
+    await expect(
+      followRunEvents({
+        conversationId: cid,
+        runId: rid,
+        signal: new AbortController().signal,
+        cursor: () => 0,
+        onEvent: (value) => accepted.push(value),
+        readStatus: async () => 'running',
+        retryDelay: 0,
+        fetchEvents: async () => {
+          calls++;
+          return new Response(
+            `data: ${JSON.stringify(event(1, 'thread.started', { run_id: cid }))}\n\n`,
+          );
+        },
+      }),
+    ).rejects.toThrow('订阅事件与指定会话 / Run 不匹配');
+    expect(calls).toBe(3);
+    expect(accepted).toEqual([]);
+  });
+  it('stops following when access is revoked without another GET', async () => {
+    let calls = 0;
+    await expect(
+      followRunEvents({
+        conversationId: cid,
+        runId: rid,
+        signal: new AbortController().signal,
+        cursor: () => 0,
+        onEvent: () => {
+          throw new Error('unexpected event');
+        },
+        readStatus: async () => 'running',
+        retryDelay: 0,
+        fetchEvents: async () => {
+          calls++;
+          return new Response(
+            JSON.stringify({
+              code: 1,
+              data: null,
+              msg: 'forbidden',
+              error: { code: 'FORBIDDEN', message: 'forbidden' },
+              request_id: 'revoked',
+            }),
+            { status: 403 },
+          );
+        },
+      }),
+    ).rejects.toThrow();
+    expect(calls).toBe(1);
+  });
+
   it('does not turn normal approval suspension EOF into a terminal event', async () => {
     const incoming = [
       event(1, 'thread.started'),

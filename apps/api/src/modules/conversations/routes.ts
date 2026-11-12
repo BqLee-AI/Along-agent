@@ -25,11 +25,16 @@ import {
   cancelConversationRun,
   resumeConversationRun,
 } from './service.js';
-import type { StartResult } from './contracts.js';
-import type { HarnessServices } from './harness-process.js';
+import type { ConversationDeps, StartResult } from './contracts.js';
 import type { TimeContext } from '../time/context.js';
 import type { RoutingRuntime } from './routing/index.js';
 import { writeAuthorizedEvent } from './stream-authorization.js';
+import { withTransaction } from '../../db/transaction.js';
+import { lockViewerAccess } from '../identity/stream-access.js';
+import { ConversationEventsQuerySchema } from './schemas.js';
+import { validationError } from '../../http/errors.js';
+import type { Actor } from '../../http/auth.js';
+import type { RunDriver } from './run-driver.js';
 import {
   getConversationList,
   getConversationMessages,
@@ -41,8 +46,10 @@ export interface RouteDeps {
   resolveActor: ActorResolver;
   body?: unknown;
   timeContext: TimeContext;
-  harness?: HarnessServices | null;
+  harness?: ConversationDeps['harness'];
+  modelTransport?: ConversationDeps['modelTransport'];
   routing?: RoutingRuntime;
+  runDriver?: RunDriver;
 }
 
 function queryOf(url: URL): Record<string, string | string[] | undefined> {
@@ -70,20 +77,127 @@ function writeEvent(res: ServerResponse, event: ThreadEvent): boolean {
   res.write(`data: ${JSON.stringify(event)}\n\n`);
   return true;
 }
+// Subscribers consume only persisted events. They never own the execution
+// controller, and a slow socket cannot hold an authorization transaction.
+async function subscribeRun(
+  res: ServerResponse,
+  deps: RouteDeps,
+  actor: Actor,
+  conversationId: string,
+  runId: string,
+  requestId: string,
+  afterSeq: number | null,
+): Promise<void> {
+  if (!deps.pool) throw new Error('database unavailable');
+  const pool = deps.pool;
+  await getRunView(deps, actor.ownerId, conversationId, runId);
+  res.writeHead(200, {
+    'content-type': 'text/event-stream',
+    'cache-control': 'no-cache, no-transform',
+    connection: 'keep-alive',
+    'x-request-id': requestId,
+    'x-conversation-id': conversationId,
+    'x-run-id': runId,
+  });
+  res.flushHeaders?.();
+  let closed = false;
+  const onClose = () => {
+    closed = true;
+  };
+  res.once('close', onClose);
+  let finalDrain = false;
+  try {
+    while (!closed && !res.destroyed && !res.writableEnded) {
+      const detail = await getConversationDetail(deps, actor.ownerId, conversationId, {
+        run_id: runId,
+        limit: '200',
+        ...(afterSeq === null ? {} : { after_seq: String(afterSeq) }),
+      });
+      for (const event of detail.events) {
+        let writable = true;
+        const delivered = await writeAuthorizedEvent(
+          pool,
+          actor.ownerId,
+          async (item) => {
+            if (closed || res.destroyed || res.writableEnded) return false;
+            writable = res.write(`data: ${JSON.stringify(item)}\n\n`);
+            return true;
+          },
+          event,
+          actor.sessionId,
+        );
+        if (!delivered) return;
+        afterSeq = event.seq;
+        if (!writable) {
+          const { promise, resolve } = Promise.withResolvers<void>();
+          const done = () => {
+            res.off('drain', done);
+            res.off('close', done);
+            resolve();
+          };
+          res.once('drain', done);
+          res.once('close', done);
+          if (closed || res.destroyed) done();
+          await promise;
+          if (closed) return;
+        }
+      }
+      if (detail.events.length === 200) continue;
+      if (finalDrain) return;
+      const view = await getRunView(deps, actor.ownerId, conversationId, runId);
+      if (view.status !== 'running') {
+        finalDrain = true;
+        continue;
+      }
+      await withTransaction(pool, async (client) => {
+        if (!(await lockViewerAccess(client, actor.ownerId, actor.sessionId))) throw unauthorized();
+      });
+      const { promise, resolve } = Promise.withResolvers<void>();
+      const timer = setTimeout(done, 500);
+      function done() {
+        clearTimeout(timer);
+        res.off('close', done);
+        resolve();
+      }
+      res.once('close', done);
+      if (closed || res.destroyed) done();
+      await promise;
+    }
+  } finally {
+    res.off('close', onClose);
+    if (!res.writableEnded) res.end();
+  }
+}
 
 async function streamRun(
   req: IncomingMessage,
   res: ServerResponse,
   deps: RouteDeps,
   started: StartResult,
-  ownerId: string,
+  actor: Actor,
   requestId: string,
 ): Promise<void> {
+  if ('serverOwned' in started && started.serverOwned === true) {
+    const afterSeq =
+      'afterSeq' in started && typeof started.afterSeq === 'number' ? started.afterSeq : null;
+    await subscribeRun(
+      res,
+      deps,
+      actor,
+      started.conversationId,
+      started.runId,
+      requestId,
+      afterSeq,
+    );
+    return;
+  }
   res.writeHead(200, {
     'content-type': 'text/event-stream',
     'cache-control': 'no-cache, no-transform',
     connection: 'keep-alive',
     'x-request-id': requestId,
+    'x-conversation-id': started.conversationId,
+    'x-run-id': started.runId,
   });
   res.flushHeaders?.();
   if (started.replay) {
@@ -92,7 +206,7 @@ async function streamRun(
       if (
         !(await writeAuthorizedEvent(
           deps.pool,
-          ownerId,
+          actor.ownerId,
           async (item) => writeEvent(res, item),
           event,
         ))
@@ -150,7 +264,7 @@ export async function handleConversationRoute(
         deps.body,
         idempotencyKeyOf(req),
       );
-      await streamRun(req, res, deps, started, actor.ownerId, requestId);
+      await streamRun(req, res, deps, started, actor, requestId);
       return true;
     }
 
@@ -168,6 +282,26 @@ export async function handleConversationRoute(
           ? await getConversationMessages(deps, actor.ownerId, conversationId, queryOf(url))
           : await getConversationRuns(deps, actor.ownerId, conversationId, queryOf(url));
       sendJson(res, 200, okEnvelope(page, requestId), requestId);
+      return true;
+    }
+
+    const eventsMatch = /^\/api\/v1\/conversations\/([^/]+)\/runs\/([^/]+)\/events$/.exec(pathname);
+    if (req.method === 'GET' && eventsMatch) {
+      const conversationId = eventsMatch[1] ?? '';
+      const runId = eventsMatch[2] ?? '';
+      if (!isUuid(conversationId) || !isUuid(runId)) throw notFound('Run not found');
+      const parsed = ConversationEventsQuerySchema.safeParse(queryOf(url));
+      if (!parsed.success || parsed.data.run_id !== undefined || url.searchParams.has('limit'))
+        throw validationError('invalid events query');
+      await subscribeRun(
+        res,
+        deps,
+        actor,
+        conversationId,
+        runId,
+        requestId,
+        parsed.data.after_seq ?? null,
+      );
       return true;
     }
 
@@ -205,7 +339,7 @@ export async function handleConversationRoute(
             requestId,
             deps.body,
           );
-          await streamRun(req, res, deps, started, actor.ownerId, requestId);
+          await streamRun(req, res, deps, started, actor, requestId);
         }
         return true;
       }

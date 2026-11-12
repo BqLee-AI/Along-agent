@@ -1,15 +1,14 @@
 import { describe, expect, it } from 'bun:test';
-import { ThreadEventSchema, type ThreadEvent } from '@along/stream-protocol';
+import { ThreadEventSchema } from '@along/stream-protocol';
+import type { ThreadEvent } from '@along/stream-protocol';
 import {
-  ApiReadError,
   collectRunTranscripts,
   eventPageComplete,
-  historyPageReducer,
-  initialHistoryPage,
   mergeThreadEvents,
-  readEnvelope,
-} from '../src/lib/conversation-run';
-import { clearAppRetryState } from '../src/lib/account-navigation';
+} from '../src/features/conversations/model/conversation-run';
+import { ApiReadError, readEnvelope } from '../src/shared/http/client';
+import { historyPageReducer, initialHistoryPage } from '../src/shared/http/page';
+import { clearAppRetryState } from '../src/shared/session/navigation';
 
 const cid = '11111111-1111-4111-8111-111111111111';
 const rid = '22222222-2222-4222-8222-222222222222';

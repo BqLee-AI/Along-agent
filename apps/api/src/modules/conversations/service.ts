@@ -16,9 +16,16 @@ import {
   BUSINESS_TOOL_IDS,
   HARNESS_BASE_TOOL_IDS,
   DELEGATION_TOOL_IDS,
+  DELEGATION_WORKSPACE_READ_TOOL_IDS,
+  DELEGATION_WORKSPACE_WRITE_TOOL_IDS,
+  DELEGATION_WORKSPACE_CREATE_TOOL_IDS,
   TOOL_IDS,
 } from '../tools/contracts.js';
-import { getWorkspaceGrant, validateWorkspaceGrant } from '../workspaces/service.js';
+import {
+  getWorkspaceGrant,
+  resolveWorkspaceGrants,
+  validateWorkspaceGrant,
+} from '../workspaces/service.js';
 import { findReminderDirective } from '@along/time-core';
 import { requireTimeContext } from '../time/context.js';
 import { THREAD_PROTOCOL_VERSION, type ThreadEvent } from '@along/stream-protocol';
@@ -44,7 +51,6 @@ import {
   findIdempotency,
   freezeConversationTimezone,
   getConversation,
-  getRunStatus,
   insertAttempt,
   insertIdempotency,
   insertMessage,
@@ -63,6 +69,8 @@ import { acceptReminderDate } from './reminder-date.js';
 import { acceptTargetContinuation } from './target-continuation.js';
 import { isActiveOwner, readUserPreferences } from '../identity/preferences.js';
 import { writeAuthorizedEvent } from './stream-authorization.js';
+import { withRunTransaction, type RunOwnership } from './run-ownership.js';
+import { resolveSelection, bindRunSelection } from '../model-providers/service.js';
 
 const AGENT_REVISION = 'assistant/r1';
 const BUSINESS_MAX_ITERATIONS = 10;
@@ -98,21 +106,35 @@ function requestHashOf(input: {
   fold: string;
   execution: ExecutionKind;
   workspaceId?: string;
+  workspaceIds?: string[];
   clarificationOfRunId?: string;
   authorizationRevision?: 'delegation/1';
+  modelSelection?: { provider_id: string; model_id: string };
 }): string {
-  const material = [input.conversationId ?? null, input.text, input.timezone, input.fold];
+  const material: unknown[] = [
+    input.conversationId ?? null,
+    input.text,
+    input.timezone,
+    input.fold,
+  ];
   if (input.workspaceId !== undefined) material.push(input.workspaceId);
+  if (input.workspaceIds !== undefined) material.push([...input.workspaceIds].sort());
   if (input.clarificationOfRunId !== undefined) material.push(input.clarificationOfRunId);
   if (input.authorizationRevision) material.push(input.authorizationRevision);
+  if (input.modelSelection !== undefined)
+    material.push({
+      model_selection: [input.modelSelection.provider_id, input.modelSelection.model_id],
+    });
   const canonical = JSON.stringify(material);
   return createHash('sha256')
     .update(
-      input.workspaceId !== undefined
-        ? 'harness/workspace/v2\0'
-        : input.execution === 'harness'
-          ? 'harness/v1\0'
-          : '',
+      input.workspaceIds !== undefined
+        ? 'harness/workspace-set/v1\0'
+        : input.workspaceId !== undefined
+          ? 'harness/workspace/v2\0'
+          : input.execution === 'harness'
+            ? 'harness/v1\0'
+            : '',
     )
     .update(canonical, 'utf8')
     .digest('hex');
@@ -145,15 +167,29 @@ export async function startConversationRun(
     timezone,
     fold: input.fold_choice,
     execution,
+    ...(input.model_selection !== undefined ? { modelSelection: input.model_selection } : {}),
     ...(input.authorization_revision
       ? { authorizationRevision: input.authorization_revision }
       : {}),
     ...(input.workspace_id !== undefined ? { workspaceId: input.workspace_id } : {}),
+    ...(input.workspace_ids !== undefined ? { workspaceIds: input.workspace_ids } : {}),
     ...(input.clarification_of_run_id
       ? { clarificationOfRunId: input.clarification_of_run_id }
       : {}),
   });
   const pool = requirePool(deps);
+  const candidateRunId = randomUUID();
+  const serverOwnedEligible =
+    execution === 'harness' && input.authorization_revision === 'delegation/1' && !!deps.runDriver;
+  let ownership: RunOwnership | undefined;
+  if (serverOwnedEligible && !(await findIdempotency(pool, ownerId, key))) {
+    try {
+      ownership = await deps.runDriver!.acquire(candidateRunId);
+    } catch (error) {
+      // A duplicate may have committed while capacity was being acquired.
+      if (!(await findIdempotency(pool, ownerId, key))) throw error;
+    }
+  }
 
   let started: {
     conversationId: string;
@@ -162,9 +198,14 @@ export async function startConversationRun(
     context: RunContext | null;
   };
   try {
-    started = await withTransaction(pool, async (client: PoolClient) => {
+    started = await withRunTransaction(pool, ownership, async (client: PoolClient) => {
       if (!(await isActiveOwner(client, ownerId, { lock: 'share' })))
         throw forbidden('owner authorization revoked');
+      // Serialize the owner/key before selection resolution so a concurrent
+      // replay never observes a changed or deleted default before the winner.
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+        JSON.stringify([ownerId, key]),
+      ]);
       const existing = await findIdempotency(client, ownerId, key);
       if (existing) {
         if (existing.request_hash !== requestHash) {
@@ -177,6 +218,9 @@ export async function startConversationRun(
           context: null,
         };
       }
+      if (serverOwnedEligible && !ownership)
+        throw stateConflict('server-owned execution capacity unavailable');
+      if (ownership) await ownership.assert(client, candidateRunId);
       if (execution === 'harness' && !deps.harness)
         throw new HttpError(503, 503, 'HARNESS_UNAVAILABLE', '原生 Agent 暂不可用。');
       const workspaceGrant =
@@ -185,12 +229,24 @@ export async function startConversationRun(
         ? validateWorkspaceGrant(ownerId, workspaceGrant)
         : null;
       const delegation = input.authorization_revision === 'delegation/1';
-      const allowlist =
+      let workspaceSet = delegation
+        ? resolveWorkspaceGrants(ownerId, input.workspace_ids)
+        : { grants: [], summaries: [] };
+      let allowlist: readonly string[] =
         execution === 'harness'
           ? workspaceGrant
             ? TOOL_IDS
             : delegation
-              ? DELEGATION_TOOL_IDS
+              ? [
+                  ...DELEGATION_TOOL_IDS,
+                  ...(workspaceSet.grants.length ? DELEGATION_WORKSPACE_READ_TOOL_IDS : []),
+                  ...(workspaceSet.summaries.some((summary) => summary.writable_paths.length)
+                    ? DELEGATION_WORKSPACE_WRITE_TOOL_IDS
+                    : []),
+                  ...(workspaceSet.grants.some((grant) => grant.output_directories?.length)
+                    ? DELEGATION_WORKSPACE_CREATE_TOOL_IDS
+                    : []),
+                ]
               : HARNESS_BASE_TOOL_IDS
           : BUSINESS_TOOL_IDS;
 
@@ -238,13 +294,21 @@ export async function startConversationRun(
         input.clarification_of_run_id &&
         (allowlist as readonly string[]).includes('get_task') &&
         (allowlist as readonly string[]).includes('cancel_reminder')
-          ? await acceptTargetContinuation(client, {
+          ? ((await acceptTargetContinuation(client, {
               ownerId,
               conversationId: conversation.id,
               inputMessageId: userMessageId,
               sourceRunId: input.clarification_of_run_id,
               timeContext: deps.timeContext,
-            })
+            })) ??
+            (await acceptTargetContinuation(client, {
+              ownerId,
+              conversationId: conversation.id,
+              inputMessageId: userMessageId,
+              sourceRunId: input.clarification_of_run_id,
+              timeContext: deps.timeContext,
+              kind: 'destination',
+            })))
           : null;
       const reminderDate = await acceptReminderDate(client, {
         ownerId,
@@ -280,6 +344,47 @@ export async function startConversationRun(
           (await acceptTargetContinuation(client, { ...sourceInput, kind: 'time' })) ??
           (await acceptTargetContinuation(client, { ...sourceInput, kind: 'timezone' }));
       }
+      if (targetContinuation?.workspaceGrants) {
+        const priorIds = new Set(
+          targetContinuation.workspaceGrants.map((grant) => grant.workspace_id),
+        );
+        if (input.workspace_ids?.some((id) => !priorIds.has(id)))
+          throw validationError('workspace selection exceeds the original goal scope');
+        workspaceSet = resolveWorkspaceGrants(ownerId, input.workspace_ids ?? [...priorIds]);
+        const continuedGrants = workspaceSet.grants.map((grant) => {
+          const previous = targetContinuation.workspaceGrants!.find(
+            (candidate) => candidate.workspace_id === grant.workspace_id,
+          );
+          const directories = targetContinuation.workspaceCreateAllowed
+            ? grant.output_directories?.filter((directory) =>
+                previous?.output_directories?.some(
+                  (old) => old.path === directory.path && old.identity === directory.identity,
+                ),
+              )
+            : undefined;
+          const base = {
+            workspace_id: grant.workspace_id,
+            owner_id: grant.owner_id,
+            registration_digest: grant.registration_digest,
+            root_identity: grant.root_identity,
+          };
+          return directories?.length ? { ...base, output_directories: directories } : base;
+        });
+        workspaceSet = {
+          grants: continuedGrants,
+          summaries: continuedGrants.map((grant) => validateWorkspaceGrant(ownerId, grant)),
+        };
+        allowlist = [
+          ...DELEGATION_TOOL_IDS,
+          ...(workspaceSet.grants.length ? DELEGATION_WORKSPACE_READ_TOOL_IDS : []),
+          ...(workspaceSet.summaries.some((summary) => summary.writable_paths.length)
+            ? DELEGATION_WORKSPACE_WRITE_TOOL_IDS
+            : []),
+          ...(workspaceSet.grants.some((grant) => grant.output_directories?.length)
+            ? DELEGATION_WORKSPACE_CREATE_TOOL_IDS
+            : []),
+        ];
+      }
       if (
         delegation &&
         input.clarification_of_run_id &&
@@ -299,7 +404,7 @@ export async function startConversationRun(
       )
         requireTimeContext(deps.timeContext);
       confirmedTimezone = reminderDate.timezone ?? confirmedTimezone;
-      const runId = randomUUID();
+      const runId = candidateRunId;
       const attemptId = randomUUID();
       const mode =
         execution === 'harness'
@@ -322,7 +427,12 @@ export async function startConversationRun(
         ? TrustedExecutionContextSchema.parse({
             version: 1,
             authorization_revision: 'delegation/1',
-            execution_lifecycle: 'request-bound',
+            execution_lifecycle: ownership ? 'server-owned' : 'request-bound',
+            ...(execution === 'harness' &&
+            (allowlist as readonly string[]).includes('workspace_create') &&
+            (allowlist as readonly string[]).includes('workspace_read')
+              ? { create_resolution_revision: 'create-resolution/2' as const }
+              : {}),
             input_message_id: userMessageId,
             received_at_utc: receivedAtUtc,
             request_anchor_utc: targetContinuation?.anchor ?? reminderDate.anchor,
@@ -353,7 +463,7 @@ export async function startConversationRun(
                   }
                 : null,
             },
-            workspaces: [],
+            workspaces: workspaceSet.summaries,
           })
         : undefined;
       const frozenContext = {
@@ -370,10 +480,23 @@ export async function startConversationRun(
           : {}),
         ...(messageRefs ? { messageRefs } : {}),
         ...(workspaceGrant ? { workspaceGrant, workspaceSummary } : {}),
+        ...(delegation ? { workspaceGrants: workspaceSet.grants } : {}),
+        ...(delegation &&
+        (!targetContinuation || targetContinuation.createdArtifactReadAllowed) &&
+        workspaceSet.grants.some((grant) => (grant.output_directories?.length ?? 0) > 0)
+          ? { createdArtifactReadRevision: 'owner-created/1' as const }
+          : {}),
+        ...(delegation &&
+        (allowlist as readonly string[]).includes('workspace_create') &&
+        (allowlist as readonly string[]).includes('workspace_read')
+          ? { createResolutionRevision: 'create-resolution/2' as const }
+          : {}),
         ...(trustedExecutionContext
           ? {
               authorization_revision: 'delegation/1' as const,
-              execution_lifecycle: 'request-bound' as const,
+              execution_lifecycle: ownership
+                ? ('server-owned' as const)
+                : ('request-bound' as const),
               trustedExecutionContext,
             }
           : {}),
@@ -391,15 +514,27 @@ export async function startConversationRun(
         frozenContext,
         inputMessageId: userMessageId,
       });
+      const selected =
+        execution === 'harness'
+          ? await resolveSelection(client, ownerId, input.model_selection)
+          : null;
+      if (selected) await bindRunSelection(client, ownerId, runId, selected);
       const contextPolicy =
         execution === 'harness'
-          ? await ensureRunContextPolicy(client, ownerId, runId, deps.harness!.contextPolicy)
+          ? await ensureRunContextPolicy(client, ownerId, runId, {
+              ...deps.harness!.contextPolicy,
+              model_binding: {
+                ...deps.harness!.contextPolicy.model_binding,
+                model: selected!.model_id,
+              },
+            })
           : undefined;
       await insertAttempt(client, {
         attemptId,
         ownerId,
         runId,
         attemptNo: 1,
+        ...(ownership ? { leaseToken: ownership.token } : {}),
       });
       if (execution === 'harness')
         await insertRoutingPolicy(
@@ -426,6 +561,7 @@ export async function startConversationRun(
           runId,
           attemptId,
           requestId,
+          ...(ownership ? { ownership } : {}),
           inputText: text,
           ...(reminderDate.originalText ? { reminderInputText: reminderDate.originalText } : {}),
           ...(reminderDate.source.kind === 'unresolved' ? { reminderNeedsRestatement: true } : {}),
@@ -441,6 +577,7 @@ export async function startConversationRun(
           ...(messageRefs ? { messageRefs } : {}),
           ...(contextPolicy ? { contextPolicy } : {}),
           ...(workspaceGrant ? { workspaceGrant } : {}),
+          ...(delegation ? { workspaceGrants: workspaceSet.grants } : {}),
           ...(trustedExecutionContext
             ? { authorizationRevision: 'delegation/1' as const, trustedExecutionContext }
             : {}),
@@ -449,9 +586,14 @@ export async function startConversationRun(
       };
     });
   } catch (err) {
+    if (ownership) await deps.runDriver!.release(ownership);
     const pgError = pgErrorOf(err);
     if (pgError?.code === '23505' && pgError.constraint === 'conversation_idempotency_pkey') {
-      const existing = await findIdempotency(pool, ownerId, key);
+      const existing = await withTransaction(pool, async (client) => {
+        if (!(await isActiveOwner(client, ownerId, { lock: 'share' })))
+          throw forbidden('owner authorization revoked');
+        return findIdempotency(client, ownerId, key);
+      });
       if (!existing) throw err;
       if (existing.request_hash !== requestHash) {
         throw stateConflict('idempotency key reused with a different body') as HttpError;
@@ -467,27 +609,9 @@ export async function startConversationRun(
     }
   }
 
+  if (started.replayRunId && ownership) await deps.runDriver!.release(ownership);
   if (started.replayRunId) {
-    const status = await getRunStatus(pool, ownerId, started.replayRunId);
     const replay = await listRunEvents(pool, ownerId, started.replayRunId);
-    const terminal = replay.at(-1)?.type;
-    const hasTerminal =
-      terminal === 'thread.completed' ||
-      terminal === 'thread.failed' ||
-      terminal === 'thread.cancelled';
-    if ((status === 'running' || status === null) && !hasTerminal) {
-      throw stateConflict('run still in progress', {
-        conversation_id: started.conversationId,
-        run_id: started.runId,
-        status: status ?? 'missing',
-      }) as HttpError;
-    }
-    if (replay.length === 0) {
-      throw stateConflict('run has no replayable events', {
-        conversation_id: started.conversationId,
-        run_id: started.runId,
-      }) as HttpError;
-    }
     return {
       conversationId: started.conversationId,
       runId: started.runId,
@@ -496,6 +620,22 @@ export async function startConversationRun(
     };
   }
   if (!started.context) throw new Error('run context missing');
+  if (ownership) {
+    try {
+      deps.runDriver!.start(deps, started.context);
+    } catch (error) {
+      await deps.runDriver!.release(ownership);
+      throw error;
+    }
+    return {
+      conversationId: started.conversationId,
+      runId: started.runId,
+      replay: null,
+      context: null,
+      serverOwned: true,
+      afterSeq: null,
+    };
+  }
   return {
     conversationId: started.conversationId,
     runId: started.runId,

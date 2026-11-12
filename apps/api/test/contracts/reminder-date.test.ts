@@ -79,7 +79,7 @@ beforeAll(async () => {
   `);
   const harness = fixture.deps.harness;
   if (!harness) throw new Error('real native harness is required');
-  harness.model = async function* (request, tools) {
+  fixture.model = async function* (request, tools) {
     modelCalls++;
     expect(tools.some((tool) => tool.name === 'propose_task')).toBe(true);
     const step = steps.shift();

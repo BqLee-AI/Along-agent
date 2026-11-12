@@ -1,18 +1,23 @@
 import { McpServer, fromJsonSchema } from '@modelcontextprotocol/server';
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
+import { workspaceGrantSchema } from '@along/contracts';
 import {
   configureWorkspaceRegistry,
-  getWorkspaceGrant,
   listWorkspaceFiles,
   searchWorkspaceFiles,
   readWorkspaceFile,
   WorkspaceDeniedError,
+  type AuthorizedCreatedPath,
 } from './service.js';
 
-const configuration: unknown = JSON.parse(process.env.WORKSPACE_MCP_CONFIG ?? 'null');
-await configureWorkspaceRegistry(configuration ? [configuration] : []);
-const selected = configuration as { workspace_id: string; owner_id: string };
-const grant = getWorkspaceGrant(selected.owner_id, selected.workspace_id);
+const configuration = JSON.parse(process.env.WORKSPACE_MCP_CONFIG ?? 'null') as {
+  registration: { workspace_id: string; owner_id: string };
+  grant: unknown;
+  authorizedCreatedPaths: AuthorizedCreatedPath[];
+};
+await configureWorkspaceRegistry(configuration ? [configuration.registration] : []);
+const selected = configuration.registration;
+const grant = workspaceGrantSchema.parse(configuration.grant);
 const server = new McpServer({ name: 'along-readonly-workspace', version: '1.0.0' });
 const pathInput = fromJsonSchema<{ path: string }>({
   type: 'object',
@@ -62,7 +67,10 @@ server.registerTool(
     description: 'List actual authorized direct children.',
     inputSchema: pathInput,
   },
-  async ({ path }) => execute(() => listWorkspaceFiles(selected.owner_id, grant, path)),
+  async ({ path }) =>
+    execute(() =>
+      listWorkspaceFiles(selected.owner_id, grant, path, configuration.authorizedCreatedPaths),
+    ),
 );
 server.registerTool(
   'search_files',
@@ -71,7 +79,15 @@ server.registerTool(
     inputSchema: searchInput,
   },
   async ({ path, literal }) =>
-    execute(() => searchWorkspaceFiles(selected.owner_id, grant, path, literal)),
+    execute(() =>
+      searchWorkspaceFiles(
+        selected.owner_id,
+        grant,
+        path,
+        literal,
+        configuration.authorizedCreatedPaths,
+      ),
+    ),
 );
 server.registerTool(
   'read_file',
@@ -79,6 +95,9 @@ server.registerTool(
     description: 'Read a complete authorized UTF-8 file and its actual byte hash.',
     inputSchema: pathInput,
   },
-  async ({ path }) => execute(() => readWorkspaceFile(selected.owner_id, grant, path)),
+  async ({ path }) =>
+    execute(() =>
+      readWorkspaceFile(selected.owner_id, grant, path, configuration.authorizedCreatedPaths),
+    ),
 );
 await server.connect(new StdioServerTransport());

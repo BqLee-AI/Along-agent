@@ -266,8 +266,8 @@ beforeAll(async () => {
     maxIterations: 24,
     maxTokens: 64000,
     contextPolicy: createContextPolicy({ completionCap: 1024, model: 'context-consumer' }),
-    model: createHarnessModelTransport({ baseUrl: `${base}/v1`, model: 'context-consumer' }),
   };
+  fixture.model = createHarnessModelTransport({ baseUrl: `${base}/v1`, model: 'context-consumer' });
 }, 30_000);
 
 afterAll(async () => {

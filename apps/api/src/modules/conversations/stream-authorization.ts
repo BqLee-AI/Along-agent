@@ -3,6 +3,7 @@ import type { ThreadEvent } from '@along/stream-protocol';
 import { withTransaction } from '../../db/transaction.js';
 import { forbidden } from '../../http/errors.js';
 import { isActiveOwner } from '../identity/preferences.js';
+import { lockViewerAccess } from '../identity/stream-access.js';
 import type { EventWriter } from './contracts.js';
 
 // The sender holds the same user lock that serializes account deactivation
@@ -13,10 +14,15 @@ export async function writeAuthorizedEvent(
   ownerId: string,
   write: EventWriter,
   event: ThreadEvent,
+  sessionId?: string | null,
 ): Promise<boolean> {
   return withTransaction(pool, async (client) => {
-    if (!(await isActiveOwner(client, ownerId, { lock: 'share' })))
-      throw forbidden('owner authorization revoked');
+    if (sessionId === undefined) {
+      if (!(await isActiveOwner(client, ownerId, { lock: 'share' })))
+        throw forbidden('owner authorization revoked');
+    } else if (!(await lockViewerAccess(client, ownerId, sessionId))) {
+      throw forbidden('session authorization revoked');
+    }
     return write(event);
   });
 }

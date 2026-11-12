@@ -1,22 +1,22 @@
 # @along/web
 
-Next.js App Router Web，统一采用自有 LumenUI（shadcn/Base UI）、官方 Linen 主题与 Tailwind CSS v4。顶部导航以「助理」为主，「事项」收纳今日安排、我的提醒、待我确认和活动记录，账户设置放独立菜单；桌面与窄屏使用相同层级，不再常驻侧栏。登录、建号、原身份转正与退出沿用正式账户合同。
+Next.js App Router Web，采用自有 LumenUI 与 Tailwind CSS v4。工作区以对话为主，桌面可展开今日安排和提醒，历史会话位于对话侧栏；账户和模型服务通过设置面板访问。登录、建号、原身份转正与退出沿用正式账户合同。
 
 ## 组件库与主题
 
 基础组件直接从 `@lorelum/lumen-ui/components/*` 导入，不维护本地 `components/ui` 副本、Radix 兼容包装或 shadcn CLI 配置。根布局保留服务端组装，客户端主题边界使用库的 `LumenProvider`，让下拉菜单、选择器和弹窗 portal 继承同一 Linen 主题；CSS 导入官方 `theme.css` 并显式扫描已安装包的样式。应用只负责页面布局和业务状态，外观通过库公开的 variant、color、material 定制，不逐页覆写基础控件。
 
-只使用组件库原生材质与默认 Linen 变量：面板通过 `Card material="panel"`，已有用户消息通过 `Card material="balanced"`，文本域使用原生 `glass`。不定义应用主题 token，不针对库的 surface slot 补描边，也不用背景、阴影或 backdrop-blur 拼造玻璃；库没有的效果不增加。全局 CSS 只保留导入、字体及长正文排版。
+工作区使用应用主题令牌统一浅色与深色外观，紧凑控件、分隔线和对话输入区沿用 frontend 的视觉；组件交互仍使用库公开的控件和材质。
 
 包使用固定上游 commit 生成的官方 scoped 分发包，以 `file:vendor/...` 与单一 `bun.lock` 安装，不要求部署机访问私有 GitHub 或依赖 npm 发布。`vendor` 中的 tgz 是有意保留的版本化依赖，不是临时构建日志；Docker 在冻结安装前复制它，本地生命周期将它纳入构建输入摘要。升级时从获准源码版本运行上游官方构建/打包入口，替换归档并更新锁文件，不直接修改归档内的产物。自有代码沿用上游 UNLICENSED 标记，第三方许可包含在分发包中；不对外发布。
 
 容器构建使用独立的 BuildKit Bun 下载缓存，避免冻结依赖变化时重复下载整套依赖；缓存只属于 builder，可随时清理，清理后仍按同一锁文件安装，不改变版本或跳过冻结校验。
 
-固定分发：`@lorelum/lumen-ui@0.0.1-alpha.0`，来源 `lorelum/lumen-ui` commit `337d6c4c5fddc55a0ac5736d500c3cb9d398cace`；归档 `vendor/lorelum-lumen-ui-0.0.1-alpha.0-337d6c4c5fddc55a0ac5736d500c3cb9d398cace.tgz`，928,990字节，SHA-256 `3e231e1208b2107652cc52dfab6274b5c9c7c228e624437358c66807e70b105b`。从该版本运行官方 theme/UI 构建与 `scripts/pack.ts`，不修改上游源码或分发产物。
+固定分发：`@lorelum/lumen-ui@0.0.1-alpha.0`，来源 `lorelum/lumen-ui` commit `b95a5409bfaba0e0f8db65c7a82257425f2ca99e`；归档 `vendor/lorelum-lumen-ui-0.0.1-alpha.0-b95a5409bfaba0e0f8db65c7a82257425f2ca99e.tgz`，1,571,722 字节，SHA-256 `41c9e11666c165e9ca110d807eefdd82ab42d692d7706135b7b9dd3df2acc573`。使用原前端已有的官方分发产物，不修改归档。
 
 迁移组件时须显式保留表单提交类型、GET 筛选字段、原冻结批准内容与未选资料状态。链接按钮使用 render、`nativeButton={false}` 与 `role="link"`，保留锚点导航而非被默认识别为按钮。菜单使用库的 render 组合，离开确认保留 alertdialog 语义、取消优先焦点及触发器返回；选择工具、登记、分页和恢复只读，不得顺带发送或继续运行。
 
-`/conversations` 使用独立路由 loading，骨架保持对话栏、消息区及底部输入区的布局，不继承首页欢迎/简报骨架；加载态仅表示读取，不提供假的发送、停止或恢复控件。材质由库在服务端渲染时同步输出，不依赖 hydration 后补样式。
+`/conversations` 由工作区 shell 中持续挂载的对话面板承载；切换工作区时保留对话状态。读取态仅表示读取，不提供假的发送、停止或恢复操作。
 
 ## Run
 
@@ -28,8 +28,10 @@ bun run build:packages
 bun run --filter @along/api dev
 
 # Web on http://localhost:3100
-bun run --bun --filter @along/web dev
+bun run --filter @along/web dev
 ```
+
+开发服务器允许 `localhost` 和 `127.0.0.1` 访问 Next 的开发资源；其他主机名需显式配置可信开发来源。不要给 Web 的开发命令加 `--bun`：该选项设置的 `NODE_OPTIONS=--bun` 会使使用真正 Node.js 的 PostCSS 子进程启动失败。
 
 `API_BASE` defaults to `http://127.0.0.1:3000`. Server components forward the
 incoming session cookie; the browser talks only to the same-origin proxy at
@@ -43,11 +45,17 @@ ALLOW_DEV_AUTH=1 DEV_OWNER_ID=<seeded-user-uuid> ...
 
 ## D2
 
-`src/lib/presentation.ts` is the only display projection. It renders frozen
+`src/features/reminders/model/presentation.ts` renders frozen
 server strings (`fire_at_local`, `echo_text`) and never reads
 `snapshot.fire_at_utc`; `test/presentation.test.ts` mutates the UTC instant and
 asserts the output is unchanged. Oxlint rejects `new Date(...)`/`Date.now()`
 under `apps/web`.
+
+## 模型设置与对话选模
+
+设置面板中的模型服务通过同源 API 管理多个个人接入。可直接填写地址和 Key；保存后 Key 不回显，留空沿用，输入新值替换。修改地址时不能沿用已保存 Key，须替换或明确清除；清除会撤销相关旧版本的后续凭据使用。连接测试使用未保存草稿，在模型列表中选择检测模型后分别展示文本流、工具往返和 usage 的实测状态；模型同步只使用已保存配置，合并发现结果，不删除手动模型。列表发现不保证模型调用权限。
+
+默认模型由服务端保存；对话可显式选择启用接入中的完整模型 ID，只影响下一次新 Run。使用默认时请求省略选模字段，由服务端在接纳时决定。重试保留原请求意图；历史展示服务端冻结的接入名称和模型，不从当前设置推测旧运行。模型设置及冻结投影依赖服务端实现对应 API；不可用或读取失败时页面显示错误。
 
 ## Conversation Runs
 
@@ -71,6 +79,14 @@ under `apps/web`.
   and historical reads, with no background continuation promise. Refresh,
   reconnect and login remain GET-only; accepted timezone settings are not
   rolled back or automatically repeated after disconnect.
+- When a Run actually reports `server-owned`, the page displays that lifecycle
+  rather than the connection-bound warning. Running Runs are followed through
+  `GET /conversations/{cid}/runs/{rid}/events?after_seq=…` after history is
+  read. The stream carries existing SSE events; persisted sequence cursors
+  deduplicate reconnects. Three bounded GET attempts are made before offering
+  a manual read; 401/403/404 stop retries. Leaving only detaches the view.
+  Admission and execution authority remain server-side decisions; the page
+  displays the lifecycle frozen for that Run rather than inferring it.
 - `GoalResult` is the durable source for goal status, item outcomes, accepted
   receipt references, clarification and final answer. Run `done` means execution
   ended, not that the goal completed; partial, blocked, cancelled and unknown
@@ -81,14 +97,16 @@ under `apps/web`.
 - Plain Agent sends do not promote a cached `/me` preference into an explicit
   timezone hint. Admission reads the actual saved preference; legacy shortcuts
   and explicit ambiguity choices retain their original timezone input.
-- Approval links retain those original IDs and open a separate tab. Keep the
-  original conversation open: an approval may arrive before its native snapshot
-  commits, and ordinary disconnection still cancels active execution.
+- Approval links retain those original IDs and open a separate tab. An approval
+  may arrive before its native snapshot commits. Request-bound execution retains
+  its disconnect cancellation contract; server-owned execution only detaches
+  the subscription.
   confirm/reject/revise 后返回原标签页或原 Run 深链，先读取状态，再在“此运行的操作”中明确继续。文档批准页只授权，不写文件、不自动 resume；批准早于挂起或 `can_resume=false` 时保留授权事实，不能一概解释为尚未批准。普通挂起 EOF 不是成功或取消。
-- Resume retries retain the same checkpoint and idempotency key in this tab's
-  session storage, including across reload. 显式同键重试
-  retries that request, not approval confirmation, a successor, or a fresh
-  message. **读取运行状态** is read-only.
+- Resume requests retain the checkpoint and idempotency key in session storage.
+  After an uncertain result, read the original Run first. If the fresh state
+  still permits continuing the same checkpoint, the user may explicitly retry
+  with the same key; refresh and reconnect never resend it automatically.
+  **读取运行状态** is read-only.
 - **停止原运行** first posts the durable cancel action with a retained
   idempotency key, then aborts the stream. It does not undo accepted effects.
   The proxy forwards actual Next request cancellation and downstream reader
@@ -111,7 +129,7 @@ stack; unit coverage alone is not provider or complete R1 evidence.
 - `/tasks` 和详情只承载提醒；`/activity` 分别分页读取任务范围索引与选中任务事件。会话/消息/事件/批准/提醒各自沿原游标 GET，失败保留先前获取的内容与游标，不声称已加载范围为全量。
 - 打开历史、展开操作、分页、刷新、返回及重登恢复不自动发业务 POST。副作用丢响应先读原事实；继续/取消的显式同键恢复沿原合同，不自动换键或新 Run。
 - 授权、Run 与效果独立读取：approved/not_started 不称保存，applied 不称全文核对，verified 才表示有新读取核对；unknown 可能已写入，不能盲重做。取消不撤回既成效果，助手回复不是保存回执。
-- page/layout 保留 Server Component 组装；交互 View 使用基础组件，功能 controller 分别拥有对话生命周期、批准决议和账户操作；HTTP/解析/纯投影复用 `lib` 与公开 contracts，不建立第二执行事实源。分层真源见 [design/01 §6](../../docs/design/01-tech-stack-and-repo-structure.md#6-r1-web个人助理与职责边界)。
+- page/layout 保留 Server Component 组装；交互 View 使用基础组件，功能 controller 分别拥有对话生命周期、批准决议和账户操作；HTTP、解析与纯投影复用 `shared`、各功能 model 与公开 contracts，不建立第二执行事实源。分层真源见 [design/01 §6](../../docs/design/01-tech-stack-and-repo-structure.md#6-r1-web个人助理与职责边界)。
 - 键盘、窄屏与长正文是交付要求；源码描述、测试文件存在或受控 HTTP 浏览器观察均不能替代正式安装、真实 provider、唯一 apply 与新全文 read 的端到端证据。
 
 ## Scope
@@ -131,7 +149,9 @@ stack; unit coverage alone is not provider or complete R1 evidence.
   A development bridge cannot claim. Without an eligible old session, the
   deployer must use the original installation's `local:account` command to
   explicitly select and confirm the original account. Existing passwords are
-  not overwritten and other owners are not merged.
+  not overwritten by claim/admission and other owners are not merged. A
+  forgotten password of an admitted account is reset only through
+  `local:account --reset-password` on the trusted local terminal.
 - `/login` accepts an admitted account's username or verified contact email.
   Passwords retain leading and trailing spaces, support paste/password managers,
   and are never put in a URL or browser storage. Sessions expire after seven

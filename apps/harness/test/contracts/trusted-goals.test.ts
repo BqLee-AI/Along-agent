@@ -79,6 +79,8 @@ async function nativeCase(options: {
   start?: Record<string, unknown>;
   model?: (request: Request, index: number) => Model;
   invoke?: (request: Request) => unknown;
+  finishGoal?: (request: Request) => unknown;
+  contextSource?: (request: Request) => unknown;
   cancel?: (request: Request) => boolean;
   expectedExit?: number;
 }) {
@@ -170,6 +172,10 @@ async function nativeCase(options: {
           case 'reserve':
             value = { invocation_id: randomUUID() };
             break;
+          case 'context_source':
+            if (!options.contextSource) throw new Error('Unexpected context source request');
+            value = options.contextSource(request);
+            break;
           case 'invoke':
             value = options.invoke?.(request) ?? {
               status: 'ok',
@@ -183,10 +189,15 @@ async function nativeCase(options: {
               },
             };
             break;
+          case 'finish_goal':
+            value = options.finishGoal?.(request) ?? { accepted: true };
+            break;
           case 'answer':
           case 'finish':
-          case 'finish_goal':
             value = { accepted: true };
+            break;
+          case 'suspend':
+            value = { suspended: true };
             break;
           default:
             throw new Error(`Unexpected native request ${request.type}`);
@@ -209,7 +220,7 @@ test('v6 rejects v5, missing trust discriminator and unsupported frozen facts be
     { protocol: 'harness/v5' },
     { trusted_context: undefined },
     { trusted_context: { ...trusted, extra: true } },
-    { trusted_context: { ...trusted, execution_lifecycle: 'server-owned' } },
+    { trusted_context: { ...trusted, execution_lifecycle: 'unknown' } },
     { trusted_context: { ...trusted, received_at_utc: '2026-02-30T12:00:00Z' } },
     { trusted_context: { ...trusted, received_at_utc: '2026-11-02T12:00:00.000Z' } },
     {
@@ -223,6 +234,21 @@ test('v6 rejects v5, missing trust discriminator and unsupported frozen facts be
   ]) {
     expect(await nativeCase({ start, expectedExit: 2 })).toEqual([]);
   }
+}, 120_000);
+
+test('native accepts both frozen lifecycles and preserves legacy execution', async () => {
+  for (const lifecycle of ['request-bound', 'server-owned']) {
+    const requests = await nativeCase({
+      start: { trusted_context: { ...trusted, execution_lifecycle: lifecycle } },
+      model: () => call('finish_goal', goal()),
+    });
+    expect(requests.some((request) => request.type === 'finish_goal')).toBe(true);
+  }
+  const legacy = await nativeCase({
+    start: { trusted_context: null, tools: [] },
+    model: () => ({ content: '完成', tool_calls: [] }),
+  });
+  expect(legacy.some((request) => request.type === 'finish')).toBe(true);
 }, 120_000);
 
 test('native accepts frozen elapsed capability without wall rules and exposes it to the model', async () => {
@@ -314,6 +340,36 @@ test('plain prose cannot silently mark delegation complete; original budget boun
     outcome: 'failed',
     error: { code: 'BUDGET_EXCEEDED' },
   });
+});
+
+test('authority-rejected goal permits bounded correction but never repeats business effects', async () => {
+  let attempts = 0;
+  const requests = await nativeCase({
+    finishGoal: () =>
+      ++attempts === 1
+        ? {
+            accepted: false,
+            code: 'INVALID_GOAL_RESULT',
+            message: 'goal omits the fresh document read',
+          }
+        : { accepted: true },
+    model: (request, index) => {
+      if (index === 0) return call('finish_goal', goal());
+      const messages = request.messages as { role: string; content: string }[];
+      expect(
+        messages.some(
+          (m) => m.role === 'tool' && m.content.includes('goal omits the fresh document read'),
+        ),
+      ).toBe(true);
+      if (index === 1) return call('set_user_timezone', { timezone_id: 'Asia/Shanghai' });
+      return call('finish_goal', goal());
+    },
+  });
+  expect(requests.filter((request) => request.type === 'finish_goal')).toHaveLength(2);
+  expect(requests.some((request) => request.type === 'reserve' || request.type === 'invoke')).toBe(
+    false,
+  );
+  expect(requests.at(-1)?.type).toBe('finish_goal');
 });
 
 test('a rejected setting is not a receipt; invalid finish_goal stays in bounded control-only correction', async () => {
@@ -1433,4 +1489,377 @@ test('parallel proposals have no effects and the model can continue one action a
   expect(requests.filter((request) => request.type === 'model')).toHaveLength(4);
   expect(requests.filter((request) => request.type === 'invoke')).toHaveLength(2);
   expect(requests.at(-1)).toMatchObject({ type: 'finish_goal', goal_result: goal(refs) });
+});
+
+const delegatedWorkspaces = [
+  { workspace_id: 'one', label: 'One', readable_paths: ['same.txt'], writable_paths: ['same.txt'] },
+  { workspace_id: 'two', label: 'Two', readable_paths: ['same.txt'], writable_paths: [] },
+];
+const workspaceTool = (name: string) => ({
+  name,
+  description: name,
+  parameters: { type: 'object', properties: {}, additionalProperties: true },
+  risk: 'medium',
+});
+const workspaceTools = [
+  'workspace_list',
+  'workspace_grep',
+  'workspace_read',
+  'workspace_replace',
+  'workspace_propose_replace',
+  'workspace_apply_replace',
+].map(workspaceTool);
+
+test('delegated workspaces require frozen resources and tool allowlist, without upgrading legacy', async () => {
+  for (const start of [
+    { tools: [workspaceTool('workspace_read')] },
+    {
+      trusted_context: { ...trusted, workspaces: [delegatedWorkspaces[1]] },
+      tools: [workspaceTool('workspace_replace')],
+    },
+    {
+      trusted_context: { ...trusted, workspaces: [delegatedWorkspaces[0], delegatedWorkspaces[0]] },
+    },
+    { trusted_context: null, tools: [workspaceTool('workspace_replace')] },
+  ]) {
+    expect(await nativeCase({ start, expectedExit: 2 })).toEqual([]);
+  }
+  const requests = await nativeCase({
+    start: {
+      trusted_context: { ...trusted, workspaces: delegatedWorkspaces },
+      tools: workspaceTools,
+    },
+    model: (request) => {
+      const context = (request.messages as { content: string }[])
+        .map((message) => message.content)
+        .join('\n');
+      expect(context).toContain('"workspace_id":"one"');
+      expect(context).toContain('"workspace_id":"two"');
+      expect(context).toContain('new independent workspace_read');
+      return call('finish_goal', goal());
+    },
+  });
+  expect(requests.at(-1)).toMatchObject({ type: 'finish_goal' });
+  const old = await nativeCase({
+    start: { trusted_context: { ...trusted, workspaces: delegatedWorkspaces }, tools: [] },
+    model: () => call('workspace_replace', {}),
+  });
+  expect(old.some((request) => request.type === 'reserve')).toBe(false);
+  expect(old.at(-1)).toMatchObject({ type: 'finish', error: { code: 'TOOL_DENIED' } });
+});
+
+test('creation is available only to delegated starts with frozen output directories', async () => {
+  const output = {
+    workspace_id: 'out',
+    label: 'Output',
+    readable_paths: [],
+    writable_paths: [],
+    output_directories: ['reports'],
+  };
+  for (const start of [
+    { trusted_context: null, tools: [workspaceTool('workspace_create')] },
+    {
+      trusted_context: { ...trusted, workspaces: [delegatedWorkspaces[0]] },
+      tools: [workspaceTool('workspace_create')],
+    },
+    {
+      trusted_context: { ...trusted, workspaces: [{ ...output, output_directories: [] }] },
+      tools: [workspaceTool('workspace_create')],
+    },
+    {
+      trusted_context: {
+        ...trusted,
+        workspaces: [{ ...output, output_directories: ['../escape'] }],
+      },
+      tools: [workspaceTool('workspace_create')],
+    },
+    {
+      trusted_context: {
+        ...trusted,
+        workspaces: [{ ...output, output_directories: ['reports', 'reports'] }],
+      },
+      tools: [workspaceTool('workspace_create')],
+    },
+  ]) {
+    expect(await nativeCase({ start, expectedExit: 2 })).toEqual([]);
+  }
+  const requests = await nativeCase({
+    start: {
+      trusted_context: { ...trusted, workspaces: [output] },
+      tools: [workspaceTool('workspace_create'), workspaceTool('workspace_read')],
+    },
+    model: () => call('finish_goal', goal()),
+  });
+  expect(requests.at(-1)).toMatchObject({ type: 'finish_goal' });
+  const old = await nativeCase({
+    start: { trusted_context: { ...trusted, workspaces: [output] }, tools: [] },
+    model: () => call('workspace_create', {}),
+  });
+  expect(old.some((request) => request.type === 'reserve')).toBe(false);
+  expect(old.at(-1)).toMatchObject({ type: 'finish', error: { code: 'TOOL_DENIED' } });
+});
+
+test('frozen creation resolution prompts only eligible runs and preserves structurally valid assertions', async () => {
+  const output = {
+    workspace_id: 'out',
+    label: 'Output',
+    readable_paths: [],
+    writable_paths: [],
+    output_directories: ['reports'],
+  };
+  const resolution = {
+    source_message_id: inputId,
+    source_quote: '创建报告',
+    zero_write_invocation_ids: [randomUUID()],
+    created_invocation_id: randomUUID(),
+    read_invocation_id: randomUUID(),
+  };
+  const result = {
+    ...goal(),
+    outcomes: [{ ...goal().outcomes[0], create_resolution: resolution }],
+  };
+  for (const enabled of [false, true]) {
+    const requests = await nativeCase({
+      start: {
+        trusted_context: {
+          ...trusted,
+          workspaces: [output],
+          ...(enabled ? { create_resolution_revision: 'create-resolution/1' } : {}),
+        },
+        tools: [workspaceTool('workspace_create'), workspaceTool('workspace_read')],
+      },
+      model: (request) => {
+        const messages = JSON.stringify(request.messages);
+        expect(messages.includes('mathematical proof')).toBe(enabled);
+        return call('finish_goal', enabled ? result : goal());
+      },
+    });
+    expect(requests.at(-1)).toMatchObject({
+      type: 'finish_goal',
+      goal_result: enabled ? result : goal(),
+    });
+  }
+  for (const zero_write_invocation_ids of [
+    [],
+    [resolution.zero_write_invocation_ids[0], resolution.zero_write_invocation_ids[0]],
+  ]) {
+    const invalid = {
+      ...result,
+      outcomes: [
+        { ...result.outcomes[0], create_resolution: { ...resolution, zero_write_invocation_ids } },
+      ],
+    };
+    const requests = await nativeCase({
+      start: { budget: { max_iterations: 1, max_tokens: 1000 } },
+      model: () => call('finish_goal', invalid),
+    });
+    expect(requests.some((request) => request.type === 'finish_goal')).toBe(false);
+  }
+});
+
+test('unknown creation stops without another reservation or model step', async () => {
+  const output = {
+    workspace_id: 'out',
+    label: 'Output',
+    readable_paths: [],
+    writable_paths: [],
+    output_directories: ['reports'],
+  };
+  const requests = await nativeCase({
+    start: {
+      trusted_context: { ...trusted, workspaces: [output] },
+      tools: [workspaceTool('workspace_create')],
+    },
+    model: () =>
+      call('workspace_create', {
+        workspace_id: 'out',
+        output_directory: 'reports',
+        filename: 'brief.txt',
+        content: 'brief',
+      }),
+    invoke: (request) => ({
+      status: 'unknown',
+      invocationId: request.invocation_id,
+      replayed: false,
+      error: { code: 'TOOL_EFFECT_UNKNOWN', message: 'Unknown effect' },
+    }),
+  });
+  expect(requests.filter((request) => request.type === 'model')).toHaveLength(1);
+  expect(requests.filter((request) => request.type === 'reserve')).toHaveLength(1);
+  expect(requests.filter((request) => request.type === 'invoke')).toHaveLength(1);
+  expect(requests.at(-1)).toMatchObject({ type: 'finish', error: { code: 'TOOL_EFFECT_UNKNOWN' } });
+});
+
+test('delegated document proposal suspends and approved bootstrap continues only the frozen target', async () => {
+  const approvalId = randomUUID();
+  let invocationId = '';
+  const receipt = {
+    kind: 'document_approval',
+    approval: { approval_id: approvalId, workspace_id: 'one', relative_path: 'same.txt' },
+  };
+  const start = {
+    trusted_context: { ...trusted, workspaces: delegatedWorkspaces },
+    tools: workspaceTools,
+  };
+  const pending = await nativeCase({
+    start,
+    model: () => call('workspace_propose_replace', { read_invocation_id: randomUUID() }),
+    invoke: (request) => {
+      invocationId = request.invocation_id as string;
+      return { status: 'ok', invocationId, replayed: false, result: receipt };
+    },
+  });
+  expect(pending.at(-1)).toMatchObject({
+    type: 'suspend',
+    invocation_id: invocationId,
+    approval_id: approvalId,
+  });
+  const snapshot = {
+    version: 2,
+    message_refs: [inputId],
+    tool_refs: [invocationId],
+    next_call_no: 2,
+    usage: { iterations: 1, tokens: 5 },
+    waiting: { invocation_id: invocationId, approval_id: approvalId },
+  };
+  const observation = {
+    view: 'full',
+    invocation_id: invocationId,
+    tool_id: 'workspace_propose_replace',
+    result: { status: 'ok', result: receipt },
+  };
+  const decision = {
+    kind: 'document',
+    approval_id: approvalId,
+    status: 'approved',
+    apply_invocation_id: null,
+  };
+  const resumed = await nativeCase({
+    start: { ...start, snapshot, observations: [observation], approval: decision },
+    model: (request) => {
+      expect(JSON.stringify(request.messages)).toContain('authorization, not a completed write');
+      return call('finish_goal', goal());
+    },
+  });
+  expect(resumed.at(-1)).toMatchObject({ type: 'finish_goal' });
+  const rejected = await nativeCase({
+    start: {
+      ...start,
+      snapshot,
+      observations: [observation],
+      approval: { ...decision, status: 'rejected' },
+    },
+  });
+  expect(rejected.at(-1)).toMatchObject({ type: 'finish', error: { code: 'APPROVAL_rejected' } });
+  expect(rejected.some((request) => request.type === 'model' || request.type === 'reserve')).toBe(
+    false,
+  );
+  for (const badObservation of [
+    { ...observation, tool_id: 'workspace_read' },
+    {
+      ...observation,
+      result: {
+        status: 'ok',
+        result: { ...receipt, approval: { ...receipt.approval, workspace_id: 'two' } },
+      },
+    },
+  ]) {
+    expect(
+      await nativeCase({
+        start: { ...start, snapshot, observations: [badObservation], approval: decision },
+        expectedExit: 2,
+      }),
+    ).toEqual([]);
+  }
+});
+
+test('unknown delegated workspace write never checkpoints or retries', async () => {
+  const requests = await nativeCase({
+    start: {
+      trusted_context: { ...trusted, workspaces: delegatedWorkspaces },
+      tools: workspaceTools,
+    },
+    model: () =>
+      call('workspace_replace', {
+        read_invocation_id: randomUUID(),
+        change: { kind: 'full', new_content: 'x' },
+      }),
+    invoke: (request) => ({
+      status: 'unknown',
+      invocationId: request.invocation_id,
+      replayed: false,
+      error: { code: 'TOOL_EFFECT_UNKNOWN', message: 'Unknown effect' },
+    }),
+  });
+  expect(requests.filter((request) => request.type === 'reserve')).toHaveLength(1);
+  expect(
+    requests.some((request) => request.type === 'snapshot' || request.type === 'suspend'),
+  ).toBe(false);
+  expect(requests.at(-1)).toMatchObject({ type: 'finish', error: { code: 'TOOL_EFFECT_UNKNOWN' } });
+});
+
+test('projected delegated workspace observations retain their frozen workspace identity', async () => {
+  const id = randomUUID();
+  const source = {
+    result_version: 1,
+    omitted: true,
+    kind: 'read',
+    workspace_id: 'two',
+    path: 'same.txt',
+    version: 'a'.repeat(64),
+    byte_length: 1,
+    content_total: 1,
+  };
+  const projected = {
+    view: 'projected',
+    invocation_id: id,
+    tool_id: 'workspace_read',
+    outcome: 'ok',
+    source,
+  };
+  const full = {
+    view: 'full',
+    invocation_id: id,
+    tool_id: 'workspace_read',
+    result: {
+      status: 'ok',
+      result: {
+        kind: 'read',
+        workspace_id: 'two',
+        path: 'same.txt',
+        content: 'x',
+        version: 'a'.repeat(64),
+        byte_length: 1,
+      },
+    },
+  };
+  const snapshot = {
+    version: 2,
+    message_refs: [inputId],
+    tool_refs: [id],
+    next_call_no: 2,
+    usage: { iterations: 1, tokens: 5 },
+    waiting: null,
+  };
+  const start = {
+    trusted_context: { ...trusted, workspaces: delegatedWorkspaces },
+    tools: [workspaceTool('workspace_read'), observationTool],
+    snapshot,
+    observations: [projected],
+  };
+  const requests = await nativeCase({
+    start,
+    contextSource: () => full,
+    model: () => call('finish_goal', goal([id])),
+  });
+  expect(requests.at(-1)).toMatchObject({ type: 'finish_goal' });
+  expect(
+    await nativeCase({
+      start: {
+        ...start,
+        observations: [{ ...projected, source: { ...source, workspace_id: 'outside' } }],
+      },
+      expectedExit: 2,
+    }),
+  ).toEqual([]);
 });

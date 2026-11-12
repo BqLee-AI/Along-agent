@@ -12,10 +12,12 @@ const usage = `本机生命周期（Bun 1.4.2 / Windows + Docker Linux x64）
   bun --no-env-file run local:init --adopt [--config <私有 JSON>]
   bun --no-env-file run local:start [--config <私有 JSON>]
   bun --no-env-file run local:stop [--config <私有 JSON>]
-  bun --no-env-file run local:upgrade [--config <私有 JSON>]
-  bun --no-env-file run local:account [--admit | --workspace] [--config <私有 JSON>]
+  bun --no-env-file run local:upgrade [--stop-waiting] [--config <私有 JSON>]
+  --stop-waiting：在交互终端选择并确认停止一个无法适配的等待，再前向升级
+  bun --no-env-file run local:account [--admit | --workspace | --reset-password] [--config <私有 JSON>]
   --admit：明确选择原普通用户并验证/设置本人凭证后准入，不绑定管理员
   --workspace：明确选择已准入 owner，有限新增工作区，保留全部原登记
+  --reset-password：明确选择已准入账户，在本机交互终端重置遗忘的口令；撤销该账户全部会话，不改身份与业务数据
 已有配置时 local:init 只复用，不覆盖；首次 --new/--adopt 通过终端输入。
 未登录、缺模型或工作区均独立提示；启动不自动发模型请求。`;
 
@@ -23,7 +25,14 @@ function options(args) {
   const [action, ...rest] = args;
   if (!['init', 'start', 'stop', 'upgrade', 'account'].includes(action))
     throw failure('ARGUMENT_INVALID');
-  const value = { action, mode: null, operation: 'administrator', file: null, help: false };
+  const value = {
+    action,
+    mode: null,
+    operation: 'administrator',
+    stopWaiting: false,
+    file: null,
+    help: false,
+  };
   for (let index = 0; index < rest.length; index++) {
     const flag = rest[index];
     if (flag === '--help' || flag === '-h') value.help = true;
@@ -31,8 +40,10 @@ function options(args) {
       value.file = path.resolve(rest[++index]);
     else if (['--new', '--adopt'].includes(flag) && !value.mode && action === 'init')
       value.mode = flag.slice(2);
+    else if (flag === '--stop-waiting' && action === 'upgrade' && !value.stopWaiting)
+      value.stopWaiting = true;
     else if (
-      ['--admit', '--workspace'].includes(flag) &&
+      ['--admit', '--workspace', '--reset-password'].includes(flag) &&
       value.operation === 'administrator' &&
       action === 'account'
     )
@@ -125,11 +136,19 @@ async function newInstallationInput(mode) {
           name: await ask('原数据库名'),
         },
         authSecret: await ask('原 BETTER_AUTH_SECRET（隐藏输入，不能遗失或替换）', undefined, true),
+        modelProviderEncryptionKey: await ask(
+          'MODEL_PROVIDER_ENCRYPTION_KEY（隐藏输入；已有加密数据必须恢复原密钥）',
+          undefined,
+          true,
+        ),
         origin: await ask('原 APP_ORIGIN / Web origin（隐藏输入）', undefined, true),
         registryFile: (await ask('原登记 JSON 绝对路径；原本无登记才可留空', '', true)) || null,
         model: null,
       });
     }
+    values.harnessCompletionCap = Number(
+      await ask('HARNESS_COMPLETION_CAP（独立单次输出上限）', 4096),
+    );
     const model = await ask(
       mode === 'adopt'
         ? '原部署有模型配置？有请填 y；原本无配置回车'
@@ -143,9 +162,7 @@ async function newInstallationInput(mode) {
         apiKey: await ask('HARNESS_MODEL_API_KEY（隐藏输入；原服务无认证才留空）', '', true),
         maxIterations: Number(await ask('HARNESS_MAX_ITERATIONS', 24)),
         maxTokens: Number(await ask('HARNESS_MAX_TOKENS', 64000)),
-        completionCap: Number(
-          await ask('HARNESS_COMPLETION_CAP（必填：独立单次输出上限；不借用 Run 预算）'),
-        ),
+        completionCap: values.harnessCompletionCap,
         reserveTokens: Number(await ask('HARNESS_CONTEXT_RESERVE_TOKENS', 0)),
       };
       const window = await ask(
@@ -165,7 +182,7 @@ const explanations = {
   CONFIG_INPUT_REQUIRED:
     '首次初始化需在交互终端显式选择 --new 或 --adopt。已有部署请先恢复原配置和登记。',
   CONFIG_INVALID:
-    '私有 JSON 缺少必填项或字段无效；已配置模型必须显式补 model.completionCap（独立单次输出上限），不能借用 maxTokens。核对指南，不要重建配置或替换原安装密钥。',
+    '私有 JSON 缺少必填项或字段无效；按指南显式配置 modelProviderEncryptionKey 和 harnessCompletionCap，保留原安装及密钥。已有加密数据必须恢复原密钥。',
   CONFIG_PERMISSIONS: '配置目录或文件不是当前用户专有；请使用专用私有目录并修复权限。',
   CONFIG_EXISTS: '配置已存在；重用它，不覆盖原值。',
   PORT_IN_USE: '固定端口已被占用；核实原进程归属并按原部署流程停写，不会抢端口或杀未知进程。',
@@ -177,6 +194,13 @@ const explanations = {
     '源码、运行产物或数据库版本不一致；使用显式 local:upgrade，不在普通启动中迁移。',
   UPGRADE_INCOMPLETE:
     '上次升级未完成，写者保持停止；核对备份、账本和失败阶段后显式重试 local:upgrade。',
+  WAITING_INSPECTION_BLOCKED:
+    '存在不能安全适配的批准等待；保持停写，查看私有安装目录中的 waiting-inspection 清点结果，在原合同下处理后显式重试升级。',
+  WAITING_INSPECTION_INVALID:
+    '等待清点结果无效；保持停写，核对目标成套产物和数据库状态，不跳过清点。',
+  WAITING_INSPECTION_NO_BLOCKED: '当前没有可选择的不可适配等待；未停止任何 Run。',
+  WAITING_SELECTION_INVALID: '未明确选择并确认一个不可适配等待；未停止任何 Run。',
+  WAITING_STOP_RECEIPT_INVALID: '未能确认停止回执；保持停写并读取原 Run 状态，不重复提交。',
   DATABASE_UNSUPPORTED:
     '数据库不是完整受支持基线；先备份并人工核对，不猜版本、stamp、重放全量或清库。',
   CONFIG_LOCATION_INVALID: '配置必须位于 checkout 外的专用私有目录，不能把秘密放入代码仓库。',
@@ -199,6 +223,10 @@ const explanations = {
   ACCOUNT_SELECTION_INVALID: '请选择列表中的明确可用序号，不默认认领或输入 owner ID。',
   ACCOUNT_CONFIRMATION_REQUIRED: '未收到明确确认；没有替你选择或授权。',
   ACCOUNT_PASSWORD_MISMATCH: '两次口令不一致；口令未提交。',
+  ACCOUNT_PASSWORD_INVALID:
+    '新口令必须为 8–128 个字符，且不会被 trim；口令未提交，原口令保持有效。',
+  ACCOUNT_RESET_INELIGIBLE:
+    '所选账户不再满足重置条件（需 active、已准入且恰有一个 credential）；没有改动任何事实，请重新读取候选并按维护说明核对。',
   ACCOUNT_INSTALLATION_CHANGED: '安装事实已变化；重新读取并显式维护，不自动重试。',
   CONFIG_VERSION_CONFLICT: '私有配置字节版本已变化；保持原文件并重新读取，不覆盖并发修改。',
   IDENTITY_KEYRING_FILE_INVALID:
@@ -212,7 +240,8 @@ const explanations = {
   WORKSPACE_IDENTITY_CHANGED:
     '登记或 root 物理身份已变化；保持原材料，重新核对，不能复制新 root 代替。',
   WORKSPACE_LOAD_FAILED: '配置已保存但登记未确认加载；账户保留，修复后仅重试 local:account 收尾。',
-  UNAUTHENTICATED: '原口令不符或账户不活跃；不会重置口令或激活原用户，请核对原材料。',
+  UNAUTHENTICATED:
+    '原口令不符或账户不活跃；本流程不重置口令也不激活原用户。已遗忘口令的已准入账户请改用 local:account --reset-password。',
   STATE_CONFLICT: '原 credential、登录名或管理员绑定冲突；保留原身份，按维护说明核对，不自动合并。',
   NOT_READY:
     '账户依赖或提交结果不可核验；核对 IDENTITY_KEYRING_FILE、APP_ORIGIN、IDENTITY_MAIL_PROVIDER、IDENTITY_MAIL_FROM、IDENTITY_MAIL_API_KEY 的显式配置，保留原安装，不重复开户。',
@@ -253,7 +282,20 @@ try {
         stop: runtime.stopInstallation,
         upgrade: runtime.upgradeInstallation,
       };
-      const result = await actions[request.action](file, initialInput);
+      let io;
+      let result;
+      try {
+        if (request.stopWaiting) {
+          const { createAccountTerminalIO } = await import('./account.mjs');
+          io = createAccountTerminalIO();
+        }
+        result = await actions[request.action](
+          file,
+          request.action === 'upgrade' ? { stopWaiting: io } : initialInput,
+        );
+      } finally {
+        io?.close();
+      }
       console.log(
         result.phase === 'prepared'
           ? result.schema.upgradeRequired
@@ -265,11 +307,7 @@ try {
       );
       if (result.phase !== 'stopped') {
         console.log('账户状态请在 Web 检查；首次建号/登录后用 local:account 完成本机登记。');
-        console.log(
-          result.model === 'unconfigured'
-            ? '模型尚未配置，资料任务能力不可用。'
-            : '模型已配置但真实调用未核验；启动没有发出模型请求。',
-        );
+        console.log('用户模型状态请在 Web 检查并设置默认；启动没有发出模型请求。');
         const workspace =
           typeof result.workspace === 'string'
             ? result.workspace

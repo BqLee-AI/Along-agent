@@ -3,10 +3,11 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { RunViewSchema, type GoalResult } from '@along/contracts';
 import { ThreadEventSchema } from '@along/stream-protocol';
-import { collectRunTranscripts } from '../src/lib/conversation-run';
-import { AssistantMarkdown } from '../src/features/conversations/assistant-markdown';
-import { RunStatusPanel, TaskComposer } from '../src/features/conversations/task-views';
-import type { ConversationTask } from '../src/features/conversations/use-conversation-task';
+import { collectRunTranscripts } from '../src/features/conversations/model/conversation-run';
+import { AssistantMarkdown } from '../src/features/conversations/view/assistant-markdown';
+import { RunStatusPanel, TaskComposer } from '../src/features/conversations/view/task-views';
+import type { ConversationTask } from '../src/features/conversations/viewmodel/use-conversation-task';
+import { RunResults } from '../src/features/conversations/view/run-results';
 
 function composerTask(overrides: Partial<ConversationTask> = {}): ConversationTask {
   return {
@@ -20,6 +21,13 @@ function composerTask(overrides: Partial<ConversationTask> = {}): ConversationTa
     workspaceState: 'ready',
     workspaceError: null,
     async readWorkspaces() {},
+    modelProviders: [],
+    defaultSelection: null,
+    modelSelection: null,
+    setModelSelection() {},
+    modelState: 'ready',
+    modelError: null,
+    async readModels() {},
     events: [],
     messages: [],
     runs: [],
@@ -50,6 +58,9 @@ function composerTask(overrides: Partial<ConversationTask> = {}): ConversationTa
     reminderResults: {},
     reminderError: null,
     async confirmReminder() {},
+    documentResults: {},
+    documentError: null,
+    async confirmDocument() {},
     async resume() {},
     async stop() {},
     async refresh() {},
@@ -124,6 +135,7 @@ describe('durable goal result consumer', () => {
     run_id: rid,
     conversation_id: cid,
     execution: 'harness',
+    model_selection: { state: 'legacy_unavailable' },
     status: 'done',
     attempt_id: cid,
     attempt_no: 1,
@@ -132,6 +144,60 @@ describe('durable goal result consumer', () => {
     authorization_revision: 'delegation/1',
     execution_lifecycle: 'request-bound',
     goal_result: result,
+  });
+
+  it('renders the server-frozen model, never the current provider or default', () => {
+    const markup = renderToStaticMarkup(
+      createElement(RunStatusPanel, {
+        task: composerTask({
+          selected: { conversationId: cid, runId: rid },
+          run: {
+            ...run,
+            model_selection: {
+              state: 'available',
+              provider_id: cid,
+              provider_name: '接纳时名称',
+              model_id: 'vendor/完整-ID',
+            },
+          },
+          defaultSelection: { provider_id: receipt, model_id: 'different' },
+        }),
+      }),
+    );
+    expect(markup).toContain('接纳时名称 · vendor/完整-ID');
+    expect(markup).not.toContain('different');
+  });
+
+  it('shows a historical frozen model without a selected run or approvals', () => {
+    const markup = renderToStaticMarkup(
+      createElement(RunResults, {
+        task: composerTask(),
+        conversationId: cid,
+        entries: [
+          {
+            runId: rid,
+            history: {
+              run_id: rid,
+              conversation_id: cid,
+              execution: 'harness',
+              status: 'done',
+              created_at: '2026-11-11T00:00:00.000000Z',
+              ended_at: '2026-11-11T00:00:01.000000Z',
+              model_selection: {
+                state: 'available',
+                provider_id: cid,
+                provider_name: '历史接入',
+                model_id: 'vendor/history',
+              },
+              original: { state: 'legacy_unavailable' },
+            },
+          },
+        ],
+        needsAction: false,
+        showReminderResult: false,
+      }),
+    );
+    expect(markup).toContain('历史接入 · vendor/history');
   });
 
   it('renders the admitted lifecycle immediately from a started event before a RunView read', () => {
@@ -161,6 +227,36 @@ describe('durable goal result consumer', () => {
     );
     expect(openingTag(markup, 'request-bound-lifecycle')).not.toContain('<details');
     expect(markup).not.toContain('data-testid="goal-result"');
+  });
+
+  it('shows server-owned lifecycle from the admitted started event without request-bound warning', () => {
+    const started = ThreadEventSchema.parse({
+      protocol_version: 'v2',
+      seq: 1,
+      type: 'thread.started',
+      payload: {
+        conversation_id: cid,
+        run_id: rid,
+        stream_protocol_version: 'v2',
+        ruleset_id: 'rules-v1',
+        tzdb_version: '2026a',
+        authorization_revision: 'delegation/1',
+        execution_lifecycle: 'server-owned',
+      },
+      request_id: 'lifecycle-render',
+    });
+    const markup = renderToStaticMarkup(
+      createElement(RunStatusPanel, {
+        task: composerTask({
+          selected: { conversationId: cid, runId: rid },
+          streaming: true,
+          transcript: collectRunTranscripts([started]),
+        }),
+      }),
+    );
+    expect(markup).toContain('data-testid="server-owned-lifecycle"');
+    expect(markup).not.toContain('data-testid="request-bound-lifecycle"');
+    expect(markup).toContain('停止请使用停止按钮');
   });
 
   it('keeps each durable goal status independent of Run done and preserves answer, outcomes, clarification and receipts without executing actions', () => {
@@ -343,6 +439,7 @@ describe('composer consumer states', () => {
             status: 'suspended_approval',
             can_resume: true,
             execution: 'harness',
+            model_selection: { state: 'legacy_unavailable' },
             attempt_no: 1,
             attempt_id: 'attempt',
           },

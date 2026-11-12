@@ -2,7 +2,9 @@
 
 > 状态：业务与正式 Harness 存储合同。范围：对话/Run/attempt、只追加事件/有限快照、冻结执行权威与调用接受结果。不包含：任意崩溃自动恢复或通用 exactly-once。TS 长期持有 PostgreSQL 与事实，仓颉组织循环和本次上下文（design/09/11）。
 
-> Run 在 `frozen_context` 独立冻结授权修订、实际能力和 request-bound 生命周期，供 v6 trusted start 与只读投影；`0021_trusted_execution_goals.sql` 增加根列 `agent_runs.goal_result`。旧 Run/pending/快照/模板/hash/accepted result 不迁写或扩权，历史结果保持 NULL；snapshot 仍为2。新委托 SSE 为 v2，legacy/v1 历史保持。server-owned 和文件自主能力见 [design/20](../design/20-goal-scoped-delegation.md)，不由本切片交付。
+> 新委托 Run 在 `frozen_context` 独立冻结授权修订、实际能力、工作区资格和实际 `request-bound` 或 `server-owned` 生命周期，供 v6 trusted start 与只读投影；`0021_trusted_execution_goals.sql` 增加根列 `agent_runs.goal_result`。旧 Run/pending/快照/模板/hash/accepted result 不迁写或扩权，历史结果保持 NULL；snapshot 仍为2。新委托 SSE 为 v2，legacy/v1 历史保持。本页不构成运行验收。
+
+> Proposed 本人模型配置的独立版本引用和冻结显示快照见 [模型接入 schema](model-provider-schema.md)；原 `run_context_policies` 严格结构及旧历史不迁写，具体切换与旧等待处置见 [design/22](../design/22-model-provider-settings.md)。
 
 ## 设计依据
 
@@ -122,8 +124,10 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 - [Required] 创建时冻结 execution、owner/conversation、revision、mode、预算、工具范围、上下文与输入引用；0015 trigger 禁止事后改变，终态 Run 不可改写。
 - [Required] harness suspended_approval 时三个 waiting 引用必须齐备；其他 harness 状态必须为空。TS 锁内进一步验证实际 owner/Run/已接受调用/批准对应关系，引用本身不作授权。
 - [Required] legacy 已接受助手 delta 合并的消息、终态 checkpoint、attempt/Run 同事务；无助手输出的结构化失败不合成助手消息。新 delegation 将真实 GoalResult、其 `answer` 最终消息、终结事件和 Run/attempt 终态同事务提交，不把中间 delta 当最终 answer。取消不能覆盖已提交事实或伪撤销既成效果，失败/断连仍保留真实已接受设置收据及未完成或未知项。
-- 新委托在接纳事务冻结 `frozen_context.authorization_revision='delegation/1'`、`execution_lifecycle='request-bound'` 及 `trustedExecutionContext`；HTTP 必须显式请求该修订且为无 workspace 的 harness。可信上下文含版本1、输入消息引用、UTC received/anchor、可空 continuation/时区来源、实际可空 wall_rules；合格新 Run 冻结 `elapsed_revision:'elapsed/1'` 与空工作区集合。它进入 v6 start 的 system 权威层，legacy `trusted_context:null` 和旧 Run 保留原能力；不从模型或当前部署补写旧事实。
+- 新委托在接纳事务冻结 `frozen_context.authorization_revision='delegation/1'`、实际 `execution_lifecycle`（`request-bound` 或 `server-owned`）、本人 `workspaceGrants` 和 `trustedExecutionContext`；HTTP 须显式请求 delegation harness，可选非空去重 `workspace_ids` 收窄集合。可信上下文只含工作区安全摘要；单次 invocation 绑定的 grant 须属于原集合并通过当前资格复验。legacy 仍使用单 `workspaceGrant/workspaceSummary`，旧 Run 和已冻结空集合不回填；不能从模型或当前部署补写旧事实。
+- 资料调用在既有 invocation `frozen_context` 冻结单目标 grant；直接编辑冻结同 Run 已接受全文来源、相对路径、基线版本、精确新内容与新版本，可信零写后继另绑定前驱。冻结内容、调用身份和接受结果不可变；`document_effects` 是由真实调用和新读证据组成的只读投影，不是新的效果账。
 - `0021` 在0020之后新增根 `goal_result jsonb NULL`；`0022` 将非空结果约束收紧为明确为真，不能以缺失 legacy 字段产生的 SQL NULL 通过 CHECK。非空值必须是 object、Run 冻结 delegation/1、status 为 done/failed/cancelled，目标状态属于 completed/partial/blocked/cancelled/unknown。strict 逐项 shape、收据归属/成功状态和真实偏好事实由 TS 校验；DB 列本身不证明目标达成。RunView 投影冻结授权/生命周期与根结果，不泄漏完整 trusted context。
+- 合格新 Run 冻结创建撞名目标恢复能力；可选目标结果声明记录用户消息来源、零写撞名、后续创建和独立新读的引用，不新增目标表或改写调用账。服务端验证归属、顺序、冻结资格与效果事实；声明所表达的自然语言目标关系仍由模型理解，来源引用不构成语义证明。
 - 取消候选由服务端在目标结果事务中生成并随终态提交；可信接续读取同 owner、同会话前驱的该证据，按用户所选序号定位历史展示项，并在写入前重核目标当前状态、时间和时区。未选项变化不改变已展示序号；缺少证据的历史 Run 不回填。
 
 ### 提醒请求日期来源（#92）
@@ -164,21 +168,21 @@ snapshot2 原字段/集合不变，typed views/context_slice 不写入快照正�
 
 ### 用途
 
-[Required] 同 Run 的一次有效执行；批准挂起结束当前 attempt，显式恢复创建递增 attempt。每次动作校验最新 running attempt 与实际 Run/权限/取消；旧 pipe 不因持有 UUID 而恢复执行权。存在 lease 字段不代表已实现通用租约或任意崩溃 kill/resume。
+[Required] 同 Run 的一次有效执行；批准挂起结束当前 attempt，显式恢复创建递增 attempt。每次动作校验最新 running attempt 与实际 Run/权限/取消；server-owned 还在持有同一 PostgreSQL session advisory lock 的事务中比对该 attempt 的 token。旧 pipe 不因持有 UUID 而恢复执行权；这不是通用租约或崩溃自动重放。
 
 ### 字段
 
-| 字段               | 类型          | 约束                                                     | 说明                                     |
-| ------------------ | ------------- | -------------------------------------------------------- | ---------------------------------------- |
-| `id`               | `uuid`        | primary key                                              | attempt ID                               |
-| `owner_id`         | `uuid`        | not null                                                 | 所属用户，查询必带                       |
-| `run_id`           | `uuid`        | not null, references `agent_runs(id)` on delete restrict | 所属 run                                 |
-| `attempt_no`       | `integer`     | not null                                                 | 第几次尝试，从 1 递增                    |
-| `lease_token`      | `uuid`        | nullable                                                 | fencing 租约令牌；Scheduler claim 持有者 |
-| `lease_expires_at` | `timestamptz` | nullable                                                 | 租约过期时间                             |
-| `status`           | `text`        | not null, default `'running'`                            | 按 `running/done/failed/fenced_out` 约束 |
-| `created_at`       | `timestamptz` | not null, default `now()`                                | 创建时间                                 |
-| `ended_at`         | `timestamptz` | nullable                                                 | 结束时间                                 |
+| 字段               | 类型          | 约束                                                     | 说明                                                     |
+| ------------------ | ------------- | -------------------------------------------------------- | -------------------------------------------------------- |
+| `id`               | `uuid`        | primary key                                              | attempt ID                                               |
+| `owner_id`         | `uuid`        | not null                                                 | 所属用户，查询必带                                       |
+| `run_id`           | `uuid`        | not null, references `agent_runs(id)` on delete restrict | 所属 run                                                 |
+| `attempt_no`       | `integer`     | not null                                                 | 第几次尝试，从 1 递增                                    |
+| `lease_token`      | `uuid`        | nullable                                                 | server-owned attempt 的持锁执行 token；旧 attempt 可为空 |
+| `lease_expires_at` | `timestamptz` | nullable                                                 | 保留字段，不作为 server-owned 执行资格                   |
+| `status`           | `text`        | not null, default `'running'`                            | 按 `running/done/failed/fenced_out` 约束                 |
+| `created_at`       | `timestamptz` | not null, default `now()`                                | 创建时间                                                 |
+| `ended_at`         | `timestamptz` | nullable                                                 | 结束时间                                                 |
 
 ### 约束与索引
 
@@ -219,7 +223,7 @@ snapshot2 原字段/集合不变，typed views/context_slice 不写入快照正�
 
 - [Required] 只追加，禁 `UPDATE`/`DELETE`。
 - [Required] `payload` 不存敏感值原文；tool 参数摘要脱敏。
-- [Required] 新写入/执行仅 `harness/v5`、snapshot `version=2`；harness_snapshot 保存已接受消息/工具结果引用、usage/next_call_no/等待引用，不保存 raw args、provider body、密钥或完整推理链。真实模型增量沿既有message.delta持久，不新建数据表。TS 验证同 owner/Run、真实接受事实与单调进度；旧 task snapshot1 的限定读取迁移见本篇 R1 节。
+- [Required] 新写入/执行使用 `harness/v6`、snapshot `version=2`；harness_snapshot 保存已接受消息/工具结果引用、usage/next_call_no/等待引用，不保存 raw args、provider body、密钥或完整推理链。真实模型增量沿既有 message.delta 持久，不新建数据表。TS 验证同 owner/Run、真实接受事实与单调进度；旧 task snapshot1 的限定读取迁移见本篇 R1 节。
 - [Required] 同 conversation 先持 NO KEY UPDATE 锁再分配游标，并保持至提交，避免小游标晚提交被客户端永久漏掉，并与终态消息插入取得的外键 KEY SHARE 兼容。内部快照不交给外部 ThreadEventSchema；GET/同入站键只读不启动执行。
 
 ## R2-B 路由策略与内部执行记录（已实现，默认 off，#88）
@@ -279,22 +283,22 @@ snapshot2 原字段/集合不变，typed views/context_slice 不写入快照正�
 
 [Required] tools拥有稳定逻辑调用身份及接受结果（0014）。不以参数、request或attempt定义身份，不把只追加审计当结果账；无短TTL/自动键复用。
 
-| 字段                                                    | 类型/约束                             | 用途                                                                             |
-| ------------------------------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------- |
-| invocation_id                                           | uuid PK                               | TS生成的持久调用引用                                                             |
-| owner_id / conversation_id / run_id                     | uuid not null                         | 逻辑归属，调用conversations公共用例验证；不跨模块建强FK                          |
-| call_key                                                | text，1–200字符                       | Run内动作slot；unique(run_id,call_key)                                           |
-| first_attempt_id / first_request_id                     | uuid / text not null                  | 首次预约追踪，重交不改身份                                                       |
-| tool_id / args_hash / args_bytes                        | text / 64位小写SHA256 / 非负integer   | domain版本化的原始JSON规范摘要与UTF8长度；不存raw args                           |
-| execution_kind                                          | local / read_only / non_transactional | 由可信TS绑定，不采纳远程自报风险                                                 |
-| frozen_context                                          | jsonb object not null                 | 首次时间/规则；workspace调用冻精确grant，apply另冻documentApprovalId             |
-| state                                                   | reserved / unknown / completed        | 本地reserved→completed；非事务reserved→unknown→completed；许可前denied可直接完成 |
-| outcome_kind                                            | nullable封闭集                        | success / approval_pending / clarification / time_error / denied / failed        |
-| result_version / accepted_result                        | nullableinteger/jsonb                 | completed时版本1和非空object；DB上限262144字节，应用JSON序列化上限240000字节     |
-| approval_id                                             | nullableuuid逻辑引用                  | 仅approval_pending有值；不唯一，不复制批准正文                                   |
-| accepted_attempt_id / accepted_request_id / accepted_at | nullableuuid/text/timestamptz         | 首次接受追踪，completed时全部非空                                                |
-| evidence_ref                                            | nullabletext                          | 非事务确证的安全证据引用，不存原始provider响应                                   |
-| created_at                                              | timestamptz default now()             | 预约时间；index(owner_id,run_id,created_at)                                      |
+| 字段                                                    | 类型/约束                             | 用途                                                                                                  |
+| ------------------------------------------------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| invocation_id                                           | uuid PK                               | TS生成的持久调用引用                                                                                  |
+| owner_id / conversation_id / run_id                     | uuid not null                         | 逻辑归属，调用conversations公共用例验证；不跨模块建强FK                                               |
+| call_key                                                | text，1–200字符                       | Run内动作slot；unique(run_id,call_key)                                                                |
+| first_attempt_id / first_request_id                     | uuid / text not null                  | 首次预约追踪，重交不改身份                                                                            |
+| tool_id / args_hash / args_bytes                        | text / 64位小写SHA256 / 非负integer   | domain版本化的原始JSON规范摘要与UTF8长度；不存raw args                                                |
+| execution_kind                                          | local / read_only / non_transactional | 由可信TS绑定，不采纳远程自报风险                                                                      |
+| frozen_context                                          | jsonb object not null                 | 首次时间/规则；workspace调用冻单目标精确grant，直接编辑冻结精确计划，批准 apply 冻 documentApprovalId |
+| state                                                   | reserved / unknown / completed        | 本地reserved→completed；非事务reserved→unknown→completed；许可前denied可直接完成                      |
+| outcome_kind                                            | nullable封闭集                        | success / approval_pending / clarification / time_error / denied / failed                             |
+| result_version / accepted_result                        | nullableinteger/jsonb                 | completed时版本1和非空object；DB上限262144字节，应用JSON序列化上限240000字节                          |
+| approval_id                                             | nullableuuid逻辑引用                  | 仅approval_pending有值；不唯一，不复制批准正文                                                        |
+| accepted_attempt_id / accepted_request_id / accepted_at | nullableuuid/text/timestamptz         | 首次接受追踪，completed时全部非空                                                                     |
+| evidence_ref                                            | nullabletext                          | 非事务确证的安全证据引用，不存原始provider响应                                                        |
+| created_at                                              | timestamptz default now()             | 预约时间；index(owner_id,run_id,created_at)                                                           |
 
 [Required] reserved/unknown不得带结果字段；unknown只适用于non_transactional。身份/摘要/冻结上下文建后不可改，DB trigger拒绝非法迁移、completed改写及删除。task批准保存ID、fireAt/hash/版本材料；document提议保存`{kind:"document_approval_receipt",approval_id,presentation_hash}`，经approvals公共冻结receipt恢复完整结果，不复制批准正文到接受账。终态不使旧调用重新创建批准；新引用才产生新读取观察。
 

@@ -1,1 +1,1 @@
-export { default } from '@/features/account/AccountLoading';
+export { default } from '@/features/account/view/AccountLoading';

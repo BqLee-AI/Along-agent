@@ -1,5 +1,5 @@
 import type { PoolClient } from 'pg';
-import { GoalResultSchema } from '@along/contracts';
+import { GoalResultSchema, workspaceGrantSchema, type WorkspaceGrant } from '@along/contracts';
 import type { TimeContext } from '../time/context.js';
 import type { ToolContext } from '../tools/contracts.js';
 import {
@@ -21,8 +21,22 @@ type Frozen = {
   confirmedTimezone?: string | null;
   foldChoice?: 'first' | 'second' | 'none';
   reminderDateSource?: { inputMessageId?: string };
+  workspaceGrants?: WorkspaceGrant[];
+  createdArtifactReadRevision?: 'owner-created/1';
   trustedExecutionContext?: { continuation?: { run_id: string } | null };
 };
+function hasWorkspaceScope(
+  run: { tools_allowlist: string[]; frozen_context: Frozen },
+  ownerId: string,
+): boolean {
+  const grants = workspaceGrantSchema.array().safeParse(run.frozen_context?.workspaceGrants);
+  return (
+    run.tools_allowlist.includes('workspace_read') &&
+    grants.success &&
+    grants.data.length > 0 &&
+    grants.data.every((grant) => grant.owner_id === ownerId)
+  );
+}
 
 // The caller holds the conversation admission lock. Only immutable, completed
 // predecessor results are read; no Run lock is taken out of attempt order.
@@ -32,7 +46,7 @@ export async function acceptTargetContinuation(
     sourceRunId: string;
     inputMessageId: string;
     timeContext: TimeContext;
-    kind?: 'target_selection' | 'time' | 'timezone';
+    kind?: 'target_selection' | 'destination' | 'time' | 'timezone';
     sourceInvocationId?: string;
   },
 ) {
@@ -57,34 +71,65 @@ export async function acceptTargetContinuation(
   if (prior.length !== 1 || prior[0]!.id !== input.sourceRunId) return null;
   const run = prior[0]!;
   const goal = GoalResultSchema.safeParse(run.goal_result);
+  const kind = input.kind ?? 'target_selection';
+  const workspaceScope = hasWorkspaceScope(run, input.ownerId);
+  const reminderScope =
+    run.tools_allowlist.includes('get_task') && run.tools_allowlist.includes('cancel_reminder');
+  const eligible =
+    kind === 'destination'
+      ? workspaceScope
+      : kind === 'target_selection'
+        ? workspaceScope || reminderScope
+        : reminderScope;
   if (
     run.status !== 'done' ||
     run.frozen_context?.authorization_revision !== 'delegation/1' ||
-    !run.tools_allowlist.includes('get_task') ||
-    !run.tools_allowlist.includes('cancel_reminder') ||
+    !eligible ||
     !goal.success ||
     !['blocked', 'partial'].includes(goal.data.status) ||
-    goal.data.clarification?.kind !== (input.kind ?? 'target_selection')
+    goal.data.clarification?.kind !== kind
   )
     return null;
-  const candidates = await client.query<{ id: string }>(
-    `SELECT r.id FROM agent_runs r
+  const candidates = await client.query<{
+    id: string;
+    frozen_context: Frozen;
+    tools_allowlist: string[];
+    kind: string;
+  }>(
+    `SELECT r.id,r.frozen_context,r.tools_allowlist,r.goal_result->'clarification'->>'kind' AS kind
+    FROM agent_runs r
     WHERE r.owner_id=$1 AND r.conversation_id=$2 AND r.status='done'
       AND r.frozen_context->>'authorization_revision'='delegation/1'
-      AND r.tools_allowlist ? 'get_task' AND r.tools_allowlist ? 'cancel_reminder'
       AND r.goal_result->>'status' IN ('blocked','partial')
-      AND r.goal_result->'clarification'->>'kind'=$3
+      AND r.goal_result->'clarification'->>'kind' = ANY($3::text[])
       AND NOT EXISTS (SELECT 1 FROM agent_runs n WHERE n.owner_id=$1 AND n.conversation_id=$2
         AND (n.frozen_context->'trustedExecutionContext'->'continuation'->>'run_id'=r.id::text
           OR n.frozen_context->'reminderDateSource'->>'sourceRunId'=r.id::text))`,
-    [input.ownerId, input.conversationId, input.kind ?? 'target_selection'],
+    [
+      input.ownerId,
+      input.conversationId,
+      kind === 'target_selection' || kind === 'destination'
+        ? ['target_selection', 'destination']
+        : [kind],
+    ],
   );
-  if (candidates.rows.length !== 1 || candidates.rows[0]!.id !== run.id) return null;
+  const eligibleCandidates = candidates.rows.filter((candidate) => {
+    const reminder =
+      candidate.tools_allowlist.includes('get_task') &&
+      candidate.tools_allowlist.includes('cancel_reminder');
+    return candidate.kind === 'destination'
+      ? hasWorkspaceScope(candidate, input.ownerId)
+      : candidate.kind === 'target_selection'
+        ? hasWorkspaceScope(candidate, input.ownerId) || reminder
+        : reminder;
+  });
+  if (eligibleCandidates.length !== 1 || eligibleCandidates[0]!.id !== run.id) return null;
   const previousContinuation = run.frozen_context.trustedExecutionContext?.continuation;
   const originalId =
     previousContinuation && 'original_input_message_id' in previousContinuation
       ? String(previousContinuation.original_input_message_id)
-      : run.frozen_context.reminderDateSource?.inputMessageId;
+      : (run.frozen_context.reminderDateSource?.inputMessageId ??
+        (workspaceScope ? run.input_message_id : undefined));
   if (!originalId) return null;
   const original = (
     await client.query<{ content: string }>(
@@ -127,6 +172,10 @@ export async function acceptTargetContinuation(
       source_result: sourceResult,
     },
     anchor: run.frozen_context.anchorReceivedAtUtc,
+    ...(workspaceScope ? { workspaceGrants: run.frozen_context.workspaceGrants! } : {}),
+    workspaceCreateAllowed: run.tools_allowlist.includes('workspace_create'),
+    createdArtifactReadAllowed:
+      run.frozen_context.createdArtifactReadRevision === 'owner-created/1',
   };
 }
 
@@ -215,6 +264,7 @@ export async function readContinuationReceipts(
         requestId: '',
         allowlist: row.tools_allowlist,
         authorizationRevision: 'delegation/1',
+        ...(f.workspaceGrants ? { workspaceGrants: f.workspaceGrants } : {}),
         confirmedTimezone: f.confirmedTimezone ?? null,
         anchorReceivedAtUtc: f.anchorReceivedAtUtc ?? '',
         receivedAtUtc: f.receivedAtUtc ?? '',

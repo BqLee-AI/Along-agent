@@ -3,15 +3,18 @@ import type { Pool } from 'pg';
 import { handleRequest, type AppDeps } from './app.js';
 import { createActorResolver } from './auth.js';
 import { loadTimeContext } from '../modules/time/context.js';
-import type { HarnessServices } from '../modules/conversations/harness-process.js';
+import type { ConversationDeps } from '../modules/conversations/contracts.js';
 import type { RoutingRuntime } from '../modules/conversations/routing/index.js';
+import type { RunDriver } from '../modules/conversations/run-driver.js';
 
 export interface ServeOptions {
   port?: number;
   tzdbVersion?: string;
   pool?: Pool | null;
-  harness?: HarnessServices | null;
+  harness?: ConversationDeps['harness'];
   routing?: RoutingRuntime;
+  runDriver?: RunDriver;
+  modelTransport?: ConversationDeps['modelTransport'];
 }
 
 export function serve(options: ServeOptions = {}): Server {
@@ -26,6 +29,8 @@ export function serve(options: ServeOptions = {}): Server {
     timeContext: loadTimeContext(tzdbVersion),
     harness: options.harness ?? null,
     routing: options.routing,
+    runDriver: options.runDriver,
+    modelTransport: options.modelTransport,
   };
   const server = createServer((req, res) => {
     void handleRequest(req, res, deps).catch(() => {

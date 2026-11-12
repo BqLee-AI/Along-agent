@@ -7,20 +7,130 @@
   --font-mono: ui-monospace, 'Cascadia Code', Consolas, monospace;
 }
 
+/* 工具型产品尺度：小圆角、实线 1px 边框、近黑墨色、无放大动效。 */
+/* 主题类同时出现在 html 与 Provider 容器上，叠加类名以压过组件库的容器级令牌。 */
+.lumen-ui.lumen-ui.lumen-ui {
+  --radius: 8px;
+  --control-radius: 6px;
+  --control-press-scale: 1;
+  --control-thumb-scale: 1;
+  --control-motion-duration: 120ms;
+  --background: #fff;
+  --foreground: #171717;
+  --muted: #fafafa;
+  --secondary: #f5f5f5;
+  --brand: #171717;
+  --primary-foreground: #fff;
+  --secondary-foreground: #52525b;
+  --muted-foreground: #8f8f8f;
+  --border: #ebebeb;
+  --separator: #ebebeb;
+  --input: #d4d4d8;
+  --brand-ink: #1f6f4a;
+}
+
+/* 深色：取自 DeepSeek 的黑：主区 #151517，侧栏与面板略亮，输入框 #2c2c2e，带极轻的冷调。 */
+.lumen-ui.lumen-ui.lumen-ui.dark {
+  --background: #151517;
+  --foreground: #f9fafb;
+  --muted: #1b1b1c;
+  --secondary: #2c2c2e;
+  --brand: #f9fafb;
+  --primary-foreground: #151517;
+  --secondary-foreground: #adb2b8;
+  --muted-foreground: #81858c;
+  --border: #38383a;
+  --separator: #262628;
+  --input: #38383a;
+  --popover: #222224;
+  --brand-ink: #47b585;
+}
+
+/* 桌面端控件采用紧凑尺寸；触控屏保持 46px 的组件库默认值。 */
+@media (min-width: 1024px) {
+  [data-slot='button'] {
+    height: 2rem;
+    padding-inline: 0.75rem;
+    gap: 0.375rem;
+    font-size: 13px;
+  }
+  [data-slot='button'].size-11\.5 {
+    width: 2rem;
+    padding-inline: 0;
+  }
+  [data-slot='input-surface'],
+  [data-slot='select-trigger'] {
+    min-height: 2rem;
+    height: 2rem;
+    font-size: 13px;
+  }
+}
+
+/* 输入框表面由自身白底和边框表达，组件库的材质叠层会在其上罩一层灰色渐变。 */
+[data-slot='prompt-input'] > .lumen-material-focus {
+  display: none;
+}
+/* 组件库用 ::before 画边缘高光，悬停和聚焦时会变色；输入栏边缘固定，由自身的环形阴影表达。 */
+[data-slot='prompt-input']::before {
+  display: none;
+}
+
+/* 背景模糊在过渡中逐帧重算，实测会掉帧：设置面板打开时页面与遮罩不模糊，面板自身仅在静止后模糊。 */
+:root:has([data-testid='settings-panel'])
+  *:not([data-testid='settings-panel'], [data-testid='settings-panel'] *) {
+  backdrop-filter: none !important;
+  box-shadow: none !important;
+  border-color: transparent !important;
+  outline-color: transparent !important;
+}
+[data-testid='settings-panel']:not([data-settled]),
+[data-testid='settings-panel']:not([data-settled]) * {
+  backdrop-filter: none !important;
+}
+[data-testid='settings-panel']:not([data-settled]) {
+  background-color: color-mix(in oklab, var(--popover) 92%, transparent) !important;
+}
+.dark [data-testid='settings-panel'] {
+  background-color: color-mix(in oklab, var(--popover) 94%, transparent) !important;
+}
+.dark [data-testid='settings-panel'] > aside {
+  background-color: rgb(255 255 255 / 0.03);
+}
+.theme-switching *,
+.theme-switching *::before,
+.theme-switching *::after {
+  backdrop-filter: none !important;
+  transition: none !important;
+}
+/* 工作台自己管理滚动。弹层解除滚动锁定的瞬间，文档会短暂出现滚动条，把整个页面挤窄 8px 再弹回，所以这里固定为不滚动。 */
+:root:has([data-testid='workspace-shell']),
+:root:has([data-testid='workspace-shell']) body {
+  overflow: hidden !important;
+}
+/* 面板容器只是焦点陷阱的落点，不是可操作控件，不需要聚焦环。 */
+[data-testid='settings-panel']:focus,
+[data-testid='settings-panel']:focus-visible {
+  outline: none !important;
+}
+
 @layer base {
   body {
-    @apply m-0 bg-background font-sans text-base leading-7 text-foreground antialiased;
+    @apply m-0 bg-background font-sans text-sm leading-6 text-foreground antialiased;
+    font-feature-settings:
+      'cv11' 1,
+      'ss01' 1;
   }
   h1,
   h2,
   h3 {
     text-wrap: balance;
+    letter-spacing: -0.011em;
   }
   h2 {
-    @apply text-lg font-semibold leading-7;
+    @apply text-base font-semibold leading-6;
   }
   h3 {
-    @apply text-base font-medium leading-6;
+    @apply text-sm font-medium leading-5;
   }
   p,
   li,
@@ -30,6 +140,6 @@
     overflow-wrap: anywhere;
   }
   pre {
-    @apply whitespace-pre-wrap font-mono text-base leading-7;
+    @apply whitespace-pre-wrap font-mono text-[13px] leading-5;
   }
 }

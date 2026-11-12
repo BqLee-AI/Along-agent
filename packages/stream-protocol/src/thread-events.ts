@@ -191,6 +191,20 @@ const goalResult = z
             description: goalText,
             status: z.enum(['achieved', 'not_done', 'blocked', 'unknown']),
             receipt_refs: z.array(uuidSchema).max(64),
+            create_resolution: z
+              .object({
+                source_message_id: uuidSchema,
+                source_quote: goalText,
+                zero_write_invocation_ids: z
+                  .array(uuidSchema)
+                  .min(1)
+                  .max(64)
+                  .refine((refs) => new Set(refs).size === refs.length),
+                created_invocation_id: uuidSchema,
+                read_invocation_id: uuidSchema,
+              })
+              .strict()
+              .optional(),
           })
           .strict(),
       )
@@ -203,7 +217,10 @@ const goalResult = z
       })
       .strict()
       .nullable(),
-    answer: goalText,
+    answer: z
+      .string()
+      .min(1)
+      .max(1024 * 1024),
   })
   .strict();
 function delegationEnvelope<T extends ThreadEventType, P extends z.ZodTypeAny>(
@@ -226,7 +243,7 @@ export const DelegationThreadEventSchema = z.discriminatedUnion('type', [
     ThreadStartedPayloadSchema.extend({
       stream_protocol_version: z.literal('v2'),
       authorization_revision: z.literal('delegation/1'),
-      execution_lifecycle: z.literal('request-bound'),
+      execution_lifecycle: z.enum(['request-bound', 'server-owned']),
     }),
   ),
   delegationEnvelope(z.literal('message.delta'), MessageDeltaPayloadSchema),

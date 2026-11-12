@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { timingSafeEqual } from 'node:crypto';
 import type { Pool } from 'pg';
 import { createActorResolver, csrfTokenFor, verifyCsrf, type ActorResolver } from './auth.js';
 import {
@@ -18,9 +19,15 @@ import { handleWorkspaceRoute } from '../modules/workspaces/routes.js';
 import { handleConversationRoute } from '../modules/conversations/routes.js';
 import { handleTaskRoute } from '../modules/tasks/routes.js';
 import { handleBriefRoute } from '../modules/brief/routes.js';
+import {
+  handleModelProviderRoute,
+  isModelProviderPath,
+  isModelProviderWritePath,
+} from '../modules/model-providers/routes.js';
 import { loadTimeContext, type TimeContext } from '../modules/time/context.js';
-import type { HarnessServices } from '../modules/conversations/harness-process.js';
 import type { RoutingRuntime } from '../modules/conversations/routing/index.js';
+import type { RunDriver } from '../modules/conversations/run-driver.js';
+import type { ConversationDeps } from '../modules/conversations/contracts.js';
 import { createAccountService, type AccountService } from '../modules/identity/account-service.js';
 import { handleAccountRoute, isKnownAccountRoute } from '../modules/identity/routes.js';
 import {
@@ -34,8 +41,10 @@ export interface AppDeps {
   resolveActor?: ActorResolver;
   tzdbVersion?: string;
   timeContext?: TimeContext;
-  harness?: HarnessServices | null;
+  harness?: ConversationDeps['harness'];
   routing?: RoutingRuntime;
+  runDriver?: RunDriver;
+  modelTransport?: ConversationDeps['modelTransport'];
   accountService?: AccountService;
   invitedAccountService?: InvitedAccountService;
 }
@@ -119,6 +128,7 @@ async function dispatchRequest(
   req.headers['x-request-id'] = requestId;
   const url = new URL(req.url ?? '/', 'http://localhost');
   const { pathname } = url;
+  if (isModelProviderPath(pathname)) res.setHeader('Cache-Control', 'no-store');
   const deps: AppDeps = isAppDeps(opts) ? opts : { pool: null, tzdbVersion: opts.tzdbVersion };
   const tzdbVersion = deps.tzdbVersion;
   const timeContext = deps.timeContext ?? loadTimeContext(tzdbVersion);
@@ -161,7 +171,8 @@ async function dispatchRequest(
       pathname.startsWith('/api/v1/document-approvals/') ||
       pathname.startsWith('/api/v1/conversations/') ||
       pathname === '/api/v1/tasks' ||
-      pathname.startsWith('/api/v1/tasks/'));
+      pathname.startsWith('/api/v1/tasks/') ||
+      isModelProviderPath(pathname));
   if (protectedPost) {
     const actor = await resolveActor(req);
     if (!actor) {
@@ -176,7 +187,8 @@ async function dispatchRequest(
       /^\/api\/v1\/conversations\/[^/]+\/runs\/[^/]+\/actions\/(?:cancel|resume)$/.test(pathname) ||
       /^\/api\/v1\/approvals\/[^/]+\/actions\/(?:confirm|reject|revise)$/.test(pathname) ||
       /^\/api\/v1\/document-approvals\/[^/]+\/actions\/(?:confirm|reject)$/.test(pathname) ||
-      /^\/api\/v1\/tasks\/[^/]+\/actions\/cancel$/.test(pathname);
+      /^\/api\/v1\/tasks\/[^/]+\/actions\/cancel$/.test(pathname) ||
+      isModelProviderWritePath(pathname);
     if (!writeRoute) {
       closeUnreadRequest(req, res);
       sendJson(res, 404, failEnvelope(notFound(), requestId), requestId);
@@ -186,6 +198,35 @@ async function dispatchRequest(
       closeUnreadRequest(req, res);
       sendJson(res, 403, failEnvelope(csrfMismatch(), requestId), requestId);
       return;
+    }
+    if (isModelProviderPath(pathname)) {
+      const socket = req.socket;
+      const loopback = ['127.0.0.1', '::1', '::ffff:127.0.0.1'];
+      const localConnection =
+        loopback.includes(socket.remoteAddress ?? '') &&
+        loopback.includes(socket.localAddress ?? '');
+      const tls = 'encrypted' in socket && socket.encrypted === true;
+      const expected = process.env.ALONG_LOCAL_MODEL_PROXY_TOKEN;
+      const supplied = req.headers['x-along-local-model-proxy'];
+      const localProxy =
+        typeof expected === 'string' &&
+        /^[0-9a-f]{64}$/.test(expected) &&
+        typeof supplied === 'string' &&
+        /^[0-9a-f]{64}$/.test(supplied) &&
+        timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(supplied, 'hex'));
+      if (!tls && !localConnection && !localProxy) {
+        closeUnreadRequest(req, res);
+        sendJson(
+          res,
+          403,
+          failEnvelope(
+            new HttpError(403, 403, 'FORBIDDEN', 'secure connection required'),
+            requestId,
+          ),
+          requestId,
+        );
+        return;
+      }
     }
     try {
       // Content-Length is only an early rejection hint. Chunked requests and
@@ -260,6 +301,16 @@ async function dispatchRequest(
     return;
   }
 
+  if (isModelProviderPath(pathname)) {
+    await handleModelProviderRoute(req, res, url, {
+      pool: deps.pool,
+      resolveActor,
+      body,
+      modelTransport: deps.modelTransport,
+    });
+    return;
+  }
+
   if (pathname === '/api/v1/workspaces') {
     if (await handleWorkspaceRoute(req, res, url, { resolveActor })) return;
   }
@@ -318,6 +369,8 @@ async function dispatchRequest(
         timeContext,
         harness: deps.harness,
         routing: deps.routing,
+        runDriver: deps.runDriver,
+        modelTransport: deps.modelTransport,
       });
       if (handled) return;
     }

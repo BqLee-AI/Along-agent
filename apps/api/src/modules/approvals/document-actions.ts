@@ -12,8 +12,9 @@ import {
   validationError,
 } from '../../http/errors.js';
 import { lockDocumentApprovalRun } from '../conversations/tool-binding.js';
+import { terminateRejectedDocumentRun } from '../conversations/reject-document.js';
 import { validateWorkspaceGrant } from '../workspaces/service.js';
-import { getDocumentApproval } from './document-repository.js';
+import { getDocumentApproval } from './document-query.js';
 import { buildDocumentPresentation, documentContentVersion } from './document-rules.js';
 
 interface DecisionRow {
@@ -66,6 +67,7 @@ async function decideDocumentApproval(
     ownerId,
     conversationId: located.conversation_id,
     runId: located.run_id,
+    workspaceGrant: located.workspace_grant,
   });
   const row = await getDocumentApproval(client, ownerId, approvalId, true);
   const requestHash = documentContentVersion(
@@ -154,5 +156,13 @@ async function decideDocumentApproval(
       approvalId,
       decision,
     ]);
+  if (action === 'reject' && !duplicate)
+    await terminateRejectedDocumentRun(client, {
+      ownerId,
+      conversationId: row.conversation_id,
+      runId: row.run_id,
+      approvalId,
+      requestId: body.idempotency_key,
+    });
   return { approval_id: approvalId, status: decision, duplicate };
 }

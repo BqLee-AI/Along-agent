@@ -1,3 +1,4 @@
+import { configureTestModel } from '../helpers/model-selection.js';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import type { GoalResult } from '@along/contracts';
@@ -30,9 +31,34 @@ afterAll(async () => {
   await db?.close();
 });
 
+interface DocumentGrant {
+  workspace_id: string;
+  owner_id: string;
+  registration_digest: string;
+  root_identity: string;
+  output_directories?: Array<{ path: string; identity: string }>;
+}
+
+function documentGrant(ownerId: string): DocumentGrant {
+  return {
+    workspace_id: 'documents',
+    owner_id: ownerId,
+    registration_digest: 'a'.repeat(64),
+    root_identity: 'root',
+  };
+}
+
 async function fixture(
   allowlist = ['get_task', 'cancel_reminder'],
-  options: { running?: boolean; noGoal?: boolean; scope?: boolean; text?: string } = {},
+  options: {
+    running?: boolean;
+    noGoal?: boolean;
+    scope?: boolean;
+    text?: string;
+    clarificationKind?: 'target_selection' | 'destination';
+    workspaceGrants?: (ownerId: string) => DocumentGrant[];
+    omitReminderDateSource?: boolean;
+  } = {},
 ) {
   const ownerId = randomUUID(),
     conversationId = randomUUID(),
@@ -43,6 +69,7 @@ async function fixture(
     [ownerId, `${ownerId}@target.test`],
   );
   await admitTestUser(db.pool, ownerId);
+  await configureTestModel(db.pool, ownerId, 'test');
   await db.pool.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
     conversationId,
     ownerId,
@@ -54,7 +81,7 @@ async function fixture(
   const goal = {
     status: 'blocked',
     outcomes: [{ description: '取消提醒', status: 'blocked', receipt_refs: [] }],
-    clarification: { kind: 'target_selection', question: '哪一个？' },
+    clarification: { kind: options.clarificationKind ?? 'target_selection', question: '哪一个？' },
     answer: '请选择提醒。',
   };
   await db.pool.query(
@@ -68,7 +95,10 @@ async function fixture(
         authorization_revision: 'delegation/1',
         ...(options.scope ? { cancellationScopeRevision: 'scope/1' } : {}),
         anchorReceivedAtUtc: '2026-11-03T00:00:00Z',
-        reminderDateSource: { version: 1, kind: 'new', inputMessageId: messageId },
+        ...(options.omitReminderDateSource
+          ? {}
+          : { reminderDateSource: { version: 1, kind: 'new', inputMessageId: messageId } }),
+        ...(options.workspaceGrants ? { workspaceGrants: options.workspaceGrants(ownerId) } : {}),
       }),
       messageId,
       options.noGoal || options.running ? null : JSON.stringify(goal),
@@ -710,5 +740,159 @@ test('accepted effects are carried as receipts and must remain in the successor 
     expect(await validateGoalResult(client, nextCtx, preserved)).toEqual(preserved);
   } finally {
     client.release();
+  }
+});
+
+test.each(['target_selection', 'destination'] as const)(
+  'continues an owned document $kind gap with its frozen scope',
+  async (kind) => {
+    const f = await fixture(['workspace_read'], {
+      text: '修改这份资料',
+      clarificationKind: kind,
+      workspaceGrants: (ownerId) => [documentGrant(ownerId)],
+      omitReminderDateSource: true,
+    });
+    const grant = documentGrant(f.ownerId);
+    const inputMessageId = randomUUID();
+    await db.pool.query(
+      "INSERT INTO messages(id,owner_id,conversation_id,role,content) VALUES($1,$2,$3,'user','第二个')",
+      [inputMessageId, f.ownerId, f.conversationId],
+    );
+    const client = await db.pool.connect();
+    try {
+      const accepted = await acceptTargetContinuation(client, {
+        ...f,
+        inputMessageId,
+        sourceRunId: f.runId,
+        timeContext,
+        kind,
+      });
+      expect(accepted?.workspaceGrants).toEqual([grant]);
+      expect(accepted?.workspaceCreateAllowed).toBe(false);
+      expect(accepted?.continuation).toMatchObject({
+        run_id: f.runId,
+        original_input_message_id: f.messageId,
+        original_text: '修改这份资料',
+        receipts: [],
+        source_result: null,
+      });
+      expect(
+        await acceptTargetContinuation(client, {
+          ...f,
+          ownerId: randomUUID(),
+          inputMessageId,
+          sourceRunId: f.runId,
+          timeContext,
+          kind,
+        }),
+      ).toBeNull();
+    } finally {
+      client.release();
+    }
+  },
+);
+
+test('a destination continuation preserves the predecessor creation eligibility', async () => {
+  const f = await fixture(['workspace_read', 'workspace_create'], {
+    clarificationKind: 'destination',
+    workspaceGrants: (ownerId) => [
+      {
+        ...documentGrant(ownerId),
+        output_directories: [{ path: 'outputs', identity: 'directory' }],
+      },
+    ],
+  });
+  const inputMessageId = randomUUID();
+  await db.pool.query(
+    "INSERT INTO messages(id,owner_id,conversation_id,role,content) VALUES($1,$2,$3,'user','输出目录')",
+    [inputMessageId, f.ownerId, f.conversationId],
+  );
+  const client = await db.pool.connect();
+  try {
+    const accepted = await acceptTargetContinuation(client, {
+      ...f,
+      inputMessageId,
+      sourceRunId: f.runId,
+      timeContext,
+      kind: 'destination',
+    });
+    expect(accepted?.workspaceCreateAllowed).toBe(true);
+    expect(accepted?.workspaceGrants?.[0]?.output_directories).toEqual([
+      { path: 'outputs', identity: 'directory' },
+    ]);
+  } finally {
+    client.release();
+  }
+});
+
+test('a document destination and an older target gap are ambiguous', async () => {
+  const f = await fixture(['workspace_read'], {
+    clarificationKind: 'destination',
+    workspaceGrants: (ownerId) => [documentGrant(ownerId)],
+  });
+  const olderMessage = randomUUID();
+  await db.pool.query(
+    "INSERT INTO messages(id,owner_id,conversation_id,role,content,created_at) VALUES($1,$2,$3,'user','旧问题',clock_timestamp()-interval '2 minutes')",
+    [olderMessage, f.ownerId, f.conversationId],
+  );
+  await db.pool.query(
+    `INSERT INTO agent_runs(id,owner_id,conversation_id,agent_revision,mode,status,budget_max_iterations,budget_max_tokens,execution,tools_allowlist,frozen_context,input_message_id,goal_result)
+     SELECT $1,owner_id,conversation_id,agent_revision,mode,status,budget_max_iterations,budget_max_tokens,execution,tools_allowlist,frozen_context,$2,
+       jsonb_set(goal_result,'{clarification,kind}','"target_selection"'::jsonb)
+     FROM agent_runs WHERE id=$3`,
+    [randomUUID(), olderMessage, f.runId],
+  );
+  const inputMessageId = randomUUID();
+  await db.pool.query(
+    "INSERT INTO messages(id,owner_id,conversation_id,role,content) VALUES($1,$2,$3,'user','第二个')",
+    [inputMessageId, f.ownerId, f.conversationId],
+  );
+  const client = await db.pool.connect();
+  try {
+    expect(
+      await acceptTargetContinuation(client, {
+        ...f,
+        inputMessageId,
+        sourceRunId: f.runId,
+        timeContext,
+        kind: 'destination',
+      }),
+    ).toBeNull();
+  } finally {
+    client.release();
+  }
+});
+
+test('workspace tools alone or a foreign frozen grant cannot authorize a document gap', async () => {
+  for (const grants of [
+    [],
+    [
+      {
+        workspace_id: 'documents',
+        owner_id: randomUUID(),
+        registration_digest: 'a'.repeat(64),
+        root_identity: 'root',
+      },
+    ],
+  ]) {
+    const f = await fixture(['workspace_read'], { workspaceGrants: () => grants });
+    const inputMessageId = randomUUID();
+    await db.pool.query(
+      "INSERT INTO messages(id,owner_id,conversation_id,role,content) VALUES($1,$2,$3,'user','第二个')",
+      [inputMessageId, f.ownerId, f.conversationId],
+    );
+    const client = await db.pool.connect();
+    try {
+      expect(
+        await acceptTargetContinuation(client, {
+          ...f,
+          inputMessageId,
+          sourceRunId: f.runId,
+          timeContext,
+        }),
+      ).toBeNull();
+    } finally {
+      client.release();
+    }
   }
 });

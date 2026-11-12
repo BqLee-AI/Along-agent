@@ -5,7 +5,7 @@
 > 不包含：功能实现、运行验收记录、通用 MCP 平台、任意宿主路径或外部 exactly-once。
 > 阶段：R1；关联 #62。行为以 OpenSpec 为准，字段、接口、所有权和一致性以本设计为准。
 
-> 授权作用域：本文用户先选单工作区、精确文档按钮及冲突后重新批准适用于现行/legacy。新 profile 的冻结登记集合、正常委托直接编辑/有限创建与零写冲突自主修正见 [design/20 §3、§7](20-goal-scoped-delegation.md)（Proposed）。真实全文基线、对象/版本绑定、一次许可、新回读及 unknown 不重写保留，不模拟批准、不开放全盘；本次不改实现。
+> 授权作用域：本文单工作区选择、逐项文档按钮及冲突后重新批准适用于 legacy。新 delegation 的本人登记集合、正常直接编辑、有限输出目录创建、新增影响精确授权及零写冲突边界见 [design/20 §3、§7](20-goal-scoped-delegation.md)；两者共享对象绑定、一次许可、新回读和 unknown 边界，不模拟批准、不开放全盘。server-owned 不属于当前连接合同；设计不等于已验收。
 
 ## 1. 结论与范围
 
@@ -25,7 +25,7 @@
 | 文档授权       | approvals/document-service.ts、document-actions.ts、decision.ts；0016 | 独立批准/决议表、完整冻结内容、唯一 apply；跨模块 ID 经公共用例验证，不新增跨模块强 FK                                    |
 | 文件效果       | workspaces/replace.ts；tools/invocations.ts、query.ts                 | 非事务替换、真实 applied/conflict/unknown；unknown 不补报、不重写、不产生可恢复 checkpoint                                |
 | 历史与当前资格 | conversations/repository.ts、run-state.ts、harness-authority.ts       | 冻结摘要保留可读；新动作和继续重新核验登记，限定旧 task snapshot1 读取不扩权                                              |
-| 外部配置与预算 | conversations/harness-config.ts、harness-model.ts                     | 部署固定 provider 与预算，Run 冻结且跨 attempt 累计；普通用户不配置 provider/BYOK                                         |
+| 外部配置与预算 | conversations/harness-config.ts、harness-model.ts                     | 现行基线部署固定 provider 与预算，Run 预算跨 attempt 累计；拟议本人选择及版本冻结见 design/22                             |
 | 展示和证据     | packages/stream-protocol；Web Chat/document-approvals；ci/gates.json  | 保留七事件，不伪造 task 卡片；D8 按实际消费者及本次报告声明，不能替代真实模型或用户材料验收                               |
 
 路径均相对 apps/api/src/modules，除表中明确列出的跨包位置。#45–#47 的底座合同和历史证据保留其适用范围，不重做为 R1 新成果。
@@ -34,7 +34,7 @@
 
 ### 3.1 登记来源
 
-新增 workspaces 模块，拥有服务端部署登记清单及文件边界。登记项仅含满足当前能力所需的信息：workspace_id、展示 label、owner_id、canonical root、有限 readable_paths、writable_paths；writable_paths 必须是 readable_paths 的子集。路径为逐项登记的相对文件路径，不接受任意递归 glob。登记由受信部署配置提供，不是模型生成、浏览器目录选择结果、MCP roots/list 或用户原话中的绝对路径。无需另建 workspace 数据库/文件索引。
+新增 workspaces 模块，拥有服务端部署登记清单及文件边界。登记项含 workspace_id、展示 label、owner_id、canonical root、有限 readable_paths、writable_paths，以及可选 output_directories；writable_paths 必须是 readable_paths 的子集。输出目录允许在已有合格子目录内创建新文件，不授予读取该目录中未登记的已有文件。路径为相对路径，不接受任意递归 glob。登记由受信部署配置提供，不是模型生成、浏览器目录选择结果、MCP roots/list 或用户原话中的绝对路径。无需另建 workspace 数据库/文件索引。
 
 root 是专用持久目录，明确交付给应用的资料和简报就是本能力操作的真实文件；不是工具回显或运行后丢弃的 mock。若登记的是授权副本，Web 必须展示这是受管副本，不能声称已经修改其他未登记原件。登记配置和文件来源说明属于部署文档，不把个人路径写进仓库。
 
@@ -46,9 +46,9 @@ root 是专用持久目录，明确交付给应用的资料和简报就是本能
 
 GET /api/v1/workspaces：本人会话认证、只读/no-store，返回 items[{workspace_id,label,readable_paths,writable_paths}]；不返回 root、宿主目录或其他 owner 项。
 
-既有 POST /api/v1/conversations/messages 增加 workspace_id?，仅 execution=harness 可携带。Web 在 Agent 模式展示服务端工作区下拉及可读/可写范围；用户选择的是登记项，而不是上传 root。没有选择时保持原五工具能力；选择后冻结本 Run 的 workspace 能力。business 携带 workspace_id 拒绝，未知/他人/已撤销项在新写入/SSE 前拒绝。新消息 hash 绑定 workspace 选择；同 owner/key 换工作区409。
+legacy 的 POST /api/v1/conversations/messages 可携 `workspace_id`，仅显式 execution=harness 可用；Web 选择登记项而非宿主路径。新 delegation 使用可选 `workspace_ids` 收窄本人登记集合，省略则冻结本人有效登记；两个字段互斥，不默认首项。business、未知/他人/撤销项及越界选择按请求合同拒绝；同 owner/key 的既有 Run 先按原请求重放，不重新冻结资源。
 
-RunView 增加可选的安全 workspace 摘要，供刷新后显示原选择，不使 UI 重新选择成为既有 Run 的授权。省略 workspace 的旧请求 hash 材料不变；仅带 workspace 的新请求采用明确的新版本域。GET 和同键补读仍只读，不执行或重新登记。
+RunView 的 legacy `workspace` 与新 delegation `workspaces` 为各自接纳时的安全摘要，不是动态授权。显式集合进入请求幂等绑定；旧请求 hash 材料不因新合同迁写。GET 和同键补读只读，不执行或重新登记。
 
 ### 3.3 有限路径与 OS 边界
 
@@ -203,11 +203,11 @@ workspace_list/grep/read 走真实 initialize→listTools→callTool，返回实
 
 ## 9. 模型配置与运行前提
 
-复用 loadHarnessServices/createHarnessModelTransport、现有 HARNESS_MODEL_BASE_URL/HARNESS_MODEL/HARNESS_MODEL_API_KEY，保留固定 OpenAI-compatible chat-completions、单工具提议、真实 usage 和 abort。Web、native、MCP 不选择 provider/model/key，TS 不增加规划/Agent 循环。
+现行基线复用 loadHarnessServices/createHarnessModelTransport 和部署级 HARNESS_MODEL 配置。拟议本人接入及逐 Run 选择见 [design/22](22-model-provider-settings.md)；保留单工具提议、真实 usage、abort 和仓颉唯一循环，native/MCP 不获得 Key，TS 不增加规划/Agent 循环。
 
 模型消息使用标准 assistant `tool_calls` 与配对 `tool_call_id` 的 `role=tool` 结果，由 native 构造；不能把工具提议写成普通 assistant 文本，让模型照抄而不实际调用。transport 请求 `parallel_tool_calls:false`，native 也要求逐次等待真实观察；供应商仍返回多个调用时拒绝整个响应，不丢弃调用或在 TS 拆出第二个循环。
 
-沿用启动时固定的模型 transport 配置，不新增模型配置登记、持久引用或 provider 选择 API。部署变更不应在仍有活跃 Run 时静默更换模型语义；若真实跨部署恢复提出新的绑定需求，再根据证据单独设计。缺少实际运行依赖时，沿既有新 Run 开流/写入前 HARNESS_UNAVAILABLE 失败，无 fixture fallback。
+固定启动模型仅为现行基线；拟议切换后新 Run 绑定本人配置版本，旧部署须由管理员明确指定目标用户导入，不能共享或自动启用；旧 Run 按 design/22 安全处置。缺实际运行依赖仍明确失败，无 fixture fallback。
 
 真实模型验收需要获授权且具备 function calling 能力的兼容服务，以及确有需要时的安全凭据引用；由用户/部署负责人提供，Agent 不代选/购买/写 .env。部署、SDK、Docker、PG、隔离测试资料都属于实现任务可解决的工程前提，不推给用户。
 
@@ -245,7 +245,7 @@ workspace_list/grep/read 走真实 initialize→listTools→callTool，返回实
 | 至少一条真实 TS MCP 调用                                    | tools/MCP主责                                               | 正式 Client/TS Server initialize/listTools/callTool，返回实际文件数据被 native 消费并影响后续请求；实际改变源文件会改变消费者结果；移除调用或结果纳入，同一个正式消费者失败                                                            |
 | 必要批准回同 Run；不宣称任意恢复                            | approvals授权主责；conversations/native恢复协作             | 提议→真实冻结预览→确认/拒绝→原 Run 唯一 attempt+1；pending拒绝、早确认/并发/丢回答/换键不重复；approved不等于写入，拒绝不绕过。未知直接正常失败、无 unknown checkpoint，普通/终态恢复拒绝                                              |
 | 冲突处理绑定 observed version、exact content、approval      | approvals主责，workspaces执行                               | 分别在 read后、批准前、批准后改变文件；原 apply只报冲突/零写，不对新内容重匹配。新修改需新读/新批准；同批准换 invocation 不可第二写                                                                                                    |
-| 稳定模型配置、缺前置真实失败                                | conversations model transport主责                           | 端点/model来自现有启动固定配置，不由Web/native/MCP指定；不新增 provider 路由或持久配置注册。缺配置在新事实/SSE前503；不启动fixture/TS Agent                                                                                            |
+| 稳定模型配置、缺前置真实失败                                | conversations model transport主责                           | 现行基线使用固定部署模型；拟议本人选择、不可变绑定和旧部署显式导入见 design/22。缺依赖明确失败；不启动 fixture/TS Agent                                                                                                                |
 
 ### 11.1 确定性门与真实任务评估
 

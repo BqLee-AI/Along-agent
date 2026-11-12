@@ -7,7 +7,10 @@ import {
   readRunCreatedReminders,
   readRunCancelledReminders,
   readRunInterruptionEvidence,
+  readRunGoalDocumentEvidence,
+  validateCreateResolutionEvidence,
 } from '../tools/query.js';
+import type { RunGoalDocumentEvidence } from '../tools/query.js';
 import { readCancellationScopeInput, readContinuationReceipts } from './target-continuation.js';
 import { stateConflict } from '../../http/errors.js';
 import { readActiveSameNoteTasks, readRepeatedNotesMentioned } from '../tasks/tool-query.js';
@@ -18,6 +21,47 @@ import {
 } from '../tools/reminder-cancel-scope.js';
 
 type Binding = Pick<ToolContext, 'ownerId' | 'conversationId' | 'runId'>;
+export function validateGoalDocuments(goal: GoalResult, documents: RunGoalDocumentEvidence): void {
+  for (const effect of documents.effects) {
+    const referenced = goal.outcomes.filter((item) =>
+      item.receipt_refs.includes(effect.invocation_id),
+    );
+    if ((effect.status === 'applied' || effect.status === 'verified') && referenced.length === 0)
+      throw stateConflict('goal omits an accepted document effect');
+    if (
+      effect.status !== 'verified' &&
+      referenced.some(
+        (item) =>
+          item.status === 'achieved' &&
+          !(
+            effect.status === 'conflict' &&
+            item.create_resolution?.zero_write_invocation_ids.includes(effect.invocation_id)
+          ),
+      )
+    )
+      throw stateConflict('goal claims an unverified document effect');
+    if (
+      effect.status === 'verified' &&
+      referenced.some((item) => item.status === 'achieved') &&
+      (!effect.read_invocation_id ||
+        !goal.outcomes.some(
+          (item) =>
+            item.status === 'achieved' && item.receipt_refs.includes(effect.read_invocation_id!),
+        ))
+    )
+      throw stateConflict('goal omits the fresh document read');
+  }
+  if (
+    goal.status === 'completed' &&
+    (documents.hasPendingApproval ||
+      documents.effects.some(
+        (effect) =>
+          effect.status !== 'verified' && !(effect.status === 'conflict' && effect.superseded),
+      ))
+  )
+    throw stateConflict('goal completion has unresolved document effects');
+}
+
 async function inheritedGoal(
   client: PoolClient,
   binding: Binding,
@@ -78,6 +122,82 @@ async function inheritedGoal(
   return { runId: continuation.run_id, goal: goal.data, cancellations };
 }
 
+async function applyCreateResolutions(
+  client: PoolClient,
+  binding: Binding,
+  goal: GoalResult,
+  documents: RunGoalDocumentEvidence,
+): Promise<void> {
+  const outcomes = goal.outcomes.filter((item) => item.create_resolution);
+  if (!outcomes.length) return;
+  const row = (
+    await client.query<{
+      input_message_id: string;
+      revision: string | null;
+      original_id: string | null;
+      original_text: string | null;
+    }>(
+      `SELECT input_message_id,frozen_context->>'createResolutionRevision' AS revision,
+        frozen_context->'trustedExecutionContext'->'continuation'->>'original_input_message_id' AS original_id,
+        frozen_context->'trustedExecutionContext'->'continuation'->>'original_text' AS original_text
+       FROM agent_runs WHERE id=$1 AND owner_id=$2 AND conversation_id=$3
+         AND frozen_context->>'authorization_revision'='delegation/1'`,
+      [binding.runId, binding.ownerId, binding.conversationId],
+    )
+  ).rows[0];
+  if (!row || !['create-resolution/1', 'create-resolution/2'].includes(row.revision ?? ''))
+    throw stateConflict('create resolution is not enabled for this run');
+  const messages = await client.query<{ id: string; content: string }>(
+    `SELECT id,content FROM messages WHERE owner_id=$1 AND conversation_id=$2
+       AND role='user' AND id=ANY($3::uuid[])`,
+    [
+      binding.ownerId,
+      binding.conversationId,
+      [row.input_message_id, ...(row.original_id ? [row.original_id] : [])],
+    ],
+  );
+  const used = new Set<string>();
+  for (const outcome of outcomes) {
+    const resolution = outcome.create_resolution!;
+    const source = messages.rows.find((message) => message.id === resolution.source_message_id);
+    const authenticOriginal =
+      source?.id === row.original_id && source.content === row.original_text;
+    if (
+      !source ||
+      (source.id !== row.input_message_id && !authenticOriginal) ||
+      !resolution.source_quote ||
+      !source.content.includes(resolution.source_quote)
+    )
+      throw stateConflict('invalid create resolution source');
+    const refs = [
+      ...resolution.zero_write_invocation_ids,
+      resolution.created_invocation_id,
+      resolution.read_invocation_id,
+    ];
+    if (
+      outcome.status !== 'achieved' ||
+      !resolution.zero_write_invocation_ids.length ||
+      new Set(refs).size !== refs.length ||
+      refs.some(
+        (ref) =>
+          used.has(ref) ||
+          !outcome.receipt_refs.includes(ref) ||
+          goal.outcomes.some((other) => other !== outcome && other.receipt_refs.includes(ref)),
+      )
+    )
+      throw stateConflict(
+        'create resolution requires all distinct collision, creation and read IDs in the same outcome receipt_refs, not reused by other outcomes',
+      );
+    refs.forEach((ref) => used.add(ref));
+    await validateCreateResolutionEvidence(client, binding, resolution, documents);
+    for (const id of resolution.zero_write_invocation_ids)
+      documents.effects.find((effect) => effect.invocation_id === id)!.superseded = true;
+    documents.effects.find(
+      (effect) => effect.invocation_id === resolution.created_invocation_id,
+    )!.read_invocation_id = resolution.read_invocation_id;
+  }
+}
+
 export async function validateGoalResult(
   client: PoolClient,
   context: ToolContext,
@@ -121,6 +241,17 @@ export async function validateGoalResult(
   );
   if (accepted.some((row) => row.result.status !== 'ok'))
     throw stateConflict('goal references unsuccessful receipt');
+  for (const snapshot of accepted) {
+    if (
+      snapshot.tool_id.startsWith('workspace_') &&
+      snapshot.result.status === 'ok' &&
+      snapshot.result.result.kind === 'operation_error' &&
+      goal.outcomes.some(
+        (item) => item.status === 'achieved' && item.receipt_refs.includes(snapshot.invocation_id),
+      )
+    )
+      throw stateConflict('goal claims a document operation error as an effect');
+  }
   const settings = await readRunTimezoneSettings(client, context);
   for (const setting of settings) {
     if (
@@ -144,6 +275,9 @@ export async function validateGoalResult(
     if (!goal.outcomes.some((item) => item.receipt_refs.includes(cancellation.invocation_id)))
       throw stateConflict('goal omits an accepted reminder cancellation');
   }
+  const documents = await readRunGoalDocumentEvidence(client, context);
+  await applyCreateResolutions(client, context, goal, documents);
+  validateGoalDocuments(goal, documents);
   if (
     states.some((row) => row.state === 'unknown') &&
     goal.status !== 'unknown' &&
@@ -152,7 +286,15 @@ export async function validateGoalResult(
     throw stateConflict('goal masks unknown tool effect');
   if (
     goal.status === 'completed' &&
-    states.some((row) => row.state !== 'completed' || row.outcome_kind !== 'success')
+    states.some(
+      (row) =>
+        row.state !== 'completed' ||
+        (row.outcome_kind !== 'success' &&
+          !(
+            row.outcome_kind === 'approval_pending' &&
+            documents.resolvedApprovalInvocationIds.includes(row.invocation_id)
+          )),
+    )
   )
     throw stateConflict('goal completion has unresolved or rejected actions');
   if (
@@ -161,6 +303,8 @@ export async function validateGoalResult(
     cancellations.length === 0 &&
     creations.length === 0 &&
     settings.length === 0 &&
+    documents.effects.length === 0 &&
+    !documents.hasPendingApproval &&
     inheritedRefs.size === 0 &&
     inheritedCancellations.size === 0
   ) {
@@ -211,6 +355,7 @@ export async function interruptedGoalResult(
     settings,
     creations,
     cancellations,
+    documents,
     hasUnknown: unknown,
   } = await readRunInterruptionEvidence(client, binding);
   const inherited = await inheritedGoal(client, binding);
@@ -253,6 +398,27 @@ export async function interruptedGoalResult(
       receipt_refs: [cancellation.invocation_id],
     })),
   );
+  outcomes.push(
+    ...documents
+      .filter((effect) => effect.status !== 'unknown')
+      .map((effect) => ({
+        description:
+          effect.status === 'verified'
+            ? `资料 ${effect.path} 已${effect.operation === 'create' ? '创建' : '保存'}并经新读取验证`
+            : effect.status === 'applied'
+              ? `资料 ${effect.path} 已${effect.operation === 'create' ? '创建' : '保存'}，但尚未经新读取验证`
+              : effect.status === 'failed'
+                ? `资料 ${effect.path} 创建失败，未写入`
+                : effect.superseded
+                  ? `资料 ${effect.path} 曾发生零写冲突，已有后续调用`
+                  : `资料 ${effect.path} ${effect.operation === 'create' ? '创建' : '修改'}发生冲突，未确认完成`,
+        status: effect.status === 'verified' ? ('achieved' as const) : ('not_done' as const),
+        receipt_refs:
+          effect.status === 'verified' && effect.read_invocation_id
+            ? [effect.invocation_id, effect.read_invocation_id]
+            : [effect.invocation_id],
+      })),
+  );
   outcomes.push({
     description: '本轮剩余目标未完成；不会自动重做已接受效果',
     status: unknown ? 'unknown' : 'not_done',
@@ -264,7 +430,7 @@ export async function interruptedGoalResult(
         ? 'cancelled'
         : unknown
           ? 'unknown'
-          : outcomes.length > 1
+          : outcomes.some((item) => item.status === 'achieved')
             ? 'partial'
             : 'blocked',
     outcomes,
@@ -274,6 +440,6 @@ export async function interruptedGoalResult(
       .map((item) => item.description)
       .join(
         '；',
-      )}${outcomes.length > 1 ? '。' : ''}本轮执行已中断；已接受的设置和提醒不会回滚，刷新或重连不会重做。${unknown ? '存在效果未知的调用，不会自动重试。' : ''}`,
+      )}${outcomes.length > 1 ? '。' : ''}本轮执行已中断；已接受的效果不会回滚，刷新或重连不会重做。${unknown ? '存在效果未知的调用，不会自动重试。' : ''}`,
   });
 }
