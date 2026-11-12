@@ -2,7 +2,7 @@
 
 ### Requirement: 单一生命周期与取消裁决
 
-TS SHALL 原子保存真实资格、运行/attempt/消息及事件投影，仓颉独占下一步选择。按 [design/20 §6.3、§8](../../../../../docs/design/20-goal-scoped-delegation.md) 区分停止执行、领域取消和目标结果；停止先持久撤销后续资格，不伪撤销既成效果。
+TS SHALL 原子保存真实资格、运行/attempt/消息及事件投影，仓颉独占下一步选择。按 [design/20 §6.3、§8](../../../../../../docs/design/20-goal-scoped-delegation.md) 区分停止执行、领域取消和目标结果；停止先持久撤销后续资格，不伪撤销既成效果。
 
 #### Scenario: 停止先提交（D8/D9）
 
@@ -21,7 +21,7 @@ TS SHALL 原子保存真实资格、运行/attempt/消息及事件投影，仓�
 
 ### Requirement: 复用工具事实与所属模块业务规则
 
-工具 SHALL 沿稳定调用、原接受结果、当前资格和unknown规则，通过所属模块公共用例/只读投影执行；新profile不再强制所有领域写入经批准，但时间、事务和回执不变量保留。见 [design/20 §2、§6](../../../../../docs/design/20-goal-scoped-delegation.md)。
+工具 SHALL 沿稳定调用、原接受结果、当前资格和unknown规则，通过所属模块公共用例/只读投影执行；新profile不再强制所有领域写入经批准，但时间、事务和回执不变量保留。见 [design/20 §2、§6](../../../../../../docs/design/20-goal-scoped-delegation.md)。
 
 #### Scenario: 同调用及未知（A3/D8/D9）
 
@@ -37,7 +37,7 @@ TS SHALL 原子保存真实资格、运行/attempt/消息及事件投影，仓�
 
 ### Requirement: 目标结果独立于执行终结
 
-系统 SHALL 按 [design/20 §6.3](../../../../../docs/design/20-goal-scoped-delegation.md#63-目标结果不是-run-done) 通过同Harness结构化控制出口保存GoalResult，分别表达completed/partial/blocked/cancelled/unknown及逐项收据；TS验证真实归属/领域状态，不以Run done、tool completed或正文证明目标完成。
+系统 SHALL 按 [design/20 §6.3](../../../../../../docs/design/20-goal-scoped-delegation.md#63-目标结果不是-run-done) 通过同Harness结构化控制出口保存GoalResult，分别表达completed/partial/blocked/cancelled/unknown及逐项收据；TS验证真实归属/领域状态，不以Run done、tool completed或正文证明目标完成。
 
 #### Scenario: 全部或部分目标（A1/D8/D10）
 
@@ -62,7 +62,7 @@ TS SHALL 原子保存真实资格、运行/attempt/消息及事件投影，仓�
 
 ### Requirement: 有界接续而非目标执行引擎
 
-系统 SHALL 复用conversations可信前序关系和每Run预算，不新增输入长等待、suspended_input、snapshot3、目标表/执行器或模型发号持久去重。见 [design/20 §5–§6](../../../../../docs/design/20-goal-scoped-delegation.md)。
+系统 SHALL 复用conversations可信前序关系和每Run预算，不新增输入长等待、suspended_input、snapshot3、目标表/执行器或模型发号持久去重。见 [design/20 §5–§6](../../../../../../docs/design/20-goal-scoped-delegation.md)。
 
 #### Scenario: 用户补实际缺口（D6/D8）
 
@@ -76,7 +76,7 @@ TS SHALL 原子保存真实资格、运行/attempt/消息及事件投影，仓�
 
 ### Requirement: 冻结阶段能力与执行生命周期
 
-系统 SHALL 按 [design/20 §1、§4、§8](../../../../../docs/design/20-goal-scoped-delegation.md) 独立冻结授权修订、真实阶段能力和两种具体执行生命周期；delegation/1不等于后台已交付。可信start与只读Run/Web使用同一事实，不建通用profile平台，最终订阅解耦验收不缩小。
+系统 SHALL 按 [design/20 §1、§4、§8](../../../../../../docs/design/20-goal-scoped-delegation.md) 独立冻结授权修订、真实阶段能力和两种具体执行生命周期；delegation/1不等于后台已交付。可信start与只读Run/Web使用同一事实，不建通用profile平台，最终订阅解耦验收不缩小。
 
 #### Scenario: 偏好先交付但后台未交付（D6/D8/D10）
 
@@ -95,7 +95,7 @@ TS SHALL 原子保存真实资格、运行/attempt/消息及事件投影，仓�
 
 ### Requirement: 新委托的服务端执行所有权
 
-冻结server-owned的Run SHALL 按 [design/20 §8](../../../../../docs/design/20-goal-scoped-delegation.md#8-连接停止退出与服务端所有权) 由服务端同一Harness driver持有有界执行，PG session独占与attempt资格绑定；SSE只订阅。request-bound阶段不承诺后台继续，最终server-owned要求不能仅删abort回调交付，不承诺崩溃自动恢复。
+冻结server-owned的Run SHALL 按 [design/20 §8](../../../../../../docs/design/20-goal-scoped-delegation.md#8-连接停止退出与服务端所有权) 由服务端同一Harness driver持有有界执行，PG session独占与attempt资格绑定；SSE只订阅。request-bound阶段不承诺后台继续，最终server-owned要求不能仅删abort回调交付，不承诺崩溃自动恢复。
 
 #### Scenario: 刷新离开断网（D6/D8/D9）
 
@@ -114,7 +114,7 @@ TS SHALL 原子保存真实资格、运行/attempt/消息及事件投影，仓�
 
 ### Requirement: profile与协议前向迁移不扩历史权限
 
-系统 SHALL 按 [design/20 §1、§9](../../../../../docs/design/20-goal-scoped-delegation.md) 仅新接纳profile获得新权能，v6与TS/native/Web配套，旧事件可读、snapshot2继续、历史不可变；发布只前向迁移，不向新调用方留旧工具别名。
+系统 SHALL 按 [design/20 §1、§9](../../../../../../docs/design/20-goal-scoped-delegation.md) 仅新接纳profile获得新权能，v6与TS/native/Web配套，旧事件可读、snapshot2继续、历史不可变；发布只前向迁移，不向新调用方留旧工具别名。
 
 #### Scenario: 严格旧native与新消费者（D6/D8）
 

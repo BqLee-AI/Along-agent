@@ -129,7 +129,7 @@
 
 ## 本人目标内委托（#104/#105）
 
-合同真源为 [design/20 §1–§10](../design/20-goal-scoped-delegation.md) 及 [OpenSpec 增量](../../openspec/changes/refactor-assistant-capability-authorization/proposal.md)，总范围为 #104。时区、提醒、资料编辑及有限创建各以实际冻结 profile 为准；授权修订、实际能力和执行生命周期独立，合格新 Run 可冻结 server-owned。实现、受控消费者与真实用户路径分别取证，整体 change 随适用实施与真实验收收口。
+合同真源为 [design/20 §1–§10](../design/20-goal-scoped-delegation.md) 及相应 OpenSpec 主规范，[归档记录](../../openspec/changes/archive/2026-11-12-refactor-assistant-capability-authorization/)保留变更与验收，总范围为 #104。时区、提醒、资料编辑及有限创建各以实际冻结 profile 为准；授权修订、实际能力和执行生命周期独立，合格新 Run 可冻结 server-owned。实现、受控消费者与真实用户路径分别取证。
 
 - 接纳边界：Web 普通 Agent 显式发送 `authorization_revision:'delegation/1'`；可选 `workspace_ids` 收窄本人有效登记集合，省略则冻结全部，不能与 legacy `workspace_id` 同用。省略修订和提醒/资料快捷入口保持 legacy，不从部署或 wire 自动升级权限。本人时区写入经 identity 窄用例，不开放任意账户 patch。
 - 配套合同：v6 start 的真实 trusted context 进入 system 层，legacy 显式 null；新委托 SSE v2 与旧 v1 历史严格分读。RunView 展示冻结生命周期与持久 GoalResult；旧数据 NULL 不回填。最终 answer、目标结果和 Run/attempt/事件终结原子保存，收据须符合真实接受结果/设置事实，Run done 不能代替目标完成。
@@ -139,7 +139,7 @@
 
 - 正常自主：真实保存/清除本人时区，明确提醒直接创建/唯一取消，受管资料正常编辑/有限创建，多步混合目标零机械批准；明确重写/覆盖/取消不问相同授权。
 - 必要打断：实质歧义只补缺口，新增目标/影响只授新增部分。新profile允许一次精确“授权并继续”，不机械要求第二按钮；决议自身不是写入/保存，拒绝/停止/unknown/迟到或无效等待点不推进，GET/重登不授权/继续。legacy保持原显式继续合同，HTTP次数不预设；跨owner、登记外/链接、缺能力不能按钮突破，零写冲突可自主新读修正。
-- 资料正反例：仅摘要遇改设置/取消注入零额外效果；明确按资料建提醒可真实执行，不一概拒绝第三方事实。真实模型评估独立人工审定目标/预期效果，不用模型原答案当 gold；明示语义误判残余。
+- 资料正反例：仅摘要遇改设置/取消注入零额外效果；明确按资料建提醒可真实执行，不一概拒绝第三方事实。真实模型评估按事先明确的合同或预期核对实际效果，不用模型原答案当标准，不要求用户逐类别审定；明示语义误判残余。
 - 时间：可信 UTC 锚+180秒，无偏好不追问时区/时段；墙上/日历时间保留实际规则/DST/缺口。原目标过窗未建不顺延，UTC依据、展示版本与今日 UTC 区间投影同交付，不伪造 TZDB。
 - 接续和结果：#103来源责任扩展typed缺口，同源并发唯一后继，既成收据只读带入、只做未完成项。Run结束不等于目标成功，completed/partial/blocked/unknown及真实任务/文件状态分呈；不增输入长等待/snapshot3/目标表/模型发号去重，不自建Run绕预算。
 - 效果与停止：事务、append-only、取消/回执、文件版本/许可/新回读及unknown不重做不变。首批自主偏好可request-bound且如实显示断连取消，不伪造elapsed修订/创建能力；后台验收后仅新server-owned Run断订阅继续，旧/早期Run不随升级改义。停止/取消task/退出/禁用分别验证，最终收口仍须真实server-owned/失联收尾，不能用早期阶段替代。

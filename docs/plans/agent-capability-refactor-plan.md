@@ -4,7 +4,7 @@
 > 范围：可信上下文、业务与工作区能力、目标内自主执行、必要澄清、效果与停止、历史兼容。
 > 不包含：本轮业务实现、部署升级、真实用户任务操作、任意宿主访问或新的外部通道。
 
-> 合同入口：[#104](https://github.com/BqLee-AI/Along-agent/issues/104) 定总路线，#105 首阶段见 [design/20](../design/20-goal-scoped-delegation.md) 与 [OpenSpec change](../../openspec/changes/refactor-assistant-capability-authorization/proposal.md)。本输入保留 Proposed，详细字段/状态/迁移以 design/20 为单一真源；§11 的 A–F 是技术责任分组，不是授权自动创建的 Issue 批次。九步交付沿 #104 逐阶段建立，明确提醒复用 #90。
+> 合同入口：[#104](https://github.com/BqLee-AI/Along-agent/issues/104) 定总路线，#105 首阶段见 [design/20](../design/20-goal-scoped-delegation.md) 与 [OpenSpec 归档](../../openspec/changes/archive/2026-11-12-refactor-assistant-capability-authorization/)。本输入保留 Proposed，详细字段/状态/迁移以 design/20 为单一真源；§11 的 A–F 是技术责任分组，不是授权自动创建的 Issue 批次。九步交付沿 #104 逐阶段建立，明确提醒复用 #90。
 
 ## 1. 结论：让助理完成委托，而不是管理一串审批
 
