@@ -54,8 +54,8 @@ Observed / Required / Proposed / Deferred 同 01。
 ## 4. CI 布局（Required）
 
 - CI 使用 `checks` 和 `integration` 两个 job，均按 PR base 与 checkout 的实际 diff 分类；非 PR、空 diff、无效 base、删除、重命名和未知路径按完整范围执行。分类依据及结果写入 job 日志。
-- 仅 `docs/`、`openspec/` 的 Markdown 或根 `README.md`、`CONTRIBUTING.md` 改动时运行文案、OpenSpec 和格式检查；仅 Web 的 `src/`、`test/` 文件及上述文档改动时，运行完整 `verify` 和 Web 生产构建；其他改动以及 main push 运行完整检查。混合改动取较大范围。
-- 完整范围下，`checks` 运行本地同一 `bun run verify`；`integration` 独立并行运行数据库及调度、正式 native 合同和 Compose 冒烟，分别使用独立数据库或容器。任一失败使 job 失败；两个 job 均须成功。跳过的检查不作为本次运行证据，main 仍运行完整集合。
+- 仅 `docs/`、`openspec/` 的 Markdown 或根 `README.md`、`CONTRIBUTING.md` 改动时运行文案、OpenSpec 和格式检查；仅 Web 的 `src/`、`test/` 文件及上述文档改动时，运行完整 `verify` 和 Web 生产构建。非 identity 的已知 API 业务模块 TypeScript 源码变更运行完整 API 数据库集成、约束、native 合同及 Compose，但跳过不依赖这些源码的本地历史升级测试。仅修改允许的 API 数据库集成测试时，只执行变更的测试文件及其真实 PG 迁移前置。Web 与 API 混合、identity、共享数据库设施、迁移、升级实现、native 测试及其他未知路径，以及 main push，运行完整检查。
+- 完整范围下，`checks` 运行本地同一 `bun run verify`；`integration` 独立并行运行数据库及调度、正式 native 合同和 Compose 冒烟，分别使用独立数据库或容器。API 集成目录已包含 D9 指定调度测试，同一 job 不再重复执行指定集或重复构建。任一失败使 job 失败；两个 job 均须成功。跳过的检查不作为本次运行证据，main 仍运行完整集合。
 - 每个 job 独立满足自己的构建前置，不借用其他 job 的 `dist/`。`bun run build:packages` 保留 Bun 按依赖拓扑构建共享包，`bun run build` 先包后应用，`bun run build:api` 构建 API 及依赖；开发、类型检查和测试入口同样先满足包依赖。共享包构建成功后，`typecheck` 使用 Bun `--sequential` 串行执行各 workspace 的类型检查，保留全部源码、测试与 Next route typegen。同次 `verify` 仅在 `typecheck` 成功后允许单元步骤复用其共享 packages；失败即停、不消费失败构建。独立单元入口及跳过 typecheck 的 verify 仍真实构建，不通过旧 `dist/` 或跨次运行标记判定准备完成。
 - 测试使用 `bun:test`，保留既有测试集合、断言与文件级状态隔离；文件级并行不能替换成共享状态用例的文件内 concurrent，mock/spy/时钟按原生命周期恢复。只读边界 fixture 最多同时启动两个真实 dependency-cruiser CLI；各红例仍独立检查退出码、规则名与实际解析目标，绿例保留 err/JSON 两种真实扫描，清理前等待已排队及运行中的 CLI 结束。`bun run test:unit` 排除数据库集与正式 native 合同集；`bun run test:contracts` 保留 API healthz 进程内/HTTP 两组及契约包，并运行 §4.2 的正式跨语言合同。`bun run test:integration` 包含真实 PG 集成文件；`bun run test:scheduler` 跑 D9 指定集。DB 测试使用真实 PostgreSQL 16、原迁移和明确测试环境，不以跳过约束断言换绿。
 - D1 继续由 Bun 下的 dependency-cruiser 执行原出边、契约依赖与环检测规则；D2 仍由 AST 插件及展示投影测试守护，不以独立文本扫描代替。非 D2 lint 规则须显式映射并记录差异，不整体关闭正确性规则或扩大 ignore。

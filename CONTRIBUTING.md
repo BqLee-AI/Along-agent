@@ -136,5 +136,5 @@
 
 - PR 必须附：① CI 全绿链接；② 关键测试输出（粘贴或 CI 日志链接）；③ 若触及 D1–D10，每条附变红测试链接或变异证明。
 - Reviewer 只看证据合入：无验收证据、无 Deferred 声明、无 Spec 引用的 PR 直接打回，不进入代码细节评审。
-- Required checks 为 `checks`、`integration`，两者均须成功；PR 根据变更范围执行，main 完整验证。文档范围仅检查文案、规范和格式；Web 范围执行 `verify` 与 Web 构建；其余或未知范围执行完整验证。详细路径规则见 `docs/design/13-p0-bootstrap-and-ci-rules.md §4`。
+- Required checks 为 `checks`、`integration`，两者均须成功；PR 根据变更范围执行，main 完整验证。文档范围仅检查文案、规范和格式；Web 范围执行 `verify` 与 Web 构建；已知 API 业务源码保留完整 API 集成但跳过无关历史升级；独立 API 集成测试变更只运行选中测试；未知范围执行完整验证。详细路径规则见 `docs/design/13-p0-bootstrap-and-ci-rules.md §4`。
 - 完整范围下，`integration` 并行执行真实 PG 数据库/调度检查、独立 native 合同和两轮全新卷 Compose 冒烟；任何一项失败均阻塞。`scripts/check-gates-executable.mjs` 校验门禁声明及证据文件，不能证明本次运行了这些检查；根契约入口另校验本次 Bun JUnit 报告的 D8 必需消费者。

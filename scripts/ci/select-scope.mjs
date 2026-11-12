@@ -45,6 +45,8 @@ function selectScope() {
     if (fields.length % 2 !== 0) return ['full', 'unsupported diff status'];
 
     let hasWeb = false;
+    let hasApi = false;
+    const apiTests = [];
     for (let i = 0; i < fields.length; i += 2) {
       const [status, path] = [fields[i], fields[i + 1]];
       if ((status !== 'A' && status !== 'M') || !path)
@@ -54,15 +56,31 @@ function selectScope() {
         path === 'README.md' ||
         path === 'CONTRIBUTING.md';
       const web = /^apps\/web\/(?:src|test)\/[\s\S]+/.test(path);
-      if (!docs && !web) return ['full', `outside scoped paths: ${JSON.stringify(path)}`];
+      const apiModule =
+        /^apps\/api\/src\/modules\/(?:approvals|brief|conversations|notifications|tasks|time|tools|workspaces)\/[\s\S]+\.ts(?![\s\S])/.test(
+          path,
+        );
+      const apiTest =
+        /^apps\/api\/test\/integration\/(?!harness-)[a-z0-9-]+\.test\.ts(?![\s\S])/.test(path);
+      if (!docs && !web && !apiModule && !apiTest)
+        return ['full', `outside scoped paths: ${JSON.stringify(path)}`];
       if (web) hasWeb = true;
+      if (apiModule) hasApi = true;
+      if (apiTest) apiTests.push(path);
     }
+    if (hasWeb && (hasApi || apiTests.length)) return ['full', 'mixed Web and API changes'];
+    if (hasApi) return ['api', `${fields.length / 2} changed file(s)`];
+    if (apiTests.length)
+      return ['api-tests', `${apiTests.length} changed API test file(s)`, apiTests];
     return [hasWeb ? 'web' : 'docs', `${fields.length / 2} changed file(s)`];
   } catch (error) {
     return ['full', `unable to determine changes: ${error.message}`];
   }
 }
 
-const [scope, reason] = selectScope();
-if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `scope=${scope}\n`);
+const [scope, reason, apiTests] = selectScope();
+if (process.env.GITHUB_OUTPUT) {
+  appendFileSync(process.env.GITHUB_OUTPUT, `scope=${scope}\n`);
+  if (apiTests) appendFileSync(process.env.GITHUB_OUTPUT, `api_tests=${apiTests.join(' ')}\n`);
+}
 console.log(`CI scope: ${scope} (${reason})`);

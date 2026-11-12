@@ -99,6 +99,59 @@ describe('CI scope selector', () => {
       }));
   }
 
+  it('skips historical upgrades for isolated non-identity API module changes', () =>
+    fixture((repo, base) => {
+      commitFiles(repo, ['apps/api/src/modules/tasks/service.ts', 'docs/a.md']);
+      expect(select(repo, base)).toBe('scope=api');
+    }));
+
+  it('selects changed database integration tests without unrelated test files', () =>
+    fixture((repo, base) => {
+      commitFiles(repo, [
+        'apps/api/test/integration/tasks-read.test.ts',
+        'apps/api/test/integration/identity-rate-limit.test.ts',
+      ]);
+      expect(select(repo, base)).toBe(
+        'scope=api-tests\napi_tests=apps/api/test/integration/identity-rate-limit.test.ts apps/api/test/integration/tasks-read.test.ts',
+      );
+    }));
+
+  it('runs all API tests when a module and its tests change together', () =>
+    fixture((repo, base) => {
+      commitFiles(repo, [
+        'apps/api/src/modules/tasks/service.ts',
+        'apps/api/test/integration/tasks-read.test.ts',
+      ]);
+      expect(select(repo, base)).toBe('scope=api');
+    }));
+
+  it('falls back to full for mixed web and API changes', () =>
+    fixture((repo, base) => {
+      commitFiles(repo, ['apps/web/src/page.tsx', 'apps/api/src/modules/tasks/service.ts']);
+      expect(select(repo, base)).toBe('scope=full');
+    }));
+
+  for (const path of [
+    'apps/api/src/modules/identity/better-auth.ts',
+    'apps/api/src/db/pool.ts',
+    'infra/migrations/0028.sql',
+    'scripts/local/database.mjs',
+    'apps/api/test/integration/setup.ts',
+    'apps/api/test/integration/harness-native.test.ts',
+    'apps/api/src/modules/new-module/service.ts',
+    'apps/api/src/modules/tasks/data.json',
+    'apps/api/test/integration/fixtures/input.ts',
+    ...(process.platform === 'win32'
+      ? []
+      : ['apps/api/test/integration/unsafe.test.ts\n', 'apps/api/src/modules/tasks/service.ts\n']),
+  ]) {
+    it(`keeps the full suite for shared or native input ${path}`, () =>
+      fixture((repo, base) => {
+        commitFiles(repo, [path]);
+        expect(select(repo, base)).toBe('scope=full');
+      }));
+  }
+
   for (const path of [
     'docs/image.png',
     'openspec/config.yaml',

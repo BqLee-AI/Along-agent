@@ -52,7 +52,10 @@ jobs:
         id: scope
         run: node scripts/ci/select-scope.mjs
       - uses: ./.github/actions/setup
-        if: steps.scope.outputs.scope == 'full'
-      - name: Run database, contract and Compose checks
-        if: steps.scope.outputs.scope == 'full'
+        if: steps.scope.outputs.scope != 'docs' && steps.scope.outputs.scope != 'web'
+      - name: Run applicable integration checks
+        if: steps.scope.outputs.scope != 'docs' && steps.scope.outputs.scope != 'web'
+        env:
+          CI_SCOPE: ${{ steps.scope.outputs.scope }}
+          CI_API_TESTS: ${{ steps.scope.outputs.api_tests }}
         run: bash scripts/ci/run-integration.sh

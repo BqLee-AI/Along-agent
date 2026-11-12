@@ -315,6 +315,15 @@ CI SHALL 保留 checks 和 integration 两个 required checks；两个 job 均�
 - WHEN PR 仅修改 Web 源码或测试及允许的文档
 - THEN 运行完整 verify 和 Web 构建，不运行无关的重集成
 
+#### Scenario: 已知 API 业务源码或数据库测试变更
+
+- WHEN PR 只修改已列出的非 identity API 业务模块 TypeScript 源码，可混合允许的文档或 API 集成测试
+- THEN 保留数据库约束、完整 API 集成、native 合同及 Compose 检查，跳过不依赖这些源码的历史升级测试
+- WHEN PR 只修改允许的独立 API 数据库集成测试，可混合允许的文档
+- THEN 使用真实 PostgreSQL 和原迁移运行每个修改的测试文件，不运行未选中的测试、历史升级、native 合同或 Compose
+- WHEN 变更同时包含 Web 和 API，或者触及 identity、数据库共享设施、迁移、升级实现或 native 测试
+- THEN 回退完整范围
+
 #### Scenario: 未知或完整范围
 
 - WHEN PR 涉及其他路径、删除或重命名、无效或不可用 base、空 diff，或运行不是 PR
