@@ -1,3 +1,4 @@
+import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
@@ -64,6 +65,7 @@ maybe('server-owned driver retains an in-flight workspace write', () => {
   for (const check of ['capacity', 'shutdown'] as const) {
     it(`retains ${check} until a stopped native write is accounted`, async () => {
       const actor = await seedAdmittedSession(database.pool);
+      await configureTestModel(database.pool, actor.userId, 'fixture-transport-only');
       const file = join(root, 'brief.txt');
       await writeFile(file, 'Original brief.\n');
       await configureWorkspaceRegistry([
@@ -153,6 +155,7 @@ maybe('server-owned driver retains an in-flight workspace write', () => {
           }),
         },
       };
+      controlledModelDeps(deps);
       let locked = false;
       let shutdown: Promise<void> | undefined;
       let invocationId: string | undefined;

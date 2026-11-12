@@ -28,7 +28,8 @@ export interface ConversationHistoryRow extends HistoryBoundary {
   title_content: string | null;
 }
 export interface MessageHistoryRow extends MessageHistoryItem, HistoryBoundary {}
-export interface RunHistoryRow extends ConversationRunHistoryItem, HistoryBoundary {}
+export interface RunHistoryRow
+  extends Omit<ConversationRunHistoryItem, 'model_selection'>, HistoryBoundary {}
 
 function utc(column: string): string {
   return `to_char(${column} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;

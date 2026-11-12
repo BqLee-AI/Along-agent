@@ -18,6 +18,7 @@ const run = {
   run_id: id,
   conversation_id: id,
   execution: 'harness',
+  model_selection: { state: 'legacy_unavailable' },
   status: 'done',
   created_at,
   ended_at: null,

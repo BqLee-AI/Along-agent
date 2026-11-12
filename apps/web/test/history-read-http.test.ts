@@ -1,13 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { createServer, type Server } from 'node:http';
+import { createServer } from 'node:http';
+import type { Server } from 'node:http';
 import { once } from 'node:events';
 import { ConversationMessagePageSchema } from '@along/contracts';
 import {
   collectRunTranscripts,
   mergeThreadEvents,
-  readHistoryCollectionPage,
   readHistoryEventPage,
-} from '../src/lib/conversation-run';
+} from '../src/features/conversations/model/conversation-run';
+import { readHistoryCollectionPage } from '../src/shared/http/page';
 
 const cid = '11111111-1111-4111-8111-111111111111';
 const rid = '22222222-2222-4222-8222-222222222222';
@@ -133,6 +134,20 @@ describe('actual HTTP readonly history consumers', () => {
     const transcript = collectRunTranscripts(events).get(rid)!;
     expect(transcript.text).toBe(`第一轮。${'续'.repeat(199)}`);
     expect(transcript.text).not.toContain('最终档案');
+    const previous = collectRunTranscripts(events);
+    const delta = events.find((event) => event.type === 'message.delta')!;
+    const next = collectRunTranscripts(
+      mergeThreadEvents(events, [
+        {
+          ...delta,
+          seq: 401,
+          payload: { ...delta.payload, run_id: messageId, delta: '另一次运行。' },
+        },
+      ]),
+      { previous },
+    );
+    expect(next.get(rid)).toBe(previous.get(rid));
+    expect(next.get(messageId)?.text).toBe('另一次运行。');
     expect(requests.filter((request) => request.url.startsWith('/events'))).toEqual([
       { method: 'GET', url: '/events?after_seq=0' },
       { method: 'GET', url: '/events?after_seq=400' },

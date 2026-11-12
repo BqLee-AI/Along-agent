@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'bun:test';
 import { ThreadEventSchema } from '@along/stream-protocol';
-import { DocumentApprovalDetailSchema, type DocumentApprovalEffect } from '@along/contracts';
+import { DocumentApprovalDetailSchema } from '@along/contracts';
+import type { DocumentApprovalEffect } from '@along/contracts';
 import {
   approvalHref,
   documentConfirmBody,
   documentEffectReadReducer,
-  type DocumentEffectRead,
-} from '../src/lib/document-loop';
+} from '../src/features/approvals/model/document-loop';
+import type { DocumentEffectRead } from '../src/features/approvals/model/document-loop';
 
 const id = '11111111-1111-4111-8111-111111111111';
 const runId = '22222222-2222-4222-8222-222222222222';

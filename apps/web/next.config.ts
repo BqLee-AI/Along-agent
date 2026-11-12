@@ -6,6 +6,7 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   typedRoutes: false,
   agentRules: false,
+  allowedDevOrigins: ['127.0.0.1'],
   async headers() {
     return [
       '/account',

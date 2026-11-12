@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
-import { describeApproval, describeCard } from '../src/lib/presentation';
+import { describeApproval, describeCard } from '../src/features/reminders/model/presentation';
 import type { ApprovalDetail } from '@along/contracts';
-import type { BriefCard } from '../src/lib/types';
+import type { BriefCard } from '../src/features/brief/model/types';
 
 describe('D2 display projection', () => {
   const card: BriefCard & { fire_at_utc: string } = {

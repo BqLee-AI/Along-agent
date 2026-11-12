@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ExecutionKindSchema, RunStatusSchema } from './harness.js';
+import { ExecutionKindSchema, RunModelSelectionSchema, RunStatusSchema } from './harness.js';
 
 // PostgreSQL timestamps are rendered in UTC at their stored microsecond
 // precision. Keep them as strings: Date would discard the keyset's last digits.
@@ -52,6 +52,7 @@ export const ConversationRunHistoryItemSchema = z
     run_id: uuid,
     conversation_id: uuid,
     execution: ExecutionKindSchema,
+    model_selection: RunModelSelectionSchema,
     status: RunStatusSchema,
     created_at: utcMicrosecond,
     ended_at: utcMicrosecond.nullable(),

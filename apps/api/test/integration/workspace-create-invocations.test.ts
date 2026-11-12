@@ -4,11 +4,13 @@ import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
+import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
 import { startConversationRun } from '../../src/modules/conversations/service.js';
 import { loadTimeContext } from '../../src/modules/time/context.js';
 import { invokeTool, reserveToolInvocation } from '../../src/modules/tools/gateway.js';
 import { configureWorkspaceRegistry } from '../../src/modules/workspaces/service.js';
 import { readRunGoalDocumentEvidence } from '../../src/modules/tools/query.js';
+import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import {
   createIntegrationDatabase,
   databaseUrl,
@@ -30,6 +32,7 @@ maybe('workspace create once permit', () => {
   });
   it('freezes the grant and bytes, replays a completed slot and never dispatches an unknown slot', async () => {
     const actor = await seedAdmittedSession(database.pool, {});
+    await configureTestModel(database.pool, actor.userId, 'test');
     const root = await mkdtemp(join(tmpdir(), 'along-create-once-'));
     roots.push(root);
     await mkdir(join(root, 'out'));
@@ -46,7 +49,7 @@ maybe('workspace create once permit', () => {
       },
     ]);
     const started = await startConversationRun(
-      {
+      controlledModelDeps({
         pool: database.pool,
         timeContext: loadTimeContext('fixture-v1'),
         harness: {
@@ -57,8 +60,8 @@ maybe('workspace create once permit', () => {
           model: async function* () {
             throw new Error('model not used');
           },
-        },
-      },
+        } satisfies HarnessServices,
+      }),
       actor.userId,
       randomUUID(),
       {

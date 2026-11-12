@@ -5,6 +5,8 @@
 > 包含：正式账户、有限工作区、会话历史、本人委托与原 Run 的有限恢复；不含任意崩溃自动恢复或自动恢复备份。
 > 阶段：R1 与本人目标内委托；生命周期见 [design/15](../design/15-r1-local-lifecycle.md)，账户见 [design/16](../design/16-r1-account-access.md)，历史见 [design/17](../design/17-r1-conversation-history.md)，上下文见 [design/18](../design/18-r2a-harness-context.md)，目标委托边界见 [design/20](../design/20-goal-scoped-delegation.md)。
 
+> 用户模型配置与升级边界见 [design/22](../design/22-model-provider-settings.md)。旧配置只能由管理员明确指定目标用户导入，不自动共享，也不作为默认推理回退。
+
 ## 环境与安装身份
 
 使用 Bun **1.4.2**、Docker Desktop 的 **Linux x64** 引擎及 Docker Compose **2.24.4+**。首次准备需要联网安装锁定依赖、下载镜像并构建正式仓颉与 Web。Windows 执行 Web；API、worker、native 和 MCP 在同一正式 Linux 镜像内运行，不使用开发 server 替代。
@@ -22,9 +24,9 @@ bun --no-env-file run local:init --new
 bun --no-env-file run local:start
 ```
 
-首次按提示选择三个固定端口，默认 PG `55432`、API `3000`、Web `3100`。时间版本必须与本版本内置资源相符，使用提示中的默认值；不要凭日历年份填写。模型可以明确暂不配置；需要配置时输入已获授权的原 provider、模型、key 和预算，不提供替代模型默认值。原服务明确无认证时 key 留空，不额外生成认证材料。敏感输入不回显，也不通过命令行参数传入。
+首次按提示选择三个固定端口，默认 PG `55432`、API `3000`、Web `3100`。时间版本必须与本版本内置资源相符。新安装生成独立的模型凭据加密密钥并保存到私有配置，务必安全备份；这不是认证密钥或数据库密码。`HARNESS_COMPLETION_CAP` 是独立单次输出上限，提示默认 4096，可按实际模型和预算调整；即使暂不提供旧模型也会配置。模型由登录用户在设置中配置并设置默认；初始化时收集的旧部署模型资料仅供管理员日后显式导入，不会自动导入或成为默认推理回退。敏感输入不回显，不通过命令行参数传入。
 
-配置模型还必须显式设置独立单次输出上限 `model.completionCap`（正安全整数），不能把 `model.maxTokens` 的 Run 余额填作单次额度。可选 `model.modelWindowTokens` 只有明确模型依据时填写正安全整数，省略/null 表示未知；`model.reserveTokens` 为非负安全整数，省略按0传递。旧私有模型配置缺 completionCap 时明确报 CONFIG_INVALID：停写后在原私有文件补该字段，保留原身份、密钥、卷和其余设置；不重新初始化安装，也不由工具静默猜值。对应容器变量为 `HARNESS_COMPLETION_CAP/HARNESS_MODEL_WINDOW_TOKENS/HARNESS_CONTEXT_RESERVE_TOKENS`。累计预算仍为原 `maxIterations/maxTokens`。
+私有配置的 `harnessCompletionCap` 为正安全整数，与累计 Run 预算 `model.maxTokens` 独立；历史 `model.completionCap` 不再控制实际输出上限。旧配置如保留 `model` 对象，仍须含有效 `model.completionCap`；可将原单次上限同时填入顶层 `harnessCompletionCap`，不能借用累计预算。旧模型的 `modelWindowTokens` 和 `reserveTokens` 仍分别映射 `HARNESS_MODEL_WINDOW_TOKENS` 和 `HARNESS_CONTEXT_RESERVE_TOKENS`；无旧模型时窗口未知、预留为 0。
 
 `init` 建立一次配置、准备专用持久卷和成套产物，只有核实为空的新应用库才执行全套迁移。它不启动业务写者。已有配置再次 `init` 只复用，不重新生成密钥或覆盖登记；除下述首次接入原部署的准备阶段外，数据库仍须完整核验为当前目标版本，旧库应显式 `local:upgrade`。
 
@@ -48,7 +50,8 @@ bun --no-env-file run local:upgrade
 - 原 Compose 项目、原 PG 卷和资料卷、原资料容器挂载位置，以及明确的 loopback 端口；
 - 原数据库用户、密码和库名，**同一个** `BETTER_AUTH_SECRET`；
 - 原 Web `APP_ORIGIN`，必须为与所选 Web 端口匹配的 HTTP localhost 或 127.0.0.1 origin；
-- 原时间资源版本、原模型配置和预算；
+- 原时间资源版本、原模型配置和预算；模型凭据仅保留供管理员明确导入；
+- `MODEL_PROVIDER_ENCRYPTION_KEY`：如果原库已有用户模型加密数据，必须恢复原密钥；确认从未有加密数据时才可预先生成全新独立密钥。交互时隐藏输入；
 - 原登记 JSON 的绝对路径；只有原本没有登记时才留空。
 
 已存在默认配置时，先核实是否就是原安装，不要覆盖或另建一套来掩盖缺失材料。要使用明确恢复的配置，可以给本节所有命令都加相同的 `--config`。原部署对外监听时，先由部署者明确处理监听与 origin，不能原样作为本机受支持安装接入。
@@ -152,7 +155,7 @@ bun --no-env-file run local:start
 
 本版本配套使用 `harness/v6` API/native/Web：新委托冻结可信上下文，legacy 明确传 `trusted_context:null`；新委托 SSE v2 与旧 v1 历史同读，snapshot仍为2。数据库须按迁移账本前向升级并核验实际结构；旧 Run 和批准不因部署扩权。新授权或其他新语义事实产生后，不能交回不理解这些事实的旧写者；按原安装显式升级，不另建安装或替换原认证密钥。
 
-顶部「助理」进入对话，「事项」收纳今日安排、提醒、待确认和活动记录，账户设置在独立菜单；桌面与窄屏保持同一层级。各页恢复方式见 [Web 使用说明](../../apps/web/README.md)。提醒任务与活动页不充当资料任务历史，文档批准从原 Run 的修改与结果进入。
+对话旁可展开今日安排和提醒，账户与模型服务位于设置面板；窄屏使用底部导航切换对话与工作区。各页恢复方式见 [Web 使用说明](../../apps/web/README.md)。提醒任务与活动页不充当资料任务历史，文档批准从原 Run 的修改与结果进入。
 
 ## 显式升级与失败维护
 
@@ -164,19 +167,22 @@ bun --no-env-file run local:upgrade
 
 升级准备同批产物，取得安装锁及数据库部署许可，停旧写者并禁止其自动重启，确认没有未知数据库客户端。目标制品在迁移前只读清点全部等待批准的 Run，使用原冻结范围与候选部署配置检查能否适配；不可适配则停写，不更改或消费等待。随后备份数据库和资料卷，应用新增迁移并再次清点，通过后才启动新版本。清点结果位于私有安装目录的 `waiting-inspection-before-migration.json` 和 `waiting-inspection-after-migration.json`，含 Run 标识及状态，应作为私有资料保管；`compatible` 不是批准，也不表示已恢复，`blocked` 需要在原合同下处理后重新清点。备份位于 `backups/` 下；数据库 dump 和资料归档均完成后才写完整标记。它们含用户资料，不能上传仓库。
 
+模型接入切换前建立的等待没有可信的逐 Run 模型绑定，候选版本会将其列为 `blocked`；导入旧部署模型也不会为它们补造绑定或恢复资格。先按原版本处理，或按下面的显式停止流程逐项处置；历史、批准及已接受的效果仍保留。
+
 若迁移前清点报告 `blocked`，先确认自己有权处置所选原等待。交互终端运行 `bun --no-env-file run local:upgrade --stop-waiting`，使用相同私有配置；选择一个列出的完整 Run ID，核对展示的原消息、批准和等待引用，明确输入 `STOP <Run ID>` 后才停止该 Run。系统先备份并前向迁移，再通过公共停止用例保存取消事件和回执；原批准不会消费，已创建的提醒或文件不会撤销。只能逐项处置，不自动处理其他等待。仍有不可适配等待时写者保持停止；停止结果不确定时先读取原 Run 和私有回执，不盲目重复提交。不要删除未完成升级标记或启动旧写者。
 
 最后一个阻断等待处理后，升级会启动本安装的 API、worker 和 Web；worker 可能继续推进已有提醒，API 的后台恢复可能处理已有 `server-owned` 运行。确认启动这些原有后台工作是预期行为后再继续；本机停止单个 Run 不等于暂停或撤销其他任务。
 
 **R2-A 配置与原安装升级：**
 
-保留原安装，不清库、不删卷、不重新建号。先在原版本、原配置仍有效时执行 `local:stop --config <原私有配置>` 停稳；私下备份原配置与登记，再取得目标源码，在原私有配置的既有 `model` 对象中显式补 `completionCap`。旧CLI不认识该新字段，新CLI也不会替缺字段的旧配置猜值，因此不要先改配置再用旧CLI停机。
+保留原安装，不清库、不删卷、不重新建号。先在原版本、原配置仍有效时执行 `local:stop --config <原私有配置>` 停稳；私下备份原配置、登记和数据，再取得目标源码。用私有编辑器打开原配置，补齐以下字段，保留所有已有身份、卷、认证密钥和凭据：
 
-隔离真实验收使用 completionCap=4096，只是已验证的选择依据，不是工具自动补写的默认值。保留原 provider、model、key、maxIterations/maxTokens、认证密钥、身份、卷、origin和登记；没有可信依据时不填写模型窗口或精确输入meter。400万累计额度仅获授权用于隔离验收，不迁入原安装；原64000额度不能保证完成同规模的六份大资料任务。
+1. `modelProviderEncryptionKey`：标准 base64 编码的 **32 字节独立随机密钥**。如原配置已有该字段，原样保留，绝不替换；若字段缺失但数据库或备份可能已有用户模型加密数据，先从可信备份恢复其原密钥，无法确认或恢复时停止，不生成替代品。只有已核实从未写入该类加密数据时，才使用可信密码管理器或安全随机工具生成新密钥，在私有编辑器中写入并另行安全备份。不要打印或粘贴到聊天、命令历史、仓库或 `.env`。丢失密钥会使已有加密凭据无法解密。
+2. `harnessCompletionCap`：正安全整数，独立于累计 Run 预算。原 `model.completionCap` 有依据时可沿用；没有旧模型时可选 4096，再按模型实际限制调整。若原 `model` 存在但缺 `completionCap`，也须在该对象中补有效值，以通过旧配置校验；其他旧模型字段原样保留。
 
-随后从目标源码运行 `bun --no-env-file run local:upgrade --config <原私有配置>`；该入口自己备份数据库和资料卷、按原账本应用尚缺的前向迁移、完整核验并启动，不需另做 `init --new`、`init --adopt` 或重复 `start`。尚未由生命周期入口接管的旧部署才沿“接入原部署”执行 adopt 准备。
+旧 CLI 不认识新字段，因此必须先用旧 CLI 停机再编辑。随后从目标源码运行 `bun --no-env-file run local:upgrade --config <原私有配置>`；该入口备份数据库和资料卷、应用尚缺的前向迁移、核验并启动，不需重新 init 或重复 start。备份不自动包含私有配置与加密密钥，必须单独安全保存。尚未接管的旧部署按“接入原部署”执行 adopt 准备。
 
-升级后核对目标版本/就绪、原正式账户、原历史与资料登记。读取历史不授权或继续旧等待；如需继续，先审阅原冻结内容并明确执行原 Run 的操作。隔离验收不代替原安装核验；失败保持停写，按本节维护合同处理，不删除升级记录或换新卷绕过。
+升级后核对目标版本/就绪、原正式账户、原历史与资料登记。读取历史不授权或继续旧等待；具有可信模型绑定的等待仍须先审阅原冻结内容并明确执行原 Run 的操作，无绑定的旧等待不可继续。隔离验收不代替原安装核验；失败保持停写，按本节维护合同处理，不删除升级记录或换新卷绕过。
 
 升级期间不要手工启动另一套 API/worker，也不要直接调用全量迁移脚本。`0012` 之前没有版本账，不给 `0001–0011` 补行。无新增迁移时不重放已有步骤；后续迁移配套显式版本核验，而不是用任意最大版本行推断兼容。
 
@@ -200,6 +206,14 @@ launcher 退出不代表 PG 中的语句或事务已经结束。若仍提示部�
 
 进程存活、`/healthz`、`/readyz`、模型配置存在和真实模型调用成功是不同证据。日常启动不主动发模型请求，也不修改资料。配置了模型只报告未核验；缺模型不会偷偷使用其他 provider。
 
+### 本地模型地址的显式例外
+
+默认不允许模型请求访问本地或私有地址，且不读取偶然存在的同名宿主环境变量。仅在部署者信任并明确授权具体服务时，停服务后可在私有配置中设置可选数组，例如 `"modelProviderAllowedLocalOrigins": ["http://127.0.0.1:8080"]`，再用同一配置启动。每项必须是规范的 `http` 或 `https` origin（协议、字面 IP、可选端口；不含路径、凭据、查询或片段），多个端口分别列出；删除该字段或设为 `[]` 即不配置例外。生命周期只将该列表映射为 `MODEL_PROVIDER_ALLOWED_LOCAL_ORIGINS`，不会放宽 API 原有地址校验：仅允许指定的 IPv4 回环/RFC1918 或 IPv6 回环/ULA，域名、链路本地、元数据及其他受限地址仍被拒绝。API 在 Docker 容器内运行，`127.0.0.1` 指容器本身而非 Windows 宿主；必须使用 API 容器实际可达、且满足上述限制的明确地址，例外不创建网络路由或暴露服务。授权前核实目标及凭据风险，不要为排错盲目扩大范围。
+
+若受信任的本机 DNS 代理使用 `198.18.0.0/15` Fake-IP，部署者可在私有配置的 `modelProviderAllowedFakeDnsOrigins` 数组中明确列出需要使用的 HTTPS origin，例如 `https://model.example.com`。仅该 origin 解析出的此网段地址适用；HTTP、其他端口或域名、私网与元数据地址仍不放行。请求仍固定本次 DNS 结果并校验原域名的 TLS 证书；这不保证代理路由或上游服务可用。修改后用本机生命周期重载安装。
+
+模型配置写入在本机安装中经过仅监听回环地址的 Web 和 API。Web 使用安装专属的服务端凭证与容器内 API 认证本机代理；浏览器不能提供该凭证，普通转发头也不能代替它。该例外不授权将本机 HTTP 服务公开到网络；远程访问应使用受支持的安全传输部署。
+
 ### 受邀账户密钥与邮件的显式配置
 
 原私有JSON允许可选 `identityKeyringFile`（checkout外私有JSON的绝对路径）及 `identityMail: { provider: "resend", from: string, apiKey: string }`。不配置时保持缺依赖503，不从环境、原BETTER_AUTH_SECRET或数据库密码派生新密钥，也不自动生成生产keyfile。配置的keyfile启动写者前必须私有可读且通过严格keyring解析，只读单文件挂载到 `/run/along-identity-keyring-source.json`，不挂载整个私有目录；容器用私有权限复制为 `/run/along-identity-keyring.json`（0600）后启动 API。这样兼容 Windows ACL 私有文件的 Linux bind 权限呈现，不放宽 loader 校验；每次容器启动重新复制，轮换后须正式 reload。
@@ -213,6 +227,39 @@ keyfile形状为 `{ version: 1, lookup: { id, key }, challenge: { active, keys }
 `scripts/local/config.mjs` 提供 `loadConfig`、原子 `saveConfig` 和带安装锁的 `updateConfig`；更新失败保留旧值，安装身份、卷、数据库身份与认证密钥不可被更新接口替换。调用方在 checkout 外私有配置上操作，不新建第二份 owner/授权事实。
 
 `local:account` 完成明确授权的账户操作、有效登记私有发布后，经同一配置保存registryFile，再调用 `reloadInstallation(file, { expectedConfig, expectedConfigVersion })`。配置与来源均比较实际JSON文件字节版本，同JSON但空白变化也不能覆盖；原登记仅追加发布到全新版本，不原位改写。reload在自身锁内核对配置、归属、基线与部署许可，停止本安装写者后重新加载；不会恢复Agent，也不决定管理员。`updateConfig` 与reload分别加锁，调用方先释放维护锁和数据库连接，不嵌套；`--admit` 只做原owner准入，不伪称完成文件/config/reload。`loadPrivateJsonSnapshot` / `savePrivateJson` 复用私有文件权限、字节版本及原子发布约定。
+
+## 模型配置的显式导入
+
+停旧写者、备份并完成数据库升级后，由管理员在受控环境指定已准入且有效的目标用户 UUID，运行 `bun --no-env-file apps/api/src/bin/import-model-provider.ts <用户 UUID>`，并通过受保护的标准输入提供 JSON：`name`、`base_url`、`api_key`（无凭据时为 null）、`model_id`。进程需显式设置指向目标库的 `DATABASE_URL`（宿主执行时使用该安装 PG 的 loopback 地址和端口）和私有配置中完全相同的 `MODEL_PROVIDER_ENCRYPTION_KEY`；从受保护的输入源和私有配置取值，不把密钥放进命令行、历史或日志，也不使用 `.env`。完成后清除临时进程环境；不要将凭据复制给其他用户。
+
+例如在受保护的 PowerShell 会话中（两个路径均为 checkout 外私有文件，输入 JSON 由管理员事先安全准备；UUID 为明确选择的目标用户）：
+
+```powershell
+<#
+  启动同一安装使 PG 可达；先确认输入文件和私有配置权限。
+  不要将 JSON 或变量值输出到终端。
+#>
+$config = Get-Content -Raw -LiteralPath 'C:\AlongPrivate\local.json' | ConvertFrom-Json
+$oldDb = $env:DATABASE_URL
+$oldKey = $env:MODEL_PROVIDER_ENCRYPTION_KEY
+try {
+  $user = [Uri]::EscapeDataString($config.database.user)
+  $password = [Uri]::EscapeDataString($config.database.password)
+  $db = [Uri]::EscapeDataString($config.database.name)
+  $env:DATABASE_URL = "postgresql://${user}:${password}@127.0.0.1:$($config.ports.postgres)/${db}"
+  $env:MODEL_PROVIDER_ENCRYPTION_KEY = $config.modelProviderEncryptionKey
+  Get-Content -Raw -LiteralPath 'C:\AlongPrivate\model-import.json' |
+    bun --no-env-file apps/api/src/bin/import-model-provider.ts '<目标用户 UUID>'
+} finally {
+  $env:DATABASE_URL = $oldDb
+  $env:MODEL_PROVIDER_ENCRYPTION_KEY = $oldKey
+  Remove-Variable config, oldDb, oldKey, user, password, db -ErrorAction SilentlyContinue
+}
+```
+
+受保护输入文件含明文 API key，完成后由管理员按私有数据策略安全处理；不能上传或留在仓库。导入只连接 PG，不读取私有安装配置或启动服务。
+
+导入不读取旧安装、不设置默认模型、不复制给其他用户。用户须自行设置默认；旧 Run 的等待不因导入而获得可证明的版本绑定，不能安全继续时应保留历史并明确不可恢复。导入成功不证明真实模型调用可用。
 
 ## 实现验证记录
 

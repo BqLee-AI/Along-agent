@@ -2,7 +2,10 @@ import { parseRole } from './role.js';
 import { serve } from './http/server.js';
 import { startWorkerLoop } from './worker/loop.js';
 import { createPool } from './db/pool.js';
-import { loadHarnessServices } from './modules/conversations/harness-config.js';
+import {
+  createUserModelTransport,
+  loadHarnessServices,
+} from './modules/conversations/harness-config.js';
 import { loadWorkspaceRegistry } from './modules/workspaces/service.js';
 import { createRoutingRuntime } from './modules/conversations/routing/index.js';
 import { createRunDriver } from './modules/conversations/run-driver.js';
@@ -29,6 +32,7 @@ const server =
         port: Number(process.env.PORT ?? 3000),
         pool,
         harness: loadHarnessServices(),
+        modelTransport: createUserModelTransport,
         routing: createRoutingRuntime(),
         runDriver,
       })

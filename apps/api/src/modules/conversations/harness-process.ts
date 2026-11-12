@@ -24,7 +24,7 @@ export interface HarnessServices {
     request: Extract<HarnessRequest, { type: 'measure_context' }>,
     tools: readonly HarnessTool[],
     policy: ContextPolicy,
-  ) => HarnessContextMeasurement;
+  ) => HarnessContextMeasurement | Promise<HarnessContextMeasurement>;
   model: (
     request: Extract<HarnessRequest, { type: 'model' }>,
     tools: readonly HarnessTool[],
@@ -33,7 +33,7 @@ export interface HarnessServices {
 }
 
 export interface NativeHarnessOptions {
-  services: HarnessServices;
+  services: Omit<HarnessServices, 'model' | 'measure'>;
   start: HarnessStart;
   signal: AbortSignal;
   handleRequest: (request: HarnessRequest) => Promise<unknown>;

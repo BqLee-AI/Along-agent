@@ -17,7 +17,7 @@
 | 4    | [风险约束与阶段门](prd/03-risk-constraints-and-stage-gates.md) | Top3 风险、指标、准入准出、不承诺口径                             |
 | 5    | [验收与待决事项](prd/04-acceptance-open-questions.md)          | v0/R1/R2-A 验收、R2-B 默认关闭路由合同、Deferred 与重开门槛       |
 
-## 二、总体设计（真源，21 篇）
+## 二、总体设计（真源，22 篇）
 
 | 序号 | 文档                                                                     | 作用                                                                                                                              |
 | ---- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
@@ -42,12 +42,13 @@
 | 19   | [R2-B 有限只读意图路由](design/19-r2b-readonly-intent-routing.md)        | #88：BGE INT8、三类只读、仓颉首轮决议、默认关闭、来源/资产/落盘原子性与逐意图验证；当前配套 v6 保留 legacy 路由合同，不自动接管   |
 | 20   | [本人目标内委托与授权](design/20-goal-scoped-delegation.md)              | 冻结实际能力与本人登记集合、资料编辑及有限创建、撞名恢复、v6/SSE v2 和执行生命周期；按事先明确的合同或预期核对真实效果            |
 | 21   | [受邀账户准入与恢复](design/21-invited-account-access.md)                | #112 显式准入/有限管理、停用后的流式披露边界、邀请/恢复/会话与前向升级；#131 本机口令重置；隔离实现证据与真实外部放行分列         |
+| 22   | [用户模型接入与运行绑定](design/22-model-provider-settings.md)           | Proposed：本人模型配置、加密凭据、冻结决议、SDK 受控流式出站与受限 Fake-IP 例外；真实外部验收独立                                 |
 
 活动列表为空与历史创建事实、批量请求部分完成及标题序号的证据边界见[design/09 §5](design/09-agent-runtime-and-checkpoint.md#5-toolgateway-交互required)。
 
 R2-B 的完整目标及多轮自主查询边界见[design/19 §4、§6](design/19-r2b-readonly-intent-routing.md#4-白名单与规则)：有历史不等于依赖前文，“哪些”等完整问句仍须经过完整拒识和语义阈值判断；新增、外发、筛选和其他对象的请求不能被截取为白名单读取。
 
-## 三、API（6 篇）
+## 三、API（7 篇）
 
 | 序号 | 文档                                                    | 作用                                                                                   |
 | ---- | ------------------------------------------------------- | -------------------------------------------------------------------------------------- |
@@ -57,8 +58,9 @@ R2-B 的完整目标及多轮自主查询边界见[design/19 §4、§6](design/1
 | 4    | [对话与 SSE](api/conversations/conversations_routes.md) | 显式授权修订与 legacy 分派、v6 trusted start、v2/v1 事件、RunView/GoalResult、只读恢复 |
 | 5    | [确认门](api/approvals/approvals_routes.md)             | 列表/详情/confirm\|reject\|revise、持久修改重放、重新确认                              |
 | 6    | [任务与事件](api/tasks/tasks_routes.md)                 | 列表/详情/cancel 幂等/events 只读按 recorded_at                                        |
+| 7    | [模型接入 API](api/model-providers.md)                  | Proposed：本人配置、模型发现、默认及 Run 选择；不代表路由已上线                        |
 
-## 四、Schema（5 篇）
+## 四、Schema（6 篇）
 
 | 序号 | 文档                                                 | 作用                                                                                    |
 | ---- | ---------------------------------------------------- | --------------------------------------------------------------------------------------- |
@@ -67,6 +69,7 @@ R2-B 的完整目标及多轮自主查询边界见[design/19 §4、§6](design/1
 | 3    | [对话与运行](schema/conversation-and-runs-schema.md) | Run/attempt/checkpoint、冻结 trusted context、0021 根 goal_result、历史 NULL 与只读投影 |
 | 4    | [承诺与账本](schema/commitments-schema.md)           | approvals/修改预约/tasks/task_events/outbox/notifications 全字段                        |
 | 5    | [简报与卡片](schema/content-schema.md)               | briefs/cards 含 schema_version                                                          |
+| 6    | [模型接入数据合同](schema/model-provider-schema.md)  | Proposed：版本化凭据、默认与 Run 冻结快照；不代表迁移已部署                             |
 
 ## 五、Agent（7 篇）
 

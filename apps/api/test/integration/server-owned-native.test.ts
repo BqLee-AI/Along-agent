@@ -1,3 +1,4 @@
+import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
@@ -73,6 +74,7 @@ maybe('server-owned native execution', () => {
   });
   it('continues after an HTTP subscriber disconnects and replays without executing again', async () => {
     const session = await seedAdmittedSession(database.pool);
+    await configureTestModel(database.pool, session.userId, 'fixture-transport-only');
     const ownerId = session.userId;
     let sessionId = session.sessionId;
     const driver = createRunDriver(database.pool);
@@ -97,6 +99,7 @@ maybe('server-owned native execution', () => {
           }),
         },
       };
+      controlledModelDeps(deps);
       api = createServer((req, res) => {
         void handleConversationRoute(req, res, new URL(req.url ?? '/', 'http://localhost'), {
           ...deps,
@@ -187,6 +190,7 @@ maybe('server-owned native execution', () => {
         [ownerId, `${ownerId}@along.test`],
       );
       await admitTestUser(database.pool, ownerId);
+      await configureTestModel(database.pool, ownerId, 'fixture-transport-only');
       const received = Promise.withResolvers<void>();
       const disconnected = Promise.withResolvers<void>();
       const heldModel = createServer((_req, res) => {
@@ -225,6 +229,7 @@ maybe('server-owned native execution', () => {
             },
           },
         };
+        controlledModelDeps(deps);
         const started = await startConversationRun(
           deps,
           ownerId,

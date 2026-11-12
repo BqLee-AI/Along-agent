@@ -39,7 +39,7 @@
 配置唯一保存以下用途所需的值或私有文件引用，具体 JSON 字段随实现保持这些边界：
 
 - 固定 Compose 项目、明确的 PG/workspace 卷引用和工作区容器挂载位置；新安装固定一次，接入旧安装引用原对象，不因重命名 checkout 创建替代卷。
-- 数据库连接、原 BETTER_AUTH_SECRET、已授权 HARNESS_MODEL_BASE_URL/HARNESS_MODEL/HARNESS_MODEL_API_KEY、TZDB_VERSION 和既有预算；不更换 provider/model/路由，不因某项缺失默选另一服务。新安装可以明确暂缺模型，报告资料能力不可用。
+- 数据库连接、原 BETTER_AUTH_SECRET、旧部署已授权 HARNESS_MODEL_BASE_URL/HARNESS_MODEL/HARNESS_MODEL_API_KEY、TZDB_VERSION 和既有预算均保留，不因缺失默选另一服务。新安装可以明确暂缺模型。拟议用户模型切换时旧配置仅由管理员明确指定目标用户导入，不自动启用或共享，见 [design/22](22-model-provider-settings.md)。
 - 固定 Web origin、Web/API/DB loopback 端口与 API_BASE；为后续认证提供同一个 APP_ORIGIN，避免 Web 地址与服务端信任来源分叉。
 - 既有 WORKSPACE_REGISTRY_FILE 及受管资料位置。登记中的 owner_id、workspace_id、root、有限路径和权限规则沿用 design/14，不建立第二份 owner/授权事实。
 

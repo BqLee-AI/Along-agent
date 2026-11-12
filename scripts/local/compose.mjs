@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { lstat, mkdir, open } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
-import { loadPrivateJson } from './config.mjs';
+import { loadPrivateJson, localModelProxyToken } from './config.mjs';
 import net from 'node:net';
 import { failure, hostEnvironment, readJson, run, writeJson } from './commands.mjs';
 
@@ -59,6 +59,12 @@ export function installationEnvironment(config, image = 'along-local:unprepared'
     ALONG_API_IMAGE: image,
     DATABASE_URL: databaseUrl.toString(),
     BETTER_AUTH_SECRET: config.authSecret,
+    MODEL_PROVIDER_ENCRYPTION_KEY: config.modelProviderEncryptionKey,
+    ALONG_LOCAL_MODEL_PROXY_TOKEN: localModelProxyToken(config),
+    MODEL_PROVIDER_ALLOWED_LOCAL_ORIGINS: (config.modelProviderAllowedLocalOrigins ?? []).join(','),
+    MODEL_PROVIDER_ALLOWED_FAKE_DNS_ORIGINS: (config.modelProviderAllowedFakeDnsOrigins ?? []).join(
+      ',',
+    ),
     APP_ORIGIN: config.origin,
     IDENTITY_KEYRING_FILE: config.identityKeyringFile ? '/run/along-identity-keyring.json' : '',
     IDENTITY_MAIL_PROVIDER: config.identityMail?.provider ?? '',
@@ -66,12 +72,9 @@ export function installationEnvironment(config, image = 'along-local:unprepared'
     IDENTITY_MAIL_API_KEY: config.identityMail?.apiKey ?? '',
     API_BASE: `http://127.0.0.1:${config.ports.api}`,
     TZDB_VERSION: config.tzdbVersion,
-    HARNESS_MODEL_BASE_URL: config.model?.baseUrl ?? '',
-    HARNESS_MODEL: config.model?.name ?? '',
-    HARNESS_MODEL_API_KEY: config.model?.apiKey ?? '',
     HARNESS_MAX_ITERATIONS: String(config.model?.maxIterations ?? 24),
     HARNESS_MAX_TOKENS: String(config.model?.maxTokens ?? 64000),
-    HARNESS_COMPLETION_CAP: config.model ? String(config.model.completionCap) : '',
+    HARNESS_COMPLETION_CAP: String(config.harnessCompletionCap),
     HARNESS_MODEL_WINDOW_TOKENS:
       config.model?.modelWindowTokens == null ? '' : String(config.model.modelWindowTokens),
     HARNESS_CONTEXT_RESERVE_TOKENS: String(config.model?.reserveTokens ?? 0),

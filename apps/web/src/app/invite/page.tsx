@@ -1,9 +1,11 @@
-import AccountLink from '@/features/account/AccountLink';
+import AccountLinkPage from '@/features/account/view/AccountLinkPage';
+
 export const dynamic = 'force-dynamic';
 export const metadata = {
   referrer: 'no-referrer' as const,
   robots: { index: false, follow: false },
 };
+
 export default function InvitePage() {
-  return <AccountLink purpose="invitation" />;
+  return <AccountLinkPage purpose="invitation" />;
 }

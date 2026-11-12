@@ -1,3 +1,4 @@
+import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import {
@@ -17,6 +18,7 @@ import type {
   RunContext,
   StartResult,
 } from '../../src/modules/conversations/contracts.js';
+import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
 import {
   createHarnessSession,
@@ -178,7 +180,7 @@ maybe('routing authority durable consumer behavior', () => {
         return options.render?.(intent, result) ?? pureRenderer.render(intent, result);
       },
     };
-    const deps: ConversationDeps = {
+    const deps: ConversationDeps = controlledModelDeps({
       pool: database.pool,
       timeContext: loadTimeContext('fixture-v1'),
       routing: runtime,
@@ -196,9 +198,10 @@ maybe('routing authority durable consumer behavior', () => {
             reply: { message: { content: '原模型回答', tool_calls: [] }, usage: null },
           };
         },
-      },
-    };
+      } satisfies HarnessServices,
+    });
     const actor = await seedSession(database.pool, { timezoneId: 'Asia/Tokyo' });
+    await configureTestModel(database.pool, actor.userId, 'routing-integration');
     const key = randomUUID();
     const body = {
       execution: 'harness',
@@ -767,7 +770,7 @@ maybe('routing authority durable consumer behavior', () => {
     }
   });
 
-  it('keeps legacy Run reads and sessions routing-disabled without backfilling policy', async () => {
+  it('keeps unbound legacy Run reads available but rejects sessions without backfilling routing policy', async () => {
     const f = await fixture();
     const runId = randomUUID(),
       attemptId = randomUUID();
@@ -790,21 +793,12 @@ maybe('routing authority durable consumer behavior', () => {
       );
       const legacy = { ...f.context, runId, attemptId };
       await getRunView(f.deps, f.actor.userId, f.context.conversationId, runId);
-      const session = await createHarnessSession(
-        f.deps,
-        legacy,
-        async () => true,
-        new AbortController().signal,
-      );
-      try {
-        expect(session.start.routing_policy).toBeNull();
-        expect(session.start.eligible_phase).toBe('disabled');
-        await expect(
-          session.handleRequest(request('route_probe', { stage: 'facts', facts_ref: null })),
-        ).rejects.toThrow('fresh first step');
-      } finally {
-        await session.close();
-      }
+      await expect(
+        createHarnessSession(f.deps, legacy, async () => true, new AbortController().signal),
+      ).rejects.toMatchObject({
+        errorCode: 'STATE_CONFLICT',
+        message: 'legacy Run model binding unavailable; cannot resume',
+      });
       expect(
         await withTransaction(database.pool, (client) =>
           readRoutingPolicy(client, f.actor.userId, runId),

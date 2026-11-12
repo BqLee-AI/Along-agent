@@ -15,6 +15,8 @@
     "test:integration": "bun test --parallel=4 --timeout 30000 ./test/integration"
   },
   "dependencies": {
+    "@ai-sdk/openai-compatible": "1.0.43",
+    "@ai-sdk/provider": "2.0.3",
     "@along/contracts": "workspace:*",
     "@along/notifier-core": "workspace:*",
     "@along/scheduler-core": "workspace:*",

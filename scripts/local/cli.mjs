@@ -136,11 +136,19 @@ async function newInstallationInput(mode) {
           name: await ask('原数据库名'),
         },
         authSecret: await ask('原 BETTER_AUTH_SECRET（隐藏输入，不能遗失或替换）', undefined, true),
+        modelProviderEncryptionKey: await ask(
+          'MODEL_PROVIDER_ENCRYPTION_KEY（隐藏输入；已有加密数据必须恢复原密钥）',
+          undefined,
+          true,
+        ),
         origin: await ask('原 APP_ORIGIN / Web origin（隐藏输入）', undefined, true),
         registryFile: (await ask('原登记 JSON 绝对路径；原本无登记才可留空', '', true)) || null,
         model: null,
       });
     }
+    values.harnessCompletionCap = Number(
+      await ask('HARNESS_COMPLETION_CAP（独立单次输出上限）', 4096),
+    );
     const model = await ask(
       mode === 'adopt'
         ? '原部署有模型配置？有请填 y；原本无配置回车'
@@ -154,9 +162,7 @@ async function newInstallationInput(mode) {
         apiKey: await ask('HARNESS_MODEL_API_KEY（隐藏输入；原服务无认证才留空）', '', true),
         maxIterations: Number(await ask('HARNESS_MAX_ITERATIONS', 24)),
         maxTokens: Number(await ask('HARNESS_MAX_TOKENS', 64000)),
-        completionCap: Number(
-          await ask('HARNESS_COMPLETION_CAP（必填：独立单次输出上限；不借用 Run 预算）'),
-        ),
+        completionCap: values.harnessCompletionCap,
         reserveTokens: Number(await ask('HARNESS_CONTEXT_RESERVE_TOKENS', 0)),
       };
       const window = await ask(
@@ -176,7 +182,7 @@ const explanations = {
   CONFIG_INPUT_REQUIRED:
     '首次初始化需在交互终端显式选择 --new 或 --adopt。已有部署请先恢复原配置和登记。',
   CONFIG_INVALID:
-    '私有 JSON 缺少必填项或字段无效；已配置模型必须显式补 model.completionCap（独立单次输出上限），不能借用 maxTokens。核对指南，不要重建配置或替换原安装密钥。',
+    '私有 JSON 缺少必填项或字段无效；按指南显式配置 modelProviderEncryptionKey 和 harnessCompletionCap，保留原安装及密钥。已有加密数据必须恢复原密钥。',
   CONFIG_PERMISSIONS: '配置目录或文件不是当前用户专有；请使用专用私有目录并修复权限。',
   CONFIG_EXISTS: '配置已存在；重用它，不覆盖原值。',
   PORT_IN_USE: '固定端口已被占用；核实原进程归属并按原部署流程停写，不会抢端口或杀未知进程。',
@@ -301,11 +307,7 @@ try {
       );
       if (result.phase !== 'stopped') {
         console.log('账户状态请在 Web 检查；首次建号/登录后用 local:account 完成本机登记。');
-        console.log(
-          result.model === 'unconfigured'
-            ? '模型尚未配置，资料任务能力不可用。'
-            : '模型已配置但真实调用未核验；启动没有发出模型请求。',
-        );
+        console.log('用户模型状态请在 Web 检查并设置默认；启动没有发出模型请求。');
         const workspace =
           typeof result.workspace === 'string'
             ? result.workspace

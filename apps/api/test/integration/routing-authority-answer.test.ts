@@ -1,7 +1,9 @@
+import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { HARNESS_PROTOCOL_VERSION } from '@along/contracts';
 import type { ConversationDeps } from '../../src/modules/conversations/contracts.js';
+import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
 import { createHarnessSession } from '../../src/modules/conversations/harness-authority.js';
 import { startConversationRun } from '../../src/modules/conversations/service.js';
@@ -16,7 +18,7 @@ maybe('routing authority trusted answer boundary', () => {
   let deps: ConversationDeps;
   beforeAll(async () => {
     database = await createIntegrationDatabase();
-    deps = {
+    deps = controlledModelDeps({
       pool: database.pool,
       timeContext: loadTimeContext('fixture-v1'),
       harness: {
@@ -27,8 +29,8 @@ maybe('routing authority trusted answer boundary', () => {
         model: async function* () {
           throw new Error('provider must not be called');
         },
-      },
-    };
+      } satisfies HarnessServices,
+    });
   });
   afterAll(async () => {
     await database?.close();
@@ -36,6 +38,7 @@ maybe('routing authority trusted answer boundary', () => {
 
   it('rejects native premodel answer without accepting or disclosing any delta', async () => {
     const actor = await seedSession(database.pool, {});
+    await configureTestModel(database.pool, actor.userId, 'routing-authority-test');
     const started = await startConversationRun(
       deps,
       actor.userId,

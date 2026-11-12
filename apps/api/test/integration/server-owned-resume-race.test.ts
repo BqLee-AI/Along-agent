@@ -1,3 +1,4 @@
+import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
@@ -147,6 +148,7 @@ maybe('server-owned approval resume across processes', () => {
 
   it('admits one resumed attempt, rejects its competing owner, and never retries execution', async () => {
     const actor = await seedAdmittedSession(database.pool, {});
+    await configureTestModel(database.pool, actor.userId, 'fixture-transport-only');
     ownerId = actor.userId;
     await configureWorkspaceRegistry([
       {
@@ -178,6 +180,7 @@ maybe('server-owned approval resume across processes', () => {
         }),
       },
     };
+    controlledModelDeps(deps);
     const children: Bun.Subprocess<'pipe', 'pipe', 'pipe'>[] = [];
     let completed = false;
     try {
@@ -268,6 +271,7 @@ maybe('server-owned approval resume across processes', () => {
         import { resumeConversationRun } from './src/modules/conversations/harness-authority.ts';
         import { loadTimeContext } from './src/modules/time/context.ts';
         import { configureWorkspaceRegistry } from './src/modules/workspaces/service.ts';
+        import { controlledModelDeps } from './test/helpers/model-selection.ts';
         await configureWorkspaceRegistry([{ workspace_id: 'documents', label: 'Documents',
           owner_id: process.env.RACE_OWNER, root: process.env.RACE_ROOT,
           readable_paths: ['brief.txt'], writable_paths: ['brief.txt'] }]);
@@ -278,6 +282,7 @@ maybe('server-owned approval resume across processes', () => {
             maxIterations: 8, maxTokens: 8000,
             contextPolicy: createContextPolicy({ completionCap: 1024, model: 'fixture-transport-only' }),
             model: createHarnessModelTransport({ baseUrl: process.env.RACE_MODEL + '/v1', model: 'fixture-transport-only' }) } };
+        controlledModelDeps(deps);
         console.log(JSON.stringify({ ready: true }));
         await once(process.stdin, 'data');
         try {

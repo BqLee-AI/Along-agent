@@ -1,3 +1,4 @@
+import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
@@ -7,6 +8,7 @@ import { RunViewSchema } from '@along/contracts';
 import { z } from 'zod';
 import { startConversationRun } from '../../src/modules/conversations/service.js';
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
+import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
 import { loadTimeContext } from '../../src/modules/time/context.js';
 import { handleRequest } from '../../src/http/app.js';
 import { seedAdmittedSession as seedSession } from './setup.js';
@@ -44,6 +46,7 @@ maybe('harness authority signed HTTP boundary', () => {
 
   async function actor() {
     const session = await seedSession(database.pool, {});
+    await configureTestModel(database.pool, session.userId, 'http-test-model');
     return {
       session,
       headers: {
@@ -125,7 +128,7 @@ maybe('harness authority signed HTTP boundary', () => {
     const foreign = await actor();
     let models = 0;
     const started = await startConversationRun(
-      {
+      controlledModelDeps({
         pool: database.pool,
         timeContext: loadTimeContext('fixture-v1'),
         harness: {
@@ -137,8 +140,8 @@ maybe('harness authority signed HTTP boundary', () => {
             models += 1;
             throw new Error('GET/cancel must never call model');
           },
-        },
-      },
+        } satisfies HarnessServices,
+      }),
       session.userId,
       randomUUID(),
       { execution: 'harness', raw_text: '你好', idempotency_key: randomUUID() },
@@ -189,7 +192,7 @@ maybe('harness authority signed HTTP boundary', () => {
   it('cancel reason bounds reject before writes and preserve the longest accepted reason once', async () => {
     const { session, headers } = await actor();
     const started = await startConversationRun(
-      {
+      controlledModelDeps({
         pool: database.pool,
         timeContext: loadTimeContext('fixture-v1'),
         harness: {
@@ -200,8 +203,8 @@ maybe('harness authority signed HTTP boundary', () => {
           model: async function* () {
             throw new Error('cancel must never execute model');
           },
-        },
-      },
+        } satisfies HarnessServices,
+      }),
       session.userId,
       randomUUID(),
       { execution: 'harness', raw_text: 'cancel boundary', idempotency_key: randomUUID() },

@@ -471,25 +471,20 @@ maybe('conversation runtime', () => {
     expect(second.conversationId).not.toBe(first.conversationId);
   });
 
-  it('concurrent requests with one key create a single run; the loser gets 409', async () => {
+  it('concurrent requests with one key create one run and replay the stored prefix', async () => {
     const ownerId = await seedUser(pool);
     const key = randomUUID();
     const body = { raw_text: '明天 9:20 提醒我喝水', confirmed_timezone: 'Asia/Shanghai' };
-    const settled = await Promise.allSettled([
+    const results = await Promise.all([
       startConversationRun({ pool, timeContext }, ownerId, randomUUID(), body, key),
       startConversationRun({ pool, timeContext }, ownerId, randomUUID(), body, key),
     ]);
-    const winners = settled.filter(
-      (entry): entry is PromiseFulfilledResult<StartResult> => entry.status === 'fulfilled',
-    );
-    expect(winners).toHaveLength(1);
-    const loser = settled.find((entry) => entry.status === 'rejected');
-    if (!loser || loser.status !== 'rejected') throw new Error('expected one loser');
-    expect(loser.reason).toMatchObject({ httpStatus: 409 });
-
-    const winner = winners[0];
-    if (!winner) throw new Error('expected one winner');
-    const events = await collect(pool, winner.value);
+    expect(results[0]!.runId).toBe(results[1]!.runId);
+    const winner = results.find((result) => result.context !== null);
+    const duplicate = results.find((result) => result.replay !== null);
+    if (!winner || !duplicate) throw new Error('expected one acceptance and one replay');
+    expect(duplicate.replay).toEqual([]);
+    const events = await collect(pool, winner);
     expect(events.at(-1)?.type).toBe('thread.completed');
     const replay = await startConversationRun(
       { pool, timeContext },
@@ -501,7 +496,7 @@ maybe('conversation runtime', () => {
     expect(replay.replay).toEqual(events);
   });
 
-  it('retrying while the original run is still running returns 409', async () => {
+  it('retrying while the original run is still running returns its stored prefix', async () => {
     const ownerId = await seedUser(pool);
     const key = randomUUID();
     const body = { raw_text: '明天 9:20 提醒我喝水', confirmed_timezone: 'Asia/Shanghai' };
@@ -512,8 +507,15 @@ maybe('conversation runtime', () => {
       body,
       key,
     );
-    const retry = startConversationRun({ pool, timeContext }, ownerId, randomUUID(), body, key);
-    await expect(retry).rejects.toMatchObject({ httpStatus: 409 });
+    const retry = await startConversationRun(
+      { pool, timeContext },
+      ownerId,
+      randomUUID(),
+      body,
+      key,
+    );
+    expect(retry.runId).toBe(first.runId);
+    expect(retry.replay).toEqual([]);
     const { rows } = await pool.query('SELECT status FROM agent_runs WHERE id = $1', [first.runId]);
     expect(rows[0]?.status).toBe('running');
   });

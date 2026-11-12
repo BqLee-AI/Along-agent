@@ -1,19 +1,20 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import AccountForm from '../src/features/account/AccountForm';
+import AccountForm from '../src/features/account/view/AccountForm';
 import {
   loginHref,
   pageReturnTo,
   protectedLoginHref,
   safeReturnTo,
-} from '../src/lib/account-navigation';
-import { consumeThreadStream, readEnvelope } from '../src/lib/conversation-run';
+} from '../src/shared/session/navigation';
+import { consumeThreadStream } from '../src/features/conversations/model/conversation-run';
+import { readEnvelope } from '../src/shared/http/client';
 import type { ThreadEvent } from '@along/stream-protocol';
 import {
   submitAccountOperation,
   validateAccountFields,
-} from '../src/features/account/account-operation';
+} from '../src/features/account/model/account-operation';
 
 const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
 afterEach(() => {

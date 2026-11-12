@@ -133,7 +133,7 @@ test('D8.wire-rejection', async () => {
         let value: unknown;
         switch (request.type) {
           case 'measure_context':
-            value = measureHarnessContext(request, start.tools, contextPolicy);
+            value = await measureHarnessContext(request, start.tools, contextPolicy);
             break;
           case 'model':
             modelCalls++;

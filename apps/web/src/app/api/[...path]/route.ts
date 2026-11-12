@@ -36,6 +36,19 @@ async function proxy(req: NextRequest, context: RouteContext): Promise<Response>
     const value = req.headers.get(name);
     if (value) headers.set(name, value);
   }
+  // Only the loopback-only local lifecycle injects this server-side capability.
+  // It is never accepted from the browser or exposed in a response.
+  if (
+    process.env.ALONG_LOCAL_MODEL_PROXY_TOKEN &&
+    path[0] === 'v1' &&
+    (path[1] === 'model-providers' ||
+      (path.length === 4 &&
+        path[1] === 'model-selection' &&
+        path[2] === 'actions' &&
+        path[3] === 'set-default'))
+  ) {
+    headers.set('x-along-local-model-proxy', process.env.ALONG_LOCAL_MODEL_PROXY_TOKEN);
+  }
   // Next's Node adapter signals a premature response close, not normal EOF.
   // Also handle downstream stream cancellation (including reader.cancel()).
   const controller = new AbortController();

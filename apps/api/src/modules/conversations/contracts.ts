@@ -10,8 +10,18 @@ import type { RunOwnership } from './run-ownership.js';
 export interface ConversationDeps {
   pool: Pool | null;
   timeContext: TimeContext;
-  harness?: HarnessServices | null;
+  harness?: Omit<HarnessServices, 'model' | 'measure'> | null;
   routing?: RoutingRuntime;
+  // A real adapter must enforce the common outbound policy and make measurement
+  // describe the exact bytes its model transport sends. No deployment fallback.
+  modelTransport?: (config: {
+    base_url: string;
+    api_key: string | null;
+    model_id: string;
+  }) => Promise<{
+    model: HarnessServices['model'];
+    measure: NonNullable<HarnessServices['measure']>;
+  }>;
   runDriver?: {
     acquire(runId: string, waitForLock?: boolean): Promise<RunOwnership>;
     release(owner: RunOwnership): Promise<void>;

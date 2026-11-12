@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { ThreadEventSchema, type ThreadEvent } from '@along/stream-protocol';
+import { ThreadEventSchema } from '@along/stream-protocol';
+import type { ThreadEvent } from '@along/stream-protocol';
 import type { GoalResult } from '@along/contracts';
 import { NextRequest } from 'next/server';
 import {
@@ -7,12 +8,13 @@ import {
   consumeThreadStream,
   followRunEvents,
   mergeThreadEvents,
-  readEnvelope,
-} from '../src/lib/conversation-run';
-import { createServer, type Server } from 'node:http';
+} from '../src/features/conversations/model/conversation-run';
+import { readEnvelope } from '../src/shared/http/client';
+import { createServer } from 'node:http';
+import type { Server } from 'node:http';
 import { once } from 'node:events';
 import type { GET as ProxyGet } from '../src/app/api/[...path]/route';
-import { MeSchema } from '../src/lib/types';
+import { MeSchema } from '../src/shared/session/identity';
 
 const cid = '11111111-1111-4111-8111-111111111111';
 const rid = '22222222-2222-4222-8222-222222222222';

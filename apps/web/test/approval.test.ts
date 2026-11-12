@@ -5,8 +5,8 @@ import {
   approvalFilter,
   approvalListPath,
   reminderActionBody,
-} from '../src/features/approvals/model';
-import { historyPageReducer, initialHistoryPage } from '../src/lib/conversation-run';
+} from '../src/features/approvals/model/approval';
+import { historyPageReducer, initialHistoryPage } from '../src/shared/http/page';
 
 const id = '11111111-1111-4111-8111-111111111111';
 const key = '22222222-2222-4222-8222-222222222222';

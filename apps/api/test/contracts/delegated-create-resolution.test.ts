@@ -237,11 +237,11 @@ beforeAll(async () => {
       completionCap: 1024,
       model: 'controlled-create-resolution',
     }),
-    model: createHarnessModelTransport({
-      baseUrl: `${base}/v1`,
-      model: 'controlled-create-resolution',
-    }),
   };
+  fixture.model = createHarnessModelTransport({
+    baseUrl: `${base}/v1`,
+    model: 'controlled-create-resolution',
+  });
 }, 30_000);
 
 afterAll(async () => {
