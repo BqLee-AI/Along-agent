@@ -3,7 +3,7 @@
 > 状态：目标合同；各能力以 Run 冻结的实际工具、资源和生命周期为边界，合同不代替运行验收。
 > 范围：设置、提醒、有限受管资料的自主步骤、可信事实、接续、结果、停止及新旧 profile 迁移。
 > 不包含：市场、模型供应商、推送与计费决策；这些边界仍见 PRD 04 Deferred。具体能力以接纳时冻结的 profile 为准，不能将本方案的完整路线视为全部可执行。
-> 阶段：#104 能力重构；行为增量见 [OpenSpec change](../../openspec/changes/refactor-assistant-capability-authorization/proposal.md)。
+> 阶段：#104 能力重构；行为见 OpenSpec 主规范及[归档记录](../../openspec/changes/archive/2026-11-12-refactor-assistant-capability-authorization/)。
 
 ## 1. 裁决与生效边界
 
@@ -15,7 +15,7 @@
 
 授权修订、实际能力和执行生命周期是独立事实：`delegation/1` 只定义目标内自主策略，不证明后台执行已交付。每个新 Run 同时冻结 `execution_lifecycle:'request-bound'|'server-owned'`，由 conversations 持有，并经可信 start、Run 只读投影和 Web 如实呈现。早期设置等完整切片可以采用 request-bound，沿现行请求绑定的断连取消语义，不承诺离开/退出后继续；仅在 §8 所有权与故障验收完成后，新接纳的相应 Run 才可冻结 server-owned。已接纳 Run（包括早期 delegation/1）不随部署升级、当前开关或批准恢复改变生命周期；缺此字段的 legacy 仍沿原合同读取，不回填。这里只增加两种具体生命周期，不建立通用 profile/权限平台。最终重构必须完成 server-owned 订阅解耦及其真实验收，不能以 request-bound 阶段替代收口。
 
-本人委托采用显式接纳：`execution:'harness'` 且 `authorization_revision:'delegation/1'` 的新请求进入该 profile，普通 Web Agent 提交此字段。可选 `workspace_ids` 只收窄本人登记集合，与 legacy 的单 `workspace_id` 互斥；省略修订的 API 调用、业务提醒和资料快捷入口保留 legacy。实际工具及工作区集合随新 Run 冻结，空集合不阻断其他已有能力；旧 settings-only Run、snapshot2 和批准不因部署扩权。生命周期仍为 request-bound；wire 为 v6，legacy start 明确传 `trusted_context:null`，SSE v2 与 legacy v1 分读。提醒创建只证明保存，不证明排期、触发或通知。
+本人委托采用显式接纳：`execution:'harness'` 且 `authorization_revision:'delegation/1'` 的新请求进入该 profile，普通 Web Agent 提交此字段。可选 `workspace_ids` 只收窄本人登记集合，与 legacy 的单 `workspace_id` 互斥；省略修订的 API 调用、业务提醒和资料快捷入口保留 legacy。实际工具及工作区集合随新 Run 冻结，空集合不阻断其他已有能力；旧 settings-only Run、snapshot2 和批准不因部署扩权。生命周期按接纳时实际执行资格冻结为 request-bound 或 server-owned，不从授权修订推断；wire 为 v6，legacy start 明确传 `trusted_context:null`，SSE v2 与 legacy v1 分读。提醒创建只证明保存，不证明排期、触发或通知。
 
 ## 2. 规则的唯一所有者
 
@@ -187,4 +187,4 @@ TS 对可恢复 legacy 采用显式 profile 到新 wire 的受限适配：原 al
 
 共享 contracts/gateway/harness-authority/Web controller 单文件单集成所有者。既有 D1–D10、A1–A4 与五门保留，授权场景按新/legacy 分别验证；不让冻结文案阻挡正式新合同，也不删除有效行为覆盖。
 
-真实模型评估须独立人工审定目标/预期效果，不拿模型原答案当 gold。必含设置保存、明确创建/取消、资料编辑/创建、多步混合、严格 elapsed、零写冲突自主修正，以及资料注入、跨 owner、登记外、目标歧义、过窗、unknown；分别统计真实完成、错误效果和非必要打断，不用工具名或测试数量代替用户能力。整体 change 只随 #104 相应实施与真实验收收口 archive，本阶段不关闭 #104/#105、不自动创建下一议题。
+真实模型评估以事先明确的合同或预期对照实际效果，不拿模型原答案当标准，也不要求用户逐类别审定。必含设置保存、明确创建/取消、资料编辑/创建、多步混合、严格 elapsed、零写冲突自主修正，以及资料注入、跨 owner、登记外、目标歧义、过窗、unknown；分别记录真实完成、错误效果和非必要打断，缺失事实记未知，不用工具名或测试数量代替用户能力。复用历史证据时保留其来源、时间、版本和限制，不把用户未审定的预期写成已审定；保留真实失败，不以全部样本成功作为门槛。整体 change 随 #104 相应实施与真实验收收口归档。

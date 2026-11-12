@@ -2,7 +2,7 @@
 
 ### Requirement: 固定会话与可信退出
 
-系统 SHALL 保持固定七天会话及服务端确认撤销后清Cookie；按 [design/20 §1、§8](../../../../../docs/design/20-goal-scoped-delegation.md) 分开授权修订、会话访问和冻结生命周期。server-owned退出/到期不取消已接纳执行，request-bound不承诺退出后继续并按原连接策略收尾；账户禁用/明确撤权阻止新动作。退出不是取消task或回滚既成效果。
+系统 SHALL 保持固定七天会话及服务端确认撤销后清Cookie；按 [design/20 §1、§8](../../../../../../docs/design/20-goal-scoped-delegation.md) 分开授权修订、会话访问和冻结生命周期。server-owned退出/到期不取消已接纳执行，request-bound不承诺退出后继续并按原连接策略收尾；账户禁用/明确撤权阻止新动作。退出不是取消task或回滚既成效果。
 
 #### Scenario: 七天过期与只读重登（D6/D8）
 
@@ -28,7 +28,7 @@
 
 ### Requirement: 本人默认时区真实保存与清除
 
-identity SHALL 拥有本人默认时区的窄公共用例；新profile按 [design/20 §4.1、§6.1](../../../../../docs/design/20-goal-scoped-delegation.md) 在明确委托内直接保存/清除，与工具接受结果/审计原子提交，返回真实事实而非提议或虚构记忆；不开放任意账户patch或宿主配置。
+identity SHALL 拥有本人默认时区的窄公共用例；新profile按 [design/20 §4.1、§6.1](../../../../../../docs/design/20-goal-scoped-delegation.md) 在明确委托内直接保存/清除，与工具接受结果/审计原子提交，返回真实事实而非提议或虚构记忆；不开放任意账户patch或宿主配置。
 
 #### Scenario: 同一委托保存并使用（A1/D4/D8）
 

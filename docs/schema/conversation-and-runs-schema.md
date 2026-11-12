@@ -2,7 +2,7 @@
 
 > 状态：业务与正式 Harness 存储合同。范围：对话/Run/attempt、只追加事件/有限快照、冻结执行权威与调用接受结果。不包含：任意崩溃自动恢复或通用 exactly-once。TS 长期持有 PostgreSQL 与事实，仓颉组织循环和本次上下文（design/09/11）。
 
-> Run 在 `frozen_context` 独立冻结授权修订、实际能力、工作区资格和 request-bound 生命周期，供 v6 trusted start 与只读投影；`0021_trusted_execution_goals.sql` 增加根列 `agent_runs.goal_result`。旧 Run/pending/快照/模板/hash/accepted result 不迁写或扩权，历史结果保持 NULL；snapshot 仍为2。新委托 SSE 为 v2，legacy/v1 历史保持。server-owned 不属于 request-bound 合同；本页不构成运行验收。
+> 新委托 Run 在 `frozen_context` 独立冻结授权修订、实际能力、工作区资格和实际 `request-bound` 或 `server-owned` 生命周期，供 v6 trusted start 与只读投影；`0021_trusted_execution_goals.sql` 增加根列 `agent_runs.goal_result`。旧 Run/pending/快照/模板/hash/accepted result 不迁写或扩权，历史结果保持 NULL；snapshot 仍为2。新委托 SSE 为 v2，legacy/v1 历史保持。本页不构成运行验收。
 
 ## 设计依据
 
@@ -122,7 +122,7 @@ prompt_versions 1 ── 0..n agent_revisions   (逻辑引用，不可变)
 - [Required] 创建时冻结 execution、owner/conversation、revision、mode、预算、工具范围、上下文与输入引用；0015 trigger 禁止事后改变，终态 Run 不可改写。
 - [Required] harness suspended_approval 时三个 waiting 引用必须齐备；其他 harness 状态必须为空。TS 锁内进一步验证实际 owner/Run/已接受调用/批准对应关系，引用本身不作授权。
 - [Required] legacy 已接受助手 delta 合并的消息、终态 checkpoint、attempt/Run 同事务；无助手输出的结构化失败不合成助手消息。新 delegation 将真实 GoalResult、其 `answer` 最终消息、终结事件和 Run/attempt 终态同事务提交，不把中间 delta 当最终 answer。取消不能覆盖已提交事实或伪撤销既成效果，失败/断连仍保留真实已接受设置收据及未完成或未知项。
-- 新委托在接纳事务冻结 `frozen_context.authorization_revision='delegation/1'`、`execution_lifecycle='request-bound'`、本人 `workspaceGrants` 和 `trustedExecutionContext`；HTTP 须显式请求 delegation harness，可选非空去重 `workspace_ids` 收窄集合。可信上下文只含工作区安全摘要；单次 invocation 绑定的 grant 须属于原集合并通过当前资格复验。legacy 仍使用单 `workspaceGrant/workspaceSummary`，旧 Run 和已冻结空集合不回填；不能从模型或当前部署补写旧事实。
+- 新委托在接纳事务冻结 `frozen_context.authorization_revision='delegation/1'`、实际 `execution_lifecycle`（`request-bound` 或 `server-owned`）、本人 `workspaceGrants` 和 `trustedExecutionContext`；HTTP 须显式请求 delegation harness，可选非空去重 `workspace_ids` 收窄集合。可信上下文只含工作区安全摘要；单次 invocation 绑定的 grant 须属于原集合并通过当前资格复验。legacy 仍使用单 `workspaceGrant/workspaceSummary`，旧 Run 和已冻结空集合不回填；不能从模型或当前部署补写旧事实。
 - 资料调用在既有 invocation `frozen_context` 冻结单目标 grant；直接编辑冻结同 Run 已接受全文来源、相对路径、基线版本、精确新内容与新版本，可信零写后继另绑定前驱。冻结内容、调用身份和接受结果不可变；`document_effects` 是由真实调用和新读证据组成的只读投影，不是新的效果账。
 - `0021` 在0020之后新增根 `goal_result jsonb NULL`；`0022` 将非空结果约束收紧为明确为真，不能以缺失 legacy 字段产生的 SQL NULL 通过 CHECK。非空值必须是 object、Run 冻结 delegation/1、status 为 done/failed/cancelled，目标状态属于 completed/partial/blocked/cancelled/unknown。strict 逐项 shape、收据归属/成功状态和真实偏好事实由 TS 校验；DB 列本身不证明目标达成。RunView 投影冻结授权/生命周期与根结果，不泄漏完整 trusted context。
 - 合格新 Run 冻结创建撞名目标恢复能力；可选目标结果声明记录用户消息来源、零写撞名、后续创建和独立新读的引用，不新增目标表或改写调用账。服务端验证归属、顺序、冻结资格与效果事实；声明所表达的自然语言目标关系仍由模型理解，来源引用不构成语义证明。
@@ -221,7 +221,7 @@ snapshot2 原字段/集合不变，typed views/context_slice 不写入快照正�
 
 - [Required] 只追加，禁 `UPDATE`/`DELETE`。
 - [Required] `payload` 不存敏感值原文；tool 参数摘要脱敏。
-- [Required] 新写入/执行仅 `harness/v5`、snapshot `version=2`；harness_snapshot 保存已接受消息/工具结果引用、usage/next_call_no/等待引用，不保存 raw args、provider body、密钥或完整推理链。真实模型增量沿既有message.delta持久，不新建数据表。TS 验证同 owner/Run、真实接受事实与单调进度；旧 task snapshot1 的限定读取迁移见本篇 R1 节。
+- [Required] 新写入/执行使用 `harness/v6`、snapshot `version=2`；harness_snapshot 保存已接受消息/工具结果引用、usage/next_call_no/等待引用，不保存 raw args、provider body、密钥或完整推理链。真实模型增量沿既有 message.delta 持久，不新建数据表。TS 验证同 owner/Run、真实接受事实与单调进度；旧 task snapshot1 的限定读取迁移见本篇 R1 节。
 - [Required] 同 conversation 先持 NO KEY UPDATE 锁再分配游标，并保持至提交，避免小游标晚提交被客户端永久漏掉，并与终态消息插入取得的外键 KEY SHARE 兼容。内部快照不交给外部 ThreadEventSchema；GET/同入站键只读不启动执行。
 
 ## R2-B 路由策略与内部执行记录（已实现，默认 off，#88）

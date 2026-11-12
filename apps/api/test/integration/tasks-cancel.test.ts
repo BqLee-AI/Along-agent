@@ -7,7 +7,7 @@ import type { Pool } from 'pg';
 import { confirmApproval } from '../../src/modules/approvals/confirm.js';
 import { getApprovalDetail } from '../../src/modules/approvals/service.js';
 import { getTaskDetail } from '../../src/modules/tasks/service.js';
-import { requestCancel } from '../../src/modules/tasks/cancel.js';
+import { requestCancel, type CancelResult } from '../../src/modules/tasks/cancel.js';
 import { runCancelPhase } from '../../src/modules/tasks/scheduler/cancel-phase.js';
 import { runClaimPhase } from '../../src/modules/tasks/scheduler/claim.js';
 import {
@@ -90,6 +90,52 @@ maybe('tasks cancel', () => {
       [taskId],
     );
     expect(events).toEqual([{ type: 'cancel_requested' }]);
+    await finishCancel(pool, taskId, ownerId);
+  });
+
+  it('serializes concurrent cancellation requests with the same idempotency key', async () => {
+    const { taskId, ownerId } = await confirmTask(pool);
+    await scheduleTask(pool, taskId, ownerId);
+    const body = { reason: 'concurrent', idempotency_key: randomUUID() };
+    const blocker = await pool.connect();
+    let requests: Promise<CancelResult[]> | undefined;
+    try {
+      await blocker.query('BEGIN');
+      await blocker.query('SELECT id FROM tasks WHERE id = $1 FOR UPDATE', [taskId]);
+      requests = Promise.all([
+        requestCancel({ pool }, ownerId, taskId, body),
+        requestCancel({ pool }, ownerId, taskId, body),
+      ]);
+      let waiting = 0;
+      for (let i = 0; i < 500 && waiting < 2; i += 1) {
+        await blocker.query('SELECT pg_stat_clear_snapshot()');
+        const result = await blocker.query<{ count: string }>(
+          `SELECT count(*) FROM pg_stat_activity
+           WHERE datname = current_database() AND wait_event_type = 'Lock'
+             AND query LIKE '%FOR UPDATE%' AND pid <> pg_backend_pid()`,
+        );
+        waiting = Number(result.rows[0]!.count);
+      }
+      expect(waiting).toBeGreaterThanOrEqual(2);
+    } finally {
+      await blocker.query('ROLLBACK');
+      blocker.release();
+    }
+    const results = await requests!;
+    expect(results.map((result) => result.duplicate).sort()).toEqual([false, true]);
+    expect(results.map((result) => result.state)).toEqual(['cancel_pending', 'cancel_pending']);
+    const commands = await pool.query(
+      `SELECT status, provider_receipt_id FROM outbox
+       WHERE task_id = $1 AND command->>'kind' = 'cancel'`,
+      [taskId],
+    );
+    expect(commands.rows).toEqual([{ status: 'pending', provider_receipt_id: null }]);
+    const events = await pool.query(
+      `SELECT type FROM task_events
+       WHERE task_id = $1 AND type IN ('cancel_requested', 'cancelled')`,
+      [taskId],
+    );
+    expect(events.rows).toEqual([{ type: 'cancel_requested' }]);
     await finishCancel(pool, taskId, ownerId);
   });
 
