@@ -1,8 +1,11 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import { rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { ThreadEvent } from '@along/stream-protocol';
 import { createRoutingRuntime } from '../../src/modules/conversations/routing/index.js';
+import { configureWorkspaceRegistry } from '../../src/modules/workspaces/service.js';
 import { digestInvocationArgs } from '../../src/modules/tools/invocations.js';
 import { createRoutingFixture, type RoutingTestFixture } from '../routing-fixtures.js';
 import {
@@ -203,6 +206,68 @@ for (const mode of ['local', 'http'] as const) {
         expect(admissionError).toBeUndefined();
         expect(events.at(-1)?.type).toBe('thread.failed');
         expect(events.filter((event) => event.type === 'message.delta')).toEqual([]);
+      }
+    }, 30000);
+  }
+}
+
+for (const mode of ['local', 'http'] as const) {
+  for (const profile of ['delegation-selected', 'delegation-default', 'legacy'] as const) {
+    test(`D8.${mode}.${profile}-workspace-refuses-direct`, async () => {
+      const actor = await fixture.actor(mode);
+      const root = await mkdtemp(join(tmpdir(), 'along-routing-workspace-'));
+      try {
+        await configureWorkspaceRegistry([
+          {
+            workspace_id: 'documents',
+            label: 'Documents',
+            owner_id: actor.ownerId,
+            root,
+            readable_paths: ['memo.txt'],
+            writable_paths: [],
+          },
+        ]);
+        const callsBefore = providerCalls;
+        const events = await (
+          await actor.message({
+            execution: 'harness',
+            ...(profile === 'legacy'
+              ? { workspace_id: 'documents' }
+              : {
+                  authorization_revision: 'delegation/1',
+                  ...(profile === 'delegation-selected' ? { workspace_ids: ['documents'] } : {}),
+                }),
+            raw_text: '/timezone',
+            idempotency_key: randomUUID(),
+          })
+        ).events;
+        const run = started(events);
+        const checkpoints = (
+          await fixture.database.pool.query(
+            `SELECT c.kind,c.payload FROM run_checkpoints c
+             JOIN run_attempts a ON a.id=c.attempt_id WHERE a.run_id=$1`,
+            [run.run_id],
+          )
+        ).rows;
+        expect(
+          checkpoints.find((row) => row.kind === 'harness_routing_decision')?.payload,
+        ).toMatchObject({
+          decision: 'fallback',
+          reason: 'INELIGIBLE',
+          facts: { reason: 'WORKSPACE_CONTEXT' },
+        });
+        expect(checkpoints.some((row) => row.kind === 'harness_routing_render')).toBe(false);
+        expect(
+          (
+            await fixture.database.pool.query('SELECT 1 FROM tool_invocations WHERE run_id=$1', [
+              run.run_id,
+            ])
+          ).rows,
+        ).toEqual([]);
+        expect(providerCalls).toBe(callsBefore + 1);
+      } finally {
+        await configureWorkspaceRegistry([]);
+        await rm(root, { recursive: true, force: true });
       }
     }, 30000);
   }

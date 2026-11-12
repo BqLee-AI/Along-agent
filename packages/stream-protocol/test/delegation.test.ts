@@ -180,6 +180,18 @@ describe('explicit delegation stream decoding', () => {
     }
   });
 
+  it.each(terminals)('decodes a complete bounded answer in $type', (terminal) => {
+    for (const length of [8193, 1024 * 1024]) {
+      const answer = 'x'.repeat(length);
+      const input = {
+        ...terminal,
+        payload: { ...terminal.payload, goal_result: { ...goal, answer } },
+      };
+      const wire: unknown = JSON.parse(JSON.stringify(input));
+      expect<unknown>(ThreadEventSchema.parse(wire)).toEqual(input);
+    }
+  });
+
   it('rejects malformed receipt references and bounded or unknown goal fields', () => {
     const completed = terminals[0]!;
     for (const receipt_refs of [
@@ -201,7 +213,8 @@ describe('explicit delegation stream decoding', () => {
       { ...goal, outcomes: [] },
       { ...goal, outcomes: Array(65).fill(goal.outcomes[0]) },
       { ...goal, answer: '' },
-      { ...goal, answer: 'x'.repeat(8193) },
+      { ...goal, answer: 'x'.repeat(1024 * 1024 + 1) },
+      { ...goal, outcomes: [{ ...goal.outcomes[0], description: 'x'.repeat(8193) }] },
       { ...goal, status: 'done' },
       { ...goal, extra: true },
       { ...goal, outcomes: [{ ...goal.outcomes[0], extra: true }] },

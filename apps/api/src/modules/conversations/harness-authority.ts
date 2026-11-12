@@ -1179,7 +1179,8 @@ export async function createHarnessSession(
                     text: context.inputText,
                     messages: context.messages!.map(({ role, content }) => ({ role, content })),
                     hasPendingApproval,
-                    workspaceSelected: !!context.workspaceGrant,
+                    workspaceSelected:
+                      !!context.workspaceGrant || !!context.workspaceGrants?.length,
                   },
                   policy!,
                 ),
