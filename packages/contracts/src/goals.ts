@@ -55,7 +55,10 @@ export const GoalResultSchema = z
       })
       .strict()
       .nullable(),
-    answer: text,
+    answer: z
+      .string()
+      .min(1)
+      .max(1024 * 1024),
   })
   .strict()
   .superRefine((goal, ctx) => {

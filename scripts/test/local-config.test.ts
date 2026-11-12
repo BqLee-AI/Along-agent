@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { execFile } from 'node:child_process';
 import { chmod, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import {
   createConfig,
@@ -70,6 +70,23 @@ async function privateAccess(path: string, directory: boolean) {
 }
 
 describe('strict local configuration', () => {
+  it('keeps routing off unless an explicit installation configuration is supplied', () => {
+    expect(installationEnvironment(fixture()).HARNESS_ROUTING_MODE).toBe('off');
+    const routing = {
+      mode: 'shadow',
+      bundleFile: resolve('bundle.json'),
+      encoderUrl: 'http://encoder:8080',
+      intents: ['prefs_timezone_read'],
+    };
+    const config = createConfig({ mode: 'new', tzdbVersion: '2025b', routing });
+    expect(config.routing).toEqual(routing);
+    expect(installationEnvironment(config)).toMatchObject({
+      HARNESS_ROUTING_MODE: 'shadow',
+      HARNESS_ROUTING_BUNDLE: '/run/along-routing-bundle.json',
+      HARNESS_ROUTING_ENCODER_URL: 'http://encoder:8080',
+      HARNESS_ROUTING_INTENTS: 'prefs_timezone_read',
+    });
+  });
   it('requires an explicit independent completion cap and forwards optional context policy limits', () => {
     const model = {
       baseUrl: 'https://authorized.invalid',

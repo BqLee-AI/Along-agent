@@ -53,6 +53,15 @@ const configSchema = z
     authSecret: text,
     tzdbVersion: text,
     model: modelSchema.nullable(),
+    routing: z
+      .object({
+        mode: z.enum(['shadow', 'enforce']),
+        bundleFile: text.refine((value) => isAbsolute(value)),
+        encoderUrl: z.string().url().pipe(text),
+        intents: z.array(z.enum(['task_list_bounded', 'prefs_timezone_read', 'brief_cards_read'])),
+      })
+      .strict()
+      .optional(),
     registryFile: text.refine((value) => isAbsolute(value)).nullable(),
     identityKeyringFile: text
       .refine((value) => isAbsolute(value))
@@ -140,6 +149,7 @@ export function createConfig(input) {
     authSecret: values.authSecret ?? randomBytes(48).toString('base64url'),
     tzdbVersion: values.tzdbVersion,
     model: values.model ?? null,
+    ...(values.routing !== undefined ? { routing: values.routing } : {}),
     registryFile: values.registryFile ?? null,
     ...(values.identityKeyringFile !== undefined
       ? { identityKeyringFile: values.identityKeyringFile }

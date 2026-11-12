@@ -217,7 +217,10 @@ const goalResult = z
       })
       .strict()
       .nullable(),
-    answer: goalText,
+    answer: z
+      .string()
+      .min(1)
+      .max(1024 * 1024),
   })
   .strict();
 function delegationEnvelope<T extends ThreadEventType, P extends z.ZodTypeAny>(

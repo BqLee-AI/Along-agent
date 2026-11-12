@@ -48,6 +48,49 @@ afterAll(async () => {
 });
 
 for (const mode of ['local', 'http'] as const) {
+  for (const [command, tool, expected] of [
+    ['/timezone', 'get_user_prefs', 'Europe/London'],
+    ['/reminders 2', 'list_tasks', '活动提醒'],
+    ['/brief 2026-10-31', 'read_brief_cards', '2026-10-31'],
+  ] as const) {
+    test(`D8.${mode}.delegation-readonly-${tool}`, async () => {
+      const actor = await fixture.actor(mode);
+      if (tool === 'read_brief_cards')
+        await fixture.database.pool.query('UPDATE users SET timezone_id=NULL WHERE id=$1', [
+          actor.ownerId,
+        ]);
+      const body = {
+        execution: 'harness',
+        authorization_revision: 'delegation/1',
+        raw_text: command,
+        idempotency_key: randomUUID(),
+      };
+      const events = await (await actor.message(body)).events;
+      const run = started(events);
+      const view = await actor.view(run.conversation_id, run.run_id);
+      expect(view).toMatchObject({
+        status: 'done',
+        goal_result: { status: 'completed', outcomes: [{ status: 'achieved' }] },
+      });
+      const text = events
+        .filter((event) => event.type === 'message.delta')
+        .map((event) => event.payload.delta)
+        .join('');
+      expect(text).toContain(expected);
+      expect(view.goal_result?.answer).toBe(text);
+      const calls = await fixture.database.pool.query(
+        'SELECT invocation_id,tool_id FROM tool_invocations WHERE run_id=$1',
+        [run.run_id],
+      );
+      expect(calls.rows).toHaveLength(1);
+      expect(calls.rows[0].tool_id).toBe(tool);
+      expect(view.goal_result?.outcomes[0]?.receipt_refs).toEqual([calls.rows[0].invocation_id]);
+      expect(events.filter((event) => event.type === 'thread.completed')).toHaveLength(1);
+      expect(await (await actor.message(body)).events).toEqual(events);
+      expect(providerCalls).toBe(0);
+      expect(encoderCalls).toBe(0);
+    }, 30000);
+  }
   for (const [command, tool, expectedArgs, kind] of [
     ['/reminders 2', 'list_tasks', { limit: 2, state: null }, 'list_tasks'],
     ['/timezone', 'get_user_prefs', {}, 'prefs'],
