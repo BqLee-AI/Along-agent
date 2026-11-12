@@ -2,7 +2,7 @@
 
 ### Requirement: 可信工作区选择与有限文件授权
 
-系统 SHALL 由服务端登记并冻结本人资源资格；legacy继续用户显式单选，delegation profile按 [design/20 §7](../../../../../docs/design/20-goal-scoped-delegation.md#7-工作区资格有限创建与精确写入) 冻结可用集合或用户明确收窄子集，模型在其中自主选择。不因缺少手动“资料模式”阻断合法委托，不接受模型自报root/owner。
+系统 SHALL 由服务端登记并冻结本人资源资格；legacy继续用户显式单选，delegation profile按 [design/20 §7](../../../../../../docs/design/20-goal-scoped-delegation.md#7-工作区资格有限创建与精确写入) 冻结可用集合或用户明确收窄子集，模型在其中自主选择。不因缺少手动“资料模式”阻断合法委托，不接受模型自报root/owner。
 
 #### Scenario: 自主选择和真实歧义（D1/D8）
 
@@ -26,7 +26,7 @@
 
 ### Requirement: 文档批准绑定精确基线与完整目标
 
-文档修改 SHALL 绑定本Run真实完整读取、精确基线及完整目标。legacy和新增影响仍需精确冻结审阅；新profile新增影响按 [design/20 §3](../../../../../docs/design/20-goal-scoped-delegation.md#3-自主澄清授权升级与硬拒绝) 允许一次明确授权并继续，不机械追加继续按钮，决议自身零文件写。正常步骤直接绑定invocation，不创建自动批准；用户明确整篇重写不再次索权，效果边界见design/20 §7。
+文档修改 SHALL 绑定本Run真实完整读取、精确基线及完整目标。legacy和新增影响仍需精确冻结审阅；新profile新增影响按 [design/20 §3](../../../../../../docs/design/20-goal-scoped-delegation.md#3-自主澄清授权升级与硬拒绝) 允许一次明确授权并继续，不机械追加继续按钮，决议自身零文件写。正常步骤直接绑定invocation，不创建自动批准；用户明确整篇重写不再次索权，效果边界见design/20 §7。
 
 #### Scenario: 正常精确修改或明确重写（D2/D6/D8）
 
@@ -45,7 +45,7 @@
 
 ### Requirement: 版本冲突与无关内容保留
 
-实际编辑 SHALL 验证当前基线版本并只写冻结目标字节；冲突需真实零写证据，不能以unknown/未尝试替代。legacy变更目标仍需新批准；新委托内已确定零写冲突可自主新读重算。见 [design/20 §7](../../../../../docs/design/20-goal-scoped-delegation.md#7-工作区资格有限创建与精确写入)。
+实际编辑 SHALL 验证当前基线版本并只写冻结目标字节；冲突需真实零写证据，不能以unknown/未尝试替代。legacy变更目标仍需新批准；新委托内已确定零写冲突可自主新读重算。见 [design/20 §7](../../../../../../docs/design/20-goal-scoped-delegation.md#7-工作区资格有限创建与精确写入)。
 
 #### Scenario: 可信零写冲突自主修正（D6/D8）
 
@@ -64,7 +64,7 @@
 
 ### Requirement: 非事务写入唯一许可与诚实未知
 
-文件效果 SHALL 复用稳定invocation、动作前持久unknown与一次许可；直接写入绑定精确目标/版本，批准路径同批准只绑定一个apply。仅明确取得许可提交回答的当前执行栈执行。见 [design/20 §7](../../../../../docs/design/20-goal-scoped-delegation.md#7-工作区资格有限创建与精确写入) 及tool-gateway未知合同。
+文件效果 SHALL 复用稳定invocation、动作前持久unknown与一次许可；直接写入绑定精确目标/版本，批准路径同批准只绑定一个apply。仅明确取得许可提交回答的当前执行栈执行。见 [design/20 §7](../../../../../../docs/design/20-goal-scoped-delegation.md#7-工作区资格有限创建与精确写入) 及tool-gateway未知合同。
 
 #### Scenario: 重交与许可丢回答（A3/D3/D8）
 
@@ -85,7 +85,7 @@
 
 ### Requirement: 有限输出目录内真实创建
 
-系统 SHALL 仅在冻结登记输出目录内创建普通文件，沿 [design/20 §7](../../../../../docs/design/20-goal-scoped-delegation.md#7-工作区资格有限创建与精确写入) 提供真实原子no-replace发布、目录/链接资格及一次许可；不开放任意mkdir/move/delete或覆盖降级。
+系统 SHALL 仅在冻结登记输出目录内创建普通文件，沿 [design/20 §7](../../../../../../docs/design/20-goal-scoped-delegation.md#7-工作区资格有限创建与精确写入) 提供真实原子no-replace发布、目录/链接资格及一次许可；不开放任意mkdir/move/delete或覆盖降级。
 
 #### Scenario: 创建产物与新回读（D6/D8/D10）
 

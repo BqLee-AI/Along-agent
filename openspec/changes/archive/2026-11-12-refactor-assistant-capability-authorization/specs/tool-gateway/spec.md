@@ -2,7 +2,7 @@
 
 ### Requirement: 本地批准与接受结果原子提交
 
-网关 SHALL 将本地领域效果、首次接受结果和审计同一事务提交；legacy批准仍适用原创建/确认边界，新profile直接设置/建任务/取消通过所属模块公共事务而非假批准。见 [design/20 §6](../../../../../docs/design/20-goal-scoped-delegation.md#6-领域提交稳定调用与真实结果)。
+网关 SHALL 将本地领域效果、首次接受结果和审计同一事务提交；legacy批准仍适用原创建/确认边界，新profile直接设置/建任务/取消通过所属模块公共事务而非假批准。见 [design/20 §6](../../../../../../docs/design/20-goal-scoped-delegation.md#6-领域提交稳定调用与真实结果)。
 
 #### Scenario: 直接创建的原子性（A1/A2/D4/D8）
 
@@ -21,7 +21,7 @@
 
 ### Requirement: 实际使用路径与既有安全保证保持
 
-实现 SHALL 经真实身份、HTTP、native、PG和文件边界证明所属事实及结果；新profile的正常执行不以legacy五工具输出为永久上限，legacy仍保持原合同。设计见 [design/20 §6、§9–§10](../../../../../docs/design/20-goal-scoped-delegation.md)，不保留绕网关的旧签名或对新调用方的旧工具别名。
+实现 SHALL 经真实身份、HTTP、native、PG和文件边界证明所属事实及结果；新profile的正常执行不以legacy五工具输出为永久上限，legacy仍保持原合同。设计见 [design/20 §6、§9–§10](../../../../../../docs/design/20-goal-scoped-delegation.md)，不保留绕网关的旧签名或对新调用方的旧工具别名。
 
 #### Scenario: 新直接与旧批准消费者（D1/D8/D10）
 
@@ -40,7 +40,7 @@
 
 ### Requirement: 同 Run 原接受观察的受控回取
 
-系统 SHALL 沿同一网关回取有界原接受事实；本Run来源与经 [design/20 §5](../../../../../docs/design/20-goal-scoped-delegation.md#5-澄清与接续复用可信跨-run-来源) 接纳的可信前序收据分开核验。扩充接续不开放任意跨Run读取；旧Run不新增回取权限，回取不重执行原操作。单位/分页继续 design/18 §6–§7。
+系统 SHALL 沿同一网关回取有界原接受事实；本Run来源与经 [design/20 §5](../../../../../../docs/design/20-goal-scoped-delegation.md#5-澄清与接续复用可信跨-run-来源) 接纳的可信前序收据分开核验。扩充接续不开放任意跨Run读取；旧Run不新增回取权限，回取不重执行原操作。单位/分页继续 design/18 §6–§7。
 
 #### Scenario: 原来源与新读取不同（D2/D8/D10）
 
@@ -61,7 +61,7 @@
 
 ### Requirement: 能力资格与语义委托各有来源
 
-网关 SHALL 按 [design/20 §2–§4、§7](../../../../../docs/design/20-goal-scoped-delegation.md) 使用单一工具目录及真实执行分类，核验身份/profile/当前attempt、停止、引用、资源/时间/版本/效果；不能将工具可见性或资料正文当本次授权，也不把确定性关联当语义证明。
+网关 SHALL 按 [design/20 §2–§4、§7](../../../../../../docs/design/20-goal-scoped-delegation.md) 使用单一工具目录及真实执行分类，核验身份/profile/当前attempt、停止、引用、资源/时间/版本/效果；不能将工具可见性或资料正文当本次授权，也不把确定性关联当语义证明。
 
 #### Scenario: 正常自主执行（D6/D8）
 
@@ -80,7 +80,7 @@
 
 ### Requirement: 既有调用幂等不冒充语义去重
 
-系统 SHALL 按 [design/20 §6.2](../../../../../docs/design/20-goal-scoped-delegation.md#62-去重承诺的边界) 复用入站键、稳定调用与不可变接受结果；不新增模型item_key/effect_key/supersedes持久层，不按hash合并独立目标，不承诺语义exactly-once。
+系统 SHALL 按 [design/20 §6.2](../../../../../../docs/design/20-goal-scoped-delegation.md#62-去重承诺的边界) 复用入站键、稳定调用与不可变接受结果；不新增模型item_key/effect_key/supersedes持久层，不按hash合并独立目标，不承诺语义exactly-once。
 
 #### Scenario: 合法相同新动作（A2/D3/D8）
 

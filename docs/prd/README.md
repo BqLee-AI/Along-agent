@@ -2,7 +2,7 @@
 
 > 状态：草案 / 范围：v0 MVP 全链路的产品需求入口，串起简报→活动账八步 / 不包含：路由表、表字段、状态机细节（见 api/schema）、实现代码 / 阶段：P1（v0）
 
-> 授权作用域：本文“唯一主链/确认门唯一放行”是现行 v0 与 legacy，不锁定助理长期目标。新 profile 的本人委托内自主步骤见 [design/20](../design/20-goal-scoped-delegation.md) 与 [PRD 04](04-acceptance-open-questions.md#本人目标内委托105proposed)（Proposed）；只替换逐项批准策略，保留时间、事务、回执和只读历史，不因规范合入启用能力。
+> 授权作用域：本文“唯一主链/确认门唯一放行”是 v0 与 legacy 合同，不锁定助理长期目标。新 profile 的本人委托内自主步骤见 [design/20](../design/20-goal-scoped-delegation.md) 与 [PRD 04](04-acceptance-open-questions.md#本人目标内委托104105)；只替换逐项批准策略，保留时间、事务、回执和只读历史，不因规范合入启用能力。
 
 > Proposed 本人多模型接入与逐 Run 选择见 [PRD 验收](04-acceptance-open-questions.md#本人模型接入proposed)和 [design/22](../design/22-model-provider-settings.md)；不代表 SDK、Web 或真实供应商验收完成。
 

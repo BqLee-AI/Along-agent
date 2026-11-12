@@ -14,7 +14,7 @@ Issue: #105
 
 ## Spec
 
-设计真源：[design/20 §1–§10](../../../docs/design/20-goal-scoped-delegation.md)；现行基础为 design/04 §3、05 §3/§5/§9、06 §0/§11、09 §1–§8、14 §3–§7、17 §6–§7、18 §2–§8。
+设计真源：[design/20 §1–§10](../../../../docs/design/20-goal-scoped-delegation.md)；现行基础为 design/04 §3、05 §3/§5/§9、06 §0/§11、09 §1–§8、14 §3–§7、17 §6–§7、18 §2–§8。
 
 行为增量：v0-safety-contract、identity、tool-gateway、workspaces、agent-runtime、conversations；spec 不复制路由/字段表。PRD、Agent 职责、适用 design/API/schema 和仓库规则同步标明 legacy 与 Proposed 范围。
 

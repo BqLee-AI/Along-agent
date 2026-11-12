@@ -2,7 +2,7 @@
 
 ### Requirement 1: 错误码 HTTP 唯一
 
-系统 SHALL 保持 design/10 §6 与 API §5 的 HTTP/业务码；legacy 继续原预检和时间失败合同。新 delegation profile 按 [design/20 §4](../../../../../docs/design/20-goal-scoped-delegation.md#4-可信执行上下文和时间) 区分所需时间分支：wall 规则不可用仍 typed 503，纯 UTC elapsed 不伪造 TZDB、不因不需要的时区字段失败；readyz 如实反映原规则故障，不改成健康。
+系统 SHALL 保持 design/10 §6 与 API §5 的 HTTP/业务码；legacy 继续原预检和时间失败合同。新 delegation profile 按 [design/20 §4](../../../../../../docs/design/20-goal-scoped-delegation.md#4-可信执行上下文和时间) 区分所需时间分支：wall 规则不可用仍 typed 503，纯 UTC elapsed 不伪造 TZDB、不因不需要的时区字段失败；readyz 如实反映原规则故障，不改成健康。
 
 #### Scenario: 回显不符与既有错误码（A2/D8）
 
@@ -21,7 +21,7 @@
 
 ### Requirement 4: confirm 单事务与按钮确认
 
-系统 SHALL 对 legacy 与有效精确批准保持原按钮、owner/pending/时限/hash 校验和 confirm 单事务；对新 delegation profile 的已明确委托正常步骤直接调用领域用例，不模拟批准。所有创建路径保持 task/created/outbox 原子提交，直接工具路径还与 accepted result/审计原子提交。新/旧授权作用域见 [design/20 §1、§3、§6](../../../../../docs/design/20-goal-scoped-delegation.md)。
+系统 SHALL 对 legacy 与有效精确批准保持原按钮、owner/pending/时限/hash 校验和 confirm 单事务；对新 delegation profile 的已明确委托正常步骤直接调用领域用例，不模拟批准。所有创建路径保持 task/created/outbox 原子提交，直接工具路径还与 accepted result/审计原子提交。新/旧授权作用域见 [design/20 §1、§3、§6](../../../../../../docs/design/20-goal-scoped-delegation.md)。
 
 #### Scenario: legacy并发双击（A2/D3）
 
@@ -40,7 +40,7 @@
 
 ### Requirement 6: 简报只读投影
 
-系统 SHALL 保持 GET /brief 为 tasks/approvals 的只读投影、冻结显示和已记录步骤口径，不建 briefs/cards 表；新 UTC/跨冻结时区提醒按 [design/20 §4.3、§6](../../../../../docs/design/20-goal-scoped-delegation.md) 同步今日查询。生成并保存的简报文件属于 workspace，不是该投影持久表。
+系统 SHALL 保持 GET /brief 为 tasks/approvals 的只读投影、冻结显示和已记录步骤口径，不建 briefs/cards 表；新 UTC/跨冻结时区提醒按 [design/20 §4.3、§6](../../../../../../docs/design/20-goal-scoped-delegation.md) 同步今日查询。生成并保存的简报文件属于 workspace，不是该投影持久表。
 
 #### Scenario: 点卡与浏览无副作用（A1/D6/D8）
 
@@ -59,7 +59,7 @@
 
 ### Requirement: A4 typed时间失败与唯一流终结
 
-系统 SHALL 保持普通缺信息与已判定 typed 时间错误分离；legacy 沿原零承诺写失败，新 delegation profile 按 [design/20 §4、§6.3](../../../../../docs/design/20-goal-scoped-delegation.md) 保留逐动作真实效果和唯一 Run 终结，不因后续时间失败抹掉先前已接受效果。
+系统 SHALL 保持普通缺信息与已判定 typed 时间错误分离；legacy 沿原零承诺写失败，新 delegation profile 按 [design/20 §4、§6.3](../../../../../../docs/design/20-goal-scoped-delegation.md) 保留逐动作真实效果和唯一 Run 终结，不因后续时间失败抹掉先前已接受效果。
 
 #### Scenario: 不存在与歧义（A4/D8）
 
@@ -78,7 +78,7 @@
 
 ### Requirement: A4应用上下文与预检零新run
 
-系统 SHALL 由应用持有同一真实不可变规则/别名上下文供wall和readyz，time-core保持纯函数；legacy/business保持身份/输入/幂等之后、SSE之前的原规则预检和零新Run保证。新自然目标接纳冻结真实时间能力，不要求TS预先语义分类；实际wall工具缺规则时零该动作效果，严格elapsed才走独立真实UTC依据，不以猜测/未知类型绕过规则门。见 [design/20 §4.2](../../../../../docs/design/20-goal-scoped-delegation.md#42-严格-elapsed-与墙上时间)。
+系统 SHALL 由应用持有同一真实不可变规则/别名上下文供wall和readyz，time-core保持纯函数；legacy/business保持身份/输入/幂等之后、SSE之前的原规则预检和零新Run保证。新自然目标接纳冻结真实时间能力，不要求TS预先语义分类；实际wall工具缺规则时零该动作效果，严格elapsed才走独立真实UTC依据，不以猜测/未知类型绕过规则门。见 [design/20 §4.2](../../../../../../docs/design/20-goal-scoped-delegation.md#42-严格-elapsed-与墙上时间)。
 
 #### Scenario: wall坏包与安全优先（A4/D7/D8）
 
@@ -97,7 +97,7 @@
 
 ### Requirement: A4显式时区与Web候选重提议
 
-系统 SHALL 保留 #103 的请求锚、可信同目标跨Run来源及真实午夜边界。legacy 继续原完整重提议/按钮与候选展示版本；新 profile 使用 [design/20 §4–§5](../../../../../docs/design/20-goal-scoped-delegation.md) 的实际缺口接续、时区优先级和可信候选；Web 不算UTC或把fold选择当额外批准。
+系统 SHALL 保留 #103 的请求锚、可信同目标跨Run来源及真实午夜边界。legacy 继续原完整重提议/按钮与候选展示版本；新 profile 使用 [design/20 §4–§5](../../../../../../docs/design/20-goal-scoped-delegation.md) 的实际缺口接续、时区优先级和可信候选；Web 不算UTC或把fold选择当额外批准。
 
 #### Scenario: 显式时区与同委托设置（A4/D1/D8）
 
@@ -123,7 +123,7 @@
 
 ### Requirement: 新委托授权策略与资料事实边界
 
-新 delegation profile SHALL 按 [design/20 §1–§3](../../../../../docs/design/20-goal-scoped-delegation.md) 在本人委托内自主选择正常步骤；模型解释语义，TS验证确定性事实。v0的“只提议/全部写入按钮”仅适用legacy，其他owner、纯时间、原子、只追加、取消、回执和未知不重做不变量继续适用。
+新 delegation profile SHALL 按 [design/20 §1–§3](../../../../../../docs/design/20-goal-scoped-delegation.md) 在本人委托内自主选择正常步骤；模型解释语义，TS验证确定性事实。v0的“只提议/全部写入按钮”仅适用legacy，其他owner、纯时间、原子、只追加、取消、回执和未知不重做不变量继续适用。
 
 #### Scenario: 混合目标零机械审批（A1/D8/D10）
 

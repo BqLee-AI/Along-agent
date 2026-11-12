@@ -2,7 +2,7 @@
 
 ## 1. 责任真源与证据
 
-字段、接口、状态、一致性和迁移的唯一详细设计为 [design/20](../../../docs/design/20-goal-scoped-delegation.md) §1–§10。本文记录本次变更为何选择该合同及如何对齐，不复制第二份字段表。现行实现、Required 目标、Proposed 接缝与 Deferred 分别标记；规范通过不证明业务已实现。
+字段、接口、状态、一致性和迁移的唯一详细设计为 [design/20](../../../../docs/design/20-goal-scoped-delegation.md) §1–§10。本文记录本次变更为何选择该合同及如何对齐，不复制第二份字段表。现行实现、Required 目标、Proposed 接缝与 Deferred 分别标记；规范通过不证明业务已实现。
 
 现行证据入口：conversations/service.ts、reminder-date.ts 负责接纳锚/可信来源；harness-authority.ts 组装 start 并持有请求执行；contracts/harness.ts 与 apps/harness/src/main.cj 严格 v5/snapshot2；tools/invocations.ts 负责稳定调用/接受结果/一次许可；workspaces/replace.ts 和 approvals/document-service.ts 分离精确授权与文件效果。路径以 docs/plans/agent-capability-refactor-plan.md §2 为索引，源码事实不自动成为新授权。
 

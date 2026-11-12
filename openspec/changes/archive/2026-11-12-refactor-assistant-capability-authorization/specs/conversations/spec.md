@@ -2,7 +2,7 @@
 
 ### Requirement: 面向用户目标的确定入口
 
-系统 SHALL 默认提供真实Agent对话；新delegation profile按 [design/20 §3、§7](../../../../../docs/design/20-goal-scoped-delegation.md) 在冻结资源集合内自主选择，不让手动资料模式/工具选择成为合法目标前置。legacy快捷入口、显式单登记及不可用失败仍保持原合同，选择本身不执行。
+系统 SHALL 默认提供真实Agent对话；新delegation profile按 [design/20 §3、§7](../../../../../../docs/design/20-goal-scoped-delegation.md) 在冻结资源集合内自主选择，不让手动资料模式/工具选择成为合法目标前置。legacy快捷入口、显式单登记及不可用失败仍保持原合同，选择本身不执行。
 
 #### Scenario: 新目标与旧入口（D6/D8）
 
@@ -16,7 +16,7 @@
 
 ### Requirement: 精确批准与显式继续原运行
 
-系统 SHALL 对legacy保留原精确审阅/决议及显式同Run继续合同；新profile正常编辑/创建不逐项批准，真实新增影响则允许一次范围精确的“授权并继续”用户动作，不机械要求第二次继续。授权决议自身仍零领域/文件写入，不等于保存，后续执行仍走原Run/等待点及当前资格。见 [design/20 §3、§7](../../../../../docs/design/20-goal-scoped-delegation.md)，不模拟批准或消费历史pending，不预设HTTP请求数量。
+系统 SHALL 对legacy保留原精确审阅/决议及显式同Run继续合同；新profile正常编辑/创建不逐项批准，真实新增影响则允许一次范围精确的“授权并继续”用户动作，不机械要求第二次继续。授权决议自身仍零领域/文件写入，不等于保存，后续执行仍走原Run/等待点及当前资格。见 [design/20 §3、§7](../../../../../../docs/design/20-goal-scoped-delegation.md)，不模拟批准或消费历史pending，不预设HTTP请求数量。
 
 #### Scenario: 正常写入不是批准队列（D6/D8/D10）
 
@@ -40,7 +40,7 @@
 
 ### Requirement: 效果与运行状态依据可信事实
 
-系统 SHALL 按 [design/20 §6.3](../../../../../docs/design/20-goal-scoped-delegation.md#63-目标结果不是-run-done) 分开呈现Run生命周期、目标结果和逐项真实效果。completed/partial/blocked/unknown与created/排期/取消中/文件applied/verified不可互换；不以模型措辞或前端旗标证明完成。
+系统 SHALL 按 [design/20 §6.3](../../../../../../docs/design/20-goal-scoped-delegation.md#63-目标结果不是-run-done) 分开呈现Run生命周期、目标结果和逐项真实效果。completed/partial/blocked/unknown与created/排期/取消中/文件applied/verified不可互换；不以模型措辞或前端旗标证明完成。
 
 #### Scenario: 文件和任务事实分开（A1/D8/D10）
 
@@ -64,7 +64,7 @@
 
 ### Requirement: 错误恢复不自动产生副作用
 
-系统 SHALL 准确区分401/403/404/依赖/领域错误；历史、刷新、回退、重登和重连仍只读，不重放消息/批准/继续/取消。按 [design/20 §1、§8–§9](../../../../../docs/design/20-goal-scoped-delegation.md) 读取冻结授权及execution_lifecycle，不以delegation/1或当前部署推断后台能力，不用前端自动补POST实现后台能力。
+系统 SHALL 准确区分401/403/404/依赖/领域错误；历史、刷新、回退、重登和重连仍只读，不重放消息/批准/继续/取消。按 [design/20 §1、§8–§9](../../../../../../docs/design/20-goal-scoped-delegation.md) 读取冻结授权及execution_lifecycle，不以delegation/1或当前部署推断后台能力，不用前端自动补POST实现后台能力。
 
 #### Scenario: 真实401与其他错误（D6/D8/D10）
 
@@ -80,7 +80,7 @@
 
 ### Requirement: 冻结profile界定旧交互策略
 
-系统 SHALL 按 [design/20 §1、§8–§9](../../../../../docs/design/20-goal-scoped-delegation.md) 以Run冻结事实而非当前页面/部署版本裁决策略。资料入口和批准按授权作用域解释，连接按独立生命周期解释；早期delegation/1可显示request-bound，不能因正常步骤免批准就显示后台继续。通用布局、可达性、明确发送、真实流式增量、owner、只读历史和在途/unknown不可绕过不变。
+系统 SHALL 按 [design/20 §1、§8–§9](../../../../../../docs/design/20-goal-scoped-delegation.md) 以Run冻结事实而非当前页面/部署版本裁决策略。资料入口和批准按授权作用域解释，连接按独立生命周期解释；早期delegation/1可显示request-bound，不能因正常步骤免批准就显示后台继续。通用布局、可达性、明确发送、真实流式增量、owner、只读历史和在途/unknown不可绕过不变。
 
 #### Scenario: 新旧并存只读展示（D2/D6/D8）
 
@@ -99,7 +99,7 @@
 
 ### Requirement: 可信缺口接续与完整任务定位
 
-conversations SHALL 复用 #103 来源责任并按 [design/20 §5](../../../../../docs/design/20-goal-scoped-delegation.md#5-澄清与接续复用可信跨-run-来源) 接纳typed缺口与既成收据；任务选择来自tasks完整分页/详情公共读取，不让用户抄内部ID，不从模型历史猜前序授权。
+conversations SHALL 复用 #103 来源责任并按 [design/20 §5](../../../../../../docs/design/20-goal-scoped-delegation.md#5-澄清与接续复用可信跨-run-来源) 接纳typed缺口与既成收据；任务选择来自tasks完整分页/详情公共读取，不让用户抄内部ID，不从模型历史猜前序授权。
 
 #### Scenario: 取消唯一目标与真实歧义（D6/D8/D9）
 

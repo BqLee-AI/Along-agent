@@ -107,117 +107,129 @@ const integration = databaseUrl ? describe : describe.skip;
 integration(
   'identity mail isolated PG + loopback protocol simulator (NOT real provider/email proof)',
   () => {
-    it('commits submitting before real network IO, distinguishes acceptance/rejection/lost acceptance, never replays', async () => {
-      const db = await createIntegrationDatabase();
-      const keys = identityKeysFixture();
-      const deliveries: SeededDelivery[] = [];
-      const observed: { id: string; to: string; text: string }[] = [];
-      const protocolErrors: unknown[] = [];
-      const server = createServer(async (request, response) => {
-        try {
-          const chunks: Buffer[] = [];
-          for await (const chunk of request) chunks.push(Buffer.from(chunk));
-          const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
-            to: string[];
-            text: string;
-          };
-          const id = String(request.headers['idempotency-key']);
-          observed.push({ id, to: body.to[0]!, text: body.text });
-          expect(request.method).toBe('POST');
-          expect(request.headers.authorization).toBe('Bearer isolated-protocol-simulator-only');
-          const row = (
-            await db.pool.query(
-              `SELECT status,attempt_count FROM identity_mail_deliveries WHERE id=$1`,
-              [id],
-            )
-          ).rows[0];
-          expect(row).toMatchObject({ status: 'submitting', attempt_count: 1 });
-          const delivery = deliveries.find((item) => item.id === id)!;
-          // A concurrent no-op claimant may briefly share-lock the row; no sender may retain it across IO.
-          const client = await db.pool.connect();
+    it.each(['single claimant with lock probe', 'competing claimants'] as const)(
+      '%s: commits before IO, classifies outcomes and never replays',
+      async (mode) => {
+        const db = await createIntegrationDatabase();
+        const keys = identityKeysFixture();
+        const deliveries: SeededDelivery[] = [];
+        const observed: { id: string; to: string; text: string }[] = [];
+        const protocolErrors: unknown[] = [];
+        const server = createServer(async (request, response) => {
           try {
-            await client.query('BEGIN');
-            await client.query(`SET LOCAL lock_timeout='250ms'`);
-            await client.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [delivery.ownerId]);
-            await client.query('SELECT id FROM identity_challenges WHERE id=$1 FOR UPDATE', [
-              delivery.challengeId,
-            ]);
-            await client.query('COMMIT');
+            const chunks: Buffer[] = [];
+            for await (const chunk of request) chunks.push(Buffer.from(chunk));
+            const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
+              to: string[];
+              text: string;
+            };
+            const id = String(request.headers['idempotency-key']);
+            observed.push({ id, to: body.to[0]!, text: body.text });
+            expect(request.method).toBe('POST');
+            expect(request.headers.authorization).toBe('Bearer isolated-protocol-simulator-only');
+            const row = (
+              await db.pool.query(
+                `SELECT status,attempt_count FROM identity_mail_deliveries WHERE id=$1`,
+                [id],
+              )
+            ).rows[0];
+            expect(row).toMatchObject({ status: 'submitting', attempt_count: 1 });
+            const delivery = deliveries.find((item) => item.id === id)!;
+            // Probe only without a competing claimant: a losing claimant can still
+            // hold SHARE locks after the sender commits, independently of network IO.
+            if (mode === 'single claimant with lock probe') {
+              const client = await db.pool.connect();
+              try {
+                await client.query('BEGIN');
+                await client.query(`SET LOCAL lock_timeout='250ms'`);
+                await client.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [
+                  delivery.ownerId,
+                ]);
+                await client.query('SELECT id FROM identity_challenges WHERE id=$1 FOR UPDATE', [
+                  delivery.challengeId,
+                ]);
+                await client.query('COMMIT');
+              } catch (error) {
+                await client.query('ROLLBACK');
+                throw error;
+              } finally {
+                client.release();
+              }
+            }
+            if (body.to[0] === 'rejected@example.com') {
+              response.writeHead(422, { 'content-type': 'application/json' });
+              response.end(
+                JSON.stringify({ message: 'private raw recipient and error must never persist' }),
+              );
+            } else if (body.to[0] === 'lost@example.com') response.destroy();
+            else {
+              response.writeHead(200, { 'content-type': 'application/json' });
+              response.end(JSON.stringify({ id: `accepted_${id}` }));
+            }
           } catch (error) {
-            await client.query('ROLLBACK');
-            throw error;
-          } finally {
-            client.release();
+            protocolErrors.push(error);
+            response.destroy();
           }
-          if (body.to[0] === 'rejected@example.com') {
-            response.writeHead(422, { 'content-type': 'application/json' });
-            response.end(
-              JSON.stringify({ message: 'private raw recipient and error must never persist' }),
-            );
-          } else if (body.to[0] === 'lost@example.com') response.destroy();
-          else {
-            response.writeHead(200, { 'content-type': 'application/json' });
-            response.end(JSON.stringify({ id: `accepted_${id}` }));
-          }
-        } catch (error) {
-          protocolErrors.push(error);
-          response.destroy();
-        }
-      });
-      let peer: Pool | undefined;
-      try {
-        const endpoint = await listening(server);
-        for (const to of ['accepted@example.com', 'rejected@example.com', 'lost@example.com'])
-          deliveries.push(await seedDelivery(db.pool, keys, { to }));
-        const mail: IdentityMailConfig = {
-          origin: 'http://localhost:3000',
-          from: 'sender@example.com',
-          send: createResendIdentitySender({
-            apiKey: 'isolated-protocol-simulator-only',
-            from: 'sender@example.com',
-            endpoint,
-          }),
-          timeoutMs: 1000,
-        };
-        peer = db.connect();
-        await Promise.all([
-          runIdentityMailTick(db.pool, { keys, mail }),
-          runIdentityMailTick(peer, { keys, mail }),
-        ]);
-        expect(protocolErrors).toEqual([]);
-        expect(observed).toHaveLength(3);
-        expect(new Set(observed.map((item) => item.id)).size).toBe(3);
-        const rows = (
-          await db.pool.query('SELECT * FROM identity_mail_deliveries ORDER BY created_at,id')
-        ).rows;
-        for (const [index, expected] of ['submitted', 'failed', 'unknown'].entries()) {
-          const row = rows.find((item) => item.id === deliveries[index]!.id);
-          expect(row.status).toBe(expected);
-          expect(row.attempt_count).toBe(1);
-          expect(row.payload_ciphertext).toBeNull();
-          expect(row.payload_nonce).toBeNull();
-          expect(row.payload_tag).toBeNull();
-          expect(row.encryption_key_id).toBeNull();
-          expect(row.payload_erased_at).toBeInstanceOf(Date);
-          expect(row.submitted_at !== null).toBe(expected === 'submitted');
-          const request = observed.find((item) => item.id === row.id)!;
-          expect(request.text).toContain(`/verify-contact#token=${deliveries[index]!.token}`);
-          expect(request.text).not.toContain('?token=');
-        }
-        expect(JSON.stringify(rows)).not.toContain('private raw');
-        for (const delivery of deliveries)
-          expect(JSON.stringify(rows)).not.toContain(delivery.token);
-        await runIdentityMailTick(db.pool, { keys, mail });
-        expect(observed).toHaveLength(3);
-      } finally {
+        });
+        let peer: Pool | undefined;
         try {
-          await peer?.end();
-          await closeServer(server);
+          const endpoint = await listening(server);
+          for (const to of ['accepted@example.com', 'rejected@example.com', 'lost@example.com'])
+            deliveries.push(await seedDelivery(db.pool, keys, { to }));
+          const mail: IdentityMailConfig = {
+            origin: 'http://localhost:3000',
+            from: 'sender@example.com',
+            send: createResendIdentitySender({
+              apiKey: 'isolated-protocol-simulator-only',
+              from: 'sender@example.com',
+              endpoint,
+            }),
+            timeoutMs: 1000,
+          };
+          if (mode === 'competing claimants') {
+            peer = db.connect();
+            await Promise.all([
+              runIdentityMailTick(db.pool, { keys, mail }),
+              runIdentityMailTick(peer, { keys, mail }),
+            ]);
+          } else {
+            await runIdentityMailTick(db.pool, { keys, mail });
+          }
+          expect(protocolErrors).toEqual([]);
+          expect(observed).toHaveLength(3);
+          expect(new Set(observed.map((item) => item.id)).size).toBe(3);
+          const rows = (
+            await db.pool.query('SELECT * FROM identity_mail_deliveries ORDER BY created_at,id')
+          ).rows;
+          for (const [index, expected] of ['submitted', 'failed', 'unknown'].entries()) {
+            const row = rows.find((item) => item.id === deliveries[index]!.id);
+            expect(row.status).toBe(expected);
+            expect(row.attempt_count).toBe(1);
+            expect(row.payload_ciphertext).toBeNull();
+            expect(row.payload_nonce).toBeNull();
+            expect(row.payload_tag).toBeNull();
+            expect(row.encryption_key_id).toBeNull();
+            expect(row.payload_erased_at).toBeInstanceOf(Date);
+            expect(row.submitted_at !== null).toBe(expected === 'submitted');
+            const request = observed.find((item) => item.id === row.id)!;
+            expect(request.text).toContain(`/verify-contact#token=${deliveries[index]!.token}`);
+            expect(request.text).not.toContain('?token=');
+          }
+          expect(JSON.stringify(rows)).not.toContain('private raw');
+          for (const delivery of deliveries)
+            expect(JSON.stringify(rows)).not.toContain(delivery.token);
+          await runIdentityMailTick(db.pool, { keys, mail });
+          expect(observed).toHaveLength(3);
         } finally {
-          await db.close();
+          try {
+            await peer?.end();
+            await closeServer(server);
+          } finally {
+            await db.close();
+          }
         }
-      }
-    });
+      },
+    );
     it('bounds timeout and leaves lost acceptance unknown without replay after restart', async () => {
       const db = await createIntegrationDatabase();
       const keys = identityKeysFixture();
