@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { ApprovalDetailSchema, type RunView } from '@along/contracts';
+import { ApprovalDetailSchema } from '@along/contracts';
+import type { RunView } from '@along/contracts';
 import {
   confirmInlineReminder,
   inlineReminderWaiting,
   readInlineReminder,
-} from '../src/features/conversations/inline-reminder';
+} from '../src/features/conversations/model/inline-reminder';
 
 const approvalId = '11111111-1111-4111-8111-111111111111';
 const taskId = '22222222-2222-4222-8222-222222222222';
@@ -33,6 +34,7 @@ const run: RunView = {
   conversation_id: '33333333-3333-4333-8333-333333333333',
   run_id: '44444444-4444-4444-8444-444444444444',
   execution: 'harness',
+  model_selection: { state: 'legacy_unavailable' },
   status: 'suspended_approval',
   attempt_id: '55555555-5555-4555-8555-555555555555',
   attempt_no: 1,

@@ -1,3 +1,4 @@
+import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { GoalResultSchema } from '@along/contracts';
 import { randomUUID } from 'node:crypto';
@@ -5,6 +6,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
+import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
 import {
   validateGoalDocuments,
   validateGoalResult,
@@ -44,6 +46,7 @@ maybe('creation collision target identity', () => {
   ]) {
     it(`requires explicit, fact-checked collision recovery: ${rawText}`, async () => {
       const actor = await seedAdmittedSession(database.pool, {});
+      await configureTestModel(database.pool, actor.userId, 'test');
       const root = await mkdtemp(join(tmpdir(), 'along-create-target-'));
       roots.push(root);
       await mkdir(join(root, 'out'));
@@ -60,7 +63,7 @@ maybe('creation collision target identity', () => {
         },
       ]);
       const started = await startConversationRun(
-        {
+        controlledModelDeps({
           pool: database.pool,
           timeContext: loadTimeContext('fixture-v1'),
           harness: {
@@ -71,8 +74,8 @@ maybe('creation collision target identity', () => {
             model: async function* () {
               throw new Error('model not used');
             },
-          },
-        },
+          } satisfies HarnessServices,
+        }),
         actor.userId,
         randomUUID(),
         {

@@ -22,8 +22,9 @@
   "dependencies": {
     "@along/contracts": "workspace:*",
     "@along/stream-protocol": "workspace:*",
-    "@lorelum/lumen-ui": "file:vendor/lorelum-lumen-ui-0.0.1-alpha.0-337d6c4c5fddc55a0ac5736d500c3cb9d398cace.tgz",
+    "@lorelum/lumen-ui": "file:vendor/lorelum-lumen-ui-0.0.1-alpha.0-b95a5409bfaba0e0f8db65c7a82257425f2ca99e.tgz",
     "lucide-react": "^1.63.0",
+    "motion": "^14.9.0",
     "next": "^16.4.2",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",

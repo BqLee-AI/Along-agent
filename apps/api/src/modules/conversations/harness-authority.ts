@@ -48,8 +48,7 @@ import { validateGoalResult } from './goal-result.js';
 import { validateWorkspaceGrant } from '../workspaces/service.js';
 import { runNativeHarness } from './harness-process.js';
 import type { ConversationDeps, EventWriter, RunContext, StartResult } from './contracts.js';
-import { ensureRunContextPolicy, readRunContextPolicy } from './context-policy.js';
-import { measureHarnessContext } from './harness-context.js';
+import { readRunContextPolicy } from './context-policy.js';
 import { CancelRunBodySchema, ResumeRunBodySchema } from './schemas.js';
 import { routingRuntimeOf } from './harness-config.js';
 import { withRunTransaction, type RunOwnership } from './run-ownership.js';
@@ -82,6 +81,7 @@ import {
   supportsFrozenTools,
   viewOf,
 } from './run-state.js';
+import { resolveRunSelection } from '../model-providers/service.js';
 
 export interface HarnessSession {
   start: HarnessStart;
@@ -149,7 +149,7 @@ async function contextOf(
   attemptId: string,
   requestId: string,
   checkpointId?: string,
-  candidatePolicy?: { tableExists: boolean },
+  candidatePolicy?: { tableExists: boolean; modelBindingsExist: boolean },
 ): Promise<RunContext> {
   const frozen = run.frozen_context;
   if (!frozen || !run.input_message_id) throw stateConflict('Run accepted input missing');
@@ -168,20 +168,25 @@ async function contextOf(
   )
     throw new HttpError(503, 503, 'TZDB_UNAVAILABLE', '接纳时的时间规则暂不可用。');
   if (frozen.workspaceGrant) validateWorkspaceGrant(run.owner_id, frozen.workspaceGrant);
+  if (candidatePolicy && !candidatePolicy.modelBindingsExist)
+    throw stateConflict('legacy Run model binding unavailable; cannot resume');
   const contextPolicy = candidatePolicy
     ? ((candidatePolicy.tableExists
         ? await readRunContextPolicy(client, run.owner_id, run.id)
         : null) ?? deps.harness?.contextPolicy)
     : await readRunContextPolicy(client, run.owner_id, run.id);
-  const deployed = deps.harness?.contextPolicy;
+  const selected = await resolveRunSelection(client, run.owner_id, run.id);
+  if (!selected) throw stateConflict('legacy Run model binding unavailable; cannot resume');
   if (
     !contextPolicy ||
-    !deployed ||
-    contextPolicy.model_binding.model !== deployed.model_binding.model ||
-    contextPolicy.model_binding.adapter_revision !== deployed.model_binding.adapter_revision
+    !deps.harness ||
+    contextPolicy.model_binding.model !== selected.model_id ||
+    contextPolicy.model_binding.adapter_revision !==
+      deps.harness.contextPolicy.model_binding.adapter_revision
   )
     throw unavailable();
   if (!supportsFrozenTools(run)) throw stateConflict('unsupported frozen tool in historical Run');
+  if (!deps.modelTransport) throw unavailable();
   const messageRefs = frozen.messageRefs ?? [run.input_message_id];
   const messages = await readHarnessMessages(
     client,
@@ -305,8 +310,9 @@ export async function inspectReleaseWaiting(
       temporaryAdmissions = true;
     }
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
-    const table = await client.query<{ present: boolean }>(
-      "SELECT to_regclass('run_context_policies') IS NOT NULL AS present",
+    const table = await client.query<{ present: boolean; modelBindingsExist: boolean }>(
+      `SELECT to_regclass('run_context_policies') IS NOT NULL AS present,
+              to_regclass('model_provider_run_bindings') IS NOT NULL AS "modelBindingsExist"`,
     );
     const runs = await client.query<RunRow>(
       "SELECT * FROM agent_runs WHERE execution='harness' AND status='suspended_approval' ORDER BY id",
@@ -367,7 +373,10 @@ export async function inspectReleaseWaiting(
           randomUUID(),
           randomUUID(),
           run.waiting_checkpoint_id,
-          { tableExists: table.rows[0]!.present },
+          {
+            tableExists: table.rows[0]!.present,
+            modelBindingsExist: table.rows[0]!.modelBindingsExist,
+          },
         );
         const observations = await readRunContextObservations(
           client,
@@ -402,7 +411,9 @@ export async function getRunView(
   conversationId: string,
   runId: string,
 ): Promise<RunView> {
-  return withLatest(deps, ownerId, conversationId, runId, viewOf);
+  return withLatest(deps, ownerId, conversationId, runId, (client, locked) =>
+    viewOf(client, locked, !!deps.modelTransport),
+  );
 }
 
 export async function cancelConversationRun(
@@ -468,7 +479,7 @@ export async function cancelConversationRun(
         locked.run.waiting_approval_id = null;
         locked.attempt.status = 'failed';
       }
-      return viewOf(client, locked);
+      return viewOf(client, locked, !!deps.modelTransport);
     },
     false,
   );
@@ -606,7 +617,6 @@ export async function resumeConversationRun(
         )
           throw new HttpError(429, 429, 'BUDGET_EXCEEDED', '原运行预算已用完，不能继续。');
         const attemptId = randomUUID();
-        await ensureRunContextPolicy(client, ownerId, runId, deps.harness.contextPolicy);
         const context = await contextOf(
           client,
           deps,
@@ -1414,7 +1424,14 @@ export async function createHarnessSession(
             throw stateConflict('model balance must match accepted cumulative usage');
           if (cumulative.iterations >= context.maxIterations)
             throw new HttpError(429, 429, 'BUDGET_EXCEEDED', '本轮推理预算用完，已停下。');
-          const measurement = (deps.harness.measure ?? measureHarnessContext)(
+          if (!deps.modelTransport) throw unavailable();
+          const selected = await guarded((client) =>
+            resolveRunSelection(client, context.ownerId, context.runId),
+          );
+          if (!selected) throw stateConflict('legacy Run model binding unavailable');
+          if (selected.model_id !== context.contextPolicy.model_binding.model) throw unavailable();
+          const transport = await deps.modelTransport(selected);
+          const measurement = await transport.measure(
             { ...request, type: 'measure_context' },
             tools,
             context.contextPolicy,
@@ -1447,7 +1464,7 @@ export async function createHarnessSession(
           });
           modelStream = {
             ref: request.request_ref,
-            iterator: deps.harness.model(request, tools, modelSignal)[Symbol.asyncIterator](),
+            iterator: transport.model(request, tools, modelSignal)[Symbol.asyncIterator](),
             pendingDelta: null,
             pulling: false,
           };

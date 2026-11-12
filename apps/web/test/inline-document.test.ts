@@ -4,7 +4,7 @@ import {
   confirmInlineDocument,
   inlineDocumentWaiting,
   readInlineDocument,
-} from '../src/features/conversations/inline-document';
+} from '../src/features/conversations/model/inline-document';
 
 const id = '11111111-1111-4111-8111-111111111111';
 const runId = '22222222-2222-4222-8222-222222222222';
@@ -36,6 +36,7 @@ const run: RunView = {
   run_id: runId,
   conversation_id: id,
   execution: 'harness',
+  model_selection: { state: 'legacy_unavailable' },
   status: 'suspended_approval',
   attempt_id: id,
   attempt_no: 1,

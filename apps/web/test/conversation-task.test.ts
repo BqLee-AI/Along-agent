@@ -3,15 +3,14 @@ import type { ConversationRunHistoryItem, RunView, WorkspaceSummary } from '@alo
 import {
   conversationSendBlocked,
   clarificationReplyReference,
-  messageRunReference,
   isNearChatBottom,
   taskAdmission,
   selectResumeRequest,
   taskIntentFromQuery,
   taskSendEligibility,
   shouldSubmitMessage,
-} from '../src/features/conversations/task-model';
-import { isSameReadingPage } from '../src/lib/stream-navigation';
+} from '../src/features/conversations/model/task';
+import { isSameReadingPage } from '../src/features/conversations/model/stream-navigation';
 
 const workspace: WorkspaceSummary = {
   workspace_id: 'managed-copy',
@@ -49,6 +48,7 @@ describe('explicit conversation task entry', () => {
       run_id: 'source',
       conversation_id: 'conversation',
       execution: 'harness',
+      model_selection: { state: 'legacy_unavailable' },
       attempt_id: 'attempt',
       attempt_no: 1,
       waiting: null,
@@ -159,6 +159,7 @@ const historicalRun: ConversationRunHistoryItem = {
   run_id: 'run-one',
   conversation_id: 'same-conversation',
   execution: 'harness',
+  model_selection: { state: 'legacy_unavailable' },
   status: 'done',
   created_at: '2026-10-29T01:00:00.000000Z',
   ended_at: '2026-10-29T01:00:01.000000Z',
@@ -229,25 +230,6 @@ describe('conversation continuation safety', () => {
           runs: [{ ...historicalRun, status }],
         }),
       ).toBe(false);
-    }
-  });
-
-  it('links only authoritative user message IDs and never assigns assistant archives to a Run', () => {
-    expect(messageRunReference({ message_id: 'original-one', role: 'user' }, [historicalRun])).toBe(
-      historicalRun.run_id,
-    );
-    expect(
-      messageRunReference({ message_id: 'same-text-different-id', role: 'user' }, [historicalRun]),
-    ).toBeNull();
-    expect(
-      messageRunReference({ message_id: 'original-one', role: 'assistant' }, [historicalRun]),
-    ).toBeNull();
-    for (const state of ['legacy_unavailable', 'invalid_reference'] as const) {
-      expect(
-        messageRunReference({ message_id: 'original-one', role: 'user' }, [
-          { ...historicalRun, original: { state } },
-        ]),
-      ).toBeNull();
     }
   });
 });

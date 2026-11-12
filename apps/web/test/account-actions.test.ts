@@ -9,9 +9,9 @@ import {
   readAccountCollection,
   submitAccountAction,
   takeFragmentToken,
-} from '../src/features/account/account-actions';
-import { validateAccountFields } from '../src/features/account/account-operation';
-import { safeReturnTo } from '../src/lib/account-navigation';
+} from '../src/features/account/model/account-actions';
+import { validateAccountFields } from '../src/features/account/model/account-operation';
+import { safeReturnTo } from '../src/shared/session/navigation';
 
 const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
 afterEach(() => {

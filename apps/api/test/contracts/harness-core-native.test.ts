@@ -112,9 +112,6 @@ test('D8.unknown-core-native', async () => {
       maxIterations: 4,
       maxTokens: 100,
       contextPolicy,
-      model: async function* () {
-        throw new Error('model transport is handled at the protocol counterpart');
-      },
     },
     start,
     signal: new AbortController().signal,
@@ -301,9 +298,6 @@ test('D8.cancelled-core-native', async () => {
       maxIterations: 4,
       maxTokens: 100,
       contextPolicy,
-      model: async function* () {
-        throw new Error('model transport is handled at the protocol counterpart');
-      },
     },
     start: HarnessStartSchema.parse({
       protocol: HARNESS_PROTOCOL_VERSION,
@@ -570,9 +564,6 @@ test('native terminates boundedly when valid bootstrap observations cannot fit s
       maxIterations: 12,
       maxTokens: 1000,
       contextPolicy,
-      model: async function* () {
-        throw new Error('oversized context must not call model transport');
-      },
     },
     start,
     signal: new AbortController().signal,

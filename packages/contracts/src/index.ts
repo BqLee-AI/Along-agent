@@ -28,6 +28,7 @@ export {
   HarnessStartSchema,
   HarnessReplySchema,
   HarnessCancelSchema,
+  RunModelSelectionSchema,
   RunViewSchema,
 } from './harness.js';
 export type {
@@ -122,3 +123,4 @@ export * from './conversations.js';
 export * from './approvals.js';
 export * from './routing.js';
 export * from './goals.js';
+export * from './model-providers.js';

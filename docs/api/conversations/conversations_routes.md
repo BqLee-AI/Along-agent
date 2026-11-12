@@ -8,6 +8,8 @@
 
 > 本人委托：Web 普通 Agent 显式请求 `authorization_revision:'delegation/1'` 的 `harness`；合格新 Run 冻结本人登记集合，允许可选子集，具体工具由实际冻结 profile 决定。可信上下文、GoalResult、`harness/v6` 与 SSE `v2` 配套；省略授权修订仍为 legacy。合格新 Run 冻结 `server-owned`，历史 `request-bound` 不迁写；有限新文件创建须冻结输出目录资格，见 [design/20](../../design/20-goal-scoped-delegation.md)。
 
+> 用户模型选择、请求意图幂等和 Run 历史 `model_selection` 投影见 [模型接入 API](../model-providers.md) 与 [design/22](../../design/22-model-provider-settings.md)；模型运行使用本人冻结的选择，不回退部署固定模型。
+
 ## 1. 路由
 
 | 方法 | 路径                                             | 鉴权 | CSRF | 幂等键      | 说明                             |
@@ -95,7 +97,7 @@ data: {"protocol_version":"v1","seq":12,"type":"approval_required","payload":{"c
 `GET /conversations/{cid}/runs/{rid}` 返回通用 envelope `data`，由共享 `RunViewSchema` 校验：
 
 - `run_id/conversation_id/execution/status/attempt_id/attempt_no`；
-- `waiting=null | {checkpoint_id,invocation_id,approval_id}`；文档等待额外带 `approval_kind:"document"`，旧 task 等待不加此字段。`can_resume` 表示当前是否可显式继续，不泄漏凭据/内部推理；
+- `waiting=null | {checkpoint_id,invocation_id,approval_id}`；文档等待额外带 `approval_kind:"document"`，旧 task 等待不加此字段。`can_resume` 表示当前是否可显式继续，不泄漏凭据/内部推理；缺少模型绑定的旧 Harness Run 为 `false`，即使其批准已决议，也不能用当前默认模型补绑定；
 - 可选 `workspace={workspace_id,label,readable_paths,writable_paths}` 为接纳 Run 时冻结的安全摘要，不是当前登记的动态替代，也不返回 root/物理 identity/登记摘要。历史缺摘要不从当前登记补造；
 - 新 delegation 可投影 `workspaces:[{workspace_id,label,readable_paths,writable_paths}]`、`authorization_revision:'delegation/1'`、冻结的 `execution_lifecycle:'request-bound'|'server-owned'` 和 `goal_result:GoalResult|null`；均来自原 Run 冻结事实，不公开 owner、root、digest 或 root identity，不按当前登记补造。legacy 的 `workspace` 和历史 shape 不变。
 - `document_effects` 可选只读数组：每项含 `workspace_id,path,invocation_id,read_invocation_id,version,status` 和可选 `operation`，其中 `read_invocation_id` 和 `version` 可空；状态为 `applied|verified|conflict|failed|unknown`。applied 不是 verified；后者须同目标的独立新全文读取证据。此投影不是动作入口，Run done 也不等于目标完成。

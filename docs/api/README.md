@@ -8,6 +8,8 @@
 
 > 授权、真实工具及 v6/SSE v2 见 [design/20 §1、§4–§9](../design/20-goal-scoped-delegation.md)。授权与冻结生命周期独立：早期 request-bound 仍断流取消，合格新 Run 冻结 server-owned；旧读取和安全门不变。
 
+> Proposed 用户模型配置见 [模型接入 API](model-providers.md) 和 [design/22](../design/22-model-provider-settings.md)。下列 29 端点数为现行基线，不含拟议新增端点；接纳、历史投影及 SDK 传输以变更实施与验收为准。
+
 ## 1. Base Path 与路由总数 [Required]
 
 - Base Path：`/api/v1`。下文路由表省略该前缀，如 `GET /me` 即 `GET /api/v1/me`。

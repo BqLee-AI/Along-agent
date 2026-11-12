@@ -1,3 +1,4 @@
+import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
@@ -27,8 +28,8 @@ maybe('harness stream authority at a concurrent deactivation', () => {
 
   beforeAll(async () => {
     database = await createIntegrationDatabase();
-    // The same OpenAI SSE fixture protocol used by harness-native.test.ts; native,
-    // model transport, authority, and persistence are all the production paths.
+    // A controlled OpenAI SSE fixture exercises native authority and persistence;
+    // it is not evidence of the production SDK or outbound-policy behavior.
     modelServer = createServer((_req, res) => {
       sendModelSse(res, {
         message: { content: 'private streamed answer', tool_calls: [] },
@@ -56,6 +57,7 @@ maybe('harness stream authority at a concurrent deactivation', () => {
       [ownerId, `tester-${ownerId}@along.test`],
     );
     await admitTestUser(database.pool, ownerId);
+    await configureTestModel(database.pool, ownerId, 'fixture-transport-only');
     const deps = {
       pool: database.pool,
       timeContext: loadTimeContext('fixture-v1'),
@@ -74,6 +76,7 @@ maybe('harness stream authority at a concurrent deactivation', () => {
         }),
       },
     };
+    controlledModelDeps(deps);
     const result = await startConversationRun(
       deps,
       ownerId,

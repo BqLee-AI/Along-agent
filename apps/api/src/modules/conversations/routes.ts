@@ -25,8 +25,7 @@ import {
   cancelConversationRun,
   resumeConversationRun,
 } from './service.js';
-import type { StartResult } from './contracts.js';
-import type { HarnessServices } from './harness-process.js';
+import type { ConversationDeps, StartResult } from './contracts.js';
 import type { TimeContext } from '../time/context.js';
 import type { RoutingRuntime } from './routing/index.js';
 import { writeAuthorizedEvent } from './stream-authorization.js';
@@ -47,7 +46,8 @@ export interface RouteDeps {
   resolveActor: ActorResolver;
   body?: unknown;
   timeContext: TimeContext;
-  harness?: HarnessServices | null;
+  harness?: ConversationDeps['harness'];
+  modelTransport?: ConversationDeps['modelTransport'];
   routing?: RoutingRuntime;
   runDriver?: RunDriver;
 }
@@ -96,6 +96,8 @@ async function subscribeRun(
     'cache-control': 'no-cache, no-transform',
     connection: 'keep-alive',
     'x-request-id': requestId,
+    'x-conversation-id': conversationId,
+    'x-run-id': runId,
   });
   res.flushHeaders?.();
   let closed = false;
@@ -194,6 +196,8 @@ async function streamRun(
     'cache-control': 'no-cache, no-transform',
     connection: 'keep-alive',
     'x-request-id': requestId,
+    'x-conversation-id': started.conversationId,
+    'x-run-id': started.runId,
   });
   res.flushHeaders?.();
   if (started.replay) {

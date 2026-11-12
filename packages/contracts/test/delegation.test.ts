@@ -69,6 +69,7 @@ test('trusted starts and run views preserve both lifecycle values and reject unk
     run_id: id,
     conversation_id: id,
     execution: 'harness',
+    model_selection: { state: 'legacy_unavailable' },
     status: 'running',
     attempt_id: id,
     attempt_no: 1,

@@ -4,6 +4,8 @@
 
 > 授权作用域：本文“唯一主链/确认门唯一放行”是 v0 与 legacy 合同，不锁定助理长期目标。新 profile 的本人委托内自主步骤见 [design/20](../design/20-goal-scoped-delegation.md) 与 [PRD 04](04-acceptance-open-questions.md#本人目标内委托104105)；只替换逐项批准策略，保留时间、事务、回执和只读历史，不因规范合入启用能力。
 
+> Proposed 本人多模型接入与逐 Run 选择见 [PRD 验收](04-acceptance-open-questions.md#本人模型接入proposed)和 [design/22](../design/22-model-provider-settings.md)；不代表 SDK、Web 或真实供应商验收完成。
+
 ## 依赖链（v0 唯一主链路）
 
 - [Required] 八步按序推进，前一步未完成不得进入下一步（B06 §1–§2）：

@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { appendFile } from 'node:fs/promises';
-import { loadConfig } from './config.mjs';
+import { loadConfig, localModelProxyToken } from './config.mjs';
 import { readJson, writeJson } from './commands.mjs';
 
 // This is the production Web process itself, not a persistent launcher daemon.
@@ -11,6 +11,7 @@ try {
   const state = await readJson(stateFile);
   if (!state || state.nonce !== nonce) throw new Error('WEB_STATE_INVALID');
   const config = await loadConfig(state.configFile);
+  process.env.ALONG_LOCAL_MODEL_PROXY_TOKEN = localModelProxyToken(config);
   const webDirectory = path.join(state.source, 'apps/web');
   const require = createRequire(path.join(webDirectory, 'package.json'));
   const next = require('next');

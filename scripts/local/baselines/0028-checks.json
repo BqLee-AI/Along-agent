@@ -1,0 +1,328 @@
+{
+  "version": "0028",
+  "tables": [
+    "model_providers",
+    "model_provider_versions",
+    "model_provider_models",
+    "model_provider_defaults",
+    "model_provider_run_bindings"
+  ],
+  "columns": [
+    {
+      "table": "model_provider_defaults",
+      "name": "owner_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "model_provider_defaults",
+      "name": "provider_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "model_provider_defaults",
+      "name": "model_id",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "model_provider_models",
+      "name": "provider_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "model_provider_models",
+      "name": "model_id",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "model_provider_run_bindings",
+      "name": "run_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "model_provider_run_bindings",
+      "name": "owner_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "model_provider_run_bindings",
+      "name": "version_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "model_provider_run_bindings",
+      "name": "provider_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "model_provider_run_bindings",
+      "name": "provider_name",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "model_provider_run_bindings",
+      "name": "model_id",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "model_provider_versions",
+      "name": "id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "model_provider_versions",
+      "name": "owner_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "model_provider_versions",
+      "name": "provider_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "model_provider_versions",
+      "name": "base_url",
+      "type": "text",
+      "required": true,
+      "default": "''::text"
+    },
+    {
+      "table": "model_provider_versions",
+      "name": "credential_ciphertext",
+      "type": "text",
+      "required": false,
+      "default": ""
+    },
+    {
+      "table": "model_provider_versions",
+      "name": "revoked_at",
+      "type": "timestamptz",
+      "required": false,
+      "default": ""
+    },
+    {
+      "table": "model_provider_versions",
+      "name": "created_at",
+      "type": "timestamptz",
+      "required": true,
+      "default": "now()"
+    },
+    {
+      "table": "model_providers",
+      "name": "id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "model_providers",
+      "name": "owner_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "model_providers",
+      "name": "name",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "model_providers",
+      "name": "enabled",
+      "type": "bool",
+      "required": true,
+      "default": "true"
+    },
+    {
+      "table": "model_providers",
+      "name": "current_version_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "model_providers",
+      "name": "deleted_at",
+      "type": "timestamptz",
+      "required": false,
+      "default": ""
+    },
+    {
+      "table": "model_providers",
+      "name": "created_at",
+      "type": "timestamptz",
+      "required": true,
+      "default": "now()"
+    }
+  ],
+  "constraints": [
+    {
+      "table": "agent_runs",
+      "name": "agent_runs_id_owner_unique",
+      "type": "u",
+      "columns": ["id", "owner_id"]
+    },
+    {
+      "table": "model_provider_defaults",
+      "name": "model_provider_defaults_pkey",
+      "type": "p",
+      "columns": ["owner_id"]
+    },
+    {
+      "table": "model_provider_defaults",
+      "name": "model_provider_defaults_provider_id_model_id_fkey",
+      "type": "f",
+      "target": "model_provider_models",
+      "delete_action": "a",
+      "columns": ["provider_id", "model_id"],
+      "target_columns": ["provider_id", "model_id"]
+    },
+    {
+      "table": "model_provider_defaults",
+      "name": "model_provider_defaults_provider_id_owner_id_fkey",
+      "type": "f",
+      "target": "model_providers",
+      "delete_action": "a",
+      "columns": ["provider_id", "owner_id"],
+      "target_columns": ["id", "owner_id"]
+    },
+    {
+      "table": "model_provider_models",
+      "name": "model_provider_models_pkey",
+      "type": "p",
+      "columns": ["provider_id", "model_id"]
+    },
+    {
+      "table": "model_provider_models",
+      "name": "model_provider_models_provider_id_fkey",
+      "type": "f",
+      "target": "model_providers",
+      "delete_action": "a",
+      "columns": ["provider_id"],
+      "target_columns": ["id"]
+    },
+    {
+      "table": "model_provider_run_bindings",
+      "name": "model_provider_run_bindings_pkey",
+      "type": "p",
+      "columns": ["run_id"]
+    },
+    {
+      "table": "model_provider_run_bindings",
+      "name": "model_provider_run_bindings_run_id_owner_id_fkey",
+      "type": "f",
+      "target": "agent_runs",
+      "delete_action": "a",
+      "columns": ["run_id", "owner_id"],
+      "target_columns": ["id", "owner_id"]
+    },
+    {
+      "table": "model_provider_run_bindings",
+      "name": "model_provider_run_bindings_version_id_owner_id_provider_i_fkey",
+      "type": "f",
+      "target": "model_provider_versions",
+      "delete_action": "a",
+      "columns": ["version_id", "owner_id", "provider_id"],
+      "target_columns": ["id", "owner_id", "provider_id"]
+    },
+    {
+      "table": "model_provider_versions",
+      "name": "model_provider_versions_id_owner_id_provider_id_key",
+      "type": "u",
+      "columns": ["id", "owner_id", "provider_id"]
+    },
+    {
+      "table": "model_provider_versions",
+      "name": "model_provider_versions_pkey",
+      "type": "p",
+      "columns": ["id"]
+    },
+    {
+      "table": "model_provider_versions",
+      "name": "model_provider_versions_provider_id_owner_id_fkey",
+      "type": "f",
+      "target": "model_providers",
+      "delete_action": "a",
+      "columns": ["provider_id", "owner_id"],
+      "target_columns": ["id", "owner_id"]
+    },
+    {
+      "table": "model_providers",
+      "name": "model_provider_current_version_fk",
+      "type": "f",
+      "deferred": true,
+      "target": "model_provider_versions",
+      "delete_action": "a",
+      "columns": ["current_version_id", "owner_id", "id"],
+      "target_columns": ["id", "owner_id", "provider_id"]
+    },
+    {
+      "table": "model_providers",
+      "name": "model_providers_id_owner_id_key",
+      "type": "u",
+      "columns": ["id", "owner_id"]
+    },
+    {
+      "table": "model_providers",
+      "name": "model_providers_pkey",
+      "type": "p",
+      "columns": ["id"]
+    }
+  ],
+  "functions": [
+    {
+      "name": "model_provider_binding_immutable",
+      "arguments": "",
+      "volatility": "v",
+      "strict": false,
+      "result": "trigger"
+    }
+  ],
+  "triggers": [
+    {
+      "table": "model_provider_run_bindings",
+      "name": "model_provider_binding_no_mutation",
+      "type": 27,
+      "function": "model_provider_binding_immutable"
+    }
+  ],
+  "indexes": [
+    {
+      "table": "model_providers",
+      "name": "model_providers_owner_idx",
+      "unique": false,
+      "method": "btree",
+      "keys": ["owner_id"],
+      "predicate": "(deleted_at IS NULL)"
+    }
+  ]
+}

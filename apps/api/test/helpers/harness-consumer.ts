@@ -33,7 +33,10 @@ import type {
   StartResult,
 } from '../../src/modules/conversations/contracts.js';
 import { createHarnessModelTransport } from '../../src/modules/conversations/harness-model.js';
+import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
+import { measureHarnessContext } from '../../src/modules/conversations/harness-context.js';
+import { configureTestModel } from './model-selection.js';
 import { SendMessageBodySchema } from '../../src/modules/conversations/schemas.js';
 import { seedAdmittedSession as seedSession } from '../integration/setup.js';
 import type { SeededSession } from '../../src/modules/identity/seed.js';
@@ -218,6 +221,7 @@ export class HarnessConsumer {
   readonly gates = new Map<string, ModelGate>();
   readonly executions = new Set<Promise<unknown>>();
   readonly deps: ConversationDeps;
+  model!: HarnessServices['model'];
   private server: Server | undefined;
   private modelServer: Server | undefined;
   private base = '';
@@ -309,16 +313,23 @@ export class HarnessConsumer {
       maxIterations: 8,
       maxTokens: 8000,
       contextPolicy: createContextPolicy({ completionCap: 1024, model: 'fixture-transport-only' }),
-      model: createHarnessModelTransport({
-        baseUrl: `${modelBase}/v1`,
-        model: 'fixture-transport-only',
-      }),
     };
+    this.model = createHarnessModelTransport({
+      baseUrl: `${modelBase}/v1`,
+      model: 'fixture-transport-only',
+    });
+    // Test-only controlled provider seam: exercises native authority, not SDK
+    // encoding, outbound-policy enforcement, or real provider acceptance.
+    this.deps.modelTransport = async () => ({
+      model: this.model,
+      measure: measureHarnessContext,
+    });
     this.server = createServer((req, res) => {
       void handleRequest(req, res, {
         pool: this.database.pool,
         tzdbVersion: 'fixture-v1',
         harness: this.deps.harness,
+        modelTransport: this.deps.modelTransport,
         routing: this.deps.routing,
       }).catch(() => res.destroy());
     });
@@ -326,13 +337,10 @@ export class HarnessConsumer {
   }
 
   async actor(mode: ConsumerMode): Promise<HarnessActor> {
-    return new HarnessActor(
-      this,
-      mode,
-      await seedSession(this.database.pool, {
-        timezoneId: 'Europe/London',
-      }),
-    );
+    const session = await seedSession(this.database.pool, { timezoneId: 'Europe/London' });
+    const model = this.deps.harness!.contextPolicy.model_binding.model;
+    await configureTestModel(this.database.pool, session.userId, model);
+    return new HarnessActor(this, mode, session);
   }
 
   gate(id: string): ModelGate {

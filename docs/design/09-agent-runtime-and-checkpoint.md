@@ -33,7 +33,7 @@ HTTP 消息、Run 读/取消/恢复路由见 [conversations API](../api/conversa
 - TS→native：`start/reply/cancel`；native→TS：`measure_context/model/model_next/context_source/reserve/invoke/snapshot/suspend/answer/finish`，以及 `route_probe/route_decide/render_route_result`（路由默认 off）。模型流按 delta 拉取和原样 ack，完整或失败收尾前不插入上下文装配。
 - 具体 strict schema 与公开 Run DTO 的唯一类型源为 [contracts/harness.ts](../../packages/contracts/src/harness.ts)。两端拒绝未知字段、版本、畸形 UTF-8/JSON、残缺 EOF 与超过 1MiB 的累计帧；发送前也检查字节大小，不静默截断上下文。
 - `request_ref/reply_to` 仅关联当前 pipe，不能替代持久身份；一个请求等待 ack 后再继续。snapshot/suspend/finish 的 ack 必须在 TS 对应事实提交后返回。
-- TS model transport 仅使用部署服务端固定的 OpenAI-compatible chat-completions 配置做 HTTP/协议转换；普通用户不配置 provider/BYOK。仓颉构造上下文并解析提议、选择工具与决定下一轮。未配置时新 harness Run 在任何写入/SSE 之前返回 `503 HARNESS_UNAVAILABLE`，不启用测试 transport。
+- TS model transport 使用 Run 冻结的本人 OpenAI-compatible 接入和受控出站路径做 HTTP/协议转换；仓颉构造上下文并解析提议、选择工具与决定下一轮。无可用模型选择或依赖时拒绝新 harness Run，不启用部署固定模型或测试 transport 回退。
 - 模型 transport 请求 `stream:true`，逐次给出当前模型响应的可见增量或完整结果；native 每次将增量经 `answer` 取得 TS 持久回执后再以 `model_next` 拉取，保持单请求等待和背压。完整结果只用于工具/历史/用量，正文不重发；参数未完整时不执行工具。部分接受文本不是成功，畸形/中断流明确失败，取消关闭在途 reader，不保留非流式回退。原生系统上下文默认简体中文、明确语言要求优先。
 - 每步只执行一个工具提议。transport 发送 `parallel_tool_calls:false`；供应商仍返回多个提议时，完整解析并校验，但不预约、不执行其中任何一项，告知模型未执行并在原预算内要求逐项选择。native 等待实际观察后才选择下一步，独立读取亦然；已发生或效果未知的调用不因此重试。运行说明、固定工具链和分发 notices 见 [harness README](../../apps/harness/README.md)。
 - native 持有标准函数消息历史：实际提议存为 `assistant.tool_calls`，实际结果存为 `role=tool` 并使用对应 `tool_call_id`；TS 仅按结构原样 transport，不用普通 assistant 文本模拟工具调用。恢复 bootstrap 中的已接受观察可以是明确数据摘要；snapshot 仍只存事实引用，不扩展为完整函数历史。

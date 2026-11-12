@@ -39,6 +39,7 @@ import {
   readRunGoalDocumentEvidence,
   readRunReminderTimeErrors,
 } from '../tools/query.js';
+import { getRunSelections, isRunSelectionUsable } from '../model-providers/service.js';
 
 export async function appendEvent(
   client: PoolClient,
@@ -204,7 +205,11 @@ export function supportsFrozenTools(run: RunRow): boolean {
   return run.tools_allowlist.every((name) => supported.includes(name));
 }
 
-export async function viewOf(client: PoolClient, locked: LockedRun): Promise<RunView> {
+export async function viewOf(
+  client: PoolClient,
+  locked: LockedRun,
+  modelTransportAvailable: boolean,
+): Promise<RunView> {
   const { run, attempt } = locked;
   const waiting =
     run.waiting_checkpoint_id && run.waiting_invocation_id && run.waiting_approval_id
@@ -230,12 +235,22 @@ export async function viewOf(client: PoolClient, locked: LockedRun): Promise<Run
   // Pre-summary workspace Runs remain readable/cancellable without inventing
   // metadata from a current registration that may represent different access.
   const workspace = run.frozen_context?.workspaceGrant ? run.frozen_context.workspaceSummary : null;
+  const modelSelection =
+    (await getRunSelections(client, run.owner_id, [run.id])).get(run.id) ??
+    (run.execution === 'business'
+      ? { state: 'not_applicable' as const }
+      : { state: 'legacy_unavailable' as const });
   let canResume =
     run.execution === 'harness' &&
+    modelTransportAvailable &&
+    modelSelection.state === 'available' &&
     run.status === 'suspended_approval' &&
     decision !== null &&
     decision.status !== 'pending' &&
     supportsFrozenTools(run);
+  if (canResume) {
+    canResume = await isRunSelectionUsable(client, run.owner_id, run.id);
+  }
   // Eligibility reflects current authority without making historical reads
   // depend on it. Resume itself still validates before allocating an attempt.
   if (canResume && run.frozen_context?.workspaceGrant) {
@@ -325,6 +340,7 @@ export async function viewOf(client: PoolClient, locked: LockedRun): Promise<Run
     run_id: run.id,
     conversation_id: run.conversation_id,
     execution: run.execution,
+    model_selection: modelSelection,
     status: run.status,
     attempt_id: attempt.id,
     attempt_no: attempt.attempt_no,

@@ -1,3 +1,4 @@
+import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
@@ -21,6 +22,7 @@ import { acceptReminderDate } from '../../src/modules/conversations/reminder-dat
 import type { ConversationDeps } from '../../src/modules/conversations/contracts.js';
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
 import { createHarnessModelTransport } from '../../src/modules/conversations/harness-model.js';
+import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
 import { loadTimeContext } from '../../src/modules/time/context.js';
 import {
   createIntegrationDatabase,
@@ -159,29 +161,32 @@ beforeAll(async () => {
     });
   });
   const modelBase = await listen(modelServer);
+  const harness: HarnessServices = {
+    binaryPath,
+    libraryPath,
+    maxIterations: 8,
+    maxTokens: 8000,
+    contextPolicy: createContextPolicy({
+      completionCap: 1024,
+      model: 'direct-controlled-provider',
+    }),
+    model: createHarnessModelTransport({
+      baseUrl: `${modelBase}/v1`,
+      model: 'direct-controlled-provider',
+    }),
+  };
   deps = {
     pool: database.pool,
     timeContext: loadTimeContext('fixture-v1'),
-    harness: {
-      binaryPath,
-      libraryPath,
-      maxIterations: 8,
-      maxTokens: 8000,
-      contextPolicy: createContextPolicy({
-        completionCap: 1024,
-        model: 'direct-controlled-provider',
-      }),
-      model: createHarnessModelTransport({
-        baseUrl: `${modelBase}/v1`,
-        model: 'direct-controlled-provider',
-      }),
-    },
+    harness,
   };
+  controlledModelDeps(deps);
   apiServer = createServer((req, res) => {
     void handleRequest(req, res, {
       pool: database.pool,
       timeContext: deps.timeContext,
       harness: deps.harness,
+      modelTransport: deps.modelTransport,
     }).catch(() => res.destroy());
   });
   base = await listen(apiServer);
@@ -200,6 +205,7 @@ afterAll(async () => {
 for (const mode of ['local', 'http'] as const) {
   test(`${mode}: official native creates independent reminders with frozen receipts, inbound replay and read-only recovery`, async () => {
     const session = await seedSession(database.pool, { timezoneId: 'Asia/Shanghai' });
+    await configureTestModel(database.pool, session.userId, 'direct-controlled-provider');
     const id = randomUUID();
     const value = { observations: new Map<string, z.infer<typeof Observation>>(), calls: 0 };
     cases.set(id, value);
@@ -321,6 +327,7 @@ for (const mode of ['local', 'http'] as const) {
 for (const mode of ['local', 'http'] as const) {
   test(`${mode}: a direct DST clarification exposes real candidates and creates only the explicitly selected fold`, async () => {
     const session = await seedSession(database.pool, { timezoneId: 'America/New_York' });
+    await configureTestModel(database.pool, session.userId, 'direct-controlled-provider');
     const id = randomUUID();
     const singleTime = '2027年11月7日01:30提醒我核对报告';
     const value = {

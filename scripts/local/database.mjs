@@ -757,7 +757,7 @@ export class DeploymentDatabase {
       if (
         !actual ||
         !actual.valid ||
-        actual.deferred ||
+        actual.deferred !== (expected.deferred ?? false) ||
         !actual.index_valid ||
         !actual.target_public ||
         actual.type !== expected.type ||

@@ -1,11 +1,12 @@
 // Conversation HTTP contracts (issue #9): docs/api/conversations.
 import { z } from 'zod';
-import { workspaceSummarySchema } from '@along/contracts';
+import { ModelSelectionSchema, workspaceSummarySchema } from '@along/contracts';
 
 export const SendMessageBodySchema = z
   .object({
     conversation_id: z.string().uuid().optional(),
     execution: z.enum(['business', 'harness']).optional(),
+    model_selection: ModelSelectionSchema.optional(),
     authorization_revision: z.literal('delegation/1').optional(),
     workspace_id: workspaceSummarySchema.shape.workspace_id.optional(),
     workspace_ids: z
@@ -23,6 +24,10 @@ export const SendMessageBodySchema = z
     client_sent_at: z.string().max(100).optional(),
   })
   .strict()
+  .refine((input) => input.model_selection === undefined || input.execution === 'harness', {
+    message: 'model_selection requires harness execution',
+    path: ['model_selection'],
+  })
   .refine((input) => input.workspace_id === undefined || input.execution === 'harness', {
     message: 'workspace_id requires harness execution',
     path: ['workspace_id'],

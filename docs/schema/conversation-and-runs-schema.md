@@ -4,6 +4,8 @@
 
 > 新委托 Run 在 `frozen_context` 独立冻结授权修订、实际能力、工作区资格和实际 `request-bound` 或 `server-owned` 生命周期，供 v6 trusted start 与只读投影；`0021_trusted_execution_goals.sql` 增加根列 `agent_runs.goal_result`。旧 Run/pending/快照/模板/hash/accepted result 不迁写或扩权，历史结果保持 NULL；snapshot 仍为2。新委托 SSE 为 v2，legacy/v1 历史保持。本页不构成运行验收。
 
+> Proposed 本人模型配置的独立版本引用和冻结显示快照见 [模型接入 schema](model-provider-schema.md)；原 `run_context_policies` 严格结构及旧历史不迁写，具体切换与旧等待处置见 [design/22](../design/22-model-provider-settings.md)。
+
 ## 设计依据
 
 - B03 §4.1 在线对话数据流：BFF 拉上下文 → 调 Agent → SSE → 落库本轮对话 [B03]。

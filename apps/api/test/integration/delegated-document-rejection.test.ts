@@ -19,6 +19,7 @@ import {
   readWorkspaceFile,
 } from '../../src/modules/workspaces/service.js';
 import { loadTimeContext } from '../../src/modules/time/context.js';
+import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import {
   createIntegrationDatabase,
   databaseUrl,
@@ -41,6 +42,7 @@ maybe('delegated document rejection', () => {
   async function fixture(suspend: boolean) {
     const pool = database.pool;
     const actor = await seedAdmittedSession(pool, {});
+    await configureTestModel(pool, actor.userId, 'test');
     const root = await mkdtemp(join(tmpdir(), 'along-rejected-document-'));
     roots.push(root);
     await writeFile(join(root, 'brief.txt'), 'Original brief.\n');
@@ -55,7 +57,7 @@ maybe('delegated document rejection', () => {
       },
     ]);
     const grant = getWorkspaceGrant(actor.userId, 'documents');
-    const deps = {
+    const deps = controlledModelDeps({
       pool,
       timeContext: loadTimeContext('fixture-v1'),
       harness: {
@@ -67,7 +69,7 @@ maybe('delegated document rejection', () => {
           throw new Error('rejection must not call a model');
         },
       },
-    };
+    });
     const started = await startConversationRun(
       deps,
       actor.userId,
