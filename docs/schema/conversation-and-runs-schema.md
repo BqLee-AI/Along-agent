@@ -6,6 +6,8 @@
 
 > Proposed 本人模型配置的独立版本引用和冻结显示快照见 [模型接入 schema](model-provider-schema.md)；原 `run_context_policies` 严格结构及旧历史不迁写，具体切换与旧等待处置见 [design/22](../design/22-model-provider-settings.md)。
 
+> R3（#144，Proposed）：[design/23](../design/23-r3-short-term-memory-and-compact.md)提出独立安全点、摘要覆盖、短期记忆及可重建向量索引；表名、迁移和新状态尚未落地，本篇现行字段/快照合同及旧 Run 不变。
+
 ## 设计依据
 
 - B03 §4.1 在线对话数据流：BFF 拉上下文 → 调 Agent → SSE → 落库本轮对话 [B03]。

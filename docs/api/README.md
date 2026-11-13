@@ -10,6 +10,8 @@
 
 > Proposed 用户模型配置见 [模型接入 API](model-providers.md) 和 [design/22](../design/22-model-provider-settings.md)。下列 29 端点数为现行基线，不含拟议新增端点；接纳、历史投影及 SDK 传输以变更实施与验收为准。
 
+> Proposed R3（#144）：手动 compact、暂停继续和跨会话记忆的目标合同见 [design/23](../design/23-r3-short-term-memory-and-compact.md) 与 [OpenSpec 增量](../../openspec/changes/define-r3-short-term-memory/proposal.md)；本表仍只统计现行路由，设计不代表接口已部署。
+
 ## 1. Base Path 与路由总数 [Required]
 
 - Base Path：`/api/v1`。下文路由表省略该前缀，如 `GET /me` 即 `GET /api/v1/me`。

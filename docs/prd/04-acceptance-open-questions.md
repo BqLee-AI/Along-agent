@@ -137,6 +137,15 @@
 - [Required · 暂停边界] 自然质量或保守净收益未获证实时，可暂停专项、保持off并停止专用编码服务，应用和历史事实继续保留；暂停不是自然shadow或受控接管验收通过。恢复shadow或开启enforce需对应授权，模型声明交付不代替完整镜像/依赖分发清算。时间性运行状态与结果仅记入任务Verification。
 - [非目标] 不借优化裁决提醒改期次序、多目标同/拆Run、同名对象选择或批准流程中的独立请求策略，不进入R3/R4、工作区写入、在线学习或provider/市场/推送/计费决定。超出本白名单的请求沿原路径，不暗中改变原产品行为。
 
+## R3 跨会话短期记忆与 compact（#144，Proposed）
+
+- 用户可显式记住信息，也可在手动或自动 compact 时从有来源的对话原文提取候选；记忆可供本人跨会话检索，不等于提醒或执行授权。普通短会话不额外进行每轮自动提取。
+- 手动 `/compact` 暂停并继续当前 Run；自动压缩在模型流收尾后的安全边界进行。两者共用压缩能力，不复用批准等待；原始消息、已接受工具事实、预算、取消和真实批准保持，旧 Run 不被迁写或扩权。
+- 新 Run 改用摘要及其覆盖后的消息，不再以固定 63 条历史作为产品规则；仍受可验证的容量和权限边界限制。手动成功只给简短状态，摘要与记忆内容不自动刷屏。
+- 检索采用字面与 pgvector 候选，精确编号不可被相似编号冒充；无答案、未完成和依赖故障不混为一谈。top-k、自动触发参数、保留期限和历史回填按实验与合同收敛，不将离线 top-3 写成生产选择。
+- [证据](../verification/r3-stage-zero-2026-11-13.md)区分静态运行边界、真实模型候选错误及 PG16 小样本检索。一次正式 transport 的拒绝原因未知，不能归因于网络波动；实验不替代正式 Web/native/PG/真实模型验收。
+- 设计、契约与阶段顺序见 [design/23](../design/23-r3-short-term-memory-and-compact.md)、[OpenSpec 增量](../../openspec/changes/define-r3-short-term-memory/proposal.md)和[规划](../plans/r3-short-term-memory-plan.md)。本节不启用新行为，不依赖开启 R2-B。
+
 ## 本人目标内委托（#104/#105）
 
 合同真源为 [design/20 §1–§10](../design/20-goal-scoped-delegation.md) 及相应 OpenSpec 主规范，[归档记录](../../openspec/changes/archive/2026-11-12-refactor-assistant-capability-authorization/)保留变更与验收，总范围为 #104。时区、提醒、资料编辑及有限创建各以实际冻结 profile 为准；授权修订、实际能力和执行生命周期独立，合格新 Run 可冻结 server-owned。实现、受控消费者与真实用户路径分别取证。

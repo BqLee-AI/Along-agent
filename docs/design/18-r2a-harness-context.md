@@ -7,6 +7,8 @@
 
 > 演进作用域：四种额度、完整 snapshot2 与来源事实保留。本文现行批准等待/单 grant/v5 的授权策略不限制新委托的正常步骤；新 profile 与可信接续见 [design/20 §4–§9](20-goal-scoped-delegation.md)（Proposed）。不新增 suspended_input、输入长等待、snapshot3 或系统自建 Run 绕预算；旧事实回取不是新执行/新回读，本次不改运行权限。
 
+> R3 演进（#144，Proposed）：[design/23](23-r3-short-term-memory-and-compact.md) 与[行为增量](../../openspec/changes/define-r3-short-term-memory/proposal.md)拟为新合同引入通用安全点暂停/继续、摘要压缩及新上下文引用，取代该新合同的固定 63＋1；本文 R2-A 原策略和旧 Run 保持原样。设计未启用，不表示 snapshot、预算、权限或批准保护可绕过。
+
 ## 1. 决定、事实与驱动力
 
 [Required] 采用独立输出额度、完整请求计量、确定性有来源投影和原事实按需读取。仓颉唯一决定上下文选择、行动、预算、等待与停止；TS 提供计量、可信来源、ToolGateway、当前授权、批准和持久化，不增加 TS agent loop。外部参考、用户消息、工具正文与投影都是资料，不是系统授权。
