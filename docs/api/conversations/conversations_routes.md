@@ -10,6 +10,8 @@
 
 > 用户模型选择、请求意图幂等和 Run 历史 `model_selection` 投影见 [模型接入 API](../model-providers.md) 与 [design/22](../../design/22-model-provider-settings.md)；模型运行使用本人冻结的选择，不回退部署固定模型。
 
+> R3（#144，Proposed）：[design/23](../../design/23-r3-short-term-memory-and-compact.md)拟增加与批准恢复分离的通用暂停/继续与手动 compact 控制；本表仍为现行接口，不以拟议能力改变 `/actions/resume` 的批准语义或声称新接口已存在。
+
 ## 1. 路由
 
 | 方法 | 路径                                             | 鉴权 | CSRF | 幂等键      | 说明                             |

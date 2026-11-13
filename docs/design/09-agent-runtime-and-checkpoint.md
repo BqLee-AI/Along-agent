@@ -9,6 +9,8 @@
 
 > profile作用域：本文v5/单grant/逐项批准仍描述现行/legacy；早期新授权可request-bound并保留请求绑定连接语义。可信start、目标结果与最终server-owned见 [design/20 §1、§4–§9](20-goal-scoped-delegation.md)（Proposed），授权修订不证明后台已交付，旧Run不随部署改义；唯一Harness、预算、稳定结果和unknown不重做保留。
 
+> R3 演进（#144，Proposed）：[design/23](23-r3-short-term-memory-and-compact.md)拟新增与批准等待分离的安全点暂停/继续及 compact；现行批准恢复、旧 Run 与取消/未知效果语义不变，设计不代表通用暂停已实现，也不承诺任意崩溃恢复。
+
 ## 标记约定
 
 Observed / Required / Proposed / Deferred 同 01；运行记录只写进对应验收记录或 PR，不混作长期能力保证。
