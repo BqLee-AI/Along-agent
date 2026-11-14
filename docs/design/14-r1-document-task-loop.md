@@ -21,7 +21,7 @@
 | -------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | 可信工作区     | workspaces/service.ts；conversations/schemas.ts、service.ts           | 部署登记、有限相对路径和 owner；新请求选择绑定 hash 与冻结 grant，模型不能自报 root/allowlist                             |
 | 工具目录与执行 | tools/catalog.ts、contracts.ts、gateway.ts、invocations.ts            | 五个业务工具、五个 workspace 工具及原事实回取；分类由服务端固定，纯读事务外 MCP、写入一次许可，不能让模型选择执行种类     |
-| 唯一循环       | apps/harness/src/main.cj；packages/contracts/src/harness.ts           | harness/v5（路由默认 off），逐次真实函数配对及模型增量、有界来源投影、typed task/document 决议；TS transport 不规划下一步 |
+| 唯一循环       | apps/harness/src/session/；packages/contracts/src/harness.ts          | harness/v5（路由默认 off），逐次真实函数配对及模型增量、有界来源投影、typed task/document 决议；TS transport 不规划下一步 |
 | 文档授权       | approvals/document-service.ts、document-actions.ts、decision.ts；0016 | 独立批准/决议表、完整冻结内容、唯一 apply；跨模块 ID 经公共用例验证，不新增跨模块强 FK                                    |
 | 文件效果       | workspaces/replace.ts；tools/invocations.ts、query.ts                 | 非事务替换、真实 applied/conflict/unknown；unknown 不补报、不重写、不产生可恢复 checkpoint                                |
 | 历史与当前资格 | conversations/repository.ts、run-state.ts、harness-authority.ts       | 冻结摘要保留可读；新动作和继续重新核验登记，限定旧 task snapshot1 读取不扩权                                              |
@@ -219,7 +219,7 @@ workspace_list/grep/read 走真实 initialize→listTools→callTool，返回实
 | tools            | 静态五旧＋五新定义、strict 输入/结果、MCP adapter、既有 reservation/local/non_transactional coordinator、typed 批准引用/接受结果/审计；修改 contracts/schemas/result-schema/gateway/invocations |
 | approvals        | document_approvals、按钮决议/冻结预览、一次 apply 绑定及公共授权/决议读取；新增窄文档用例文件，保留旧 task create/confirm/revise                                                                |
 | conversations    | 选择/hash/Run 冻结/资格/等待/终态及公开只读结果；service/schemas/contracts/run-state/tool-binding/harness-authority/config                                                                      |
-| contracts/native | harness/v5（含只读路由帧，路由默认 off）、typed 决议、workspace 安全上下文、真实增量输出/有界观察消费/unknown 正常失败；packages/contracts/src/harness.ts、apps/harness/src/main.cj             |
+| contracts/native | harness/v5（含只读路由帧，路由默认 off）、typed 决议、workspace 安全上下文、真实增量输出/有界观察消费/unknown 正常失败；packages/contracts/src/harness.ts、apps/harness/src/session/            |
 | Web              | 现有 Chat 的 workspace 选择、文档批准链接/原 Run 继续、实际结果展示；新增文档批准页及 HTTP DTO，不能引用 API 源码                                                                               |
 | integration/CI   | 原根入口和五门；添加正式文件/MCP 产品消费者及负例，按实际证据扩 D8，不另建 job 平台                                                                                                             |
 

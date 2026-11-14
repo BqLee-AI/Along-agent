@@ -2,11 +2,15 @@
 
 生产源位于本目录，目标平台 Linux x86_64，仅使用继承的 stdin/stdout 交换 `harness/v6`；`v5` 与未知版本硬拒绝，不执行或写出旧 wire 协议。snapshot 仅接受/输出 `version: 2`。不监听端口、不持有模型凭据、不包含模型 fixture 或网络 transport。准确 wire DTO 见 `packages/contracts/src/harness.ts`、`goals.ts` 与 `routing.ts`；身份、授权、调用预约、效果、批准与持久事实由 TypeScript 裁决。
 
+源码按职责分层：`src/main.cj` 负责进程入口；`src/protocol/` 校验 wire 数据，`src/transport/` 负责管道帧及请求应答，`src/session/` 持有会话状态、恢复、路由及模型循环。分层不改变 v6 协议或 snapshot 版本。
+
 ## 可复现构建与安装
 
 Linux/WSL 安装 Bun1.4.2、Docker 后执行根入口 `bun run build:harness`，或 `bash scripts/build-harness.sh`。它构建 `infra/docker/Dockerfile` 的独立 `harness-artifact` 目标，默认导出到 `apps/harness/dist`。builder 包含 GCC、binutils、C/C++ 开发库和按 `artifacts.lock` 校验的 SDK/stdx；`cjpm build --skip-script` 编译本目录正式源，不接受全局 SDK 或旧二进制。`cjpm.lock` 固定包依赖，`artifacts.lock` 单独固定二进制路径依赖；stdx hash 是官方 release 的本地计算值，不是独立发布者证明。
 
 也可执行 `docker build --target harness-artifact --output type=local,dest=/tmp/along-harness -f infra/docker/Dockerfile .`。导出包括 `bin/along-harness`、实际链接的 SDK/stdx 动态库闭包 `lib/`、官方及第三方许可 `notices/`、源与产物 SHA256。API 使用 `HARNESS_BINARY=/tmp/along-harness/bin/along-harness` 和 `HARNESS_LIBRARY_PATH=/tmp/along-harness/lib`；直接运行二进制使用 `LD_LIBRARY_PATH=/tmp/along-harness/lib`。正式 API 镜像将该构建阶段复制到 `/app/harness/` 并配置这些路径。
+
+`source.sha256` 递归收录 `src/` 下所有 `.cj` 源文件（按路径排序），以及 `cjpm.toml`、`cjpm.lock` 和 `artifacts.lock`；子包新增或修改均会改变对应源哈希。
 
 `bun run harness:prepare /opt/along-toolchain` 是显式 Linux 下载入口，先校验再解包；依赖 bash/curl/sha256sum/tar/unzip，构建不运行 cjpm hooks 或下载隐式依赖。Docker builder 是正式编译环境；原生 Windows 和其他架构不在该 artifact lock 支持范围。
 

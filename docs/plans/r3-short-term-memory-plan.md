@@ -30,7 +30,7 @@
 
 ## Compact 与记忆提取
 
-**Observed**：`apps/harness/src/main.cj` 的 `projectOldest` 在容量压力下对已见旧工具观察做确定性投影，保留来源及回取能力，不是模型摘要；`repository.ts#listHarnessMessageRefs` 在新 Run 接纳时选最近 63 条可见历史及当前输入，`service.ts` 冻结引用。两者是不同接缝，现有实现不会因历史退出窗口自动提取记忆。
+**Observed**：`apps/harness/src/session/context.cj` 的 `projectOldest` 在容量压力下对已见旧工具观察做确定性投影，保留来源及回取能力，不是模型摘要；`repository.ts#listHarnessMessageRefs` 在新 Run 接纳时选最近 63 条可见历史及当前输入，`service.ts` 冻结引用。两者是不同接缝，现有实现不会因历史退出窗口自动提取记忆。
 
 **Proposed**：新增摘要式 compact，不将已有工具观察投影误称为摘要。手动 `/compact` 由用户触发，执行时暂停当前 Run；暂停及继续的具体接入须与现有生命周期合同对齐，不假设已支持任意挂起恢复。手动与自动触发共用压缩用例；手动成功只需简短状态，不向聊天输出整篇摘要或记忆列表，失败说明原因。摘要与记忆不是模型正在执行的用户消息，也不作为用户可见回答。
 

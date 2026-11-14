@@ -8,7 +8,7 @@
 
 **建议**先为新接纳 Run 建立与 compact 无关的通用安全点暂停/继续：用户可明确暂停并继续，运行时可为已登记的内部操作请求暂停并在操作结束后受控继续；仓颉在安全点交还控制，conversations 持有资格与暂停点，TS 验证并持久化。手动 `/compact` 和自动触发均以此为前置，调用同一隔离摘要用例，生成有来源、低信任的派生历史。活动任务成功后仍是**同一 Run**，累计预算、权限及已接受效果不变。跨会话记忆只来自用户明确要求记住或 compact 的原消息候选，保存来源并由本人检索；原消息和领域回执始终权威。
 
-[Observed] 当前没有摘要功能或通用暂停。`packages/contracts/src/harness.ts` 的状态只有 running、suspended_approval 和终态；`apps/api/src/modules/conversations/harness-authority.ts` 的 resume 必须匹配批准、waiting checkpoint 和决议，不能拿它模拟普通暂停。流活跃时只允许 `model_next` 和 `answer`；取消先提交终态撤销资格再 abort。`repository.ts` 的接纳选择最近 63 条可见历史加当前输入，读取要求最多 64 个、唯一且当前输入在末尾；快照逐位绑定冻结引用。`service.ts` 在接纳时冻结该集合。仓颉 `apps/harness/src/main.cj` 的 `projectOldest` 是确定性工具观察投影，不是对话摘要。R2-A 的 24 次/64000 tokens 是默认累计 Run 预算，不是模型窗口；窗口与输入计量可未知。详见 [design/18](18-r2a-harness-context.md) 与 [阶段 0](../verification/r3-stage-zero-2026-11-13.md)。
+[Observed] 当前没有摘要功能或通用暂停。`packages/contracts/src/harness.ts` 的状态只有 running、suspended_approval 和终态；`apps/api/src/modules/conversations/harness-authority.ts` 的 resume 必须匹配批准、waiting checkpoint 和决议，不能拿它模拟普通暂停。流活跃时只允许 `model_next` 和 `answer`；取消先提交终态撤销资格再 abort。`repository.ts` 的接纳选择最近 63 条可见历史加当前输入，读取要求最多 64 个、唯一且当前输入在末尾；快照逐位绑定冻结引用。`service.ts` 在接纳时冻结该集合。仓颉 `apps/harness/src/session/context.cj` 的 `projectOldest` 是确定性工具观察投影，不是对话摘要。R2-A 的 24 次/64000 tokens 是默认累计 Run 预算，不是模型窗口；窗口与输入计量可未知。详见 [design/18](18-r2a-harness-context.md) 与 [阶段 0](../verification/r3-stage-zero-2026-11-13.md)。
 
 [Observed] 三项阶段 0 证据限制设计结论：
 
