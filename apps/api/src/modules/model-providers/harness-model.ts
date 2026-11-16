@@ -35,6 +35,24 @@ class ModelUnavailableError extends HttpError {
   }
 }
 
+function outboundFailure(error: unknown): ModelUnavailableError | undefined {
+  if (
+    error instanceof OutboundError &&
+    [
+      'invalid_endpoint',
+      'blocked_address',
+      'timeout',
+      'connection',
+      'authentication',
+      'unsupported',
+      'incompatible',
+    ].includes(error.category)
+  ) {
+    return new ModelUnavailableError(`outbound_${error.category}`);
+  }
+  return undefined;
+}
+
 // Only structured provider codes count as a capacity rejection. Diagnostic prose
 // and arbitrary error bodies never enter either native frames or public output.
 async function isWindowRejection(response: Response): Promise<boolean> {
@@ -111,21 +129,8 @@ function createModelTransport(
       } catch (error) {
         if (error instanceof HttpError) {
           state.failure = error;
-        } else if (
-          error instanceof OutboundError &&
-          [
-            'invalid_endpoint',
-            'blocked_address',
-            'timeout',
-            'connection',
-            'authentication',
-            'unsupported',
-            'incompatible',
-          ].includes(error.category)
-        ) {
-          state.failure = new ModelUnavailableError(`outbound_${error.category}`);
         } else {
-          state.failure = new ModelUnavailableError('network_error');
+          state.failure = outboundFailure(error) ?? new ModelUnavailableError('network_error');
         }
         throw error;
       }
@@ -200,12 +205,13 @@ function createModelTransport(
       const typed =
         state.failure ??
         (error instanceof HttpError ? error : new ModelUnavailableError('sdk_error'));
-      if (typed instanceof ModelProtocolError) {
+      const diagnosticFailure = outboundFailure(state.outboundError) ?? typed;
+      if (diagnosticFailure instanceof ModelProtocolError) {
         console.warn(
           JSON.stringify({
             event: 'MODEL_PROTOCOL_REJECTED',
-            reason: typed.reason,
-            ...(typed.frame ? { frame: typed.frame } : {}),
+            reason: diagnosticFailure.reason,
+            ...(diagnosticFailure.frame ? { frame: diagnosticFailure.frame } : {}),
             ...(state.finishReason ? { finish_reason: state.finishReason } : {}),
             ...(diagnostic
               ? {
@@ -217,12 +223,12 @@ function createModelTransport(
           }),
         );
       }
-      if (typed instanceof ModelUnavailableError) {
+      if (diagnosticFailure instanceof ModelUnavailableError) {
         console.warn(
           JSON.stringify({
             event: 'MODEL_TRANSPORT_UNAVAILABLE',
-            reason: typed.reason,
-            ...(typed.status === undefined ? {} : { status: typed.status }),
+            reason: diagnosticFailure.reason,
+            ...(diagnosticFailure.status === undefined ? {} : { status: diagnosticFailure.status }),
             ...(diagnostic
               ? {
                   run_id: diagnostic.runId,

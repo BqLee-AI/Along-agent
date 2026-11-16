@@ -85,6 +85,43 @@ test('reports a safe outbound failure category without exposing error details', 
   }
 });
 
+test('reports an outbound disconnect while reading an accepted response body', async () => {
+  const warn = spyOn(console, 'warn').mockImplementation(() => {});
+  try {
+    let sent = false;
+    const transport = createUserConfiguredHarnessModelTransport(
+      config,
+      async () =>
+        new Response(
+          new ReadableStream({
+            pull(controller) {
+              if (!sent) {
+                sent = true;
+                controller.enqueue(new TextEncoder().encode(chunk({ content: 'accepted' })));
+              } else {
+                controller.error(new OutboundError('connection'));
+              }
+            },
+          }),
+          { headers: { 'content-type': 'text/event-stream' } },
+        ),
+    );
+    const steps = await Array.fromAsync(transport(request, [], new AbortController().signal));
+    expect(steps.at(-1)).toMatchObject({
+      type: 'failed',
+      error: { code: 'HARNESS_UNAVAILABLE' },
+      usage: null,
+    });
+    expect(warn.mock.calls.map((args) => JSON.parse(String(args[0])))).toContainEqual({
+      event: 'MODEL_TRANSPORT_UNAVAILABLE',
+      reason: 'outbound_connection',
+    });
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(config.baseUrl);
+  } finally {
+    warn.mockRestore();
+  }
+});
+
 test('user model request uses the boundary while local measurement does not, and remains streaming', async () => {
   const release = Promise.withResolvers<void>();
   const server = createServer((_req, res) => {

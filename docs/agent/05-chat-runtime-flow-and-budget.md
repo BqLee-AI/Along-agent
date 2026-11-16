@@ -47,6 +47,8 @@
 
 模型传输失败时，服务端输出带 Run/attempt 标识的结构化诊断：`MODEL_PROTOCOL_REJECTED` 给出固定拒绝原因、可用的 finish reason 和有限的帧结构标记；`MODEL_TRANSPORT_UNAVAILABLE` 区分受控出站故障、provider HTTP 错误及 SDK 故障，不记录错误原文。收到 `length` 且流完整结束时，`MODEL_OUTPUT_LIMIT` 记录请求的单次输出上限和可得的总 usage；总 usage 不是输出 token 数。日志不含提示词、模型正文、工具参数、凭据或供应商地址，Run/attempt 标识仍应按内部运行数据保护。外部错误码和消息不变；缺少记录的历史错误不能据此追溯具体原因。
 
+收到响应头后读取响应体时的受控出站断流也记录为出站故障；只修正内部分类，不更改对外错误。
+
 ## 事件补读与执行恢复
 
 - GET `after_seq` / 同入站幂等键只补读已存七词事件，不重新归一、执行工具或分配 attempt；内部 snapshot 导致游标间隙合法。running 同键409，suspended 可回前缀而不恢复。

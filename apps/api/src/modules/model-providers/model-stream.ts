@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { HARNESS_MAX_FRAME_BYTES, HarnessModelReplySchema } from '@along/contracts';
 import { HttpError } from '../../http/errors.js';
+import { OutboundError } from './outbound.js';
 // Provider metadata may evolve; choice/function identity must remain unambiguous.
 const ProviderChunkSchema = z.object({
   choices: z
@@ -108,6 +109,7 @@ async function* modelEvents(response: Response): AsyncGenerator<string> {
 }
 export type UsageState = {
   usage: { total_tokens: number } | null;
+  outboundError?: OutboundError;
   failure?: HttpError;
   finishReason?: 'stop' | 'tool_calls' | 'length' | 'content_filter';
   sawContent: boolean;
@@ -278,6 +280,7 @@ export function normalizeResponse(
           if (next.done) controller.close();
           else controller.enqueue(encoder.encode(next.value));
         } catch (error) {
+          if (error instanceof OutboundError) state.outboundError = error;
           if (error instanceof HttpError) state.failure = error;
           controller.error(error);
         }
