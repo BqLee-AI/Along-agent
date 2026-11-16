@@ -6,14 +6,14 @@ cd "$root"
 scope="${CI_SCOPE:-full}"
 if [[ "$scope" != api && "$scope" != api-tests ]]; then scope=full; fi
 postgres="along-ci-postgres-$$"
-pids=()
+build_pid=''
 cleanup() {
   local result=$?
   trap - EXIT
-  for pid in "${pids[@]}"; do
-    kill -TERM -- "-$pid" 2>/dev/null || true
-  done
-  for pid in "${pids[@]}"; do wait "$pid" 2>/dev/null || true; done
+  if [[ -n "$build_pid" ]]; then
+    kill -TERM -- "-$build_pid" 2>/dev/null || true
+    wait "$build_pid" 2>/dev/null || true
+  fi
   docker rm -f "$postgres" >/dev/null 2>&1 || true
   exit "$result"
 }
@@ -56,38 +56,30 @@ if [[ "$scope" == api-tests ]]; then
   bun test --parallel=4 --timeout 30000 "${api_tests[@]}"
   exit
 fi
-# History owns separate databases; API fixtures own schemas in the migrated database.
-api_workers=4
+# Compile while independent history databases are exercised; API tests wait below.
+setsid bun run build:api &
+build_pid=$!
+bun scripts/check-migrations.mjs
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/db/verify-constraints.sql
 if [[ "$scope" == full ]]; then
-  api_workers=2
-  echo '== historical upgrades: 2 workers =='
-  setsid bun --no-env-file test --parallel=2 \
+  bun --no-env-file test --parallel=2 \
     scripts/test/local-routing-database.test.ts \
     scripts/test/local-goal-database.test.ts \
     scripts/test/local-direct-reminder-database.test.ts \
     scripts/test/local-invited-database.test.ts \
-    scripts/test/local-116-convergence.test.ts &
-  pids+=("$!")
+    scripts/test/local-116-convergence.test.ts
 else
   echo 'Skipping historical upgrade tests for API module changes'
 fi
-echo "== API database checks: $api_workers workers =="
-setsid bash -euo pipefail -c '
-  bun run build:api
-  bun scripts/check-migrations.mjs
-  psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/db/verify-constraints.sql
-  for sql in verify-conversation.sql d3-d5.test.sql conversation.test.sql verify-agent-support.sql agent-support.test.sql; do
-    psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "scripts/db/$sql"
-  done
-  sh scripts/db/d3-concurrent.test.sh
-  mapfile -t native_tests < ci/native-tests.txt
-  native_names=()
-  for test in "${native_tests[@]}"; do native_names+=("${test##*/}"); done
-  ignore="$(IFS=,; echo "${native_names[*]}")"
-  bun test --parallel="$1" --timeout 30000 \
-    --path-ignore-patterns "**/test/integration/{$ignore}" ./apps/api/test/integration
-' _ "$api_workers" &
-pids+=("$!")
-if (( ${#pids[@]} == 2 )); then wait -n "${pids[@]}"; fi
-for pid in "${pids[@]}"; do wait "$pid"; done
-pids=()
+for sql in verify-conversation.sql d3-d5.test.sql conversation.test.sql verify-agent-support.sql agent-support.test.sql; do
+  psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "scripts/db/$sql"
+done
+sh scripts/db/d3-concurrent.test.sh
+wait "$build_pid"
+build_pid=''
+mapfile -t native_tests < ci/native-tests.txt
+native_names=()
+for test in "${native_tests[@]}"; do native_names+=("${test##*/}"); done
+ignore="$(IFS=,; echo "${native_names[*]}")"
+bun test --parallel=4 --timeout 30000 \
+  --path-ignore-patterns "**/test/integration/{$ignore}" ./apps/api/test/integration
