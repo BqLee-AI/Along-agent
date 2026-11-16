@@ -91,6 +91,11 @@
 - WHEN gate-manifest、gates-executable、frozen-names 或 copy-claims 任一步失败
 - THEN verify 报告失败步名并中止后续步骤，原禁词/口径与缺执行检查不因优化跳过
 
+#### Scenario: 冻结名检查不随 CI 分域省略
+
+- WHEN CI 选择任意变更范围或沿用历史成功结果
+- THEN checks 仍扫描 apps、packages、infra 中的交付代码，冻结别名违规使 checks 失败，不要求选中 tooling 分域
+
 #### Scenario: 干净 checkout 恢复构建依赖
 
 - WHEN 干净 checkout 尚无 workspace dist，独立执行需要依赖产物的 build、typecheck 或测试入口

@@ -23,7 +23,8 @@ const boundaries = (paths, owned) => [
 ];
 
 const lanes = {
-  docs: [
+  common: [
+    ['scripts/check-frozen-names.mjs'],
     ['scripts/scan-copy-claims.mjs'],
     ['x', '--bun', '--no-install', 'openspec', 'validate', '--all', '--strict'],
     ['run', 'format:check'],
@@ -57,7 +58,6 @@ const lanes = {
     [...unit, './scripts/test'],
     ['scripts/check-gate-manifest.mjs'],
     ['scripts/check-gates-executable.mjs'],
-    ['scripts/check-frozen-names.mjs'],
   ],
   // Harness has no TS workspace/typecheck or non-contract unit tests today.
   // Native contracts belong to runtime CI; embedding is an independent Python service.

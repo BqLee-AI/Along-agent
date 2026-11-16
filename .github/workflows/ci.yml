@@ -47,8 +47,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
-      - name: Check documentation
-        run: bun scripts/ci/checks.mjs docs
+      - name: Check common gates
+        run: bun scripts/ci/checks.mjs common
       - name: Check Web
         if: contains(fromJSON(needs.plan.outputs.plan).checks, 'web')
         run: bun scripts/ci/checks.mjs web
