@@ -21,6 +21,7 @@ export interface HarnessServices {
   maxIterations: number;
   maxTokens: number;
   autoCompactPlanningTokens?: number;
+  compactCompletionCap?: number;
   contextPolicy: ContextPolicy;
   measure?: (
     request: Extract<HarnessRequest, { type: 'measure_context' }>,

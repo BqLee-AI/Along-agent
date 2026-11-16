@@ -6,7 +6,7 @@ import { createServer, type Server } from 'node:http';
 import type { Pool, PoolClient } from 'pg';
 import type { ThreadEvent } from '@along/stream-protocol';
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import { createHarnessModelTransport } from '../../src/modules/conversations/harness-model.js';
+import { createHarnessModelTransport } from '../../src/modules/model-providers/harness-model.js';
 import { executeRun, startConversationRun } from '../../src/modules/conversations/service.js';
 import { listRunEvents } from '../../src/modules/conversations/repository.js';
 import { loadTimeContext } from '../../src/modules/time/context.js';

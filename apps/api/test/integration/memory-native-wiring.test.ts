@@ -7,7 +7,7 @@ import type { HarnessRequest } from '@along/contracts';
 import { handleRequest } from '../../src/http/app.js';
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
 import { measureHarnessContext } from '../../src/modules/conversations/harness-context.js';
-import { createHarnessModelTransport } from '../../src/modules/conversations/harness-model.js';
+import { createHarnessModelTransport } from '../../src/modules/model-providers/harness-model.js';
 import { configureTestModel } from '../helpers/model-selection.js';
 import {
   findModelObservation,

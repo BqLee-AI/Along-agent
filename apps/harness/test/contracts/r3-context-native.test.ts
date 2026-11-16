@@ -157,6 +157,37 @@ test('v8 compact resume replaces only history and retains protected state and un
     remaining_tokens: 10,
     max_output_tokens: 10,
   });
+  if (pendingPreview[0]?.type !== 'context_preview') throw new Error('missing pending preview');
+  expect(pendingPreview[0].messages.at(-1)).toEqual({
+    role: 'assistant',
+    content: 'pending response',
+  });
+  pendingSnapshot.native_state.pending_model = {
+    content: null,
+    tool_calls: [
+      {
+        id: 'pending-call',
+        type: 'function',
+        function: { name: 'get_user_prefs', arguments: '{}' },
+      },
+    ],
+  };
+  const toolPreview = await run(
+    {
+      ...base,
+      protocol: 'harness/v8',
+      mode: 'measure_only',
+      r3_context: next,
+      snapshot: pendingSnapshot,
+    },
+    () => ({ value: { accepted: true } }),
+  );
+  if (toolPreview[0]?.type !== 'context_preview') throw new Error('missing tool preview');
+  expect(toolPreview[0].messages.at(-1)).toEqual({
+    role: 'assistant',
+    content: '',
+    tool_calls: pendingSnapshot.native_state.pending_model.tool_calls,
+  });
   const resumed = await run(
     { ...base, protocol: 'harness/v8', r3_context: next, snapshot: secondSnapshot },
     (r) => {

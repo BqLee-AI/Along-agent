@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { measureHarnessContext } from '../src/modules/conversations/harness-context.js';
-import { createUserConfiguredHarnessModelTransport } from '../src/modules/conversations/harness-model.js';
+import { createUserConfiguredHarnessModelTransport } from '../src/modules/model-providers/harness-model.js';
 import {
   requestCompactModel as requestWithReservation,
   type CompactModelInput,

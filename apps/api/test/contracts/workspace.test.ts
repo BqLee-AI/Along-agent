@@ -17,7 +17,7 @@ import {
   workspaceResultSchema,
 } from '@along/contracts';
 import type { HarnessModelReply, WorkspaceResult } from '@along/contracts';
-import { createHarnessModelTransport } from '../../src/modules/conversations/harness-model.js';
+import { createHarnessModelTransport } from '../../src/modules/model-providers/harness-model.js';
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
 import { configureWorkspaceRegistry } from '../../src/modules/workspaces/service.js';
 import type { WorkspaceRegistration } from '../../src/modules/workspaces/service.js';

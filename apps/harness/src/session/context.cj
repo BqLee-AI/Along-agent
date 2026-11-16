@@ -153,6 +153,19 @@ extend Harness {
     protected func previewContext(): Unit {
         require(pipe.measureOnly && pipe.protocol == "harness/v8" && restoredPause && isNull(waiting))
         rebuildMessages()
+        // The accepted response is protected across compact even though it has
+        // not yet become history. Account for it without inventing a tool result.
+        if (!isNull(pendingModel)) {
+            let pending = pendingModel.asObject()
+            let content = field(pending, "content")
+            let calls = field(pending, "tool_calls").asArray()
+            let historyContent: JsonValue = if (isNull(content)) { text("") } else { content }
+            if (calls.size() == 0) {
+                contextState.messages.add(obj([("role", text("assistant")), ("content", historyContent)]))
+            } else {
+                contextState.messages.add(obj([("role", text("assistant")), ("content", historyContent), ("tool_calls", calls)]))
+            }
+        }
         require(contextState.messages.size() > 0 && contextState.messages.size() <= 256)
         var output = budgetState.completionCap
         var remaining: JsonValue = JsonNull()

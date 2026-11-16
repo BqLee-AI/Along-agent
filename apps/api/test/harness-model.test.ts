@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { createServer, type Server, type RequestListener, type ServerResponse } from 'node:http';
 import { HARNESS_PROTOCOL_VERSION } from '@along/contracts';
-import { createHarnessModelTransport } from '../src/modules/conversations/harness-model.js';
+import { createHarnessModelTransport } from '../src/modules/model-providers/harness-model.js';
 import { loadHarnessServices } from '../src/modules/conversations/harness-config.js';
 import { failEnvelope, HttpError } from '../src/http/errors.js';
 
@@ -327,6 +327,94 @@ describe('harness incremental model HTTP transport', () => {
     expect(JSON.stringify(failEnvelope(error, 'model-boundary'))).not.toContain(privateBody);
   });
 
+  test('reports a redacted reason when a provider stream ends without DONE', async () => {
+    const warn = spyOn(console, 'warn').mockImplementation(() => {});
+    const secret = 'private-provider-content';
+    try {
+      const baseUrl = await provider((_req, res) => {
+        res.writeHead(200, { 'content-type': 'text/event-stream' });
+        res.end(chunk({ content: secret }));
+      });
+      const error = await rejected(baseUrl);
+      expect(error.errorCode).toBe('HARNESS_PROTOCOL_ERROR');
+      const records = warn.mock.calls.map((args) => JSON.parse(String(args[0])));
+      expect(records).toContainEqual({
+        event: 'MODEL_PROTOCOL_REJECTED',
+        reason: 'stream_missing_done',
+      });
+      expect(JSON.stringify(records)).not.toContain(secret);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test('attributes a missing DONE after length to the originating compact run', async () => {
+    const warn = spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const baseUrl = await provider((_req, res) => {
+        res.writeHead(200, { 'content-type': 'text/event-stream' });
+        res.write(chunk({ content: 'private text' }));
+        res.end(chunk({}, 'length'));
+      });
+      const model = createHarnessModelTransport({
+        baseUrl,
+        model: 'contract-model',
+        diagnostic: { runId: 'run-1', attemptId: 'attempt-1', operation: 'compact' },
+      });
+      const steps = await Array.fromAsync(
+        model(
+          {
+            protocol: HARNESS_PROTOCOL_VERSION,
+            type: 'model',
+            request_ref: 'compact-model',
+            messages: [{ role: 'user', content: 'private input' }],
+            remaining_tokens: 8000,
+            max_output_tokens: 512,
+          },
+          [],
+          new AbortController().signal,
+        ),
+      );
+      expect(steps.at(-1)).toMatchObject({
+        type: 'failed',
+        error: { code: 'HARNESS_PROTOCOL_ERROR' },
+      });
+      expect(warn.mock.calls.map((args) => JSON.parse(String(args[0])))).toContainEqual({
+        event: 'MODEL_PROTOCOL_REJECTED',
+        reason: 'stream_missing_done',
+        finish_reason: 'length',
+        run_id: 'run-1',
+        attempt_id: 'attempt-1',
+        operation: 'compact',
+      });
+      expect(JSON.stringify(warn.mock.calls)).not.toContain('private');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test('reports only safe frame structure when provider schema validation fails', async () => {
+    const warn = spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const baseUrl = await provider((_req, res) => {
+        res.writeHead(200, { 'content-type': 'text/event-stream' });
+        res.end(
+          `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: 'private text' }, finish_reason: 'private reason' }], usage: null })}\n\n`,
+        );
+      });
+      expect((await rejected(baseUrl)).errorCode).toBe('HARNESS_PROTOCOL_ERROR');
+      const records = warn.mock.calls.map((args) => JSON.parse(String(args[0])));
+      expect(records).toContainEqual({
+        event: 'MODEL_PROTOCOL_REJECTED',
+        reason: 'event_schema_invalid',
+        frame: { choice_count: 1, has_usage: true, has_finish_reason: true, has_tool_calls: false },
+      });
+      expect(JSON.stringify(records)).not.toContain('private');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   test('rejects complete JSON responses instead of silently retrying without streaming', async () => {
     let calls = 0;
     const baseUrl = await provider((_req, res) => {
@@ -485,9 +573,50 @@ describe('harness deployment-only cumulative budgets', () => {
     expect(services?.maxTokens).toBe(8000);
     expect(services?.contextPolicy.completion_cap).toBe(512);
   });
+
+  test('uses an independently configured compact output limit without changing normal output', () => {
+    const services = loadHarnessServices({
+      ...environment,
+      HARNESS_COMPACT_COMPLETION_CAP: '4096',
+    });
+    expect(services?.compactCompletionCap).toBe(4096);
+    expect(services?.contextPolicy.completion_cap).toBe(512);
+    for (const value of ['', '0', '-1', '1.5', 'NaN', 'Infinity', '9007199254740992']) {
+      expect(
+        loadHarnessServices({ ...environment, HARNESS_COMPACT_COMPLETION_CAP: value }),
+      ).toBeNull();
+    }
+  });
 });
 
 describe('harness R2-A model failure accounting', () => {
+  test('records output length termination without exposing content', async () => {
+    const warn = spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const baseUrl = await provider((_req, res) => {
+        res.writeHead(200, { 'content-type': 'text/event-stream' });
+        res.write(chunk({ content: 'private text' }));
+        res.write(chunk({}, 'length'));
+        res.write(`data: ${JSON.stringify({ choices: [], usage: { total_tokens: 73 } })}\n\n`);
+        res.end('data: [DONE]\n\n');
+      });
+      const steps = await Array.fromAsync(request(baseUrl));
+      expect(steps.at(-1)).toMatchObject({
+        type: 'failed',
+        error: { code: 'HARNESS_CONTEXT_LIMIT' },
+        usage: { total_tokens: 73 },
+      });
+      expect(warn.mock.calls.map((args) => JSON.parse(String(args[0])))).toContainEqual({
+        event: 'MODEL_OUTPUT_LIMIT',
+        max_output_tokens: 512,
+        usage_tokens: 73,
+      });
+      expect(JSON.stringify(warn.mock.calls)).not.toContain('private text');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   test('length termination preserves accepted deltas and usage without completing partial arguments', async () => {
     const baseUrl = await provider((_req, res) => {
       res.writeHead(200, { 'content-type': 'text/event-stream' });

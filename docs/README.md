@@ -46,7 +46,7 @@
 | 20   | [本人目标内委托与授权](design/20-goal-scoped-delegation.md)              | 冻结实际能力与本人登记集合、资料编辑及有限创建、撞名恢复、v6/SSE v2 和执行生命周期；按事先明确的合同或预期核对真实效果            |
 | 21   | [受邀账户准入与恢复](design/21-invited-account-access.md)                | #112 显式准入/有限管理、停用后的流式披露边界、邀请/恢复/会话与前向升级；#131 本机口令重置；隔离实现证据与真实外部放行分列         |
 | 22   | [用户模型接入与运行绑定](design/22-model-provider-settings.md)           | Proposed：本人模型配置、各接入默认、加密凭据、冻结决议、SDK 受控流式出站与受限 Fake-IP 例外；真实外部验收独立                     |
-| 23   | [R3 跨会话记忆与 compact](design/23-r3-short-term-memory-and-compact.md) | 通用暂停继续、摘要压缩、来源记忆及检索质量边界                                                                                    |
+| 23   | [R3 跨会话记忆与 compact](design/23-r3-short-term-memory-and-compact.md) | 通用暂停继续、摘要压缩、来源记忆、安全边界及最小 MVP 验收                                                                         |
 
 活动列表为空与历史创建事实、批量请求部分完成及标题序号的证据边界见[design/09 §5](design/09-agent-runtime-and-checkpoint.md#5-toolgateway-交互required)。
 
@@ -99,7 +99,7 @@ R2-B 的完整目标及多轮自主查询边界见[design/19 §4、§6](design/1
 | 4    | [#91 对话内提醒确认收口计划](plans/inline-reminder-closeout-plan.md)        | 已有证据的版本边界、真实文档/后继补验、隔离范围与独立归档 PR 要求                                        |
 | 5    | [助理能力与授权模型重构方案](plans/agent-capability-refactor-plan.md)       | Proposed：委托内自主执行、可信上下文、真实工具/产物、必要澄清、停止与兼容迁移；不启用新权限              |
 | 6    | [账户产品化与首个办公只读连接](plans/account-and-office-connectors-plan.md) | Proposed：邀请入驻、真实邮件恢复、双用户隔离与无损迁移；飞书用户授权和单 Docx 只读，不接管 #104 执行重构 |
-| 7    | [R3 跨窗口短期记忆规划](plans/r3-short-term-memory-plan.md)                 | Proposed：近期对话来源、字面与语义召回、生命周期、部署和分级验收；不依赖 R2-B 开启                       |
+| 7    | [R3 跨窗口短期记忆规划](plans/r3-short-term-memory-plan.md)                 | Proposed 演进背景；MVP 合并与安全门槛以 design/23、OpenSpec 和 PRD 为准                                  |
 | 8    | [持续对话与工作区](plans/desktop-experience-plan.md)                        | 全应用双栏工作台、聊天与工作区切换、功能分层与验收范围                                                   |
 
 ## 七、操作指南（1 篇）
@@ -118,7 +118,7 @@ R2-B 的完整目标及多轮自主查询边界见[design/19 §4、§6](design/1
 | 2    | [time-core 黄金用例](demo/time-core-golden-cases.md) | 4 基准+DST+50 表达；第14条区分新请求/可信澄清锚、同日等待与真实午夜，纯函数不代替消费者验收 |
 | 3    | [故障注入 smoke](demo/fault-injection-smoke.md)      | 真实强杀、取消竞争及规则故障；分别计数实际调用与持久结果                                    |
 
-## 九、历史验收与实验记录（16 篇）
+## 九、历史验收与实验记录（17 篇）
 
 这些记录绑定各自日期、源码、环境与实际覆盖范围，不代替现行规范，也不证明新版本或 Proposed 方案已验收。
 
@@ -140,7 +140,8 @@ R2-B 的完整目标及多轮自主查询边界见[design/19 §4、§6](design/1
 | 14   | [2026-11-03 受邀账户外部前置](verification/invited-account-external-prerequisites-2026-11-03.md) | 邮件公开兼容性与真实通道、域名/HTTPS、受控邮箱、密钥托管和隐私缺口；没有外部发送或部署              |
 | 15   | [2026-11-03 受邀账户实现验证](verification/invited-account-implementation-2026-11-03.md)         | #112 正式 API/隔离 PG、原生消费者、Web 与旧副本生命周期；真实邮件和生产 HTTPS 仍单独验收            |
 | 16   | [2026-11-13 R3 阶段 0 实验](verification/r3-stage-zero-2026-11-13.md)                            | Run 静态边界、真实模型摘要试验及 PG16/pgvector 中文检索比较；不代替 R3 验收                         |
-| 17   | [2026-11-02—03 桌面工作台验证](verification/desktop-experience-verification-2026-11-02.md)       | 工作台构建、真实浏览器与本机实测的分段证据及未覆盖范围                                              |
+| 17   | [2026-11-16 R3 MVP 验收](verification/r3-mvp-acceptance-2026-11-16.md)                           | 真实模型、隔离检索、受控竞争与升级恢复证据及未覆盖边界                                              |
+| 18   | [2026-11-02—03 桌面工作台验证](verification/desktop-experience-verification-2026-11-02.md)       | 工作台构建、真实浏览器与本机实测的分段证据及未覆盖范围                                              |
 
 ## 十、References（3 篇）
 
@@ -166,7 +167,7 @@ R2-B 的完整目标及多轮自主查询边界见[design/19 §4、§6](design/1
 - [R1 个人助理](design/01-tech-stack-and-repo-structure.md#6-r1-web个人助理与职责边界) 与[页面 PRD](prd/02-core-loop-and-pages.md#r1-个人助理)记录分组顶部导航、对话首页、简洁登录、LumenUI/Base UI/Tailwind v4、React 职责、精确批准和原 Run 显式继续；[Web 使用说明](../apps/web/README.md)与[本机任务流程](guides/local-lifecycle.md#开始任务与审阅文档)说明实际操作与原安装边界。[版本化验证记录](verification/web-task-experience-verification-2026-10-28.md)区分各轮源码、生产页面、受控交互与原安装实际验收，不把旧 CI 或页面示例当作新增迁移已验证。
 - [R2-A 上下文合同（#83）](design/18-r2a-harness-context.md) 的行为真源为 [agent-runtime](../openspec/specs/agent-runtime/spec.md)、[tool-gateway](../openspec/specs/tool-gateway/spec.md) 与 [workspaces](../openspec/specs/workspaces/spec.md)，实施/分级验收记录见 [归档清单](../openspec/changes/archive/2026-10-30-manage-harness-context/tasks.md)。[schema](schema/conversation-and-runs-schema.md#r2-a-上下文策略83)、[API](api/conversations/conversations_routes.md#7-r2-a-上下文容量83)、[PRD](prd/04-acceptance-open-questions.md#r2-a-单-run-上下文83) 跟随。保留 accepted facts、snapshot2 全引用与精确批准，原事实回取不是新读取；纯合同校验不算正式 native/真实模型验收。
 - [R2-B 路由合同（#88）](design/19-r2b-readonly-intent-routing.md) 沿完整规则→BGE INT8→原模型的有限只读路径，保持仓颉唯一循环、原网关/取消/批准恢复，默认off并逐意图验证；行为增量见 [change](../openspec/changes/define-readonly-intent-routing/proposal.md) 与 [任务](../openspec/changes/define-readonly-intent-routing/tasks.md)，[PRD](prd/04-acceptance-open-questions.md#r2-b-有限只读路由88默认关闭) 跟随。[配置及实验入口](design/19-r2b-readonly-intent-routing.md#15-配置与受控实验)复用生产实现；默认off实施PR使用`Refs #88`，与自然shadow、受控接管和最终归档分阶段交付，暂停不等于通过，不自动重启观察、启用enforce或关闭issue。时间性验证与待决门槛见任务Verification；[历史离线证据](verification/r2b-embedding-evidence-2026-10-31.md)不能作为生产接管批准。
-- [R3 记忆与 compact（#144）](design/23-r3-short-term-memory-and-compact.md)为 Proposed 设计，[行为增量](../openspec/changes/define-r3-short-term-memory/proposal.md)、[任务](../openspec/changes/define-r3-short-term-memory/tasks.md)、[PRD](prd/04-acceptance-open-questions.md)和[阶段 0 证据](verification/r3-stage-zero-2026-11-13.md)区分目标、实验与实际交付；不自动启用 R2-B，不将未知 transport 失败归因于网络。
+- [R3 记忆与 compact（#144）](design/23-r3-short-term-memory-and-compact.md)为 Proposed 设计，[行为增量](../openspec/changes/define-r3-short-term-memory/proposal.md)、[任务](../openspec/changes/define-r3-short-term-memory/tasks.md)、[PRD](prd/04-acceptance-open-questions.md)和[阶段 0 证据](verification/r3-stage-zero-2026-11-13.md)区分 MVP 合同、实验与实际交付；代表性检索质量和原安装真实数据试验不是本次合并前置，安全约束不放宽。不自动启用 R2-B，不将未知 transport 失败归因于网络。
 - [提醒请求日期锚（#92）](design/05-time-core.md#3-锚点冻结-required)按本轮服务端接纳事实建立新锚，可信且唯一/紧邻的原提醒澄清才继承；整条明确时区补充与带 `clarification_of_run_id` 的精确 fold 重提议之外，不明补充要求完整重述。同日等待不冒称跨日、真实午夜仍问具体日期，旧 Run/重放/恢复/历史保持冻结。[归档设计](../openspec/changes/archive/2026-11-02-anchor-conversation-time-per-run/design.md)具体化最小请求引用与既有不可变 JSON，无新表/迁移或旧数据回填；[API](api/conversations/conversations_routes.md#2-post-conversationsmessages-required)、[schema](schema/conversation-and-runs-schema.md#提醒请求日期来源92)、[Agent](agent/04-proposal-to-commitment-flow.md#澄清问法问一次问准)、[黄金第14条](demo/time-core-golden-cases.md#50-表达adaptation入口归一到秒的覆盖表节选写法)及[PRD](prd/04-acceptance-open-questions.md#v0-验收四条全部按自家可测指标)跟随，分层交付证据仅记入 [归档任务](../openspec/changes/archive/2026-11-02-anchor-conversation-time-per-run/tasks.md)，不以规范采纳代替运行验收。
 - [BGE INT8 第三方声明](../apps/embedding/third-party/bge-small-zh-v1.5/NOTICE.md)与同目录`LICENSE`、`provenance.json`覆盖模型使用依据及量化声明边界；编码镜像携带声明，不包含权重。模型声明与完整镜像/依赖分发清算分别交付，不互相替代，也不构成自动接管批准；完成状态见任务Verification。
 - 冲突矩阵：行为/验收以 spec 为准，字段/路由以 design/api/schema 为准，why 以 ADR 为准。

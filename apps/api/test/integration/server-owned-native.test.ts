@@ -6,7 +6,7 @@ import { createServer, type Server } from 'node:http';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import { createHarnessModelTransport } from '../../src/modules/conversations/harness-model.js';
+import { createHarnessModelTransport } from '../../src/modules/model-providers/harness-model.js';
 import { createRunDriver } from '../../src/modules/conversations/run-driver.js';
 import { handleConversationRoute } from '../../src/modules/conversations/routes.js';
 import { ThreadEventSchema } from '@along/stream-protocol';

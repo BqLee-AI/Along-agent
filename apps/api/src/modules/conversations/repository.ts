@@ -56,6 +56,7 @@ export interface FrozenContext {
   execution_lifecycle?: 'request-bound' | 'server-owned';
   execution_profile?: 'pause/1' | 'pause-memory/1' | 'compact-memory/1';
   autoCompactPolicy?: AutoCompactPolicy;
+  compactCompletionCap?: number;
   trustedExecutionContext?: TrustedExecutionContext;
 }
 export interface LockedRun {

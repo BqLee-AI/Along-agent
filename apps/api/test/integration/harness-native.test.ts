@@ -15,7 +15,7 @@ import {
 import { ThreadEventSchema } from '@along/stream-protocol';
 import type { ThreadEvent } from '@along/stream-protocol';
 import { handleRequest } from '../../src/http/app.js';
-import { createHarnessModelTransport } from '../../src/modules/conversations/harness-model.js';
+import { createHarnessModelTransport } from '../../src/modules/model-providers/harness-model.js';
 import { runNativeHarness } from '../../src/modules/conversations/harness-process.js';
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
 import { measureHarnessContext } from '../../src/modules/conversations/harness-context.js';
