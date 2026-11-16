@@ -4,6 +4,7 @@ import { once } from 'node:events';
 import { createServer, type Server } from 'node:http';
 import { setTimeout as delay } from 'node:timers/promises';
 import { HARNESS_PROTOCOL_VERSION, HARNESS_R3_PROTOCOL_VERSION } from '@along/contracts';
+import { z } from 'zod';
 import { handleRequest } from '../../src/http/app.js';
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
 import { createHarnessModelTransport } from '../../src/modules/conversations/harness-model.js';
@@ -320,13 +321,17 @@ maybe('user pause and continue over HTTP', () => {
     try {
       const response = await f.post('pause', { reason: 'user', purpose: 'none' }, randomUUID());
       expect(response.status).toBe(200);
-      const { pause_id } = (await response.json()).data;
+      const { pause_id } = z
+        .object({ data: z.object({ pause_id: z.string().uuid() }) })
+        .parse(await response.json()).data;
       f.release.resolve();
       await paused(f, pause_id);
       const continued = await f.post('continue', { pause_id }, randomUUID());
       expect(continued.status).toBe(200);
       await continued.text();
-      const view = await (await f.get()).json();
+      const view = z
+        .object({ data: z.object({ status: z.string() }) })
+        .parse(await (await f.get()).json());
       expect(view.data.status).toBe('done');
       expect(f.calls()).toBe(2);
     } finally {
@@ -642,7 +647,9 @@ maybe('user pause and continue over HTTP', () => {
       })) as { invocation_id: string };
       const pause = await f.post('pause', { reason: 'user', purpose: 'none' });
       expect(pause.status).toBe(200);
-      const { pause_id } = (await pause.json()).data;
+      const { pause_id } = z
+        .object({ data: z.object({ pause_id: z.string().uuid() }) })
+        .parse(await pause.json()).data;
       const outcome = (await session.handleRequest({
         protocol,
         request_ref: randomUUID(),
