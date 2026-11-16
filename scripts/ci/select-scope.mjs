@@ -22,8 +22,17 @@ function git(args, cwd) {
     cwd,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: 10000,
     maxBuffer: 32 * 1024 * 1024,
   });
+}
+
+function ensureCommit(ref, cwd) {
+  try {
+    git(['cat-file', '-e', `${ref}^{commit}`], cwd);
+  } catch {
+    git(['fetch', '--no-tags', 'origin', ref], cwd);
+  }
 }
 
 function fullPlan() {
@@ -181,9 +190,7 @@ function requested(plan, gate) {
   return plan.checks.includes(gate);
 }
 
-export function fingerprint(ref, gate, base, cwd) {
-  if (![...lanes, 'database', 'runtime'].includes(gate))
-    throw new Error(`Unknown CI gate: ${gate}`);
+function fingerprint(ref, gate, base, cwd) {
   const native = readNative(ref, cwd);
   const hash = createHash('sha256').update(`${gate}\0${base}\0`);
   for (const entry of git(['ls-tree', '-r', '-z', '--full-tree', ref], cwd).split('\0')) {
@@ -214,7 +221,7 @@ async function github(path, context) {
         Accept: 'application/vnd.github+json',
         'X-GitHub-Api-Version': '2022-11-28',
       },
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.any([context.signal, AbortSignal.timeout(10000)]),
     },
   );
   if (!response.ok) throw new Error(`GitHub evidence lookup returned ${response.status}`);
@@ -222,6 +229,7 @@ async function github(path, context) {
 }
 
 export async function applyReuse(plan, candidates, context) {
+  context = { ...context, signal: context.signal ?? AbortSignal.timeout(30000) };
   const result = { ...plan, checks: [...plan.checks], database: { ...plan.database }, reused: {} };
   const pending = [
     ...plan.checks,
@@ -230,7 +238,7 @@ export async function applyReuse(plan, candidates, context) {
   ];
   const currentHashes = new Map();
   for (const run of candidates) {
-    if (!pending.length) break;
+    if (!pending.length || context.signal.aborted) break;
     if (
       run.status !== 'completed' ||
       run.event !== 'pull_request' ||
@@ -242,11 +250,26 @@ export async function applyReuse(plan, candidates, context) {
       continue;
     try {
       git(['merge-base', '--is-ancestor', run.head_sha, context.head], context.cwd);
-      const oldPlan = classifyChanges(
-        changesBetween(context.base, run.head_sha, context.cwd),
-        readNative(run.head_sha, context.cwd),
-      );
       const jobs = await github(`actions/runs/${run.id}/jobs?per_page=100`, context);
+      const recorded = jobs.jobs
+        ?.find((job) => job.name === 'plan' && job.conclusion === 'success')
+        ?.steps?.find(
+          (step) =>
+            step.conclusion === 'success' &&
+            /^Select affected checks \([a-f0-9]{40}\)$/.test(step.name),
+        );
+      if (!recorded) continue;
+      const previous = recorded.name.slice(-41, -1);
+      ensureCommit(previous, context.cwd);
+      if (
+        git(['show', '-s', '--format=%P', previous], context.cwd).trim() !==
+        `${context.base} ${run.head_sha}`
+      )
+        continue;
+      const oldPlan = classifyChanges(
+        changesBetween(context.base, previous, context.cwd),
+        readNative(previous, context.cwd),
+      );
       for (const gate of [...pending]) {
         const jobName =
           gate === 'database' ? 'database' : gate === 'runtime' ? 'integration' : 'checks';
@@ -261,8 +284,8 @@ export async function applyReuse(plan, candidates, context) {
         if (!executed || (gate === 'database' && !covers(oldPlan.database, plan.database)))
           continue;
         if (!currentHashes.has(gate))
-          currentHashes.set(gate, fingerprint(context.head, gate, context.base, context.cwd));
-        if (currentHashes.get(gate) !== fingerprint(run.head_sha, gate, context.base, context.cwd))
+          currentHashes.set(gate, fingerprint(context.checkout, gate, context.base, context.cwd));
+        if (currentHashes.get(gate) !== fingerprint(previous, gate, context.base, context.cwd))
           continue;
         result.reused[gate] = { runId: run.id, url: run.html_url };
         if (gate === 'database') result.database = { mode: 'none', tests: [] };
@@ -285,19 +308,17 @@ async function selectPlan() {
     const base = eventName === 'pull_request' ? event.pull_request?.base?.sha : event.before;
     const head = eventName === 'pull_request' ? event.pull_request?.head?.sha : 'HEAD';
     if (!/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i.test(base ?? '') || !head) return fullPlan();
-    try {
-      git(['cat-file', '-e', `${base}^{commit}`]);
-    } catch {
-      git(['fetch', '--no-tags', '--depth=1', 'origin', base]);
-    }
+    ensureCommit(base);
     const plan = classifyChanges(changesBetween(base, 'HEAD'), readNative('HEAD'));
     if (eventName !== 'pull_request' || !process.env.GH_TOKEN) return plan;
     const context = {
       base,
       head,
+      checkout: git(['rev-parse', 'HEAD']).trim(),
       prNumber: event.number,
       repository: process.env.GITHUB_REPOSITORY,
       token: process.env.GH_TOKEN,
+      signal: AbortSignal.timeout(30000),
     };
     try {
       const data = await github(

@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { classifyChanges, fingerprint, applyReuse } from '../ci/select-scope.mjs';
+import { classifyChanges, applyReuse } from '../ci/select-scope.mjs';
 
 const nativeTest = 'apps/api/test/integration/harness-native.test.ts';
 const databaseTest = 'apps/api/test/integration/tasks-read.test.ts';
@@ -52,6 +52,8 @@ async function fixture(run: (repo: string, base: string) => void | Promise<void>
     const base = commit(repo, {
       [webSource]: 'web baseline\n',
       [apiSource]: 'api baseline\n',
+      [databaseTest]: 'database baseline\n',
+      [otherDatabaseTest]: 'other database baseline\n',
       'packages/contracts/src/index.ts': 'contracts baseline\n',
       'packages/time-core/src/index.ts': 'time baseline\n',
       'README.md': 'documentation baseline\n',
@@ -161,10 +163,7 @@ describe('affected CI selection', () => {
   });
 
   it('maps infrastructure, harness, and script changes to their actual consumers', () => {
-    const cases: [
-      string,
-      { checks: string[]; database: { mode: string; tests: string[] }; runtime: boolean },
-    ][] = [
+    const cases = [
       ['infra/migrations/001.sql', plan([], 'full', true)],
       ['infra/docker/compose.yml', plan([], 'none', true)],
       ['.dockerignore', plan([], 'none', true)],
@@ -190,7 +189,7 @@ describe('affected CI selection', () => {
       ['apps/api/src/http/errors.ts', plan(['api', 'tooling'], 'api', true)],
       ['ci/native-tests.txt', plan(['api', 'tooling'], 'full', true)],
       ['ci/gates.json', plan(['tooling'], 'none', true)],
-    ];
+    ] as const;
     for (const [path, expected] of cases) expect(select([path])).toEqual(expected);
   });
 
@@ -251,57 +250,6 @@ describe('CI event entry point', () => {
   });
 });
 
-describe('tracked-tree fingerprints', () => {
-  it('ignores documentation but includes base and relevant source trees', async () => {
-    await fixture((repo, base) => {
-      const gates = ['web', 'api', 'packages', 'tooling', 'harness', 'database', 'runtime'];
-      const original = Object.fromEntries(
-        gates.map((gate) => [gate, fingerprint(base, gate, base, repo)]),
-      );
-      const docs = commit(repo, { 'README.md': 'updated documentation\n' });
-      for (const gate of gates) expect(fingerprint(docs, gate, base, repo)).toBe(original[gate]);
-      const web = commit(repo, { [webSource]: 'updated web\n' });
-      expect(fingerprint(web, 'web', base, repo)).not.toBe(original.web);
-      for (const gate of ['api', 'database', 'runtime'])
-        expect(fingerprint(web, gate, base, repo)).toBe(original[gate]);
-      const api = commit(repo, { [apiSource]: 'updated API\n' });
-      for (const gate of ['api', 'database', 'runtime'])
-        expect(fingerprint(api, gate, base, repo)).not.toBe(original[gate]);
-      expect(fingerprint(api, 'web', base, repo)).toBe(fingerprint(web, 'web', base, repo));
-      expect(fingerprint(api, 'api', docs, repo)).not.toBe(fingerprint(api, 'api', base, repo));
-    });
-  });
-
-  it('includes shared dependencies only for their consumers and common CI for every gate', async () => {
-    await fixture((repo, base) => {
-      const time = commit(repo, { 'packages/time-core/src/index.ts': 'updated time\n' });
-      for (const gate of ['packages', 'api', 'database', 'runtime']) {
-        expect(fingerprint(time, gate, base, repo)).not.toBe(fingerprint(base, gate, base, repo));
-      }
-      expect(fingerprint(time, 'web', base, repo)).toBe(fingerprint(base, 'web', base, repo));
-      const contracts = commit(repo, { 'packages/contracts/src/index.ts': 'updated contracts\n' });
-      expect(fingerprint(contracts, 'web', base, repo)).not.toBe(
-        fingerprint(time, 'web', base, repo),
-      );
-      const ci = commit(repo, { '.github/workflows/ci.yml': 'updated workflow\n' });
-      for (const gate of ['web', 'api', 'packages', 'tooling', 'harness', 'database', 'runtime']) {
-        expect(fingerprint(ci, gate, base, repo)).not.toBe(
-          fingerprint(contracts, gate, base, repo),
-        );
-      }
-    });
-  });
-});
-
-const stepNames = [
-  'Check Web',
-  'Check API',
-  'Check packages',
-  'Check tooling',
-  'Check harness',
-  'Verify PostgreSQL',
-  'Verify production runtime',
-];
 function successfulRun(head: string, base: string) {
   return {
     id: 42,
@@ -314,56 +262,36 @@ function successfulRun(head: string, base: string) {
     html_url: 'https://github.com/example/repo/actions/runs/42',
   };
 }
-function context(
-  repo: string,
-  base: string,
-  head: string,
-  overrides: Record<string, unknown> = {},
-) {
+function merge(repo: string, base: string, head: string) {
+  const tree = git(repo, 'merge-tree', '--write-tree', base, head).split('\n')[0];
+  return git(repo, 'commit-tree', tree, '-p', base, '-p', head, '-m', 'PR merge fixture');
+}
+
+function context(repo: string, base: string, head: string, prior: string) {
+  const steps = {
+    plan: [`Select affected checks (${merge(repo, base, prior)})`],
+    checks: allChecks.map(
+      (lane) => `Check ${lane === 'web' ? 'Web' : lane === 'api' ? 'API' : lane}`,
+    ),
+    database: ['Verify PostgreSQL'],
+    integration: ['Verify production runtime'],
+  };
   return {
     cwd: repo,
     base,
     head,
+    checkout: merge(repo, base, head),
     prNumber: 7,
     repository: 'example/repo',
     token: 'fixture-token',
     fetch: async () =>
-      new Response(
-        JSON.stringify({
-          jobs: [
-            {
-              id: 9,
-              name: 'checks',
-              status: 'completed',
-              conclusion: 'success',
-              steps: stepNames.slice(0, 5).map((name, index) => ({
-                name,
-                number: index + 1,
-                status: 'completed',
-                conclusion: 'success',
-              })),
-            },
-            {
-              id: 10,
-              name: 'database',
-              status: 'completed',
-              conclusion: 'success',
-              steps: [{ name: 'Verify PostgreSQL', status: 'completed', conclusion: 'success' }],
-            },
-            {
-              id: 11,
-              name: 'integration',
-              status: 'completed',
-              conclusion: 'success',
-              steps: [
-                { name: 'Verify production runtime', status: 'completed', conclusion: 'success' },
-              ],
-            },
-          ],
-        }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } },
-      ),
-    ...overrides,
+      Response.json({
+        jobs: Object.entries(steps).map(([name, names]) => ({
+          name,
+          conclusion: 'success',
+          steps: names.map((name) => ({ name, conclusion: 'success' })),
+        })),
+      }),
   };
 }
 
@@ -375,7 +303,12 @@ describe('prior successful gate reuse', () => {
         'packages/contracts/src/index.ts': 'validated contracts\n',
       });
       const head = commit(repo, { [webSource]: 'new Web\n', 'README.md': 'new docs\n' });
-      const result = await applyReuse(all, [successfulRun(prior, base)], context(repo, base, head));
+      const original = structuredClone(all);
+      const result = await applyReuse(
+        all,
+        [successfulRun(prior, base)],
+        context(repo, base, head, prior),
+      );
       expect(result.checks).toEqual(['web']);
       expect(result.database.mode).toBe('none');
       expect(result.runtime).toBe(false);
@@ -388,91 +321,69 @@ describe('prior successful gate reuse', () => {
         'tooling',
       ]);
       expect(result.reused.api).toEqual({ runId: 42, url: successfulRun(prior, base).html_url });
-      expect(all.database.mode).toBe('full');
-      expect(all.checks).toEqual(allChecks);
+      expect(all).toEqual(original);
     });
   });
 
-  it('invalidates API, database, and runtime on API edits', async () => {
+  it.each([
+    [apiSource, plan(['api'], 'api', true)],
+    ['packages/contracts/src/index.ts', plan(['web', 'api', 'packages'], 'full', true)],
+    ['packages/time-core/src/index.ts', plan(['web', 'api', 'packages'], 'full', true)],
+    ['scripts/test/fixtures/0024_tasks_elapsed_basis.sql', plan([], 'full')],
+    ['apps/api/src/modules/workspaces/service.ts', plan(['tooling'])],
+    ['apps/api/src/http/errors.ts', plan(['tooling'])],
+    ['scripts/ci/select-scope.mjs', all],
+  ] as const)('invalidates %s for its consumers', async (path, requested) => {
     await fixture(async (repo, base) => {
-      const head = commit(repo, { [apiSource]: 'new API\n' });
-      const result = await applyReuse(
-        plan(['api'], 'api', true),
-        [successfulRun(base, base)],
-        context(repo, base, head),
-      );
-      expect(result.checks).toEqual(['api']);
-      expect(result.database.mode).toBe('api');
-      expect(result.runtime).toBe(true);
-      expect(result.reused).toEqual({});
-    });
-  });
-
-  it('invalidates cross-directory consumer evidence for SQL fixtures and local-account inputs', async () => {
-    const cases = [
-      {
-        path: 'scripts/test/fixtures/0024_tasks_elapsed_basis.sql',
-        gate: 'database',
-        requested: plan([], 'full'),
-      },
-      {
-        path: 'apps/api/src/modules/workspaces/service.ts',
-        gate: 'tooling',
-        requested: plan(['tooling']),
-      },
-      { path: 'apps/api/src/http/errors.ts', gate: 'tooling', requested: plan(['tooling']) },
-    ];
-    for (const item of cases) {
-      await fixture(async (repo, base) => {
-        const prior = commit(repo, {
-          'packages/contracts/src/index.ts': 'validated shared dependency\n',
-          [item.path]: 'validated input\n',
-        });
-        const head = commit(repo, { [item.path]: 'changed consumer input\n' });
-        expect(fingerprint(head, item.gate, base, repo)).not.toBe(
-          fingerprint(prior, item.gate, base, repo),
-        );
-        const result = await applyReuse(
-          item.requested,
-          [successfulRun(prior, base)],
-          context(repo, base, head),
-        );
-        expect(result).toEqual({ ...item.requested, reused: {} });
+      const prior = commit(repo, {
+        'packages/contracts/src/index.ts': 'validated dependency\n',
+        [path]: 'validated input\n',
       });
-    }
-  });
-
-  it('does not reuse a database test subset that omits requested tests', async () => {
-    await fixture(async (repo, base) => {
-      const prior = commit(repo, { [databaseTest]: 'validated test\n' });
-      const head = commit(repo, { [otherDatabaseTest]: 'additional test\n' });
-      const requested = plan([], 'api-tests', false, [databaseTest, otherDatabaseTest].sort());
+      const head = commit(repo, { [path]: 'changed input\n' });
       const result = await applyReuse(
         requested,
         [successfulRun(prior, base)],
-        context(repo, base, head),
+        context(repo, base, head, prior),
       );
-      expect(result).toEqual({ ...requested, reused: {} });
+      const unchanged = path.startsWith('packages/time-core/') ? ['web'] : [];
+      expect(result.checks).toEqual(requested.checks.filter((lane) => !unchanged.includes(lane)));
+      expect(result.database).toEqual(requested.database);
+      expect(result.runtime).toBe(requested.runtime);
+      expect(Object.keys(result.reused)).toEqual(unchanged);
+    });
+  });
+
+  it('does not reuse a database subset even with identical current test inputs', async () => {
+    await fixture(async (repo, base) => {
+      const prior = commit(repo, { [databaseTest]: 'validated test\n' });
+      const head = commit(repo, { 'README.md': 'new docs\n' });
+      const requested = plan([], 'api-tests', false, [databaseTest, otherDatabaseTest].sort());
+      expect(
+        await applyReuse(requested, [successfulRun(prior, base)], context(repo, base, head, prior)),
+      ).toEqual({ ...requested, reused: {} });
     });
   });
 
   it('accepts a successful owning job even when another job failed the overall run', async () => {
     await fixture(async (repo, base) => {
+      const prior = commit(repo, { [webSource]: 'validated Web\n' });
       const head = commit(repo, { 'README.md': 'new docs\n' });
       const result = await applyReuse(
         plan(['web']),
-        [{ ...successfulRun(base, base), conclusion: 'failure' }],
-        context(repo, base, head),
+        [{ ...successfulRun(prior, base), conclusion: 'failure' }],
+        context(repo, base, head, prior),
       );
       expect(result.checks).toEqual([]);
-      expect(result.reused.web).toEqual({ runId: 42, url: successfulRun(base, base).html_url });
+      expect(result.reused.web).toEqual({ runId: 42, url: successfulRun(prior, base).html_url });
     });
   });
 
-  it('never reuses runs with incompatible provenance or unfinished status', async () => {
+  it('rejects incompatible provenance and unfinished runs', async () => {
     await fixture(async (repo, base) => {
+      const prior = commit(repo, { [webSource]: 'validated Web\n' });
       const head = commit(repo, { 'README.md': 'new docs\n' });
-      const valid = successfulRun(base, base);
+      const ctx = context(repo, base, head, prior);
+      const valid = successfulRun(prior, base);
       const invalid = [
         { ...valid, status: 'in_progress', conclusion: null },
         { ...valid, path: '.github/workflows/other.yml' },
@@ -483,67 +394,102 @@ describe('prior successful gate reuse', () => {
       git(repo, 'checkout', '-q', '--orphan', 'unrelated');
       const unrelated = commit(repo, { 'README.md': 'unrelated history\n' });
       invalid.push({ ...valid, head_sha: unrelated });
-      for (const candidate of invalid) {
-        const result = await applyReuse(all, [candidate], context(repo, base, head));
-        expect(result).toEqual({ ...all, reused: {} });
-      }
+      for (const candidate of invalid)
+        expect(await applyReuse(all, [candidate], ctx)).toEqual({ ...all, reused: {} });
     });
   });
 
-  it('requires successful job and actual named step evidence, not just run success', async () => {
+  it('requires a successful owning job and actual execution, not skipped or failed steps', async () => {
     await fixture(async (repo, base) => {
+      const prior = commit(repo, { [webSource]: 'validated Web\n' });
       const head = commit(repo, { 'README.md': 'new docs\n' });
-      const evidence = [
-        { jobs: [] },
-        {
-          jobs: [
-            {
-              name: 'checks',
-              status: 'completed',
-              conclusion: 'failure',
-              steps: [{ name: 'Check Web', conclusion: 'success', status: 'completed' }],
-            },
-          ],
-        },
-        { jobs: [{ name: 'checks', status: 'completed', conclusion: 'success', steps: [] }] },
-        ...['skipped', 'failure', null].map((conclusion) => ({
-          jobs: [
-            {
-              name: 'checks',
-              conclusion: 'success',
-              status: 'completed',
-              steps: [{ name: 'Check Web', conclusion, status: 'completed' }],
-            },
-          ],
-        })),
+      const ctx = context(repo, base, head, prior);
+      const { jobs } = await (await ctx.fetch()).json();
+      const cases = [
+        [],
+        [
+          {
+            name: 'checks',
+            conclusion: 'failure',
+            steps: [{ name: 'Check Web', conclusion: 'success' }],
+          },
+        ],
+        [{ name: 'checks', conclusion: 'success', steps: [] }],
+        ...['skipped', 'failure', null].map((conclusion) => [
+          {
+            name: 'checks',
+            conclusion: 'success',
+            steps: [{ name: 'Check Web', conclusion }],
+          },
+        ]),
       ];
-      for (const body of evidence) {
-        const result = await applyReuse(
-          plan(['web']),
-          [successfulRun(base, base)],
-          context(repo, base, head, {
-            fetch: async () => new Response(JSON.stringify(body), { status: 200 }),
+      for (const checks of cases) {
+        expect(
+          await applyReuse(plan(['web']), [successfulRun(prior, base)], {
+            ...ctx,
+            fetch: async () => Response.json({ jobs: [jobs[0], ...checks] }),
           }),
-        );
-        expect(result).toEqual({ ...plan(['web']), reused: {} });
+        ).toEqual({ ...plan(['web']), reused: {} });
       }
     });
   });
 
-  it('runs normally when evidence cannot be fetched or CI has changed', async () => {
+  it('does not trust missing checkout evidence or a commit with the wrong merge parents', async () => {
     await fixture(async (repo, base) => {
-      const docs = commit(repo, { 'README.md': 'new docs\n' });
-      const unavailable = await applyReuse(
-        all,
-        [successfulRun(base, base)],
-        context(repo, base, docs, {
+      const prior = commit(repo, { [webSource]: 'validated Web\n' });
+      const head = commit(repo, { 'README.md': 'new docs\n' });
+      const ctx = context(repo, base, head, prior);
+      const { jobs } = await (await ctx.fetch()).json();
+      for (const name of ['Select affected checks', `Select affected checks (${prior})`]) {
+        jobs[0].steps[0].name = name;
+        expect(
+          await applyReuse(plan(['web']), [successfulRun(prior, base)], {
+            ...ctx,
+            fetch: async () => Response.json({ jobs }),
+          }),
+        ).toEqual({ ...plan(['web']), reused: {} });
+      }
+    });
+  });
+
+  it('hashes the tested merge tree when base adds a native test absent from the PR manifest', async () => {
+    await fixture(async (repo, originalBase) => {
+      const prior = commit(repo, { [databaseTest]: 'previous test\n' });
+      const head = commit(repo, { [databaseTest]: 'changed native test\n' });
+      git(repo, 'checkout', '-qb', 'target', originalBase);
+      const base = commit(repo, { 'ci/native-tests.txt': `${nativeTest}\n${databaseTest}\n` });
+      const requested = plan(['api'], 'none', true);
+      expect(
+        await applyReuse(requested, [successfulRun(prior, base)], context(repo, base, head, prior)),
+      ).toEqual({ ...requested, reused: {} });
+    });
+  });
+
+  it('runs normally without evidence and stops querying when the shared deadline expires', async () => {
+    await fixture(async (repo, base) => {
+      const prior = commit(repo, { [apiSource]: 'validated API\n' });
+      const head = commit(repo, { 'README.md': 'new docs\n' });
+      const ctx = context(repo, base, head, prior);
+      expect(
+        await applyReuse(all, [successfulRun(prior, base)], {
+          ...ctx,
           fetch: async () => new Response('unavailable', { status: 503 }),
         }),
-      );
-      expect(unavailable).toEqual({ ...all, reused: {} });
-      const head = commit(repo, { 'scripts/ci/select-scope.mjs': 'new planner\n' });
-      const changed = await applyReuse(all, [successfulRun(base, base)], context(repo, base, head));
-      expect(changed).toEqual({ ...all, reused: {} });
+      ).toEqual({ ...all, reused: {} });
+      const controller = new AbortController();
+      let calls = 0;
+      expect(
+        await applyReuse(all, [successfulRun(prior, base), successfulRun(prior, base)], {
+          ...ctx,
+          signal: controller.signal,
+          fetch: async () => {
+            calls++;
+            controller.abort();
+            throw controller.signal.reason;
+          },
+        }),
+      ).toEqual({ ...all, reused: {} });
+      expect(calls).toBe(1);
     });
   });
 });

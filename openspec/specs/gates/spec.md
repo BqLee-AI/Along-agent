@@ -74,12 +74,12 @@
 
 ### Requirement: verify 主链覆盖
 
-一键 verify SHALL 以 `bun run verify` 为本地与代码变更 CI 的共同入口，按既有顺序执行 lint、typecheck、depcruise、gate-manifest、gates-executable、frozen-names、copy-claims、unit、OpenSpec 严格校验与阻塞式 format:check；构建前置不得省略门，任一步失败即停并报告步名及非零退出码。同次执行中成功 typecheck 准备的 packages SHALL 被 unit 复用；独立入口及未执行 typecheck 的路径仍自行完成真实构建，不依据旧 dist、跨 job 产物或持久完成标记判定已准备。
+一键 verify SHALL 保留 `bun run verify` 本地完整入口，按既有顺序执行 lint、typecheck、depcruise、gate-manifest、gates-executable、frozen-names、copy-claims、unit、OpenSpec 严格校验与阻塞式 format:check；CI 按受影响分域执行对应检查。构建前置不得省略门，任一步失败即停并报告步名及非零退出码。同次 verify 中成功 typecheck 准备的 packages SHALL 被 unit 复用；独立入口及未执行 typecheck 的路径仍自行完成真实构建，不依据旧 dist、跨 job 产物或持久完成标记判定已准备。
 
-#### Scenario: 本地与 CI 同一阻塞主链
+#### Scenario: 本地完整验证与 CI 分域验证
 
-- WHEN 在干净安装后运行 `bun run verify`，或代码变更的 checks job 调用该入口
-- THEN 相同门以相同顺序执行，gates-executable 位于 gate-manifest 之后；成功 typecheck 完成的 packages 前置不在 unit 重复执行，全部门成功才返回 0（映射 D1/D2/D10）
+- WHEN 在干净安装后运行 `bun run verify`，或 checks job 执行受影响分域
+- THEN 对应检查均阻塞；本地完整入口中 gates-executable 位于 gate-manifest 之后，成功 typecheck 完成的 packages 前置不在 unit 重复执行，全部所需检查成功才返回 0（映射 D1/D2/D10）
 
 #### Scenario: 格式错误不是非阻塞警告
 
@@ -340,7 +340,7 @@ CI SHALL 保留 checks、database 和 integration 三个 required checks，分�
 
 #### Scenario: 未变化输入沿用已执行证据
 
-- WHEN 同一 PR 的祖先版本已有成功检查，目标分支 SHA、该检查相关输入及 CI 定义均未变化，且此前实际执行范围覆盖本次所需范围
+- WHEN 同一 PR 的祖先版本已有成功检查，可确认其实际执行的合并树，目标分支 SHA、执行树中该检查相关输入及 CI 定义均未变化，且此前实际执行范围覆盖本次所需范围
 - THEN 可省略该检查并关联原运行；当前变更的检查仍执行
-- WHEN 原检查失败、跳过、未完成，或输入/目标分支变化、证据不可用
+- WHEN 原检查失败、跳过、未完成，或输入/目标分支变化、执行树未知、证据查询不可用或超时
 - THEN 不得以该记录放行，正常执行受影响检查

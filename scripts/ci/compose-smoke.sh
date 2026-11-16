@@ -31,7 +31,7 @@ check() {
 }
 
 echo "== boot without TZDB_VERSION =="
-$COMPOSE down -v >/dev/null 2>&1 || true
+$COMPOSE down -v
 $COMPOSE up -d --no-build
 BASE="http://$($COMPOSE port api 3000)"
 
@@ -50,7 +50,7 @@ grep -q "TZDB_UNAVAILABLE" "$body" || fail "/readyz body missing TZDB_UNAVAILABL
 echo "ok /readyz (no TZDB) -> 503 TZDB_UNAVAILABLE"
 
 echo "== reboot with TZDB_VERSION =="
-$COMPOSE down -v >/dev/null 2>&1 || true
+$COMPOSE down -v
 TZDB_VERSION=fixture-v1 $COMPOSE up -d --no-build
 BASE="http://$($COMPOSE port api 3000)"
 

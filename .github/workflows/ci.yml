@@ -24,7 +24,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Select affected checks
+      - name: Select affected checks (${{ github.sha }})
         id: select
         env:
           GH_TOKEN: ${{ github.token }}
