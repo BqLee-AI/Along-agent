@@ -1,0 +1,104 @@
+{
+  "version": "0036",
+  "tables": ["idle_compact_requests"],
+  "columns": [
+    {
+      "table": "idle_compact_requests",
+      "name": "owner_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "idle_compact_requests",
+      "name": "idempotency_key",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "idle_compact_requests",
+      "name": "conversation_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "idle_compact_requests",
+      "name": "run_id",
+      "type": "uuid",
+      "required": false,
+      "default": ""
+    },
+    {
+      "table": "idle_compact_requests",
+      "name": "created_at",
+      "type": "timestamptz",
+      "required": true,
+      "default": "now()"
+    }
+  ],
+  "constraints": [
+    {
+      "table": "r3_context_freezes",
+      "name": "r3_context_freezes_input_kind_check",
+      "type": "c",
+      "columns": ["input_message_id", "context"],
+      "expression": "COALESCE((((input_message_id IS NULL) AND ((context -> 'input'::text) = '{\"type\": \"compact_control\"}'::jsonb)) OR ((input_message_id IS NOT NULL) AND (((context -> 'input'::text) ->> 'type'::text) = 'user'::text) AND (((context -> 'input'::text) ->> 'message_id'::text) = (input_message_id)::text))), false)"
+    },
+    {
+      "table": "idle_compact_requests",
+      "name": "idle_compact_requests_pkey",
+      "type": "p",
+      "columns": ["owner_id", "idempotency_key"]
+    },
+    {
+      "table": "idle_compact_requests",
+      "name": "idle_compact_requests_run_id_key",
+      "type": "u",
+      "columns": ["run_id"]
+    },
+    {
+      "table": "idle_compact_requests",
+      "name": "idle_compact_requests_conversation_id_fkey",
+      "type": "f",
+      "columns": ["conversation_id"],
+      "target": "conversations",
+      "delete_action": "r",
+      "target_columns": ["id"]
+    },
+    {
+      "table": "idle_compact_requests",
+      "name": "idle_compact_requests_run_id_fkey",
+      "type": "f",
+      "columns": ["run_id"],
+      "target": "agent_runs",
+      "delete_action": "r",
+      "target_columns": ["id"]
+    }
+  ],
+  "baseline_checks": [
+    {
+      "table": "agent_runs",
+      "name": "agent_runs_harness_context_check",
+      "expression": "((jsonb_typeof(tools_allowlist) = 'array'::text) AND ((execution = 'business'::text) OR ((mode = 'chat'::text) AND (frozen_context IS NOT NULL) AND (jsonb_typeof(frozen_context) = 'object'::text) AND ((input_message_id IS NOT NULL) OR COALESCE((((frozen_context ->> 'execution_profile'::text) = 'compact-memory/1'::text) AND ((frozen_context ->> 'execution_lifecycle'::text) = 'server-owned'::text)), false)))))"
+    }
+  ],
+  "alter_columns": [
+    {
+      "table": "r3_context_freezes",
+      "name": "input_message_id",
+      "type": "uuid",
+      "required": false,
+      "default": ""
+    }
+  ],
+  "triggers": [
+    {
+      "table": "idle_compact_requests",
+      "name": "idle_compact_requests_immutable",
+      "type": 27,
+      "function": "run_checkpoints_reject_mutation"
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 // The gateway binds each logical tool call before executing local work.
 // Approved results, local approval inserts and audit rows commit together.
 import type { Pool, PoolClient } from 'pg';
+import { isDeepStrictEqual } from 'node:util';
 import { workspaceGrantSchema } from '@along/contracts';
 import { normalizeTime } from '../time/normalize.js';
 import { addElapsed, classifyEntry, reminderDateExpression, utcToLocal } from '@along/time-core';
@@ -26,7 +27,13 @@ import {
   DELEGATED_WORKSPACE_READ_SCHEMAS,
   DelegatedWorkspaceProposeInputSchema,
 } from './schemas.js';
-import type { ToolContext, ToolOutcome, ToolPayload, ToolResult } from './contracts.js';
+import type {
+  MemoryRecallPayload,
+  ToolContext,
+  ToolOutcome,
+  ToolPayload,
+  ToolResult,
+} from './contracts.js';
 import {
   executeLocalInvocation,
   executeReadOnlyInvocation,
@@ -51,7 +58,7 @@ import {
   utf8Bytes,
   WorkspaceDeniedError,
 } from '../workspaces/service.js';
-import { readAcceptedInvocationResult } from './accepted-result.js';
+import { readAcceptedInvocationResult, readMemorySourceForRecall } from './accepted-result.js';
 import { callWorkspaceMcp, type WorkspaceReadTool } from './mcp-workspace.js';
 import { readRunDocumentEvidence } from './query.js';
 import { readObservationPage } from './observation-page.js';
@@ -65,6 +72,7 @@ import {
   renderCancellationClarification,
 } from './reminder-cancel-scope.js';
 import { createMemoryService, type MemoryService } from '../memory/service.js';
+import { loadMemorySemanticConfig } from '../memory/semantic.js';
 import { saveRecallReceipt, validateRecallReceipt } from '../memory/recall-receipt.js';
 import { conversationMemorySources, readMemoryRunSource } from '../conversations/memory-sources.js';
 
@@ -1101,6 +1109,40 @@ export function invokeTool(
   if (input.toolId === 'workspace_apply_replace') return invokeWorkspaceApply(pool, ctx, input);
   if (input.toolId === 'workspace_replace') return invokeWorkspaceReplace(pool, ctx, input);
   if (input.toolId === 'workspace_create') return invokeWorkspaceCreate(pool, ctx, input);
+  if (input.toolId === 'read_memory_source') {
+    const memory = createMemoryService({ pool, sources: conversationMemorySources });
+    const parsed = TOOL_INPUT_SCHEMAS.read_memory_source.safeParse(input.args);
+    return executeLocalInvocation(
+      pool,
+      ctx,
+      input,
+      async (client, frozen) => {
+        if (!parsed.success) return workspaceDenied();
+        try {
+          return {
+            status: 'ok',
+            result: await readMemorySourceForRecall(client, frozen, memory, parsed.data),
+          };
+        } catch (error) {
+          if (error instanceof HttpError && [400, 403, 404, 409].includes(error.httpStatus))
+            return workspaceDenied();
+          throw error;
+        }
+      },
+      async (client, accepted) => {
+        if (accepted.status !== 'ok') return true;
+        if (!parsed.success || accepted.result.kind !== 'memory_source') return false;
+        try {
+          const current = await readMemorySourceForRecall(client, ctx, memory, parsed.data);
+          return isDeepStrictEqual(current, accepted.result);
+        } catch (error) {
+          if (error instanceof HttpError && [400, 403, 404, 409].includes(error.httpStatus))
+            return false;
+          throw error;
+        }
+      },
+    );
+  }
   if (input.toolId === 'recall_memories') {
     let memory: MemoryService | undefined;
     const revisions: { id: string; revision: number }[] = [];
@@ -1111,21 +1153,25 @@ export function invokeTool(
       async (frozen) => {
         const parsed = TOOL_INPUT_SCHEMAS.recall_memories.safeParse(input.args);
         if (!parsed.success) return workspaceDenied();
-        memory = createMemoryService({ pool, sources: conversationMemorySources });
-        const result = await memory.recall(frozen.ownerId, parsed.data, ctx.signal, false);
-        const items: Array<{
-          memory_id: string;
-          content: string;
-          conversation_id: string;
-          message_ids: string[];
-          created_at: string;
-          updated_at: string;
-        }> = [];
+        const binding = await pool.query<{ profile: string | null }>(
+          `SELECT frozen_context->>'execution_profile' AS profile FROM agent_runs
+           WHERE id=$1 AND owner_id=$2 AND conversation_id=$3`,
+          [frozen.runId, frozen.ownerId, frozen.conversationId],
+        );
+        const compactMemory = binding.rows[0]?.profile === 'compact-memory/1';
+        memory = createMemoryService({
+          pool,
+          sources: conversationMemorySources,
+          ...(compactMemory ? { semantic: loadMemorySemanticConfig(process.env) } : {}),
+        });
+        const result = await memory.recall(frozen.ownerId, parsed.data, ctx.signal, compactMemory);
+        const items: MemoryRecallPayload['items'] = [];
         let bytes = 0;
         for (const item of result.items) {
           const projected = {
             memory_id: item.id,
             content: item.content,
+            ...(compactMemory ? { match: item.match } : {}),
             conversation_id: item.conversationId,
             message_ids: item.messageIds,
             created_at: item.createdAt,

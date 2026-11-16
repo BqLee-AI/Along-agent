@@ -278,4 +278,164 @@ databaseTests('routing lifecycle schema admission against PG16', () => {
       await rm(directory, { recursive: true, force: true });
     }
   }, 120000);
+  it('upgrades 0032 through compact and context versions without rewriting pause facts', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'compact-lifecycle-'));
+    const migrations = new URL('../../infra/migrations/', import.meta.url);
+    const names = (await readdir(migrations)).filter((name) => /^\d{4}_.+\.sql$/.test(name)).sort();
+    try {
+      for (const name of names.filter((item) => item.slice(0, 4) <= '0032'))
+        await copyFile(new URL(name, migrations), join(directory, name));
+      await isolated(async (url) => {
+        await deployment(
+          url,
+          async (database) => {
+            expect((await database.initialize()).version).toBe('0032');
+          },
+          directory,
+        );
+        const [owner, conversation, message, run, attempt, pause, key] = Array.from(
+          { length: 7 },
+          () => randomUUID(),
+        );
+        let original: unknown;
+        await sql(url, async (client) => {
+          await client.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
+            conversation,
+            owner,
+          ]);
+          await client.query(
+            "INSERT INTO messages(id,owner_id,conversation_id,role,content) VALUES($1,$2,$3,'user','original')",
+            [message, owner, conversation],
+          );
+          await client.query(
+            `INSERT INTO agent_runs(id,owner_id,conversation_id,agent_revision,mode,status,budget_max_iterations,budget_max_tokens)
+            VALUES($1,$2,$3,'historical','chat','paused',2,100)`,
+            [run, owner, conversation],
+          );
+          await client.query(
+            "INSERT INTO run_attempts(id,owner_id,run_id,attempt_no,status) VALUES($1,$2,$3,1,'done')",
+            [attempt, owner, run],
+          );
+          await client.query(
+            `INSERT INTO harness_pauses(id,owner_id,conversation_id,run_id,attempt_id,idempotency_key,reason,purpose,resume_source,state,snapshot)
+            VALUES($1,$2,$3,$4,$5,$6,'user','none','user','paused','{"original":true}')`,
+            [pause, owner, conversation, run, attempt, key],
+          );
+          original = (
+            await client.query('SELECT to_jsonb(p) AS value FROM harness_pauses p WHERE id=$1', [
+              pause,
+            ])
+          ).rows[0].value;
+        });
+        for (const name of names.filter(
+          (item) => item.slice(0, 4) >= '0033' && item.slice(0, 4) <= '0036',
+        )) {
+          const version = name.slice(0, 4);
+          await copyFile(new URL(name, migrations), join(directory, name));
+          await deployment(
+            url,
+            async (database) => {
+              expect(await database.classify()).toMatchObject({
+                kind: 'supported',
+                version: String(Number(version) - 1).padStart(4, '0'),
+              });
+              expect((await database.upgrade()).version).toBe(version);
+              expect(await database.classify()).toMatchObject({ kind: 'supported', version });
+            },
+            directory,
+          );
+          await sql(url, async (client) => {
+            expect(
+              (
+                await client.query(
+                  'SELECT to_jsonb(p) AS value FROM harness_pauses p WHERE id=$1',
+                  [pause],
+                )
+              ).rows[0].value,
+            ).toEqual(original);
+            if (version === '0033') {
+              expect(
+                (await client.query('SELECT count(*)::int AS n FROM compact_freezes')).rows[0].n,
+              ).toBe(0);
+              await expect(
+                client.query(
+                  `INSERT INTO harness_pauses(id,owner_id,conversation_id,run_id,attempt_id,idempotency_key,reason,purpose,resume_source,state)
+                VALUES($1,$2,$3,$4,$5,$6,'user','manual_compact','user','invalidated')`,
+                  [randomUUID(), owner, conversation, run, attempt, randomUUID()],
+                ),
+              ).rejects.toMatchObject({ code: '23514' });
+              await client.query(
+                `INSERT INTO harness_pauses(id,owner_id,conversation_id,run_id,attempt_id,idempotency_key,reason,purpose,resume_source,state)
+                VALUES($1,$2,$3,$4,$5,$6,'runtime','automatic_compact','runtime','invalidated')`,
+                [randomUUID(), owner, conversation, run, attempt, randomUUID()],
+              );
+            }
+            if (version === '0035') {
+              await client.query(
+                `INSERT INTO r3_context_freezes(run_id,owner_id,conversation_id,input_message_id,context)
+                VALUES($1,$2,$3,$4,$5::jsonb)`,
+                [
+                  run,
+                  owner,
+                  conversation,
+                  message,
+                  JSON.stringify({ input: { type: 'user', message_id: message } }),
+                ],
+              );
+              await expect(
+                client.query('DELETE FROM r3_context_freezes WHERE run_id=$1', [run]),
+              ).rejects.toBeDefined();
+            }
+            if (version === '0036') {
+              expect(
+                (
+                  await client.query('SELECT context FROM r3_context_freezes WHERE run_id=$1', [
+                    run,
+                  ])
+                ).rows[0].context,
+              ).toEqual({ input: { type: 'user', message_id: message } });
+            }
+          });
+          const mutation =
+            version === '0033'
+              ? [
+                  'ALTER TABLE harness_pauses DROP CONSTRAINT harness_pauses_check',
+                  `ALTER TABLE harness_pauses ADD CONSTRAINT harness_pauses_check CHECK ((reason='user' AND purpose='none' AND resume_source='user') OR (reason='runtime' AND purpose IN ('manual_compact','automatic_compact') AND resume_source='runtime'))`,
+                ]
+              : version === '0034'
+                ? [
+                    'ALTER TABLE compact_continuations DISABLE TRIGGER compact_continuations_immutable',
+                    'ALTER TABLE compact_continuations ENABLE TRIGGER compact_continuations_immutable',
+                  ]
+                : version === '0035'
+                  ? [
+                      'ALTER TABLE r3_context_freezes ALTER COLUMN input_message_id DROP NOT NULL',
+                      'ALTER TABLE r3_context_freezes ALTER COLUMN input_message_id SET NOT NULL',
+                    ]
+                  : [
+                      'ALTER TABLE idle_compact_requests DISABLE TRIGGER idle_compact_requests_immutable',
+                      'ALTER TABLE idle_compact_requests ENABLE TRIGGER idle_compact_requests_immutable',
+                    ];
+          await sql(url, async (client) => {
+            await client.query(mutation[0]);
+          });
+          await deployment(
+            url,
+            async (database) => {
+              expect((await database.classify()).kind).toBe('unknown');
+              await expect(database.upgrade()).rejects.toMatchObject({
+                code: 'unsupported_upgrade_source',
+              });
+            },
+            directory,
+          );
+          await sql(url, async (client) => {
+            await client.query(mutation[1]);
+          });
+        }
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 120000);
 });

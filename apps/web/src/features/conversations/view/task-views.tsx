@@ -19,7 +19,7 @@ import {
   runStatusLabel,
   userPauseCanContinue,
 } from '@/features/conversations/model/conversation-run';
-import { shouldSubmitMessage } from '@/features/conversations/model/task';
+import { compactCommand, shouldSubmitMessage } from '@/features/conversations/model/task';
 import type { ConversationTask } from '@/features/conversations/viewmodel/use-conversation-task';
 import { composerBlockedReason } from '../model/presentation';
 import { useComposerDisplay } from '../viewmodel/use-composer-display';
@@ -285,7 +285,9 @@ export function RunStatusPanel({ task }: { task: ConversationTask }) {
             </p>
           ) : run.status === 'paused' ? (
             <p className="text-secondary-foreground">
-              只有明确继续才会恢复此运行；读取和刷新不会继续。
+              {run.pause?.reason === 'runtime'
+                ? '运行正在等待服务端处理压缩；读取和刷新不会继续运行。'
+                : '只有明确继续才会恢复此运行；读取和刷新不会继续。'}
             </p>
           ) : null}
           <div className="flex flex-wrap gap-2">
@@ -491,17 +493,24 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
   const workspace = task.workspaces.find((item) => item.workspace_id === task.workspaceId);
   const textarea = useComposerDisplay(task.input);
   const composing = useRef(false);
-  const allowed = task.eligibility.allowed && !(task.ambiguousProposal && !task.foldChoice);
+  const command = compactCommand(task.input);
+  const allowed = command
+    ? task.compactAvailable
+    : task.eligibility.allowed && !(task.ambiguousProposal && !task.foldChoice);
   const canStop = task.streaming || task.run?.status === 'running';
-  const blockedReason = composerBlockedReason({
-    effectsUnknown: task.effectsUnknown,
-    reading: task.reading,
-    run: task.run,
-    runs: task.runs,
-    ambiguous: Boolean(task.ambiguousProposal && !task.foldChoice),
-    active: task.active,
-    eligibilityReason: task.eligibility.reason,
-  });
+  const blockedReason = command
+    ? task.compactAvailable
+      ? null
+      : '当前压缩请求尚不可提交。'
+    : composerBlockedReason({
+        effectsUnknown: task.effectsUnknown,
+        reading: task.reading,
+        run: task.run,
+        runs: task.runs,
+        ambiguous: Boolean(task.ambiguousProposal && !task.foldChoice),
+        active: task.active,
+        eligibilityReason: task.eligibility.reason,
+      });
   return (
     <section
       className="flex max-h-[min(460px,calc(100dvh-14rem))] min-h-0 min-w-0 flex-col gap-2 overflow-y-auto p-1 text-sm leading-[22px]"
@@ -551,6 +560,50 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
             </Alert.Description>
           </Alert.Content>
         </Alert>
+      ) : null}
+      {task.compactStatus ? (
+        <div
+          className="space-y-2 text-sm"
+          role={task.compactStatus.message ? 'alert' : 'status'}
+          aria-live="polite"
+        >
+          <p>
+            {task.compactStatus.message ??
+              (task.compactStatus.phase === 'submitting'
+                ? '正在提交压缩请求…'
+                : task.compactStatus.phase === 'waiting'
+                  ? task.compactStatus.receipt?.status === 'published'
+                    ? '摘要已保存，正在等待后续处理与运行裁决…'
+                    : '压缩处理中，等待服务端状态…'
+                  : task.compactStatus.receipt?.status === 'no_content'
+                    ? '没有可压缩的历史。'
+                    : task.compactStatus.receipt?.status === 'failed'
+                      ? `压缩失败${task.compactStatus.receipt.error_code ? `：${task.compactStatus.receipt.error_code}` : '。'}`
+                      : task.compactStatus.receipt?.status === 'cancelled'
+                        ? '压缩已取消。'
+                        : '压缩已完成；运行状态以原运行记录为准。')}
+          </p>
+          {task.compactStatus.receipt?.candidate_status === 'failed' ? (
+            <p>部分记忆候选未能保存；已保存的摘要不会因此撤销。</p>
+          ) : null}
+          {task.compactStatus.phase === 'read_error' ? (
+            <Button type="button" variant="glass" color="default" onClick={task.refreshCompact}>
+              重新读取压缩状态
+            </Button>
+          ) : null}
+          {task.compactRetryAllowed ? (
+            <Button
+              type="button"
+              variant="glass"
+              color="default"
+              onClick={() => void task.retryCompact()}
+            >
+              重试原压缩请求（同键）
+            </Button>
+          ) : task.compactStatus.phase === 'uncertain' ? (
+            <p>请保留此会话并联系维护者核对；不会自动创建新的压缩请求。</p>
+          ) : null}
+        </div>
       ) : null}
       <PromptInput
         variant="glass"
@@ -871,19 +924,20 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
             >
               <Square className="size-3.5 fill-current" aria-hidden="true" />
             </Button>
-          ) : (
+          ) : null}
+          {!canStop || command ? (
             <Button
               type="submit"
               size="icon"
               color="primary"
               className="rounded-full bg-brand-ink! text-background! transition-[opacity,scale]! duration-200! ease-out! hover:opacity-90 active:scale-95 disabled:scale-90 motion-reduce:transition-none!"
               disabled={!allowed}
-              aria-label="发送消息"
+              aria-label={command ? '执行压缩命令' : '发送消息'}
               data-testid="send-message"
             >
               <ArrowUp className="size-4" aria-hidden="true" />
             </Button>
-          )}
+          ) : null}
         </div>
       </PromptInput>
       <p

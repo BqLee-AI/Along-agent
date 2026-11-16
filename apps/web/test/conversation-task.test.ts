@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import type { ConversationRunHistoryItem, RunView, WorkspaceSummary } from '@along/contracts';
 import {
   conversationSendBlocked,
+  compactCommand,
   clarificationReplyReference,
   isNearChatBottom,
   taskAdmission,
@@ -29,6 +30,14 @@ const documentDraft = {
 };
 
 describe('explicit conversation task entry', () => {
+  it('reserves compact commands and rejects arguments as ordinary messages', () => {
+    expect(compactCommand('/compact')).toBe('compact');
+    expect(compactCommand('  /compact  ')).toBe('compact');
+    expect(compactCommand('/compact extra')).toBe('invalid');
+    expect(compactCommand('please /compact')).toBeNull();
+    expect(compactCommand('/compactly')).toBeNull();
+  });
+
   it('opts plain Agent into delegation while preserving legacy shortcut admission without fallback', () => {
     expect(taskAdmission('reminder')).toEqual({ execution: 'business' });
     expect(taskAdmission('document')).toEqual({ execution: 'harness' });

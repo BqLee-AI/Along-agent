@@ -1,0 +1,550 @@
+{
+  "version": "0033",
+  "tables": [
+    "compact_freezes",
+    "compact_freeze_sources",
+    "compact_summaries",
+    "compact_summary_sources",
+    "compact_heads"
+  ],
+  "columns": [
+    {
+      "table": "compact_freezes",
+      "name": "id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "compact_freezes",
+      "name": "owner_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "compact_freezes",
+      "name": "conversation_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "compact_freezes",
+      "name": "run_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "compact_freezes",
+      "name": "attempt_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "compact_freezes",
+      "name": "pause_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "compact_freezes",
+      "name": "previous_summary_id",
+      "type": "uuid",
+      "required": false,
+      "default": ""
+    },
+    {
+      "table": "compact_freezes",
+      "name": "previous_revision",
+      "type": "int8",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "compact_freezes",
+      "name": "model_id",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "compact_freezes",
+      "name": "prompt_revision",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "compact_freezes",
+      "name": "created_at",
+      "type": "timestamptz",
+      "required": true,
+      "default": "now()"
+    },
+    {
+      "table": "compact_freeze_sources",
+      "name": "freeze_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "compact_freeze_sources",
+      "name": "position",
+      "type": "int4",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "compact_freeze_sources",
+      "name": "message_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "compact_freeze_sources",
+      "name": "source_hash",
+      "type": "bytea",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "compact_summaries",
+      "name": "id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "compact_summaries",
+      "name": "freeze_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "compact_summaries",
+      "name": "owner_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "compact_summaries",
+      "name": "conversation_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "compact_summaries",
+      "name": "previous_summary_id",
+      "type": "uuid",
+      "required": false,
+      "default": ""
+    },
+    {
+      "table": "compact_summaries",
+      "name": "revision",
+      "type": "int8",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "compact_summaries",
+      "name": "summary_text",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "compact_summaries",
+      "name": "created_at",
+      "type": "timestamptz",
+      "required": true,
+      "default": "now()"
+    },
+    {
+      "table": "compact_summary_sources",
+      "name": "summary_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "compact_summary_sources",
+      "name": "position",
+      "type": "int4",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "compact_summary_sources",
+      "name": "message_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "compact_summary_sources",
+      "name": "source_hash",
+      "type": "bytea",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "compact_heads",
+      "name": "conversation_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "compact_heads",
+      "name": "owner_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "compact_heads",
+      "name": "summary_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "compact_heads",
+      "name": "revision",
+      "type": "int8",
+      "required": true,
+      "default": ""
+    }
+  ],
+  "constraints": [
+    {
+      "table": "compact_freeze_sources",
+      "name": "compact_freeze_sources_message_id_fkey",
+      "type": "f",
+      "columns": ["message_id"],
+      "target": "messages",
+      "delete_action": "r",
+      "target_columns": ["id"]
+    },
+    {
+      "table": "compact_summaries",
+      "name": "compact_summaries_revision_check",
+      "type": "c",
+      "columns": ["revision"],
+      "expression": "(revision > 0)"
+    },
+    {
+      "table": "compact_freezes",
+      "name": "compact_freezes_previous_revision_check",
+      "type": "c",
+      "columns": ["previous_revision"],
+      "expression": "(previous_revision >= 0)"
+    },
+    {
+      "table": "compact_freezes",
+      "name": "compact_freezes_model_id_check",
+      "type": "c",
+      "columns": ["model_id"],
+      "expression": "((length(model_id) >= 1) AND (length(model_id) <= 512))"
+    },
+    {
+      "table": "compact_freezes",
+      "name": "compact_freezes_prompt_revision_check",
+      "type": "c",
+      "columns": ["prompt_revision"],
+      "expression": "((length(prompt_revision) >= 1) AND (length(prompt_revision) <= 128))"
+    },
+    {
+      "table": "compact_freezes",
+      "name": "compact_freezes_pkey",
+      "type": "p",
+      "columns": ["id"]
+    },
+    {
+      "table": "compact_freezes",
+      "name": "compact_freezes_conversation_id_fkey",
+      "type": "f",
+      "columns": ["conversation_id"],
+      "target": "conversations",
+      "delete_action": "r",
+      "target_columns": ["id"]
+    },
+    {
+      "table": "compact_freezes",
+      "name": "compact_freezes_run_id_fkey",
+      "type": "f",
+      "columns": ["run_id"],
+      "target": "agent_runs",
+      "delete_action": "r",
+      "target_columns": ["id"]
+    },
+    {
+      "table": "compact_freezes",
+      "name": "compact_freezes_attempt_id_fkey",
+      "type": "f",
+      "columns": ["attempt_id"],
+      "target": "run_attempts",
+      "delete_action": "r",
+      "target_columns": ["id"]
+    },
+    {
+      "table": "compact_freezes",
+      "name": "compact_freezes_pause_id_fkey",
+      "type": "f",
+      "columns": ["pause_id"],
+      "target": "harness_pauses",
+      "delete_action": "r",
+      "target_columns": ["id"]
+    },
+    {
+      "table": "compact_freeze_sources",
+      "name": "compact_freeze_sources_position_check",
+      "type": "c",
+      "columns": ["position"],
+      "expression": "(\"position\" >= 0)"
+    },
+    {
+      "table": "compact_freeze_sources",
+      "name": "compact_freeze_sources_source_hash_check",
+      "type": "c",
+      "columns": ["source_hash"],
+      "expression": "(octet_length(source_hash) = 32)"
+    },
+    {
+      "table": "compact_freeze_sources",
+      "name": "compact_freeze_sources_pkey",
+      "type": "p",
+      "columns": ["freeze_id", "position"]
+    },
+    {
+      "table": "compact_freeze_sources",
+      "name": "compact_freeze_sources_freeze_id_message_id_key",
+      "type": "u",
+      "columns": ["freeze_id", "message_id"]
+    },
+    {
+      "table": "compact_freeze_sources",
+      "name": "compact_freeze_sources_freeze_id_fkey",
+      "type": "f",
+      "columns": ["freeze_id"],
+      "target": "compact_freezes",
+      "delete_action": "r",
+      "target_columns": ["id"]
+    },
+    {
+      "table": "compact_summaries",
+      "name": "compact_summaries_summary_text_check",
+      "type": "c",
+      "columns": ["summary_text"],
+      "expression": "((octet_length(summary_text) >= 1) AND (octet_length(summary_text) <= 65536))"
+    },
+    {
+      "table": "compact_summaries",
+      "name": "compact_summaries_pkey",
+      "type": "p",
+      "columns": ["id"]
+    },
+    {
+      "table": "compact_summaries",
+      "name": "compact_summaries_freeze_id_key",
+      "type": "u",
+      "columns": ["freeze_id"]
+    },
+    {
+      "table": "compact_summaries",
+      "name": "compact_summaries_conversation_id_revision_key",
+      "type": "u",
+      "columns": ["conversation_id", "revision"]
+    },
+    {
+      "table": "compact_summaries",
+      "name": "compact_summaries_freeze_id_fkey",
+      "type": "f",
+      "columns": ["freeze_id"],
+      "target": "compact_freezes",
+      "delete_action": "r",
+      "target_columns": ["id"]
+    },
+    {
+      "table": "compact_summaries",
+      "name": "compact_summaries_conversation_id_fkey",
+      "type": "f",
+      "columns": ["conversation_id"],
+      "target": "conversations",
+      "delete_action": "r",
+      "target_columns": ["id"]
+    },
+    {
+      "table": "compact_summaries",
+      "name": "compact_summaries_previous_summary_id_fkey",
+      "type": "f",
+      "columns": ["previous_summary_id"],
+      "target": "compact_summaries",
+      "delete_action": "r",
+      "target_columns": ["id"]
+    },
+    {
+      "table": "compact_freezes",
+      "name": "compact_freezes_previous_summary_id_fkey",
+      "type": "f",
+      "columns": ["previous_summary_id"],
+      "target": "compact_summaries",
+      "delete_action": "r",
+      "target_columns": ["id"]
+    },
+    {
+      "table": "compact_summary_sources",
+      "name": "compact_summary_sources_position_check",
+      "type": "c",
+      "columns": ["position"],
+      "expression": "(\"position\" >= 0)"
+    },
+    {
+      "table": "compact_summary_sources",
+      "name": "compact_summary_sources_source_hash_check",
+      "type": "c",
+      "columns": ["source_hash"],
+      "expression": "(octet_length(source_hash) = 32)"
+    },
+    {
+      "table": "compact_summary_sources",
+      "name": "compact_summary_sources_pkey",
+      "type": "p",
+      "columns": ["summary_id", "position"]
+    },
+    {
+      "table": "compact_summary_sources",
+      "name": "compact_summary_sources_summary_id_message_id_key",
+      "type": "u",
+      "columns": ["summary_id", "message_id"]
+    },
+    {
+      "table": "compact_summary_sources",
+      "name": "compact_summary_sources_summary_id_fkey",
+      "type": "f",
+      "columns": ["summary_id"],
+      "target": "compact_summaries",
+      "delete_action": "r",
+      "target_columns": ["id"]
+    },
+    {
+      "table": "compact_summary_sources",
+      "name": "compact_summary_sources_message_id_fkey",
+      "type": "f",
+      "columns": ["message_id"],
+      "target": "messages",
+      "delete_action": "r",
+      "target_columns": ["id"]
+    },
+    {
+      "table": "compact_heads",
+      "name": "compact_heads_revision_check",
+      "type": "c",
+      "columns": ["revision"],
+      "expression": "(revision > 0)"
+    },
+    {
+      "table": "compact_heads",
+      "name": "compact_heads_pkey",
+      "type": "p",
+      "columns": ["conversation_id"]
+    },
+    {
+      "table": "compact_heads",
+      "name": "compact_heads_summary_id_key",
+      "type": "u",
+      "columns": ["summary_id"]
+    },
+    {
+      "table": "compact_heads",
+      "name": "compact_heads_conversation_id_fkey",
+      "type": "f",
+      "columns": ["conversation_id"],
+      "target": "conversations",
+      "delete_action": "r",
+      "target_columns": ["id"]
+    },
+    {
+      "table": "compact_heads",
+      "name": "compact_heads_summary_id_fkey",
+      "type": "f",
+      "columns": ["summary_id"],
+      "target": "compact_summaries",
+      "delete_action": "r",
+      "target_columns": ["id"]
+    }
+  ],
+  "triggers": [
+    {
+      "table": "compact_freezes",
+      "name": "compact_freezes_immutable",
+      "type": 27,
+      "function": "run_checkpoints_reject_mutation"
+    },
+    {
+      "table": "compact_freeze_sources",
+      "name": "compact_freeze_sources_immutable",
+      "type": 27,
+      "function": "run_checkpoints_reject_mutation"
+    },
+    {
+      "table": "compact_summaries",
+      "name": "compact_summaries_immutable",
+      "type": 27,
+      "function": "run_checkpoints_reject_mutation"
+    },
+    {
+      "table": "compact_summary_sources",
+      "name": "compact_summary_sources_immutable",
+      "type": 27,
+      "function": "run_checkpoints_reject_mutation"
+    }
+  ],
+  "alter_constraints": [
+    {
+      "table": "harness_pauses",
+      "name": "harness_pauses_reason_check",
+      "type": "c",
+      "columns": ["reason"],
+      "expression": "(reason = ANY (ARRAY['user'::text, 'runtime'::text]))"
+    },
+    {
+      "table": "harness_pauses",
+      "name": "harness_pauses_purpose_check",
+      "type": "c",
+      "columns": ["purpose"],
+      "expression": "(purpose = ANY (ARRAY['none'::text, 'manual_compact'::text, 'automatic_compact'::text]))"
+    },
+    {
+      "table": "harness_pauses",
+      "name": "harness_pauses_resume_source_check",
+      "type": "c",
+      "columns": ["resume_source"],
+      "expression": "(resume_source = ANY (ARRAY['user'::text, 'runtime'::text]))"
+    },
+    {
+      "table": "harness_pauses",
+      "name": "harness_pauses_check",
+      "type": "c",
+      "columns": ["reason", "purpose", "resume_source"],
+      "expression": "(((reason = 'user'::text) AND (purpose = 'none'::text) AND (resume_source = 'user'::text)) OR ((reason = 'runtime'::text) AND (purpose = ANY (ARRAY['manual_compact'::text, 'automatic_compact'::text])) AND (resume_source = 'runtime'::text)))"
+    },
+    {
+      "table": "harness_pause_resumes",
+      "name": "harness_pause_resumes_source_check",
+      "type": "c",
+      "columns": ["source"],
+      "expression": "(source = ANY (ARRAY['user'::text, 'runtime'::text]))"
+    }
+  ]
+}

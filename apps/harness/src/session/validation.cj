@@ -1,6 +1,8 @@
 package along_harness.session
 
 import along_harness.protocol.*
+import along_harness.transport.*
+
 import std.collection.*
 import stdx.encoding.json.*
 
@@ -83,6 +85,22 @@ extend Harness {
             return None
         }
     }
+    func policyCheck(v: JsonValue): Unit {
+        let p = v.asObject()
+        keys(p, ["revision", "completion_cap", "model_window_tokens", "input_meter", "meter_revision", "reserve_tokens", "model_binding"])
+        require(ref(field(p, "revision")) == "r2a/1")
+        budgetState.completionCap = integer(field(p, "completion_cap"), 1)
+        if (!isNull(field(p, "model_window_tokens"))) { budgetState.modelWindow = integer(field(p, "model_window_tokens"), 1) }
+        budgetState.reserveTokens = integer(field(p, "reserve_tokens"), 0)
+        let quality = ref(field(p, "input_meter"))
+        require(quality == "verified" || quality == "estimated" || quality == "unavailable")
+        let revision = str(field(p, "meter_revision"), FRAME_LIMIT)
+        require(revision.size > 0 && (quality == "unavailable" || revision != "unavailable/1"))
+        let binding = field(p, "model_binding").asObject()
+        keys(binding, ["model", "adapter_revision"])
+        require(str(field(binding, "model"), FRAME_LIMIT).size > 0)
+        require(str(field(binding, "adapter_revision"), FRAME_LIMIT).size > 0)
+    }
     func observationCheck(o: JsonObject): Unit {
         let view = str(field(o, "view"), 16)
         uuid(field(o, "invocation_id")); ref(field(o, "tool_id"))
@@ -151,14 +169,13 @@ extend Harness {
                 }
                 nonempty(field(payload, "alias_version"), 512)
             }
-            else if (kind == "memory_source") { require(false) }
             else if (kind == "memory_saved") {
-                require(pipe.protocol == "harness/v7")
+                require(pipe.protocol != "harness/v6")
                 keys(payload, ["kind", "memory_id", "content"])
                 uuid(field(payload, "memory_id")); nonempty(field(payload, "content"), 12000)
             }
             else if (kind == "memory_recall") {
-                require(pipe.protocol == "harness/v7")
+                require(pipe.protocol != "harness/v6")
                 keys(payload, ["kind", "items", "completeness"])
                 let completeness = ref(field(payload, "completeness"))
                 require(completeness == "complete" || completeness == "degraded" || completeness == "incomplete")
@@ -169,18 +186,29 @@ extend Harness {
                     if (item.containsKey("match")) {
                         keys(item, ["memory_id", "content", "conversation_id", "message_ids", "created_at", "updated_at", "match"])
                         let matchKind = ref(field(item, "match"))
-                        require(matchKind == "literal" || matchKind == "unfiltered")
+                        require(matchKind == "literal" || matchKind == "unfiltered" || (pipe.protocol == "harness/v8" && matchKind == "semantic"))
                     } else {
                         keys(item, ["memory_id", "content", "conversation_id", "message_ids", "created_at", "updated_at"])
                     }
                     uuid(field(item, "memory_id")); nonempty(field(item, "content"), 12000)
-                    uuid(field(item, "conversation_id"))
-                    let ids = field(item, "message_ids").asArray()
-                    require(ids.size() >= 1 && ids.size() <= 128)
-                    let seen = HashSet<String>()
-                    for (id in ids.getItems()) { require(seen.add(uuid(id))) }
+                    uuid(field(item, "conversation_id")); boundedRefsCheck(field(item, "message_ids"), 1, 128)
                     nonempty(field(item, "created_at"), 64); nonempty(field(item, "updated_at"), 64)
                 }
+            }
+            else if (kind == "memory_source") {
+                require(pipe.protocol == "harness/v8")
+                keys(payload, ["kind", "recall_invocation_id", "memory_id", "conversation_id", "message_id", "role", "content", "offset", "end", "total", "has_more"])
+                for (name in ["recall_invocation_id", "memory_id", "conversation_id", "message_id"]) { uuid(field(payload, name)) }
+                let role = ref(field(payload, "role"))
+                require(role == "user" || role == "assistant")
+                let content = str(field(payload, "content"), 8192)
+                var length: Int64 = 0
+                for (_ in content.runes()) { length++ }
+                let offset = integer(field(payload, "offset"), 0)
+                let end = integer(field(payload, "end"), 0)
+                let total = integer(field(payload, "total"), 0)
+                require(length <= 4096 && offset <= end && end <= total && end - offset == length)
+                require(field(payload, "has_more").asBool().getValue() == (end < total))
             }
             else if (kind == "task_created") {
                 let elapsed = payload.containsKey("time_basis") || payload.containsKey("display_version")

@@ -10,15 +10,15 @@
 
 > Proposed 用户模型配置见 [模型接入 API](model-providers.md) 和 [design/22](../design/22-model-provider-settings.md)；接纳、历史投影及 SDK 传输以对应合同与验收为准。
 
-> R3（#144）的用户暂停与显式继续见 [conversations API §9](conversations/conversations_routes.md#9-用户安全点暂停和继续)，本人记忆管理见 §12；compact 的目标合同见 [design/23](../design/23-r3-short-term-memory-and-compact.md)。
+> R3（#144）的用户暂停、显式继续和 compact 见 [conversations API §9–§10](conversations/conversations_routes.md#9-用户安全点暂停和继续)，本人记忆管理见 §12；语义和边界见 [design/23](../design/23-r3-short-term-memory-and-compact.md)。
 
 ## 1. Base Path 与路由总数 [Required]
 
 - Base Path：`/api/v1`。下文路由表省略该前缀，如 `GET /me` 即 `GET /api/v1/me`。
-- 合同共 35 个业务端点 + 2 个探针：既有 v0 的 13 个业务端点、正式 Harness 的 3 个 Run 入口、R1 的 4 个工作区/文档批准入口、5 个窄账户入口、3 个历史集合读取入口、1 个只读事件订阅入口、2 个用户暂停/继续入口及 4 个本人记忆入口：
+- 合同共 38 个业务端点 + 2 个探针：既有 v0 的 13 个业务端点、正式 Harness 的 3 个 Run 入口、R1 的 4 个工作区/文档批准入口、5 个窄账户入口、3 个历史集合读取入口、1 个只读事件订阅入口、2 个用户暂停/继续入口、4 个本人记忆入口及 3 个 compact 入口：
   - auth：`GET /me`，`GET /auth/status`、`POST /auth/initialize`、`POST /auth/claim`、`POST /auth/sign-in`、`POST /auth/sign-out`（6；后5个是 #68 新增合同，详见 auth §4）。
   - brief：`GET /brief`（1）。
-  - conversations：`POST /conversations/messages`（SSE）、`GET /conversations/{id}`，Run 查询、取消、有限批准恢复、用户暂停和继续，以及会话/消息/Run 历史集合和 Run 事件订阅（11；见 conversations §3、§6、§9）。
+  - conversations：`POST /conversations/messages`（SSE）、`GET /conversations/{id}`，Run 查询、取消、有限批准恢复、用户暂停和继续，compact 操作和回执，以及会话/消息/Run 历史集合和 Run 事件订阅（14；见 conversations §3、§6、§9–§10）。
   - approvals：`GET /approvals`、`GET /approvals/{id}`、`POST /approvals/{id}/actions/confirm`、`POST /approvals/{id}/actions/reject`、`POST /approvals/{id}/actions/revise`（5；revise 见 approvals §6）。
   - tasks：`GET /tasks`、`GET /tasks/{id}`、`POST /tasks/{id}/actions/cancel`、`GET /tasks/{id}/events`（4）。
   - R1：`GET /workspaces`、文档批准详情、确认和拒绝（4；见 §8）。不提供工作区登记写接口或任意文件读写 HTTP 入口。
@@ -205,5 +205,5 @@
 
 - `GET /memories` 支持 `limit` 和 `cursor`，仅列出本人记录；`GET /memories/{id}` 返回本人记忆和来源。原话通过已有本人会话消息接口查看，不凭记忆文本代替原始事实。
 - `POST /memories/{id}/actions/correct` 提交 `{content, conversationId, messageIds, expectedRevision, expiresAt?}`；来源必须是本人可访问的用户消息，修订冲突不覆盖。`POST /memories/{id}/actions/stop-recall` 提交 `{expectedRevision}`，停止后不再用于新召回，原始消息和已接受事实保留。
-- 当前模型召回只执行字面匹配，语义召回与索引管理另有合同。
-- 新 `pause-memory/1` Run 才可使用记忆保存及召回工具；旧冻结工具清单不扩权。保存提示要求模型只处理本人明确要求，但来源校验不证明模型对原话意图或语义的理解正确。记忆是低信任历史，不是授权或当前事实；空结果与降级不证明不存在。召回结果受接受账本大小约束，超出时仅返回完整条目的前缀并标记 `incomplete`。
+- `pause-memory/1` 模型召回使用字面匹配；`compact-memory/1` 可在编码器已配置时使用语义候选，并可回查获准召回项的原始来源。索引管理不提供 HTTP 入口。
+- 记忆保存及召回只对各新 profile 冻结的工具开放，旧 `pause/1` 不扩权。保存提示要求模型只处理本人明确要求，但来源校验不证明模型对原话意图或语义的理解正确。记忆是低信任历史，不是授权或当前事实；空结果与降级不证明不存在。召回结果受接受账本大小约束，超出时仅返回完整条目的前缀并标记 `incomplete`。

@@ -18,13 +18,22 @@ maybe('literal memory gateway receipts', () => {
   afterAll(async () => {
     await database?.close();
   });
-  for (const change of ['correct', 'stop'] as const) {
-    it(`revalidates the accepted observation after ${change}`, async () => {
+  for (const [change, profile] of [
+    ['correct', 'pause-memory/1'],
+    ['stop', 'pause-memory/1'],
+    ['correct', 'compact-memory/1'],
+    ['stop', 'compact-memory/1'],
+  ] as const) {
+    it(`revalidates ${profile} accepted observations after ${change}`, async () => {
       const base = await seedContext(database.pool);
       const message = randomUUID();
       const runId = randomUUID();
       const attemptId = randomUUID();
-      const allowlist = ['remember_memory', 'recall_memories'];
+      const allowlist = [
+        'remember_memory',
+        'recall_memories',
+        ...(profile === 'compact-memory/1' ? ['read_memory_source'] : []),
+      ];
       await database.pool.query(
         "INSERT INTO messages(id,owner_id,conversation_id,role,content) VALUES($1,$2,$3,'user','remember old value')",
         [message, base.ownerId, base.conversationId],
@@ -40,7 +49,7 @@ maybe('literal memory gateway receipts', () => {
           message,
           JSON.stringify(allowlist),
           JSON.stringify({
-            execution_profile: 'pause-memory/1',
+            execution_profile: profile,
             execution_lifecycle: 'request-bound',
           }),
         ],
@@ -74,7 +83,12 @@ maybe('literal memory gateway receipts', () => {
         result: {
           kind: 'memory_recall',
           completeness: 'degraded',
-          items: [{ content: 'old value' }],
+          items: [
+            {
+              content: 'old value',
+              ...(profile === 'compact-memory/1' ? { match: 'literal' } : {}),
+            },
+          ],
         },
       });
       expect(await invokeTool(database.pool, ctx, input)).toMatchObject({
@@ -85,6 +99,27 @@ maybe('literal memory gateway receipts', () => {
         'SELECT revisions FROM r3_memory_recall_receipts WHERE invocation_id=$1',
         [input.invocationId],
       );
+      let sourceInput: { invocationId: string; toolId: string; args: unknown } | undefined;
+      if (profile === 'compact-memory/1') {
+        const toolId = 'read_memory_source';
+        const args = {
+          recall_invocation_id: input.invocationId,
+          memory_id: saved.id,
+          message_id: message,
+          offset: 0,
+          limit: 100,
+        };
+        const reserved = await reserveToolInvocation(database.pool, ctx, {
+          callKey: randomUUID(),
+          toolId,
+          args,
+        });
+        sourceInput = { ...reserved, toolId, args };
+        expect(await invokeTool(database.pool, ctx, sourceInput)).toMatchObject({
+          status: 'ok',
+          result: { kind: 'memory_source', content: 'remember old value' },
+        });
+      }
       expect(receipt.rows[0]?.revisions).toEqual([{ id: saved.id, revision: 1 }]);
       if (change === 'correct')
         await memory.correct(ctx.ownerId, saved.id, {
@@ -94,6 +129,10 @@ maybe('literal memory gateway receipts', () => {
           expectedRevision: 1,
         });
       else await memory.stopRecall(ctx.ownerId, saved.id, 1);
+      if (sourceInput)
+        expect(await invokeTool(database.pool, ctx, sourceInput)).toMatchObject({
+          status: 'denied',
+        });
       expect(await invokeTool(database.pool, ctx, input)).toMatchObject({ status: 'denied' });
       await expect(
         withTransaction(database.pool, (client) =>

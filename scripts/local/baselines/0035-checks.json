@@ -1,0 +1,98 @@
+{
+  "version": "0035",
+  "tables": ["r3_context_freezes"],
+  "columns": [
+    {
+      "table": "r3_context_freezes",
+      "name": "run_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "r3_context_freezes",
+      "name": "owner_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "r3_context_freezes",
+      "name": "conversation_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "r3_context_freezes",
+      "name": "input_message_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "r3_context_freezes",
+      "name": "context",
+      "type": "jsonb",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "r3_context_freezes",
+      "name": "created_at",
+      "type": "timestamptz",
+      "required": true,
+      "default": "now()"
+    }
+  ],
+  "constraints": [
+    {
+      "table": "r3_context_freezes",
+      "name": "r3_context_freezes_context_check",
+      "type": "c",
+      "columns": ["context"],
+      "expression": "(octet_length((context)::text) <= 1048576)"
+    },
+    {
+      "table": "r3_context_freezes",
+      "name": "r3_context_freezes_pkey",
+      "type": "p",
+      "columns": ["run_id"]
+    },
+    {
+      "table": "r3_context_freezes",
+      "name": "r3_context_freezes_run_id_fkey",
+      "type": "f",
+      "columns": ["run_id"],
+      "target": "agent_runs",
+      "delete_action": "r",
+      "target_columns": ["id"]
+    },
+    {
+      "table": "r3_context_freezes",
+      "name": "r3_context_freezes_conversation_id_fkey",
+      "type": "f",
+      "columns": ["conversation_id"],
+      "target": "conversations",
+      "delete_action": "r",
+      "target_columns": ["id"]
+    },
+    {
+      "table": "r3_context_freezes",
+      "name": "r3_context_freezes_input_message_id_fkey",
+      "type": "f",
+      "columns": ["input_message_id"],
+      "target": "messages",
+      "delete_action": "r",
+      "target_columns": ["id"]
+    }
+  ],
+  "triggers": [
+    {
+      "table": "r3_context_freezes",
+      "name": "r3_context_freezes_immutable",
+      "type": 27,
+      "function": "run_checkpoints_reject_mutation"
+    }
+  ]
+}

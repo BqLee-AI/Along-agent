@@ -2,12 +2,20 @@ package along_harness.session
 
 import along_harness.protocol.*
 import along_harness.transport.*
+
 import std.collection.*
 import stdx.encoding.json.*
 
 extend Harness {
     protected func loop(): Unit {
-        if (pipe.protocol == "harness/v7" && pausePoint()) { return }
+        if (pipe.compactControl) {
+            require(isNull(waiting) && isNull(pendingModel) && contextState.units.size == 0 && toolRefs.size() == 0)
+            if (restoredPause) { finish("done", ""); return }
+            if (pausePoint()) { return }
+            finish("failed", "COMPACT_PAUSE_UNAVAILABLE")
+            return
+        }
+        if (pipe.protocol != "harness/v6" && pausePoint()) { return }
         if (routeFirstStep()) { return }
         if (!restoredPause && budgetState.iterations < budgetState.maxIterations && budgetState.knownTokens < budgetState.maxTokens) { restoreBootstrap() }
         while (true) {
@@ -16,9 +24,12 @@ extend Harness {
             if (isNull(pendingModel)) {
             if (budgetState.iterations >= budgetState.maxIterations || budgetState.knownTokens >= budgetState.maxTokens) { finish("failed", "BUDGET_EXCEEDED"); return }
             let output = measuredOutput(true)
+            // A v8 measurement can atomically register an automatic compact.
+            // Recheck before spending a model permit or incrementing usage.
+            if (pipe.protocol == "harness/v8" && pausePointWithMarker(true)) { return }
             var step = pipe.request("model", candidate(output)).asObject()
             if (str(field(step, "type"), 32) == "pause_requested") {
-                require(pipe.protocol == "harness/v7")
+                require(pipe.protocol != "harness/v6")
                 keys(step, ["type"])
                 continue
             }
@@ -42,7 +53,7 @@ extend Harness {
             if (str(field(step, "type"), 16) == "failed") {
                 keys(step, ["type", "error", "usage"])
                 let code = errorCheck(field(step, "error"))
-                acceptUsage(field(step, "usage"), previouslyKnown)
+                budgetState.acceptUsage(field(step, "usage"), previouslyKnown)
                 finish("failed", code)
                 return
             }
@@ -50,7 +61,7 @@ extend Harness {
             require(str(field(step, "type"), 16) == "complete")
             let response = field(step, "reply").asObject()
             keys(response, ["message", "usage"])
-            acceptUsage(field(response, "usage"), previouslyKnown)
+            budgetState.acceptUsage(field(response, "usage"), previouslyKnown)
             m = field(response, "message").asObject()
             keys(m, ["content", "tool_calls"])
             let streamedContent = field(m, "content")
@@ -99,7 +110,7 @@ extend Harness {
             if (delegated && name == "finish_goal") {
                 let feedback = match (goalArguments(arguments)) {
                     case Some(goal) =>
-                        pipe.request("finish_goal", obj([("goal_result", goal), ("usage", usage())])).asObject()
+                        pipe.request("finish_goal", obj([("goal_result", goal), ("usage", budgetState.usage())])).asObject()
                     case None =>
                         obj([
                             ("accepted", JsonBool(false)), ("code", text("INVALID_GOAL_RESULT")),
@@ -134,7 +145,7 @@ extend Harness {
             require(nextCall < SAFE_INTEGER)
             let reservation = pipe.request("reserve", obj([("call_key", text("harness/${nextCall}")), ("tool_id", text(name)), ("args", args)])).asObject()
             if (reservation.containsKey("pause_requested")) {
-                require(pipe.protocol == "harness/v7")
+                require(pipe.protocol != "harness/v6")
                 keys(reservation, ["pause_requested"])
                 require(field(reservation, "pause_requested").asBool().getValue())
                 pendingModel = m
@@ -162,6 +173,15 @@ extend Harness {
             let approvalId = pendingApproval(result)
             if (approvalId != "") {
                 if (delegated) { delegatedDocumentCheck(name, result) }
+                if (pipe.protocol == "harness/v8") {
+                    let accepted = obj([("status", text("ok")), ("result", field(result.asObject(), "result"))])
+                    let observation = obj([("view", text("full")), ("invocation_id", text(id)), ("tool_id", text(name)), ("result", accepted)])
+                    let unit = ContextUnit(observation, false, false)
+                    let historyContent: JsonValue = if (isNull(content)) { text("") } else { content }
+                    unit.entries.add(obj([("role", text("assistant")), ("content", historyContent), ("tool_calls", calls)]))
+                    unit.entries.add(obj([("role", text("tool")), ("tool_call_id", field(call, "id")), ("content", text(observation.toString()))]))
+                    contextState.units.add(unit)
+                }
                 waiting = obj([("invocation_id", text(id)), ("approval_id", text(approvalId))])
                 let checkpointRef = checkpoint()
                 pipe.ack("suspend", obj([("checkpoint_ref", text(checkpointRef)), ("invocation_id", text(id)), ("approval_id", text(approvalId))]), "suspended")

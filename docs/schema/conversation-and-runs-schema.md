@@ -419,4 +419,10 @@ snapshot2 原字段/集合不变，typed views/context_slice 不写入快照正�
 
 - `r3_memories` 保存 owner、当前修订与 active/stopped 状态；`r3_memory_revisions` 只追加，保存内容、来源会话和消息、过期时间。原始消息仍由 conversations 持有；保存和更正需验证本人来源与用户消息资格。
 - `r3_memory_requests` 为保存操作提供幂等身份；`r3_memory_recall_receipts` 与已接受的召回结果关联并冻结记忆修订，读取或重放时重新核验当前资格。停止或更正不改写原消息和既有工具事实。
-- `r3_memory_vectors` 是按 owner、记忆修订和编码器绑定保存的可重建派生索引；迁移不安装 pgvector。语义检索和 compact 派生记忆有独立合同，本阶段的模型召回只支持字面匹配。
+- `r3_memory_vectors` 是按 owner、记忆修订和编码器绑定保存的可重建派生索引；迁移不安装 pgvector。`pause-memory/1` 只使用字面召回，`compact-memory/1` 可使用受配置和来源校验约束的语义候选及 compact 派生记忆。
+
+## R3 compact 与冻结上下文
+
+- `compact_freezes` 和 `compact_freeze_sources` 冻结一次操作的来源集合与前驱版本；`compact_summaries`、`compact_summary_sources` 只追加，`compact_heads` 以版本比较发布。原消息不删除或修改，来源有效仅证明可追溯。
+- `compact_operations`、`compact_continuations` 持久化操作状态与唯一后继；`r3_context_freezes` 绑定新 Run 的摘要、未覆盖原消息和输入。`idle_compact_requests` 保存空闲控制动作的幂等身份，不伪装成普通用户消息。
+- 0033 以前向迁移扩展 0029 的暂停原因及运行时继续约束，0034–0036 分别引入操作账、上下文冻结及空闲控制输入；旧暂停和冻结合同不回填或改写。新表及触发器按版本验证，迁移不替代备份。

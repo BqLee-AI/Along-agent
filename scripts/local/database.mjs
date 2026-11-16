@@ -499,7 +499,10 @@ export class DeploymentDatabase {
               !Array.isArray(verify.tables) ||
               !Array.isArray(verify.columns) ||
               !Array.isArray(verify.constraints) ||
-              (verify.additional_checks !== undefined && !Array.isArray(verify.additional_checks))
+              (verify.additional_checks !== undefined &&
+                !Array.isArray(verify.additional_checks)) ||
+              (verify.alter_columns !== undefined && !Array.isArray(verify.alter_columns)) ||
+              (verify.alter_constraints !== undefined && !Array.isArray(verify.alter_constraints))
             )
               fail('migration_inventory_invalid');
             // Manifests may carry forward unchanged facts from earlier versions.
@@ -637,8 +640,44 @@ export class DeploymentDatabase {
           if (await this.#hasManifestObjects(migration.verify))
             fail('baseline_unstamped_migration_objects');
         }
-        for (const migration of effective.filter((m) => m.version > BASELINE && m.version <= last))
-          await this.#verifyAdditional(migration.verify);
+        const applied = effective.filter((m) => m.version > BASELINE && m.version <= last);
+        for (const [index, migration] of applied.entries()) {
+          if (typeof migration.verify !== 'object' || migration.verify === null) {
+            await this.#verifyAdditional(migration.verify);
+            continue;
+          }
+          const later = applied
+            .slice(index + 1)
+            .flatMap((item) =>
+              typeof item.verify === 'object' && item.verify !== null ? [item.verify] : [],
+            );
+          const columns = migration.verify.columns.map((column) =>
+            later.reduce(
+              (current, manifest) =>
+                (manifest.alter_columns ?? []).find(
+                  (change) => change.table === current.table && change.name === current.name,
+                ) ?? current,
+              column,
+            ),
+          );
+          const constraints = [
+            ...migration.verify.constraints.map((constraint) =>
+              later.reduce(
+                (current, manifest) =>
+                  (manifest.alter_constraints ?? []).find(
+                    (change) => change.table === current.table && change.name === current.name,
+                  ) ?? current,
+                constraint,
+              ),
+            ),
+            ...later.flatMap((manifest) =>
+              manifest.constraints.filter((constraint) =>
+                migration.verify.tables.includes(constraint.table),
+              ),
+            ),
+          ];
+          await this.#verifyAdditional({ ...migration.verify, columns, constraints });
+        }
       } catch (error) {
         if (this.#lost) throw error;
         // Roll back an aborted verifier statement before returning the stable classification.

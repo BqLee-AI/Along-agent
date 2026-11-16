@@ -3,6 +3,7 @@
 // such as user_id/conversation_id/run_id/request_id and time internals such as
 // fire_at_utc/fold/offset) are rejected at the gateway and audited as deny.
 import { z } from 'zod';
+import { ReadMemorySourceInputSchema } from '@along/contracts';
 
 import { TASK_STATES } from './contracts.js';
 
@@ -164,4 +165,5 @@ export const TOOL_INPUT_SCHEMAS = {
   read_run_observation: ReadRunObservationInputSchema,
   remember_memory: RememberMemoryInputSchema,
   recall_memories: RecallMemoriesInputSchema,
+  read_memory_source: ReadMemorySourceInputSchema,
 } as const;

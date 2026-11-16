@@ -24,6 +24,9 @@ import {
   getRunView,
   cancelConversationRun,
   resumeConversationRun,
+  requestRuntimeCompactPause,
+  getCompactReceipt,
+  startIdleCompact,
 } from './service.js';
 import { requestConversationPause, continueConversationPause } from './harness-authority.js';
 import type { ConversationDeps, StartResult } from './contracts.js';
@@ -32,7 +35,7 @@ import type { RoutingRuntime } from './routing/index.js';
 import { writeAuthorizedEvent } from './stream-authorization.js';
 import { withTransaction } from '../../db/transaction.js';
 import { lockViewerAccess } from '../identity/stream-access.js';
-import { ConversationEventsQuerySchema } from './schemas.js';
+import { ActionKeySchema, CompactRunBodySchema, ConversationEventsQuerySchema } from './schemas.js';
 import { validationError } from '../../http/errors.js';
 import type { Actor } from '../../http/auth.js';
 import type { RunDriver } from './run-driver.js';
@@ -306,8 +309,51 @@ export async function handleConversationRoute(
       return true;
     }
 
+    const compactMatch =
+      /^\/api\/v1\/conversations\/([^/]+)\/runs\/([^/]+)\/compacts\/([^/]+)$/.exec(pathname);
+    if (req.method === 'GET' && compactMatch) {
+      const [, conversationId, runId, pauseId] = compactMatch;
+      if (!isUuid(conversationId!) || !isUuid(runId!) || !isUuid(pauseId!))
+        throw notFound('compact operation not found');
+      const receipt = await getCompactReceipt(
+        deps,
+        actor.ownerId,
+        conversationId!,
+        runId!,
+        pauseId!,
+      );
+      sendJson(res, 200, okEnvelope(receipt, requestId), requestId);
+      return true;
+    }
+
+    const idleCompactMatch = /^\/api\/v1\/conversations\/([^/]+)\/actions\/compact$/.exec(pathname);
+    if (req.method === 'POST' && idleCompactMatch) {
+      if (!verifyCsrf(req, actor)) throw csrfMismatch();
+      const conversationId = idleCompactMatch[1] ?? '';
+      if (!isUuid(conversationId)) throw notFound('conversation not found');
+      const key = idempotencyKeyOf(req);
+      if (
+        !ActionKeySchema.safeParse(key).success ||
+        !CompactRunBodySchema.safeParse(deps.body).success
+      )
+        throw validationError('invalid compact request');
+      const result = await startIdleCompact(deps, actor.ownerId, conversationId, requestId, key!);
+      const receipt =
+        result.status === 'no_content'
+          ? { status: 'no_content', run_id: null, pause_id: null }
+          : await getCompactReceipt(
+              deps,
+              actor.ownerId,
+              conversationId,
+              result.runId,
+              result.pauseId,
+            );
+      sendJson(res, 200, okEnvelope(receipt, requestId), requestId);
+      return true;
+    }
+
     const runMatch =
-      /^\/api\/v1\/conversations\/([^/]+)\/runs\/([^/]+)(?:\/actions\/(cancel|resume|pause|continue))?$/.exec(
+      /^\/api\/v1\/conversations\/([^/]+)\/runs\/([^/]+)(?:\/actions\/(cancel|resume|pause|continue|compact))?$/.exec(
         pathname,
       );
     if (runMatch) {
@@ -321,7 +367,30 @@ export async function handleConversationRoute(
       }
       if (req.method === 'POST' && runMatch[3]) {
         if (!verifyCsrf(req, actor)) throw csrfMismatch();
-        if (runMatch[3] === 'cancel') {
+        if (runMatch[3] === 'compact') {
+          const key = idempotencyKeyOf(req);
+          if (
+            !ActionKeySchema.safeParse(key).success ||
+            !CompactRunBodySchema.safeParse(deps.body).success
+          )
+            throw validationError('invalid compact request');
+          const pending = await requestRuntimeCompactPause(
+            deps,
+            actor.ownerId,
+            conversationId,
+            runId,
+            'manual_compact',
+            key!,
+          );
+          const receipt = await getCompactReceipt(
+            deps,
+            actor.ownerId,
+            conversationId,
+            runId,
+            pending.pause_id,
+          );
+          sendJson(res, 200, okEnvelope(receipt, requestId), requestId);
+        } else if (runMatch[3] === 'cancel') {
           const view = await cancelConversationRun(
             deps,
             actor.ownerId,

@@ -8,7 +8,7 @@
 分类按用途区分：`plans/` 存实施与演进规划，`guides/` 存实际操作指南，`verification/` 存带日期的历史验收与实验记录，`demo/` 存可重复运行的 smoke、故障注入和黄金用例说明。`design/`、`api/`、`schema/`、`prd/`、`agent/`、`adr/` 与 `references/` 保持原有职责；规划、操作说明及历史证据不覆盖有效业务合同。
 
 原生 Harness 源码分层入口及构建哈希范围见 [Harness README](../apps/harness/README.md)；历史基线的文件路径与证据仍按其原版本理解。
-用户安全点暂停与显式继续的接口和边界见 [conversations API §9](api/conversations/conversations_routes.md#9-用户安全点暂停和继续)；本人记忆管理见 [API §12](api/README.md#12-本人短期记忆)，完整 R3 合同见 design/23。
+用户安全点暂停、显式继续和 compact 接口见 [conversations API §9–§10](api/conversations/conversations_routes.md#9-用户安全点暂停和继续)；本人记忆管理见 [API §12](api/README.md#12-本人短期记忆)，R3 边界见 design/23。
 
 ## 一、PRD（产品需求，5 篇）
 
@@ -46,7 +46,7 @@
 | 20   | [本人目标内委托与授权](design/20-goal-scoped-delegation.md)              | 冻结实际能力与本人登记集合、资料编辑及有限创建、撞名恢复、v6/SSE v2 和执行生命周期；按事先明确的合同或预期核对真实效果            |
 | 21   | [受邀账户准入与恢复](design/21-invited-account-access.md)                | #112 显式准入/有限管理、停用后的流式披露边界、邀请/恢复/会话与前向升级；#131 本机口令重置；隔离实现证据与真实外部放行分列         |
 | 22   | [用户模型接入与运行绑定](design/22-model-provider-settings.md)           | Proposed：本人模型配置、加密凭据、冻结决议、SDK 受控流式出站与受限 Fake-IP 例外；真实外部验收独立                                 |
-| 23   | [R3 跨会话记忆与 compact](design/23-r3-short-term-memory-and-compact.md) | Proposed：通用暂停继续、摘要压缩、来源记忆及字面/向量检索；不代表已实施                                                           |
+| 23   | [R3 跨会话记忆与 compact](design/23-r3-short-term-memory-and-compact.md) | 通用暂停继续、摘要压缩、来源记忆及检索质量边界                                                                                    |
 
 活动列表为空与历史创建事实、批量请求部分完成及标题序号的证据边界见[design/09 §5](design/09-agent-runtime-and-checkpoint.md#5-toolgateway-交互required)。
 

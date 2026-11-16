@@ -4,10 +4,12 @@ import {
   HARNESS_MAX_FRAME_BYTES,
   HarnessRequestSchema,
   HarnessStartSchema,
+  HarnessR3ContextStartSchema,
   type ContextPolicy,
   type HarnessContextMeasurement,
   type HarnessModelStep,
   type HarnessRequest,
+  type HarnessR3ContextStart,
   type HarnessStart,
   type HarnessTool,
 } from '@along/contracts';
@@ -18,6 +20,7 @@ export interface HarnessServices {
   libraryPath?: string;
   maxIterations: number;
   maxTokens: number;
+  autoCompactPlanningTokens?: number;
   contextPolicy: ContextPolicy;
   measure?: (
     request: Extract<HarnessRequest, { type: 'measure_context' }>,
@@ -33,7 +36,7 @@ export interface HarnessServices {
 
 export interface NativeHarnessOptions {
   services: Omit<HarnessServices, 'model' | 'measure'>;
-  start: HarnessStart;
+  start: HarnessStart | HarnessR3ContextStart;
   signal: AbortSignal;
   handleRequest: (request: HarnessRequest) => Promise<unknown>;
   onExit?: () => void | Promise<void>;
@@ -62,10 +65,23 @@ async function writeLine(stream: Writable, json: string): Promise<void> {
 export async function runNativeHarness(options: NativeHarnessOptions): Promise<void> {
   const { services, signal, handleRequest } = options;
   if (signal.aborted) return;
-  const parsedStart = HarnessStartSchema.safeParse(options.start);
+  const initialJson = JSON.stringify(options.start);
+  if (Buffer.byteLength(initialJson, 'utf8') > HARNESS_MAX_FRAME_BYTES) {
+    if (options.start.protocol === 'harness/v8')
+      throw new HttpError(
+        422,
+        422,
+        'HARNESS_CONTEXT_LIMIT',
+        'harness context exceeds safe capacity',
+      );
+    throw protocolError();
+  }
+  const parsedStart =
+    options.start.protocol === 'harness/v8'
+      ? HarnessR3ContextStartSchema.safeParse(options.start)
+      : HarnessStartSchema.safeParse(options.start);
   if (!parsedStart.success) throw protocolError();
   const startJson = JSON.stringify(parsedStart.data);
-  if (Buffer.byteLength(startJson, 'utf8') > HARNESS_MAX_FRAME_BYTES) throw protocolError();
   const child = spawn(services.binaryPath, [], {
     shell: false,
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -129,6 +145,8 @@ export async function runNativeHarness(options: NativeHarnessOptions): Promise<v
   const frame = Buffer.allocUnsafe(HARNESS_MAX_FRAME_BYTES);
   let frameBytes = 0;
   let terminal = false;
+  const measureOnly =
+    parsedStart.data.protocol === 'harness/v8' && parsedStart.data.mode === 'measure_only';
   const seenReferences = new Set<string>();
   try {
     await writeLine(child.stdin, startJson);
@@ -167,6 +185,7 @@ export async function runNativeHarness(options: NativeHarnessOptions): Promise<v
         }
         if (seenReferences.has(parsed.data.request_ref)) throw protocolError();
         const request = parsed.data;
+        if (measureOnly !== (request.type === 'context_preview')) throw protocolError();
         if (request.protocol !== parsedStart.data.protocol) throw protocolError();
         seenReferences.add(request.request_ref);
         let reply: unknown;
@@ -187,6 +206,15 @@ export async function runNativeHarness(options: NativeHarnessOptions): Promise<v
             result = await handleRequest(request);
           }
           if (result === undefined) throw protocolError();
+          if (
+            measureOnly &&
+            (typeof result !== 'object' ||
+              result === null ||
+              !('accepted' in result) ||
+              result.accepted !== true ||
+              Object.keys(result).length !== 1)
+          )
+            throw protocolError();
           reply = {
             protocol: parsedStart.data.protocol,
             type: 'reply',
@@ -194,6 +222,7 @@ export async function runNativeHarness(options: NativeHarnessOptions): Promise<v
             value: result,
           };
           terminal =
+            (measureOnly && request.type === 'context_preview') ||
             request.type === 'suspend' ||
             (request.type === 'pause_point' &&
               typeof result === 'object' &&

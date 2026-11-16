@@ -114,3 +114,4 @@ export const PauseRunBodySchema = z
   .strict();
 export const ContinueRunBodySchema = z.object({ pause_id: z.string().uuid() }).strict();
 export const ActionKeySchema = z.string().uuid();
+export const CompactRunBodySchema = z.object({}).strict();

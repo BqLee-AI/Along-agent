@@ -192,8 +192,8 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
   it('initializes an empty database at the converged version', async () => {
     await isolated(async (url) => {
       await deployment(url, async (db) => {
-        expect((await db.initialize()).version).toBe('0032');
-        expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0032' });
+        expect((await db.initialize()).version).toBe('0036');
+        expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0036' });
       });
       await sql(url, async (client) => {
         expect(
@@ -205,7 +205,21 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
               "SELECT version FROM schema_migrations WHERE version >= '0024' ORDER BY version",
             )
           ).rows.map((row) => row.version),
-        ).toEqual(['0024', '0025', '0026', '0027', '0028', '0029', '0030', '0031', '0032']);
+        ).toEqual([
+          '0024',
+          '0025',
+          '0026',
+          '0027',
+          '0028',
+          '0029',
+          '0030',
+          '0031',
+          '0032',
+          '0033',
+          '0034',
+          '0035',
+          '0036',
+        ]);
       });
     });
   }, 30000);
@@ -223,7 +237,7 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
           await expect(db.initialize()).rejects.toMatchObject({
             code: 'explicit_upgrade_required',
           });
-          expect((await db.upgrade()).version).toBe('0032');
+          expect((await db.upgrade()).version).toBe('0036');
         });
         await sql(url, async (client) => {
           expect(await facts(client, history)).toEqual(before);
@@ -247,11 +261,25 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
                 "SELECT version FROM schema_migrations WHERE version >= '0024' ORDER BY version",
               )
             ).rows.map((row) => row.version),
-          ).toEqual(['0024', '0025', '0026', '0027', '0028', '0029', '0030', '0031', '0032']);
+          ).toEqual([
+            '0024',
+            '0025',
+            '0026',
+            '0027',
+            '0028',
+            '0029',
+            '0030',
+            '0031',
+            '0032',
+            '0033',
+            '0034',
+            '0035',
+            '0036',
+          ]);
         });
         await deployment(url, async (db) => {
-          expect((await db.initialize()).version).toBe('0032');
-          expect((await db.upgrade()).version).toBe('0032');
+          expect((await db.initialize()).version).toBe('0036');
+          expect((await db.upgrade()).version).toBe('0036');
         });
       });
     }, 30000);
@@ -289,7 +317,7 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
             url,
             async (db) => {
               expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0025' });
-              expect((await db.upgrade()).version).toBe('0032');
+              expect((await db.upgrade()).version).toBe('0036');
             },
             directory,
           );
@@ -335,7 +363,7 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
           version: '0026',
           reason: 'explicit_upgrade_required',
         });
-        expect((await db.upgrade()).version).toBe('0032');
+        expect((await db.upgrade()).version).toBe('0036');
       });
       await sql(url, async (client) => {
         expect(await facts(client, 'legacy')).toEqual(before.facts);
@@ -445,7 +473,7 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
           ).toBe('0');
         });
         await deployment(url, async (db) => {
-          expect((await db.upgrade()).version).toBe('0032');
+          expect((await db.upgrade()).version).toBe('0036');
         });
         await sql(url, async (client) => expect(await facts(client, 'legacy')).toEqual(before));
       } finally {

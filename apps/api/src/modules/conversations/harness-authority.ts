@@ -4,18 +4,24 @@ import { ZodError } from 'zod';
 import {
   HARNESS_PROTOCOL_VERSION,
   HARNESS_R3_PROTOCOL_VERSION,
-  HarnessPauseSnapshotSchema,
-  type HarnessPauseSnapshot,
+  HARNESS_CONTEXT_PROTOCOL_VERSION,
   HARNESS_MAX_FRAME_BYTES,
   HarnessSnapshotSchema,
+  HarnessPauseSnapshotSchema,
+  HarnessR3ContextStartSchema,
+  HarnessR3SnapshotSchema,
   HistoricalHarnessSnapshotSchema,
   HarnessStartSchema,
+  HarnessContextMeasurementSchema,
   HarnessModelStepSchema,
   HarnessRequestSchema,
   workspaceGrantSchema,
   type HarnessModelStep,
   type HarnessRequest,
   type HarnessSnapshot,
+  type HarnessPauseSnapshot,
+  type HarnessR3ContextStart,
+  type HarnessR3Snapshot,
   type HarnessStart,
   type HarnessApprovalDecision,
   type RunView,
@@ -32,6 +38,7 @@ import {
   HttpError,
   forbidden,
   notReady,
+  notFound,
   stateConflict,
   validationError,
 } from '../../http/errors.js';
@@ -49,6 +56,8 @@ import {
   HARNESS_TOOL_DEFINITIONS,
   DELEGATION_TOOL_DEFINITIONS,
   R3_MEMORY_TOOL_DEFINITIONS,
+  R3_COMPACT_MEMORY_TOOL_DEFINITIONS,
+  R3_MEMORY_SOURCE_TOOL_DEFINITION,
 } from '../tools/catalog.js';
 import { GOAL_CONTROL_TOOL } from './goal-control.js';
 import { validateGoalResult } from './goal-result.js';
@@ -58,9 +67,9 @@ import type { ConversationDeps, EventWriter, RunContext, StartResult } from './c
 import { readRunContextPolicy } from './context-policy.js';
 import {
   ActionKeySchema,
-  CancelRunBodySchema,
   ContinueRunBodySchema,
   PauseRunBodySchema,
+  CancelRunBodySchema,
   ResumeRunBodySchema,
 } from './schemas.js';
 import { routingRuntimeOf } from './harness-config.js';
@@ -95,9 +104,18 @@ import {
   viewOf,
 } from './run-state.js';
 import { resolveRunSelection } from '../model-providers/service.js';
+import { readR3Context, readR3ControlContext } from './r3-context.js';
+import {
+  readCompactContinuation,
+  readConsumedCompactContinuation,
+  validateR3SnapshotContext,
+} from './compact-continuation.js';
+import { executeCompact } from './compact-runtime.js';
+import { assertCompactEligibility, failCompact, recordCompactUsage } from './compact-operations.js';
+import { AutoCompactPolicySchema, shouldAutoCompact } from './auto-compact-policy.js';
 
 export interface HarnessSession {
-  start: HarnessStart;
+  start: HarnessStart | HarnessR3ContextStart;
   handleRequest(request: HarnessRequest): Promise<unknown>;
   close(): Promise<void>;
 }
@@ -165,14 +183,18 @@ async function contextOf(
   candidatePolicy?: { tableExists: boolean; modelBindingsExist: boolean },
 ): Promise<RunContext> {
   const frozen = run.frozen_context;
-  if (!frozen || !run.input_message_id) throw stateConflict('Run accepted input missing');
-  const message = (
-    await client.query<{ content: string }>(
-      `SELECT content FROM messages WHERE id=$1 AND owner_id=$2 AND conversation_id=$3 AND role='user'`,
-      [run.input_message_id, run.owner_id, run.conversation_id],
-    )
-  ).rows[0];
-  if (!message) throw stateConflict('Run accepted message missing');
+  if (!frozen) throw stateConflict('Run accepted input missing');
+  const control = frozen.execution_profile === 'compact-memory/1' && run.input_message_id === null;
+  if (!control && !run.input_message_id) throw stateConflict('Run accepted input missing');
+  const message = control
+    ? null
+    : (
+        await client.query<{ content: string }>(
+          `SELECT content FROM messages WHERE id=$1 AND owner_id=$2 AND conversation_id=$3 AND role='user'`,
+          [run.input_message_id, run.owner_id, run.conversation_id],
+        )
+      ).rows[0];
+  if (!control && !message) throw stateConflict('Run accepted message missing');
   if (
     deps.timeContext.ruleset_id !== frozen.rulesetId ||
     deps.timeContext.tzdb_version !== frozen.tzdbVersion ||
@@ -200,16 +222,53 @@ async function contextOf(
     throw unavailable();
   if (!supportsFrozenTools(run)) throw stateConflict('unsupported frozen tool in historical Run');
   if (!deps.modelTransport) throw unavailable();
-  const messageRefs = frozen.messageRefs ?? [run.input_message_id];
-  const messages = await readHarnessMessages(
-    client,
-    {
-      ownerId: run.owner_id,
-      conversationId: run.conversation_id,
-      userMessageId: run.input_message_id,
-    },
-    messageRefs,
-  );
+  const r3Context =
+    frozen.execution_profile === 'compact-memory/1'
+      ? control
+        ? await readR3ControlContext(client, {
+            ownerId: run.owner_id,
+            conversationId: run.conversation_id,
+            runId: run.id,
+          })
+        : await readR3Context(client, {
+            ownerId: run.owner_id,
+            conversationId: run.conversation_id,
+            runId: run.id,
+            userMessageId: run.input_message_id!,
+          })
+      : undefined;
+  if (
+    r3Context &&
+    (control
+      ? r3Context.input.type !== 'compact_control'
+      : r3Context.input.type !== 'user' ||
+        r3Context.input.message_id !== run.input_message_id ||
+        r3Context.input.content !== message!.content)
+  )
+    throw stateConflict('R3 context input differs from accepted message');
+  const messageRefs = frozen.messageRefs ?? (run.input_message_id ? [run.input_message_id] : []);
+  const messages = r3Context
+    ? [
+        ...r3Context.messages,
+        ...(control
+          ? []
+          : [
+              {
+                message_id: run.input_message_id!,
+                role: 'user' as const,
+                content: message!.content,
+              },
+            ]),
+      ]
+    : await readHarnessMessages(
+        client,
+        {
+          ownerId: run.owner_id,
+          conversationId: run.conversation_id,
+          userMessageId: run.input_message_id!,
+        },
+        messageRefs,
+      );
   return {
     ownerId: run.owner_id,
     conversationId: run.conversation_id,
@@ -217,9 +276,9 @@ async function contextOf(
     attemptId,
     requestId,
     execution: run.execution,
-    ...(frozen.execution_profile ? { executionProfile: frozen.execution_profile } : {}),
     userMessageId: run.input_message_id,
-    inputText: message.content,
+    ...(control ? { compactControl: true as const } : {}),
+    inputText: message?.content ?? '',
     confirmedTimezone: frozen.confirmedTimezone,
     anchorReceivedAtUtc: frozen.anchorReceivedAtUtc,
     receivedAtUtc: frozen.receivedAtUtc,
@@ -228,6 +287,9 @@ async function contextOf(
     maxIterations: run.budget_max_iterations,
     maxTokens: run.budget_max_tokens,
     allowlist: run.tools_allowlist,
+    ...(frozen.autoCompactPolicy
+      ? { autoCompactPolicy: AutoCompactPolicySchema.parse(frozen.autoCompactPolicy) }
+      : {}),
     ...(frozen.workspaceGrant ? { workspaceGrant: frozen.workspaceGrant } : {}),
     ...(frozen.workspaceGrants ? { workspaceGrants: frozen.workspaceGrants } : {}),
     ...(frozen.authorization_revision
@@ -236,7 +298,12 @@ async function contextOf(
           trustedExecutionContext: frozen.trustedExecutionContext,
         }
       : {}),
-    messageRefs,
+    ...(r3Context
+      ? { executionProfile: 'compact-memory/1' as const, r3Context }
+      : {
+          messageRefs,
+          ...(frozen.execution_profile ? { executionProfile: frozen.execution_profile } : {}),
+        }),
     messages,
     contextPolicy,
     ...(checkpointId ? { resumeCheckpointId: checkpointId } : {}),
@@ -256,15 +323,55 @@ function approvalAuthorizesActions(decision: HarnessApprovalDecision | null): bo
   );
 }
 
-function buildHarnessStart(
+export function buildHarnessStart(
   context: RunContext,
-  snapshot: HarnessSnapshot | HarnessPauseSnapshot | null,
+  snapshot: HarnessSnapshot | HarnessPauseSnapshot | HarnessR3Snapshot | null,
   observations: HarnessStart['observations'],
   approval: HarnessApprovalDecision | null,
   routingPolicy: RoutingPolicy | null = null,
   eligiblePhase: HarnessStart['eligible_phase'] = 'disabled',
-): HarnessStart {
+): HarnessStart | HarnessR3ContextStart {
   if (!context.contextPolicy || !context.messages) throw unavailable();
+  if (context.executionProfile === 'compact-memory/1') {
+    if (!context.r3Context || (snapshot && snapshot.version !== 4))
+      throw stateConflict('v8 context or snapshot unavailable');
+    const tools = [
+      ...(context.authorizationRevision
+        ? DELEGATION_TOOL_DEFINITIONS.map((tool) =>
+            tool.name === 'list_tasks' &&
+            !(
+              context.allowlist.includes('get_task') &&
+              context.allowlist.includes('cancel_reminder')
+            )
+              ? HARNESS_TOOL_DEFINITIONS.find((legacy) => legacy.name === 'list_tasks')!
+              : tool,
+          )
+        : HARNESS_TOOL_DEFINITIONS),
+      ...R3_COMPACT_MEMORY_TOOL_DEFINITIONS,
+      R3_MEMORY_SOURCE_TOOL_DEFINITION,
+    ].filter((tool) => context.allowlist.includes(tool.name));
+    const start: HarnessR3ContextStart = {
+      protocol: HARNESS_CONTEXT_PROTOCOL_VERSION,
+      type: 'start',
+      trusted_context: context.trustedExecutionContext ?? null,
+      r3_context: context.r3Context,
+      context_policy: context.contextPolicy,
+      routing_policy: routingPolicy,
+      eligible_phase: eligiblePhase,
+      tools,
+      budget: { max_iterations: context.maxIterations, max_tokens: context.maxTokens },
+      snapshot,
+      observations,
+      approval,
+      workspace: context.workspaceGrant
+        ? validateWorkspaceGrant(context.ownerId, context.workspaceGrant)
+        : null,
+    };
+    if (Buffer.byteLength(JSON.stringify(start), 'utf8') > HARNESS_MAX_FRAME_BYTES)
+      throw new HttpError(422, 422, 'HARNESS_CONTEXT_LIMIT', '工具上下文超过安全范围，已停下。');
+    return HarnessR3ContextStartSchema.parse(start);
+  }
+  if (snapshot?.version === 4) throw stateConflict('v8 snapshot requires v8 profile');
   if (
     snapshot &&
     (snapshot.message_refs.length !== context.messages.length ||
@@ -400,6 +507,10 @@ export async function inspectReleaseWaiting(
             modelBindingsExist: table.rows[0]!.modelBindingsExist,
           },
         );
+        if (snapshot.version === 4) {
+          await validateR3SnapshotContext(client, context, snapshot);
+          context.r3Context = snapshot.context;
+        }
         const observations = await readRunContextObservations(
           client,
           toolContext(context),
@@ -486,6 +597,15 @@ export async function cancelConversationRun(
         `UPDATE harness_pauses SET state='invalidated' WHERE run_id=$1 AND owner_id=$2 AND state IN ('pending','paused')`,
         [runId, ownerId],
       );
+      await client.query(
+        `UPDATE compact_operations
+         SET status=CASE WHEN status IN ('pending','running') THEN 'cancelled' ELSE status END,
+             candidate_status=CASE WHEN candidate_status='pending' THEN 'cancelled' ELSE candidate_status END,
+             updated_at=now()
+         WHERE run_id=$1 AND owner_id=$2 AND (status IN ('pending','running') OR
+               (status='published' AND candidate_status='pending'))`,
+        [runId, ownerId],
+      );
       if (
         locked.run.status === 'running' ||
         locked.run.status === 'suspended_approval' ||
@@ -559,7 +679,9 @@ export async function requestConversationPause(
     }
     if (
       locked.run.execution !== 'harness' ||
-      !['pause/1', 'pause-memory/1'].includes(locked.run.frozen_context?.execution_profile ?? '') ||
+      !['pause/1', 'pause-memory/1', 'compact-memory/1'].includes(
+        locked.run.frozen_context?.execution_profile ?? '',
+      ) ||
       locked.run.status !== 'running' ||
       locked.attempt.status !== 'running'
     )
@@ -572,6 +694,589 @@ export async function requestConversationPause(
     );
     return { status: 'pending' as const, pause_id: id };
   });
+}
+
+/** Register an internal compact pause only for a profile that can resume a
+ * compacted view. Existing v7 Runs can never be upgraded by this action. */
+export async function requestRuntimeCompactPause(
+  deps: ConversationDeps,
+  ownerId: string,
+  conversationId: string,
+  runId: string,
+  purpose: 'manual_compact' | 'automatic_compact',
+  key: string,
+): Promise<{ status: string; pause_id: string }> {
+  if (
+    !ActionKeySchema.safeParse(key).success ||
+    (purpose !== 'manual_compact' && purpose !== 'automatic_compact')
+  )
+    throw validationError('invalid compact pause request');
+  return withLatest(deps, ownerId, conversationId, runId, async (client, locked) => {
+    const prior = (
+      await client.query<{
+        id: string;
+        run_id: string;
+        conversation_id: string;
+        state: string;
+        reason: string;
+        purpose: string;
+        resume_source: string;
+      }>(
+        `SELECT id,run_id,conversation_id,state,reason,purpose,resume_source
+       FROM harness_pauses WHERE owner_id=$1 AND idempotency_key=$2`,
+        [ownerId, key],
+      )
+    ).rows[0];
+    if (prior) {
+      if (
+        prior.run_id !== runId ||
+        prior.conversation_id !== conversationId ||
+        prior.reason !== 'runtime' ||
+        prior.purpose !== purpose ||
+        prior.resume_source !== 'runtime'
+      )
+        throw stateConflict('pause idempotency key conflict');
+      return { status: prior.state, pause_id: prior.id };
+    }
+    if (
+      !deps.runDriver ||
+      locked.run.execution !== 'harness' ||
+      locked.run.frozen_context?.execution_lifecycle !== 'server-owned' ||
+      (locked.run.frozen_context?.execution_profile as string | undefined) !== 'compact-memory/1' ||
+      locked.run.status !== 'running' ||
+      locked.attempt.status !== 'running'
+    )
+      throw stateConflict('Run cannot compact', { status: locked.run.status });
+    for (const grant of locked.run.frozen_context.workspaceGrants ?? [])
+      validateWorkspaceGrant(ownerId, grant);
+    if (locked.run.frozen_context.workspaceGrant)
+      validateWorkspaceGrant(ownerId, locked.run.frozen_context.workspaceGrant);
+    if (!(await resolveRunSelection(client, ownerId, runId)))
+      throw stateConflict('frozen model binding unavailable');
+    const live = await client.query(
+      `SELECT 1 FROM harness_pauses WHERE run_id=$1 AND state IN ('pending','paused')`,
+      [runId],
+    );
+    if (live.rowCount) throw stateConflict('Run already has a pending pause');
+    const id = randomUUID();
+    const inserted = await client.query(
+      `INSERT INTO harness_pauses(id,owner_id,conversation_id,run_id,attempt_id,idempotency_key,reason,purpose,resume_source,state)
+       VALUES($1,$2,$3,$4,$5,$6,'runtime',$7,'runtime','pending') ON CONFLICT (owner_id,idempotency_key) DO NOTHING RETURNING id`,
+      [id, ownerId, conversationId, runId, locked.attempt.id, key, purpose],
+    );
+    if (!inserted.rowCount) {
+      const raced = (
+        await client.query<{
+          id: string;
+          run_id: string;
+          conversation_id: string;
+          reason: string;
+          purpose: string;
+          resume_source: string;
+          state: string;
+        }>(
+          `SELECT id,run_id,conversation_id,reason,purpose,resume_source,state FROM harness_pauses WHERE owner_id=$1 AND idempotency_key=$2`,
+          [ownerId, key],
+        )
+      ).rows[0];
+      if (
+        !raced ||
+        raced.run_id !== runId ||
+        raced.conversation_id !== conversationId ||
+        raced.reason !== 'runtime' ||
+        raced.purpose !== purpose ||
+        raced.resume_source !== 'runtime'
+      )
+        throw stateConflict('pause idempotency key conflict');
+      return { status: raced.state, pause_id: raced.id };
+    }
+    await client.query(
+      `INSERT INTO compact_operations(pause_id,owner_id,conversation_id,run_id,attempt_id,status)
+       VALUES($1,$2,$3,$4,$5,'pending')`,
+      [id, ownerId, conversationId, runId, locked.attempt.id],
+    );
+    return { status: 'pending' as const, pause_id: id };
+  });
+}
+
+export async function getCompactReceipt(
+  deps: ConversationDeps,
+  ownerId: string,
+  conversationId: string,
+  runId: string,
+  pauseId: string,
+) {
+  return withLatest(deps, ownerId, conversationId, runId, async (client, locked) => {
+    const row = (
+      await client.query<{
+        state: string;
+        status: string;
+        error_code: string | null;
+        candidate_status: string;
+        candidate_error_code: string | null;
+      }>(
+        `SELECT p.state,o.status,o.error_code,o.candidate_status,o.candidate_error_code
+      FROM harness_pauses p JOIN compact_operations o ON o.pause_id=p.id
+      WHERE p.id=$1 AND p.owner_id=$2 AND p.conversation_id=$3 AND p.run_id=$4
+        AND p.reason='runtime' AND p.purpose='manual_compact'`,
+        [pauseId, ownerId, conversationId, runId],
+      )
+    ).rows[0];
+    if (!row) throw notFound('compact operation not found');
+    const control = locked.run.input_message_id === null;
+    const runFailure =
+      locked.run.status === 'failed' &&
+      row.status !== 'failed' &&
+      (control || row.state === 'invalidated')
+        ? ((
+            await client.query<{ code: string | null }>(
+              `SELECT c.payload->'payload'->'error'->>'code' AS code FROM run_checkpoints c
+           JOIN run_attempts a ON a.id=c.attempt_id WHERE a.run_id=$1 AND c.kind='thread.failed'
+           ORDER BY c.event_seq DESC LIMIT 1`,
+              [runId],
+            )
+          ).rows[0]?.code ?? 'RUN_FAILED')
+        : null;
+    const status =
+      row.status === 'cancelled' ||
+      (row.state === 'invalidated' && locked.run.status === 'cancelled')
+        ? 'cancelled'
+        : row.status === 'failed' || runFailure
+          ? 'failed'
+          : row.state === 'consumed' && (!control || locked.run.status === 'done')
+            ? 'continued'
+            : row.status === 'published'
+              ? 'published'
+              : row.status === 'running'
+                ? 'compacting'
+                : row.state === 'paused'
+                  ? 'paused'
+                  : row.state === 'invalidated'
+                    ? 'failed'
+                    : 'pending';
+    return {
+      status,
+      run_id: runId,
+      pause_id: pauseId,
+      candidate_status: row.candidate_status,
+      ...(row.error_code || runFailure
+        ? { error_code: row.error_code ?? runFailure }
+        : row.state === 'invalidated' && status === 'failed'
+          ? { error_code: 'RUN_TERMINATED' }
+          : {}),
+      ...(row.candidate_error_code ? { candidate_error_code: row.candidate_error_code } : {}),
+    };
+  });
+}
+
+/** Consume only the runtime-owned compact pause, after all model and candidate
+ * facts are durable. The returned context is launched by the existing owner. */
+export async function continueRuntimeCompact(
+  deps: ConversationDeps,
+  ownerId: string,
+  conversationId: string,
+  runId: string,
+  pauseId: string,
+  requestId: string,
+  ownership?: RunOwnership,
+): Promise<RunContext> {
+  return withLatest(
+    deps,
+    ownerId,
+    conversationId,
+    runId,
+    async (client, locked) => {
+      if (
+        locked.run.frozen_context?.execution_profile !== 'compact-memory/1' ||
+        locked.run.status !== 'paused'
+      )
+        throw stateConflict('compact continuation unavailable');
+      const binding = {
+        ownerId,
+        conversationId,
+        runId,
+        attemptId: locked.attempt.id,
+        pauseId,
+        ownership,
+      };
+      const guard = async (guardClient: PoolClient) => {
+        for (const grant of locked.run.frozen_context?.workspaceGrants ?? [])
+          validateWorkspaceGrant(ownerId, grant);
+        if (locked.run.frozen_context?.workspaceGrant)
+          validateWorkspaceGrant(ownerId, locked.run.frozen_context.workspaceGrant);
+        if (!(await resolveRunSelection(guardClient, ownerId, runId)))
+          throw stateConflict('frozen model binding unavailable');
+      };
+      const restored = await readCompactContinuation(
+        client,
+        binding,
+        locked.run.input_message_id,
+        {
+          maxIterations: locked.run.budget_max_iterations,
+          maxTokens: locked.run.budget_max_tokens,
+        },
+        guard,
+      );
+      const attemptId = randomUUID();
+      const context = await contextOf(client, deps, locked.run, attemptId, requestId);
+      if (ownership) context.ownership = ownership;
+      context.r3Context = restored.context;
+      const observations = await readRunContextObservations(
+        client,
+        toolContext(context),
+        restored.snapshot.tool_refs,
+        {
+          project: context.allowlist.includes('read_run_observation'),
+        },
+      );
+      buildHarnessStart(context, restored.snapshot, observations, null);
+      await insertAttempt(client, {
+        attemptId,
+        ownerId,
+        runId,
+        attemptNo: locked.attempt.attempt_no + 1,
+        ...(ownership ? { leaseToken: ownership.token } : {}),
+      });
+      await client.query(
+        `INSERT INTO harness_pause_resumes(owner_id,idempotency_key,run_id,pause_id,attempt_id,source)
+       VALUES($1,$2,$3,$2,$4,'runtime')`,
+        [ownerId, pauseId, runId, attemptId],
+      );
+      await client.query(
+        `INSERT INTO compact_continuations(pause_id,attempt_id,snapshot,context) VALUES($1,$2,$3::jsonb,$4::jsonb)`,
+        [pauseId, attemptId, JSON.stringify(restored.snapshot), JSON.stringify(restored.context)],
+      );
+      await client.query(`UPDATE harness_pauses SET state='consumed' WHERE id=$1`, [pauseId]);
+      await client.query(`UPDATE agent_runs SET status='running' WHERE id=$1`, [runId]);
+      return context;
+    },
+    true,
+    ownership,
+  );
+}
+
+/** Run only after the native process has durably stopped at a runtime pause.
+ * All external I/O is outside the authority transaction. */
+export async function executeRuntimeCompact(
+  deps: ConversationDeps,
+  context: RunContext,
+  interruption?: AbortSignal,
+): Promise<RunContext | null> {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  context.ownership?.signal.addEventListener('abort', abort, { once: true });
+  interruption?.addEventListener('abort', abort, { once: true });
+  if (context.ownership?.signal.aborted || interruption?.aborted) controller.abort();
+  active.set(context.runId, controller);
+  try {
+    return await executeRuntimeCompactWork(deps, context, controller.signal);
+  } finally {
+    context.ownership?.signal.removeEventListener('abort', abort);
+    interruption?.removeEventListener('abort', abort);
+    if (active.get(context.runId) === controller) active.delete(context.runId);
+  }
+}
+
+async function executeRuntimeCompactWork(
+  deps: ConversationDeps,
+  context: RunContext,
+  signal: AbortSignal,
+): Promise<RunContext | null> {
+  if (!deps.harness || !deps.modelTransport || !context.contextPolicy || !context.ownership)
+    return null;
+  const pool = poolOf(deps);
+  const tx = <T>(fn: (client: PoolClient) => Promise<T>) =>
+    withRunTransaction(pool, context.ownership, fn);
+  const prepared = await tx(async (client) => {
+    const locked = await lockRun(client, context, false, false);
+    if (
+      locked.run.status !== 'paused' ||
+      locked.run.frozen_context?.execution_profile !== 'compact-memory/1'
+    )
+      return null;
+    const row = (
+      await client.query<{ id: string; snapshot: unknown; purpose: string }>(
+        `SELECT p.id,p.snapshot,p.purpose FROM harness_pauses p JOIN compact_operations o ON o.pause_id=p.id
+       WHERE p.owner_id=$1 AND p.conversation_id=$2 AND p.run_id=$3 AND p.attempt_id=$4
+         AND p.state='paused' AND p.reason='runtime' AND o.status='pending'`,
+        [context.ownerId, context.conversationId, context.runId, context.attemptId],
+      )
+    ).rows[0];
+    if (!row) return null;
+    const snapshot = HarnessR3SnapshotSchema.parse(row.snapshot);
+    await validateR3SnapshotContext(client, context, snapshot);
+    const selected = await resolveRunSelection(client, context.ownerId, context.runId);
+    if (!selected || selected.model_id !== context.contextPolicy!.model_binding.model)
+      throw stateConflict('frozen model binding unavailable');
+    const observations = await readRunContextObservations(
+      client,
+      toolContext(context),
+      snapshot.tool_refs,
+      {
+        project: context.allowlist.includes('read_run_observation'),
+      },
+    );
+    return { pauseId: row.id, snapshot, selected, observations, purpose: row.purpose };
+  });
+  if (!prepared) return null;
+  const { snapshot, pauseId, observations } = prepared;
+  const binding = {
+    ownerId: context.ownerId,
+    conversationId: context.conversationId,
+    runId: context.runId,
+    attemptId: context.attemptId,
+    pauseId,
+    ownership: context.ownership,
+  };
+  const guard = async (client: PoolClient, ids: readonly string[]) => {
+    for (const grant of context.workspaceGrants ?? [])
+      validateWorkspaceGrant(context.ownerId, grant);
+    if (context.workspaceGrant) validateWorkspaceGrant(context.ownerId, context.workspaceGrant);
+    const selected = await resolveRunSelection(client, context.ownerId, context.runId);
+    if (!selected || selected.model_id !== context.contextPolicy!.model_binding.model)
+      throw stateConflict('frozen model binding unavailable');
+    const row = (
+      await client.query<{
+        snapshot: unknown;
+        head: string | null;
+        own_head: boolean;
+        usage_recorded: boolean;
+        usage_tokens: string | null;
+      }>(
+        `SELECT p.snapshot,h.summary_id AS head,
+          EXISTS(SELECT 1 FROM compact_summaries s WHERE s.id=h.summary_id AND s.freeze_id=o.freeze_id) AS own_head,
+          o.usage_recorded,o.usage_tokens::text
+        FROM harness_pauses p JOIN compact_operations o ON o.pause_id=p.id
+        LEFT JOIN compact_heads h ON h.owner_id=p.owner_id AND h.conversation_id=p.conversation_id
+        WHERE p.id=$1 AND p.owner_id=$2 AND p.run_id=$3`,
+        [pauseId, context.ownerId, context.runId],
+      )
+    ).rows[0];
+    if (
+      !row ||
+      JSON.stringify(HarnessR3SnapshotSchema.parse(row.snapshot)) !== JSON.stringify(snapshot) ||
+      ((row.head ?? null) !== (snapshot.context.summary?.id ?? null) && !row.own_head)
+    )
+      throw stateConflict('compact protected view changed');
+    const permitted = new Set(snapshot.original_manifest.message_ids);
+    if (ids.some((id) => !permitted.has(id) || id === context.userMessageId))
+      throw stateConflict('compact source outside protected view');
+    if (
+      row.usage_recorded &&
+      (row.usage_tokens === null ||
+        (snapshot.usage.tokens !== null &&
+          snapshot.usage.tokens + Number(row.usage_tokens) >= context.maxTokens) ||
+        snapshot.usage.iterations + 1 >= context.maxIterations)
+    )
+      throw stateConflict('compact leaves no continuation budget');
+    const states = await readRunInvocationStates(client, toolContext(context));
+    for (const state of states) {
+      if (state.state !== 'completed' || state.outcome_kind === 'failed')
+        throw stateConflict('compact has unresolved tool effects');
+      if (
+        state.outcome_kind === 'approval_pending' &&
+        (!state.approval_id ||
+          !snapshot.tool_refs.includes(state.invocation_id) ||
+          (await readRunApprovalDecision(client, context, state.invocation_id, state.approval_id))
+            .status === 'pending')
+      )
+        throw stateConflict('compact has unresolved approval');
+    }
+  };
+  const reject = async (code: string) => {
+    await tx(async (client) => {
+      await assertCompactEligibility(client, binding, (c) => guard(c, []));
+      await failCompact(client, binding, code);
+    });
+  };
+  try {
+    if (
+      (snapshot.usage.tokens !== null && snapshot.usage.tokens >= context.maxTokens) ||
+      snapshot.native_state.pending_model ||
+      snapshot.usage.iterations + 1 >= context.maxIterations ||
+      !snapshot.context.messages.length
+    ) {
+      await reject(
+        snapshot.context.messages.length
+          ? 'COMPACT_CONTINUATION_UNAVAILABLE'
+          : 'COMPACT_NO_CONTENT',
+      );
+    } else {
+      const transport = await deps.modelTransport(prepared.selected);
+      await executeCompact({
+        pool,
+        binding,
+        messageIds: snapshot.context.messages.map((message) => message.message_id),
+        promptRevision: 'compact/1',
+        policy: context.contextPolicy,
+        budget: {
+          iterationsRemaining: context.maxIterations - snapshot.usage.iterations,
+          continuationIterations:
+            prepared.purpose === 'automatic_compact'
+              ? context.autoCompactPolicy!.continuationIterations
+              : 1,
+          tokensRemaining:
+            snapshot.usage.tokens === null ? null : context.maxTokens - snapshot.usage.tokens,
+          continuationTokens:
+            prepared.purpose === 'automatic_compact'
+              ? context.autoCompactPolicy!.continuationTokens
+              : context.contextPolicy.completion_cap,
+          maxOutputTokens: context.contextPolicy.completion_cap,
+        },
+        transport,
+        signal,
+        guard,
+        validateContinuation: async (frozen, result) => {
+          if (!result.usage) throw stateConflict('compact continuation measurement unavailable');
+          const total =
+            snapshot.usage.tokens === null
+              ? null
+              : snapshot.usage.tokens + result.usage.total_tokens;
+          if (total !== null && (!Number.isSafeInteger(total) || total >= context.maxTokens))
+            throw stateConflict('compact continuation budget exhausted');
+          const revision = (
+            await pool.query<{ revision: string }>(
+              'SELECT (previous_revision+1)::text AS revision FROM compact_freezes WHERE id=$1 AND owner_id=$2',
+              [frozen.freezeId, context.ownerId],
+            )
+          ).rows[0]?.revision;
+          if (!revision) throw stateConflict('compact freeze unavailable');
+          const covered = new Set(frozen.coverageMessageIds);
+          const candidate = {
+            ...snapshot.context,
+            summary: {
+              id: randomUUID(),
+              revision,
+              text: result.text,
+              message_ids: frozen.coverageMessageIds,
+            },
+            messages: snapshot.context.messages.filter(
+              (message) => !covered.has(message.message_id),
+            ),
+          };
+          const nextSnapshot = {
+            ...snapshot,
+            usage: { iterations: snapshot.usage.iterations + 1, tokens: total },
+          };
+          const start = buildHarnessStart(
+            { ...context, r3Context: candidate },
+            nextSnapshot,
+            observations,
+            null,
+          );
+          if (start.protocol !== HARNESS_CONTEXT_PROTOCOL_VERSION)
+            throw stateConflict('compact requires v8');
+          let seen = false;
+          await runNativeHarness({
+            services: deps.harness!,
+            start: { ...start, mode: 'measure_only' },
+            signal,
+            detachOnAbort: true,
+            handleRequest: async (request) => {
+              if (
+                seen ||
+                request.type !== 'context_preview' ||
+                request.pending_model ||
+                request.remaining_tokens !== (total === null ? null : context.maxTokens - total) ||
+                request.max_output_tokens === 0
+              )
+                throw stateConflict('compact continuation preview unavailable');
+              seen = true;
+              const { pending_model: _pending, ...preview } = request;
+              void _pending;
+              const measurement = HarnessContextMeasurementSchema.parse(
+                await transport.measure(
+                  { ...preview, type: 'measure_context' },
+                  context.authorizationRevision ? [...start.tools, GOAL_CONTROL_TOOL] : start.tools,
+                  context.contextPolicy!,
+                ),
+              );
+              const meter = measurement.input_meter;
+              if (
+                measurement.limit_reason ||
+                measurement.wire_bytes > HARNESS_MAX_FRAME_BYTES ||
+                measurement.http_bytes > HARNESS_MAX_FRAME_BYTES ||
+                measurement.output_ceiling < request.max_output_tokens ||
+                (request.remaining_tokens !== null &&
+                  meter.quality !== 'unavailable' &&
+                  (meter.input_tokens === null ||
+                    meter.input_tokens + request.max_output_tokens > request.remaining_tokens))
+              )
+                throw stateConflict('compact continuation exceeds measured capacity');
+              return { accepted: true };
+            },
+          });
+          if (!seen || signal.aborted)
+            throw stateConflict('compact continuation preview unavailable');
+        },
+      });
+    }
+  } catch (error) {
+    // Preserve unknown usage if a provider reservation committed but the
+    // surrounding transport failed before returning an accountable result.
+    await withTransaction(pool, async (client) => {
+      const operation = (
+        await client.query<{ status: string; call_started: boolean; usage_recorded: boolean }>(
+          `SELECT status,call_started,usage_recorded FROM compact_operations WHERE pause_id=$1 AND owner_id=$2`,
+          [pauseId, context.ownerId],
+        )
+      ).rows[0];
+      if (!operation || !['pending', 'running'].includes(operation.status)) return;
+      if (operation.call_started && !operation.usage_recorded)
+        await recordCompactUsage(client, binding, null);
+      await failCompact(
+        client,
+        binding,
+        error instanceof HttpError ? error.errorCode : 'COMPACT_RUNTIME_FAILED',
+      );
+    });
+  }
+  try {
+    return await continueRuntimeCompact(
+      deps,
+      context.ownerId,
+      context.conversationId,
+      context.runId,
+      pauseId,
+      context.requestId,
+      context.ownership,
+    );
+  } catch {
+    // A failed control or automatic compact has no safe conversational successor.
+    // Cancellation or lost authority wins over terminalizing the paused Run.
+    if (context.compactControl || prepared.purpose === 'automatic_compact') {
+      try {
+        await tx(async (client) => {
+          const locked = await lockRun(client, context, false, false);
+          if (locked.run.status !== 'paused') return;
+          const failed = (
+            await client.query<{ error_code: string | null }>(
+              `SELECT error_code FROM compact_operations WHERE pause_id=$1 AND owner_id=$2 AND status='failed'`,
+              [pauseId, context.ownerId],
+            )
+          ).rows[0];
+          if (!failed) return;
+          await commitTerminal(
+            client,
+            context,
+            'failed',
+            {
+              ...eventPayload(context),
+              error: {
+                code: failed.error_code ?? 'COMPACT_FAILED',
+                message: 'compact failed',
+                http_status: 422,
+              },
+            },
+            { preserveAttemptStatus: true },
+          );
+        });
+      } catch {
+        /* cancellation or lost authority wins */
+      }
+    }
+    return null;
+  }
 }
 
 export async function continueConversationPause(
@@ -649,7 +1354,7 @@ export async function continueConversationPause(
         if (
           locked.run.status !== 'paused' ||
           !locked.run.frozen_context ||
-          !['pause/1', 'pause-memory/1'].includes(
+          !['pause/1', 'pause-memory/1', 'compact-memory/1'].includes(
             locked.run.frozen_context.execution_profile ?? '',
           ) ||
           !pause ||
@@ -659,7 +1364,10 @@ export async function continueConversationPause(
           pause.purpose !== 'none'
         )
           throw stateConflict('Run has no matching user pause');
-        const snapshot = HarnessPauseSnapshotSchema.parse(pause.snapshot);
+        const snapshot =
+          locked.run.frozen_context?.execution_profile === 'compact-memory/1'
+            ? HarnessR3SnapshotSchema.parse(pause.snapshot)
+            : HarnessPauseSnapshotSchema.parse(pause.snapshot);
         const finalAnswer =
           !locked.run.frozen_context.authorization_revision &&
           snapshot.native_state.pending_model?.tool_calls.length === 0;
@@ -683,6 +1391,10 @@ export async function continueConversationPause(
         const attemptId = randomUUID();
         const context = await contextOf(client, deps, locked.run, attemptId, requestId);
         if (ownership) context.ownership = ownership;
+        if (snapshot.version === 4) {
+          await validateR3SnapshotContext(client, context, snapshot);
+          context.r3Context = snapshot.context;
+        }
         const observations = await readRunContextObservations(
           client,
           toolContext(context),
@@ -882,6 +1594,10 @@ export async function resumeConversationRun(
           input.checkpoint_id,
         );
         if (ownership) context.ownership = ownership;
+        if (snapshot.version === 4) {
+          await validateR3SnapshotContext(client, context, snapshot);
+          context.r3Context = snapshot.context;
+        }
         const afterSeq = ownership
           ? Number(
               (
@@ -964,9 +1680,9 @@ export async function createHarnessSession(
       )
     ).rows[0];
     const pausedResume = (
-      await client.query<{ snapshot: unknown }>(
-        `SELECT p.snapshot FROM harness_pause_resumes r JOIN harness_pauses p ON p.id=r.pause_id
-         WHERE r.attempt_id=$1 AND r.run_id=$2 AND r.owner_id=$3 AND p.state='consumed'`,
+      await client.query<{ snapshot: unknown; source: string }>(
+        `SELECT p.snapshot,r.source FROM harness_pause_resumes r JOIN harness_pauses p ON p.id=r.pause_id
+       WHERE r.attempt_id=$1 AND r.run_id=$2 AND r.owner_id=$3 AND p.state='consumed'`,
         [supplied.attemptId, supplied.runId, supplied.ownerId],
       )
     ).rows[0];
@@ -980,11 +1696,23 @@ export async function createHarnessSession(
       resume?.checkpoint_id,
     );
     if (supplied.ownership) context.ownership = supplied.ownership;
-    const snapshot = pausedResume
-      ? HarnessPauseSnapshotSchema.parse(pausedResume.snapshot)
-      : resume
-        ? await readSnapshot(client, locked.run, resume.checkpoint_id)
+    const compact =
+      pausedResume?.source === 'runtime'
+        ? await readConsumedCompactContinuation(client, context)
         : null;
+    const snapshot =
+      compact?.snapshot ??
+      (pausedResume
+        ? locked.run.frozen_context?.execution_profile === 'compact-memory/1'
+          ? HarnessR3SnapshotSchema.parse(pausedResume.snapshot)
+          : HarnessPauseSnapshotSchema.parse(pausedResume.snapshot)
+        : resume
+          ? await readSnapshot(client, locked.run, resume.checkpoint_id)
+          : null);
+    if (snapshot?.version === 4) {
+      await validateR3SnapshotContext(client, context, snapshot);
+      context.r3Context = compact?.context ?? snapshot.context;
+    }
     const observations = snapshot
       ? await readRunContextObservations(client, toolContext(context), snapshot.tool_refs, {
           project: context.allowlist.includes('read_run_observation'),
@@ -1011,6 +1739,7 @@ export async function createHarnessSession(
     );
     const eligible =
       !context.trustedExecutionContext?.continuation &&
+      !context.r3Context?.summary &&
       locked.attempt.attempt_no === 1 &&
       !resume &&
       !snapshot &&
@@ -1019,7 +1748,7 @@ export async function createHarnessSession(
       !checkpoint.rowCount &&
       policy?.payload.policy.mode !== 'off' &&
       policy !== null;
-    return { context, snapshot, observations, approval, policy, eligible, decision };
+    return { context, snapshot, observations, approval, policy, eligible, decision, compact };
   });
   const { context } = initial;
   const start = buildHarnessStart(
@@ -1032,7 +1761,9 @@ export async function createHarnessSession(
   );
   const tools = context.authorizationRevision ? [...start.tools, GOAL_CONTROL_TOOL] : start.tools;
   let stopped = false;
-  let correctingGoal = false;
+  let correctingGoal =
+    (initial.snapshot?.version === 3 || initial.snapshot?.version === 4) &&
+    initial.snapshot.native_state.closing_goal;
   let lastSnapshot = initial.snapshot;
   const delivered = new Set(initial.snapshot?.tool_refs ?? []);
   const cumulative = { ...(initial.snapshot?.usage ?? { iterations: 0, tokens: 0 }) };
@@ -1050,11 +1781,20 @@ export async function createHarnessSession(
   let encodingCount = 0;
   let encodingPending = false;
   let routingDecision = initial.decision;
-  let modelStarted = initial.snapshot?.version === 3 && initial.snapshot.usage.iterations > 0;
+  let modelStarted =
+    (initial.snapshot?.version === 3 || initial.snapshot?.version === 4) &&
+    initial.snapshot.usage.iterations > 0;
   let latestModelMessage =
-    initial.snapshot?.version === 3 ? initial.snapshot.native_state.pending_model : null;
+    initial.snapshot?.version === 3 || initial.snapshot?.version === 4
+      ? initial.snapshot.native_state.pending_model
+      : null;
   let modelToolCount = delivered.size;
   let nextPermit = false;
+  let lastMeasurement: {
+    measurement: ReturnType<typeof HarnessContextMeasurementSchema.parse>;
+    remaining: number | null;
+    output: number;
+  } | null = null;
   let modelStream: {
     ref: string;
     iterator: AsyncGenerator<HarnessModelStep, void, unknown>;
@@ -1305,19 +2045,31 @@ export async function createHarnessSession(
     ]);
     for (const event of events) await send(event);
   }
-  async function validateSnapshot(client: PoolClient, snapshot: HarnessSnapshot): Promise<void> {
+  async function validateSnapshot(
+    client: PoolClient,
+    snapshot: HarnessSnapshot | HarnessR3Snapshot,
+  ): Promise<void> {
     if (
-      modelStarted &&
+      (modelStarted || snapshot.version === 4) &&
       (snapshot.usage.iterations !== cumulative.iterations ||
         snapshot.usage.tokens !== cumulative.tokens)
     )
       throw stateConflict('snapshot usage must match accepted model steps');
-    const frozenRefs = context.messageRefs ?? [context.userMessageId];
-    if (
-      snapshot.message_refs.length !== frozenRefs.length ||
-      snapshot.message_refs.some((ref, index) => ref !== frozenRefs[index])
-    )
-      throw stateConflict('snapshot message reference conflict');
+    if (snapshot.version === 4) {
+      if (
+        context.executionProfile !== 'compact-memory/1' ||
+        routingIdentity(snapshot.context) !== routingIdentity(context.r3Context)
+      )
+        throw stateConflict('snapshot context differs from trusted execution view');
+      await validateR3SnapshotContext(client, context, snapshot);
+    } else {
+      const frozenRefs = context.messageRefs ?? [context.userMessageId];
+      if (
+        snapshot.message_refs.length !== frozenRefs.length ||
+        snapshot.message_refs.some((ref, index) => ref !== frozenRefs[index])
+      )
+        throw stateConflict('snapshot message reference conflict');
+    }
     if (new Set(snapshot.tool_refs).size !== snapshot.tool_refs.length)
       throw stateConflict('duplicate snapshot tool reference');
     const states = await readRunInvocationStates(client, toolContext(context));
@@ -1333,6 +2085,30 @@ export async function createHarnessSession(
       snapshot.tool_refs,
       { project: context.allowlist.includes('read_run_observation') },
     );
+    if (snapshot.version === 4) {
+      if (snapshot.native_state.units.length !== snapshot.tool_refs.length)
+        throw stateConflict('snapshot must retain each accepted observation');
+      for (let i = 0; i < snapshot.native_state.units.length; i++) {
+        const unit = snapshot.native_state.units[i]!;
+        if (unit.observation.invocation_id !== snapshot.tool_refs[i])
+          throw stateConflict('snapshot observation order conflict');
+        const source = await readRunContextSource(
+          client,
+          toolContext(context),
+          unit.observation.invocation_id,
+          unit.observation.view,
+        );
+        if (routingIdentity(source) !== routingIdentity(unit.observation))
+          throw stateConflict('snapshot observation differs from accepted result');
+      }
+      if (
+        snapshot.native_state.pending_model &&
+        (modelToolCount !== delivered.size ||
+          routingIdentity(snapshot.native_state.pending_model) !==
+            routingIdentity(latestModelMessage))
+      )
+        throw stateConflict('snapshot pending model differs from accepted response');
+    }
     const next = accepted.reduce((max, row) => {
       const match = /^harness\/([1-9]\d*)$/.exec(row.call_key);
       if (!match) throw stateConflict('invalid harness invocation slot');
@@ -1357,7 +2133,9 @@ export async function createHarnessSession(
       )
     ).rows[0];
     const baseline = previous
-      ? HistoricalHarnessSnapshotSchema.parse(previous.payload)
+      ? context.executionProfile === 'compact-memory/1'
+        ? HarnessR3SnapshotSchema.parse(previous.payload)
+        : HistoricalHarnessSnapshotSchema.parse(previous.payload)
       : lastSnapshot;
     if (
       baseline &&
@@ -1425,6 +2203,18 @@ export async function createHarnessSession(
         const request = HarnessRequestSchema.parse(suppliedRequest);
         if (request.protocol !== start.protocol)
           throw stateConflict('harness protocol version conflict');
+        if (
+          context.compactControl &&
+          !(['pause_probe', 'pause_point', 'finish'] as const).some((type) => type === request.type)
+        )
+          throw stateConflict('compact control cannot execute conversational actions');
+        if (
+          context.compactControl &&
+          request.type === 'finish' &&
+          request.outcome === 'done' &&
+          (!initial.snapshot || !initial.compact)
+        )
+          throw stateConflict('compact control requires a published successor');
         await guarded(async () => undefined);
         if (modelStream && request.type === 'finish' && request.outcome !== 'done')
           await closeModel();
@@ -1432,27 +2222,89 @@ export async function createHarnessSession(
           throw stateConflict('model stream must complete before another action');
         if (request.type === 'pause_probe') {
           if (
-            !['pause/1', 'pause-memory/1'].includes(context.executionProfile ?? '') ||
-            request.protocol !== HARNESS_R3_PROTOCOL_VERSION
+            !(
+              ((context.executionProfile === 'pause/1' ||
+                context.executionProfile === 'pause-memory/1') &&
+                request.protocol === HARNESS_R3_PROTOCOL_VERSION) ||
+              (context.executionProfile === 'compact-memory/1' &&
+                request.protocol === HARNESS_CONTEXT_PROTOCOL_VERSION)
+            )
           )
             throw stateConflict('pause protocol not enabled for Run');
           return guarded(async (client) => {
             await assertActionAuthority(client);
-            const pending =
+            let pending =
               (
                 await client.query(
                   `SELECT 1 FROM harness_pauses WHERE owner_id=$1 AND run_id=$2 AND attempt_id=$3 AND state='pending'`,
                   [context.ownerId, context.runId, context.attemptId],
                 )
               ).rowCount !== 0;
+            const measured = lastMeasurement;
+            lastMeasurement = null;
+            if (
+              !pending &&
+              request.after_measurement &&
+              nextPermit &&
+              !context.compactControl &&
+              context.executionProfile === 'compact-memory/1' &&
+              context.r3Context &&
+              context.contextPolicy &&
+              measured &&
+              shouldAutoCompact({
+                policy: context.autoCompactPolicy ?? null,
+                contextPolicy: context.contextPolicy,
+                measurement: measured.measurement,
+                remainingTokens: measured.remaining,
+                maxOutputTokens: measured.output,
+                iterationsRemaining: context.maxIterations - cumulative.iterations,
+                uncoveredMessageCount: context.r3Context.messages.length,
+              })
+            ) {
+              const prior = await client.query(
+                `SELECT 1 FROM harness_pauses WHERE owner_id=$1 AND run_id=$2 AND purpose='automatic_compact'
+                 AND snapshot->'context'=$3::jsonb LIMIT 1`,
+                [context.ownerId, context.runId, JSON.stringify(context.r3Context)],
+              );
+              const live = await client.query(
+                `SELECT 1 FROM harness_pauses WHERE run_id=$1 AND state IN ('pending','paused')`,
+                [context.runId],
+              );
+              if (!prior.rowCount && !live.rowCount) {
+                const id = randomUUID();
+                await client.query(
+                  `INSERT INTO harness_pauses(id,owner_id,conversation_id,run_id,attempt_id,idempotency_key,reason,purpose,resume_source,state)
+                   VALUES($1,$2,$3,$4,$5,$6,'runtime','automatic_compact','runtime','pending')`,
+                  [
+                    id,
+                    context.ownerId,
+                    context.conversationId,
+                    context.runId,
+                    context.attemptId,
+                    randomUUID(),
+                  ],
+                );
+                await client.query(
+                  `INSERT INTO compact_operations(pause_id,owner_id,conversation_id,run_id,attempt_id,status)
+                   VALUES($1,$2,$3,$4,$5,'pending')`,
+                  [id, context.ownerId, context.conversationId, context.runId, context.attemptId],
+                );
+                pending = true;
+              }
+            }
             nextPermit = !pending;
             return { pending };
           });
         }
         if (request.type === 'pause_point') {
           if (
-            !['pause/1', 'pause-memory/1'].includes(context.executionProfile ?? '') ||
-            request.protocol !== HARNESS_R3_PROTOCOL_VERSION
+            !(
+              ((context.executionProfile === 'pause/1' ||
+                context.executionProfile === 'pause-memory/1') &&
+                request.protocol === HARNESS_R3_PROTOCOL_VERSION) ||
+              (context.executionProfile === 'compact-memory/1' &&
+                request.protocol === HARNESS_CONTEXT_PROTOCOL_VERSION)
+            )
           )
             throw stateConflict('pause protocol not enabled for Run');
           const paused = await guarded(async (client) => {
@@ -1469,6 +2321,8 @@ export async function createHarnessSession(
             }
             await assertActionAuthority(client);
             const snapshot = request.context;
+            if (snapshot.version === 4 && snapshot.waiting)
+              throw stateConflict('pause cannot consume approval waiting');
             if (
               snapshot.native_state.pending_model &&
               (modelToolCount !== delivered.size ||
@@ -1484,14 +2338,19 @@ export async function createHarnessSession(
             const states = await readRunInvocationStates(client, toolContext(context));
             if (states.some((row) => row.state !== 'completed' || row.outcome_kind === 'failed'))
               throw stateConflict('pause requires all tool effects to be resolved');
-            await validateSnapshot(client, {
-              version: 2,
-              message_refs: snapshot.message_refs,
-              tool_refs: snapshot.tool_refs,
-              next_call_no: snapshot.next_call_no,
-              usage: snapshot.usage,
-              waiting: null,
-            });
+            await validateSnapshot(
+              client,
+              snapshot.version === 4
+                ? snapshot
+                : {
+                    version: 2,
+                    message_refs: snapshot.message_refs,
+                    tool_refs: snapshot.tool_refs,
+                    next_call_no: snapshot.next_call_no,
+                    usage: snapshot.usage,
+                    waiting: null,
+                  },
+            );
             if (snapshot.native_state.units.length !== snapshot.tool_refs.length)
               throw stateConflict('pause must retain each accepted observation');
             for (let i = 0; i < snapshot.native_state.units.length; i++) {
@@ -1564,7 +2423,7 @@ export async function createHarnessSession(
               facts = validateFacts(
                 routing.facts(
                   {
-                    messageId: context.userMessageId,
+                    messageId: context.userMessageId!,
                     text: context.inputText,
                     messages: context.messages!.map(({ role, content }) => ({ role, content })),
                     hasPendingApproval,
@@ -1649,7 +2508,8 @@ export async function createHarnessSession(
             }
             if (
               context.executionProfile === 'pause/1' ||
-              context.executionProfile === 'pause-memory/1'
+              context.executionProfile === 'pause-memory/1' ||
+              context.executionProfile === 'compact-memory/1'
             ) {
               const pending = await client.query(
                 `SELECT 1 FROM harness_pauses WHERE owner_id=$1 AND run_id=$2 AND attempt_id=$3 AND state='pending'`,
@@ -1807,7 +2667,8 @@ export async function createHarnessSession(
         if (request.type === 'model' || request.type === 'measure_context') {
           if (
             (context.executionProfile === 'pause/1' ||
-              context.executionProfile === 'pause-memory/1') &&
+              context.executionProfile === 'pause-memory/1' ||
+              context.executionProfile === 'compact-memory/1') &&
             request.type === 'model'
           ) {
             if (!nextPermit) throw stateConflict('model requires a safe-point permit');
@@ -1834,12 +2695,20 @@ export async function createHarnessSession(
             tools,
             context.contextPolicy,
           );
-          if (request.type === 'measure_context') return measurement;
+          if (request.type === 'measure_context') {
+            lastMeasurement = {
+              measurement: HarnessContextMeasurementSchema.parse(measurement),
+              remaining: request.remaining_tokens,
+              output: request.max_output_tokens,
+            };
+            return measurement;
+          }
           const scheduled = await guarded(async (client) => {
             await assertActionAuthority(client);
             if (
               context.executionProfile === 'pause/1' ||
-              context.executionProfile === 'pause-memory/1'
+              context.executionProfile === 'pause-memory/1' ||
+              context.executionProfile === 'compact-memory/1'
             ) {
               const pending = await client.query(
                 `SELECT 1 FROM harness_pauses WHERE owner_id=$1 AND run_id=$2 AND attempt_id=$3 AND state='pending'`,
@@ -1872,6 +2741,8 @@ export async function createHarnessSession(
               )
             )
               throw stateConflict('approval requires suspension before further actions');
+            // Establish the model reservation under the same attempt → Run
+            // locks used by pause registration, before invoking the transport.
             modelStream = {
               ref: request.request_ref,
               iterator: transport.model(request, tools, modelSignal)[Symbol.asyncIterator](),
@@ -1887,7 +2758,8 @@ export async function createHarnessSession(
         if (request.type === 'reserve') {
           if (
             context.executionProfile === 'pause/1' ||
-            context.executionProfile === 'pause-memory/1'
+            context.executionProfile === 'pause-memory/1' ||
+            context.executionProfile === 'compact-memory/1'
           ) {
             if (!nextPermit) throw stateConflict('tool reservation requires a safe-point permit');
             nextPermit = false;
@@ -1951,7 +2823,8 @@ export async function createHarnessSession(
           const reserved =
             routingDecision?.payload.decision !== 'direct' &&
             (context.executionProfile === 'pause/1' ||
-              context.executionProfile === 'pause-memory/1')
+              context.executionProfile === 'pause-memory/1' ||
+              context.executionProfile === 'compact-memory/1')
               ? await reserveToolInvocation(pool, toolCtx, reservation, { deferOnPause: true })
               : await reserveToolInvocation(pool, toolCtx, reservation);
           if ('pauseRequested' in reserved) return { pause_requested: true };
@@ -2007,7 +2880,10 @@ export async function createHarnessSession(
           return outcome;
         }
         if (request.type === 'snapshot') {
-          const snapshot = HarnessSnapshotSchema.parse(request.context);
+          const snapshot =
+            request.context.version === 4
+              ? HarnessR3SnapshotSchema.parse(request.context)
+              : HarnessSnapshotSchema.parse(request.context);
           const id = await guarded(async (client) => {
             await validateSnapshot(client, snapshot);
             const seq = (
@@ -2026,7 +2902,7 @@ export async function createHarnessSession(
                 context.attemptId,
                 seq,
                 JSON.stringify(snapshot),
-                HARNESS_PROTOCOL_VERSION,
+                start.protocol,
               ],
             );
             return id;
@@ -2057,7 +2933,6 @@ export async function createHarnessSession(
             const states = await readRunInvocationStates(client, toolContext(context));
             if (states.some((row) => row.state !== 'completed' || row.outcome_kind === 'failed'))
               throw stateConflict('cannot suspend unresolved tool effects');
-            // Approval waiting supersedes a not-yet-reached user pause on this attempt.
             await client.query(
               `UPDATE harness_pauses SET state='invalidated'
                WHERE owner_id=$1 AND run_id=$2 AND attempt_id=$3 AND state='pending'`,
@@ -2093,6 +2968,10 @@ export async function createHarnessSession(
           return { accepted: true };
         }
         if (request.type === 'finish_goal') {
+          if (context.executionProfile === 'compact-memory/1') {
+            if (!nextPermit) throw stateConflict('goal completion requires a safe-point permit');
+            nextPermit = false;
+          }
           if (!context.authorizationRevision || !modelStarted)
             throw stateConflict('goal completion requires delegated model execution');
           if (
@@ -2142,8 +3021,10 @@ export async function createHarnessSession(
         }
         if (request.type !== 'finish') throw stateConflict('unsupported terminal control');
         if (
+          !context.compactControl &&
           (context.executionProfile === 'pause/1' ||
-            context.executionProfile === 'pause-memory/1') &&
+            context.executionProfile === 'pause-memory/1' ||
+            context.executionProfile === 'compact-memory/1') &&
           request.outcome === 'done' &&
           routingDecision?.payload.decision !== 'direct'
         ) {
@@ -2171,7 +3052,9 @@ export async function createHarnessSession(
             )
           ).rows[0];
           const baseline = previous
-            ? HistoricalHarnessSnapshotSchema.parse(previous.payload)
+            ? context.executionProfile === 'compact-memory/1'
+              ? HarnessR3SnapshotSchema.parse(previous.payload)
+              : HistoricalHarnessSnapshotSchema.parse(previous.payload)
             : lastSnapshot;
           if (
             baseline &&
@@ -2326,13 +3209,15 @@ export async function executeHarness(
   context: RunContext,
   write: EventWriter,
   signal?: AbortSignal,
+  interruption?: AbortSignal,
 ): Promise<void> {
   const pool = poolOf(deps);
   if (!deps.harness) throw unavailable();
   const controller = new AbortController();
   const ownershipLost = () => controller.abort();
   context.ownership?.signal.addEventListener('abort', ownershipLost, { once: true });
-  if (context.ownership?.signal.aborted) controller.abort();
+  interruption?.addEventListener('abort', ownershipLost, { once: true });
+  if (context.ownership?.signal.aborted || interruption?.aborted) controller.abort();
   active.set(context.runId, controller);
   let cancellation: Promise<unknown> | undefined;
   let cancellationFailure: { error: unknown } | undefined;
@@ -2412,6 +3297,10 @@ export async function executeHarness(
         return pending;
       },
     });
+    // An external revocation stops the native process without throwing. Still
+    // account for a disabled owner's running attempt while ownership is held;
+    // a committed cancellation already wins the terminal-state check.
+    if (interruption?.aborted) throw new Error('server-owned execution interrupted');
   } catch (error) {
     await cancellation;
     try {
@@ -2440,6 +3329,7 @@ export async function executeHarness(
       await closeSession?.();
       signal?.removeEventListener('abort', disconnected);
       context.ownership?.signal.removeEventListener('abort', ownershipLost);
+      interruption?.removeEventListener('abort', ownershipLost);
       if (active.get(context.runId) === controller) active.delete(context.runId);
       // Project the committed stop before waiting for already-dispatched effects.
       if (controller.signal.aborted && !signal?.aborted && !cancellationProjected) {

@@ -1,16 +1,21 @@
 import type { PoolClient } from 'pg';
-import { notFound, stateConflict } from '../../http/errors.js';
+import { notFound } from '../../http/errors.js';
 import type { MemorySources } from '../memory/types.js';
+import { validateCompactSources } from './compact-sources.js';
 
 /** The conversations module owns message visibility and source qualification. */
 export const conversationMemorySources: MemorySources = {
-  async validate(client, { ownerId, conversationId, messageIds, purpose }) {
-    if (purpose === 'compact') throw stateConflict('compact source is not published');
+  async validate(client, { ownerId, conversationId, messageIds, purpose, summaryId }) {
     const conversation = await client.query(
       'SELECT id FROM conversations WHERE id=$1 AND owner_id=$2 FOR SHARE',
       [conversationId, ownerId],
     );
     if (!conversation.rowCount) throw notFound('memory source not found');
+    if (purpose === 'compact' || summaryId) {
+      if (!summaryId) throw notFound('memory source not found');
+      await validateCompactSources(client, { ownerId, conversationId, summaryId, messageIds });
+      return;
+    }
     const roles = purpose === 'read' ? ['user', 'assistant'] : ['user'];
     const messages = await client.query<{ id: string }>(
       `SELECT id FROM messages WHERE owner_id=$1 AND conversation_id=$2

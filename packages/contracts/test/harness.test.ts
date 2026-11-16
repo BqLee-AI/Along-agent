@@ -7,6 +7,7 @@ import {
   HarnessRequestSchema,
   HarnessSnapshotSchema,
   HarnessPauseSnapshotSchema,
+  HarnessR3ContextStartSchema,
   HarnessStartSchema,
   HarnessToolPayloadSchema,
   RunViewSchema,
@@ -377,7 +378,7 @@ describe('harness/v7 user pause contract', () => {
     expect(RunViewSchema.safeParse({ ...view, pause: null }).success).toBe(true);
     expect(
       RunViewSchema.safeParse({ ...view, pause: { ...pause, reason: 'runtime' } }).success,
-    ).toBe(false);
+    ).toBe(true);
     expect(
       RunViewSchema.safeParse({ ...view, pause: { ...pause, unexpected: true } }).success,
     ).toBe(false);
@@ -432,7 +433,7 @@ describe('literal memory harness contract', () => {
     ).toBe(false);
   });
 
-  it('bounds and validates memory sources and excludes semantic matches', () => {
+  it('bounds and validates memory sources and match kinds', () => {
     for (const message_ids of [
       [],
       [messageId, messageId],
@@ -447,10 +448,62 @@ describe('literal memory harness contract', () => {
     expect(
       HarnessToolPayloadSchema.safeParse({ ...payload, items: [{ ...item, match: 'semantic' }] })
         .success,
+    ).toBe(true);
+    expect(
+      HarnessToolPayloadSchema.safeParse({ ...payload, items: [{ ...item, match: 'invalid' }] })
+        .success,
     ).toBe(false);
     expect(
       HarnessToolPayloadSchema.safeParse({ ...payload, items: [{ ...item, extra: true }] }).success,
     ).toBe(false);
     expect(HarnessToolPayloadSchema.safeParse({ kind: 'memory_source' }).success).toBe(false);
+  });
+});
+
+describe('v8 memory source compatibility', () => {
+  const source = {
+    kind: 'memory_source',
+    recall_invocation_id: invocationId,
+    memory_id: taskId,
+    conversation_id: approvalId,
+    message_id: messageId,
+    role: 'user',
+    content: 'fact',
+    offset: 0,
+    end: 4,
+    total: 4,
+    has_more: false,
+  };
+  const observation = {
+    view: 'full',
+    invocation_id: invocationId,
+    tool_id: 'read_memory_source',
+    result: { status: 'ok', result: source },
+  };
+  const tool = { name: 'read_memory_source', description: 'read', parameters: {}, risk: 'low' };
+
+  it('permits source tools and observations only on the v8 start shape', () => {
+    const { messages, ...common } = start;
+    const v8 = {
+      ...common,
+      protocol: 'harness/v8',
+      r3_context: {
+        manifest: { message_ids: [] },
+        summary: null,
+        messages: [],
+        input: { type: 'user', message_id: messageId, content: messages[0].content },
+      },
+      tools: [tool],
+      observations: [observation],
+    };
+    expect(HarnessR3ContextStartSchema.safeParse(v8).success).toBe(true);
+    for (const protocol of ['harness/v6', 'harness/v7']) {
+      expect(HarnessStartSchema.safeParse({ ...start, protocol, tools: [tool] }).success).toBe(
+        false,
+      );
+      expect(
+        HarnessStartSchema.safeParse({ ...start, protocol, observations: [observation] }).success,
+      ).toBe(false);
+    }
   });
 });

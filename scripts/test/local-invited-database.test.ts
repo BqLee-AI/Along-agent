@@ -131,7 +131,7 @@ databaseTests('invited account schema explicit local upgrade against isolated PG
         await expect(database.initialize()).rejects.toMatchObject({
           code: 'explicit_upgrade_required',
         });
-        expect((await database.upgrade()).version).toBe('0032');
+        expect((await database.upgrade()).version).toBe('0036');
       });
       await sql(url, async (client) => {
         expect((await client.query(originalFacts)).rows[0].value).toEqual(original);
@@ -162,9 +162,9 @@ databaseTests('invited account schema explicit local upgrade against isolated PG
       });
       for (let restart = 0; restart < 2; restart++) {
         await deployment(url, async (database) => {
-          expect(await database.classify()).toMatchObject({ kind: 'supported', version: '0032' });
-          expect((await database.initialize()).version).toBe('0032');
-          expect((await database.upgrade()).version).toBe('0032');
+          expect(await database.classify()).toMatchObject({ kind: 'supported', version: '0036' });
+          expect((await database.initialize()).version).toBe('0036');
+          expect((await database.upgrade()).version).toBe('0036');
         });
       }
     });
@@ -275,7 +275,7 @@ databaseTests('invited account schema explicit local upgrade against isolated PG
         await client.query('DROP EVENT TRIGGER identity_upgrade_failure');
       });
       await deployment(url, async (database) => {
-        expect((await database.upgrade()).version).toBe('0032');
+        expect((await database.upgrade()).version).toBe('0036');
       });
     });
   }, 30000);
