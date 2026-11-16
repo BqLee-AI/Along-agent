@@ -7,6 +7,8 @@
 
 分类按用途区分：`plans/` 存实施与演进规划，`guides/` 存实际操作指南，`verification/` 存带日期的历史验收与实验记录，`demo/` 存可重复运行的 smoke、故障注入和黄金用例说明。`design/`、`api/`、`schema/`、`prd/`、`agent/`、`adr/` 与 `references/` 保持原有职责；规划、操作说明及历史证据不覆盖有效业务合同。
 
+原生 Harness 源码分层入口及构建哈希范围见 [Harness README](../apps/harness/README.md)；历史基线的文件路径与证据仍按其原版本理解。
+
 ## 一、PRD（产品需求，5 篇）
 
 | 序号 | 文档                                                           | 作用                                                               |

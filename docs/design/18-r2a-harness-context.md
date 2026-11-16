@@ -13,7 +13,7 @@
 
 [Required] 采用独立输出额度、完整请求计量、确定性有来源投影和原事实按需读取。仓颉唯一决定上下文选择、行动、预算、等待与停止；TS 提供计量、可信来源、ToolGateway、当前授权、批准和持久化，不增加 TS agent loop。外部参考、用户消息、工具正文与投影都是资料，不是系统授权。
 
-[Observed，历史基线] 本 worktree 建立时的 `7f282e3` 中，`harness-authority.ts:buildHarnessStart` 只发送当前输入并聚合观察，`main.cj:bootstrap/loop` 组织模型历史，`harness-model.ts:createHarnessModelTransport` 包装 tools/HTTP。#70 随后提供最近 63 条 user/assistant 历史与完整当前输入冻结、真实 streaming 和串行拉取/ack；其最终源码及归档现已通过 `f8863f5` 合入本分支。该集成仍须重新验证，不把旧基线或并行工作区的运行证据当作当前 R2-A 验收。原接受结果逐次合法不意味着聚合 start 或模型请求合法。代码路径均在 `apps/api/src/modules/conversations/`，除明确标出的 native 路径 `apps/harness/src/main.cj`。
+[Observed，历史基线] 本 worktree 建立时的 `7f282e3` 中，`harness-authority.ts:buildHarnessStart` 只发送当前输入并聚合观察，`main.cj:bootstrap/loop` 组织模型历史，`harness-model.ts:createHarnessModelTransport` 包装 tools/HTTP。#70 随后提供最近 63 条 user/assistant 历史与完整当前输入冻结、真实 streaming 和串行拉取/ack；其最终源码及归档现已通过 `f8863f5` 合入本分支。该集成仍须重新验证，不把旧基线或并行工作区的运行证据当作当前 R2-A 验收。原接受结果逐次合法不意味着聚合 start 或模型请求合法。代码路径均在 `apps/api/src/modules/conversations/`，除明确标出的 native 路径 `apps/harness/src/session/`。
 
 此前草案的离线合成实验：6 次各 200000 bytes 的读取组成简化 HTTP 请求 1211501 bytes，合成恢复 start 为 1206057 bytes，均超过 1048576；投影原型为 6849 bytes。它们只证明序列化增长，不证明 token 容量、性能、兼容性或真实模型任务成功。[#70 的版本化验证记录](../verification/web-task-experience-verification-2026-10-28.md)中三轮刷新后回忆证据使用零工具调用，只证明记录对应版本的有限历史能力，不证明当前 R2-A 长资料能力。证据适用状态见 change 的 design.md，不在长期合同保存并行任务进度。
 

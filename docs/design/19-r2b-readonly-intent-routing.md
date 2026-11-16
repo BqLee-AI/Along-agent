@@ -270,7 +270,7 @@ off 不要求编码服务或缓存。可选路由故障只停优化，核心 `/r
 | 资源与收益   | 目标宿主真实 HTTP 冷/热/并发、拒识增量和整体完成，L1 miss 的新增正确交付与真实模型调用数分账                         | D6/D8/D10，非仅单元测试 |
 | 原有保证     | R2-A 额度/unknown usage/来源/批准恢复、冻结展示、取消回执及 A1–A4 不削弱；新 kind 不泄漏外部 SSE                     | D1–D10、A1–A4 原范围    |
 
-源码依据：`packages/contracts/src/harness.ts`、`routing.ts`（wire/snapshot）；`apps/harness/src/main.cj`（首模型前/原循环）；`apps/api/src/modules/conversations/service.ts`（接纳）、`harness-authority.ts`（资格/answer/render）、`routing-checkpoints.ts`（内部记录）、`routing/`（事实/资产/编码/打分/展示）、`repository.ts`（公开过滤）；`apps/api/src/modules/tools/schemas.ts` 与公共只读用例（原参数/投影）；`infra/migrations/0020_conversation_readonly_routing.sql`（扩充0015封闭 kind 及来源约束）。实现变更与分级实测结果记录在 [change tasks](../../openspec/changes/define-readonly-intent-routing/tasks.md)，长期合同不保存临时交付进度。
+源码依据：`packages/contracts/src/harness.ts`、`routing.ts`（wire/snapshot）；`apps/harness/src/session/`（首模型前/原循环）；`apps/api/src/modules/conversations/service.ts`（接纳）、`harness-authority.ts`（资格/answer/render）、`routing-checkpoints.ts`（内部记录）、`routing/`（事实/资产/编码/打分/展示）、`repository.ts`（公开过滤）；`apps/api/src/modules/tools/schemas.ts` 与公共只读用例（原参数/投影）；`infra/migrations/0020_conversation_readonly_routing.sql`（扩充0015封闭 kind 及来源约束）。实现变更与分级实测结果记录在 [change tasks](../../openspec/changes/define-readonly-intent-routing/tasks.md)，长期合同不保存临时交付进度。
 
 ## 15. 配置与受控实验
 
