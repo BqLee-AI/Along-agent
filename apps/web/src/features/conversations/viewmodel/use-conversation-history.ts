@@ -1,12 +1,22 @@
 'use client';
 
 import { useCallback, useState } from 'react';
+import type { Dispatch, SetStateAction } from 'react';
 import { ConversationListPageSchema } from '@along/contracts';
 import type { ConversationListItem } from '@along/contracts';
 import { readHistoryCollectionPage } from '@/shared/http/page';
+import type { HistoryPageState } from '@/shared/http/page';
 import { useHistoryPage } from '@/shared/http/use-page';
 
-export function useConversationHistory() {
+export interface ConversationHistoryResource {
+  state: HistoryPageState<ConversationListItem>;
+  read: (reset: boolean) => Promise<void>;
+  search: string;
+  setSearch: Dispatch<SetStateAction<string>>;
+  matches: ConversationListItem[];
+}
+
+export function useConversationHistory(): ConversationHistoryResource {
   const [search, setSearch] = useState('');
   const loader = useCallback(async (cursor: string | null, signal: AbortSignal) => {
     const query = new URLSearchParams({ limit: '20' });

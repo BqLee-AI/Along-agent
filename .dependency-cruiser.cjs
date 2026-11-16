@@ -1,4 +1,5 @@
 const { readdirSync } = module.require('node:fs');
+const { resolve } = module.require('node:path');
 
 // Discover modules in the scanned tree, including new modules and isolated fixture trees.
 const modules = readdirSync('apps/api/src/modules', { withFileTypes: true })
@@ -43,6 +44,37 @@ module.exports = {
       to: { path: '^apps/api/' },
     },
     {
+      name: 'web-feature-model-no-presentation',
+      comment: 'Feature models own data and projections, never presentation or route adapters.',
+      severity: 'error',
+      from: { path: '^apps/web/src/features/[^/]+/model/' },
+      to: {
+        path: '^apps/web/src/(features/[^/]+/(viewmodel|view|route)/|shell/view/|shared/ui/)',
+      },
+    },
+    {
+      name: 'web-feature-no-app',
+      comment: 'App routes assemble features; features MUST NOT import route implementations.',
+      severity: 'error',
+      from: { path: '^apps/web/src/features/' },
+      to: { path: '^apps/web/src/app/' },
+    },
+    {
+      name: 'web-shared-no-feature-or-shell',
+      comment: 'Shared infrastructure MUST NOT depend on features or the workspace shell.',
+      severity: 'error',
+      from: { path: '^apps/web/src/shared/' },
+      to: { path: '^apps/web/src/(features|shell)/' },
+    },
+    {
+      name: 'web-no-root-business-lib',
+      comment:
+        'Business modules live in features, not the obsolete root lib (including deleted aliases).',
+      severity: 'error',
+      from: { path: '^apps/web/src/' },
+      to: { path: '^(apps/web/src/lib|@/lib)(/|$)' },
+    },
+    {
       name: 'scheduler-core-dependencies',
       comment: 'D1: scheduler-core may depend only on itself, contracts and time-core.',
       severity: 'error',
@@ -74,5 +106,6 @@ module.exports = {
   options: {
     doNotFollow: { path: 'node_modules' },
     tsPreCompilationDeps: true,
+    tsConfig: { fileName: resolve('apps/web/tsconfig.json') },
   },
 };

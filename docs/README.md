@@ -16,7 +16,7 @@
 | ---- | -------------------------------------------------------------- | ------------------------------------------------------------------ |
 | 1    | [PRD 索引入口](prd/README.md)                                  | 依赖链：简报→卡片→对话→提议→确认→调度→通知→活动账；Required 列表   |
 | 2    | [产品概览与范围](prd/01-overview-and-scope.md)                 | 定位、P0–P5 范围、非目标、差异化三点                               |
-| 3    | [核心循环与页面](prd/02-core-loop-and-pages.md)                | 个人助理首页、分组顶部导航、简洁登录、流式聊天与精确批准/只读恢复  |
+| 3    | [核心循环与页面](prd/02-core-loop-and-pages.md)                | 持续聊天、工作区导航、流式对话与精确批准/只读恢复                  |
 | 4    | [风险约束与阶段门](prd/03-risk-constraints-and-stage-gates.md) | Top3 风险、指标、准入准出、不承诺口径                              |
 | 5    | [验收与待决事项](prd/04-acceptance-open-questions.md)          | v0/R1/R2-A 验收、R2-B 路由及 R3 Proposed 合同、Deferred 与重开门槛 |
 
@@ -45,7 +45,7 @@
 | 19   | [R2-B 有限只读意图路由](design/19-r2b-readonly-intent-routing.md)        | #88：BGE INT8、三类只读、仓颉首轮决议、默认关闭；兼容 legacy 和本人委托，不自动接管                                               |
 | 20   | [本人目标内委托与授权](design/20-goal-scoped-delegation.md)              | 冻结实际能力与本人登记集合、资料编辑及有限创建、撞名恢复、v6/SSE v2 和执行生命周期；按事先明确的合同或预期核对真实效果            |
 | 21   | [受邀账户准入与恢复](design/21-invited-account-access.md)                | #112 显式准入/有限管理、停用后的流式披露边界、邀请/恢复/会话与前向升级；#131 本机口令重置；隔离实现证据与真实外部放行分列         |
-| 22   | [用户模型接入与运行绑定](design/22-model-provider-settings.md)           | Proposed：本人模型配置、加密凭据、冻结决议、SDK 受控流式出站与受限 Fake-IP 例外；真实外部验收独立                                 |
+| 22   | [用户模型接入与运行绑定](design/22-model-provider-settings.md)           | Proposed：本人模型配置、各接入默认、加密凭据、冻结决议、SDK 受控流式出站与受限 Fake-IP 例外；真实外部验收独立                     |
 | 23   | [R3 跨会话记忆与 compact](design/23-r3-short-term-memory-and-compact.md) | 通用暂停继续、摘要压缩、来源记忆、安全边界及最小 MVP 验收                                                                         |
 
 活动列表为空与历史创建事实、批量请求部分完成及标题序号的证据边界见[design/09 §5](design/09-agent-runtime-and-checkpoint.md#5-toolgateway-交互required)。
@@ -100,6 +100,7 @@ R2-B 的完整目标及多轮自主查询边界见[design/19 §4、§6](design/1
 | 5    | [助理能力与授权模型重构方案](plans/agent-capability-refactor-plan.md)       | Proposed：委托内自主执行、可信上下文、真实工具/产物、必要澄清、停止与兼容迁移；不启用新权限              |
 | 6    | [账户产品化与首个办公只读连接](plans/account-and-office-connectors-plan.md) | Proposed：邀请入驻、真实邮件恢复、双用户隔离与无损迁移；飞书用户授权和单 Docx 只读，不接管 #104 执行重构 |
 | 7    | [R3 跨窗口短期记忆规划](plans/r3-short-term-memory-plan.md)                 | Proposed 演进背景；MVP 合并与安全门槛以 design/23、OpenSpec 和 PRD 为准                                  |
+| 8    | [持续对话与工作区](plans/desktop-experience-plan.md)                        | 全应用双栏工作台、聊天与工作区切换、功能分层与验收范围                                                   |
 
 ## 七、操作指南（1 篇）
 
@@ -140,6 +141,7 @@ R2-B 的完整目标及多轮自主查询边界见[design/19 §4、§6](design/1
 | 15   | [2026-11-03 受邀账户实现验证](verification/invited-account-implementation-2026-11-03.md)         | #112 正式 API/隔离 PG、原生消费者、Web 与旧副本生命周期；真实邮件和生产 HTTPS 仍单独验收            |
 | 16   | [2026-11-13 R3 阶段 0 实验](verification/r3-stage-zero-2026-11-13.md)                            | Run 静态边界、真实模型摘要试验及 PG16/pgvector 中文检索比较；不代替 R3 验收                         |
 | 17   | [2026-11-16 R3 MVP 验收](verification/r3-mvp-acceptance-2026-11-16.md)                           | 真实模型、隔离检索、受控竞争与升级恢复证据及未覆盖边界                                              |
+| 18   | [2026-11-02—03 桌面工作台验证](verification/desktop-experience-verification-2026-11-02.md)       | 工作台构建、真实浏览器与本机实测的分段证据及未覆盖范围                                              |
 
 ## 十、References（3 篇）
 

@@ -7,8 +7,8 @@ import { TaskDetailSchema } from '@/features/reminders/model/types';
 import type { TaskDetail } from '@/features/reminders/model/types';
 import { readEnvelope } from '@/shared/http/client';
 import type { HistoryApprovalReference } from '../model/conversation-run';
-import { inlineReminderWaiting } from '../model/inline-reminder';
-import { inlineDocumentWaiting } from '../model/inline-document';
+import { inlineReminderWaiting } from '@/features/approvals/model/inline-reminder';
+import { inlineDocumentWaiting } from '@/features/approvals/model/inline-document';
 import type { ConversationTask } from './use-conversation-task';
 import { useHistoryPage } from '@/shared/http/use-page';
 

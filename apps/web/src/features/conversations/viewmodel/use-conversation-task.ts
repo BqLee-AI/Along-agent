@@ -6,8 +6,6 @@ import {
   ConversationRunPageSchema,
   DocumentApprovalDetailSchema,
   RunViewSchema,
-  ProviderListSchema,
-  workspaceSummarySchema,
 } from '@along/contracts';
 import type {
   ApprovalDetail,
@@ -29,7 +27,6 @@ import {
   collectRunTranscripts,
   consumeThreadStream,
   mergeThreadEvents,
-  followRunEvents,
   readHistoryEventPage,
   readRun,
   ResumeRequestSchema,
@@ -60,18 +57,19 @@ import {
 import type { TaskIntent } from '@/features/conversations/model/task';
 import type { RunTranscript } from '@/features/conversations/model/conversation-run';
 import {
-  isSameReadingPage,
-  watchHistoryNavigation,
-} from '@/features/conversations/model/stream-navigation';
-import {
   confirmInlineReminder,
   inlineReminderWaiting,
-} from '@/features/conversations/model/inline-reminder';
+} from '@/features/approvals/model/inline-reminder';
 import {
   confirmInlineDocument,
   inlineDocumentWaiting,
-} from '@/features/conversations/model/inline-document';
-import { isWorkspacePath } from '@/shell/model/navigation';
+} from '@/features/approvals/model/inline-document';
+import { useConversationApprovalResults } from '@/features/approvals/viewmodel/use-conversation-approval-results';
+import { useModelCatalog } from '@/features/model-settings/viewmodel/model-catalog-context';
+import { useConversationComposer } from './use-conversation-composer';
+import { useConversationNavigationGuard } from './use-conversation-navigation-guard';
+import { useWorkspaceRegistration } from './use-workspace-registration';
+import { useConversationFollow } from './use-conversation-follow';
 
 type AmbiguousProposal = z.infer<typeof AmbiguousTimeDetailsSchema> & {
   raw_text: string;
@@ -161,18 +159,28 @@ export function useConversationTask({
   runId?: string | null;
   initialIntent?: TaskIntent | null;
 }): ConversationTask {
-  const [input, setInput] = useState('');
-  const [intent, setIntent] = useState<TaskIntent>(initialIntent ?? 'chat');
-  const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
-  const [workspaceId, setWorkspaceId] = useState('');
-  const [workspaceState, setWorkspaceState] = useState<'loading' | 'ready' | 'error'>('loading');
-  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
-  const [modelProviders, setModelProviders] = useState<ProviderView[]>([]);
-  const [defaultSelection, setDefaultSelection] = useState<ModelSelection | null>(null);
-  const [modelSelection, setModelSelection] = useState<ModelSelection | null>(null);
-  const [modelState, setModelState] = useState<'loading' | 'ready' | 'error'>('loading');
-  const [modelError, setModelError] = useState<string | null>(null);
-  const modelRequest = useRef(0);
+  const {
+    input,
+    setInput,
+    intent,
+    setIntent,
+    workspaceId,
+    setWorkspaceId,
+    modelSelection,
+    setModelSelection,
+  } = useConversationComposer(initialIntent);
+  const { workspaces, workspaceState, workspaceError, readWorkspaces } = useWorkspaceRegistration(
+    intent,
+    setWorkspaceId,
+  );
+  const {
+    snapshot: modelCatalog,
+    state: modelState,
+    error: modelError,
+    refresh: readModels,
+  } = useModelCatalog();
+  const modelProviders = modelCatalog.items;
+  const defaultSelection = modelCatalog.default_selection;
   const [events, setEvents] = useState<ThreadEvent[]>([]);
   const [messages, setMessages] = useState<MessageHistoryItem[]>([]);
   const [runs, setRuns] = useState<ConversationRunHistoryItem[]>([]);
@@ -198,12 +206,17 @@ export function useConversationTask({
   const [foldChoice, setFoldChoice] = useState<'first' | 'second' | ''>('');
   const [clarificationReply, setClarificationReply] = useState(false);
   const [leaving, setLeaving] = useState(false);
-  const [reminderResults, setReminderResults] = useState<Record<string, ApprovalDetail>>({});
-  const [reminderError, setReminderError] = useState<ConversationTask['reminderError']>(null);
-  const [documentResults, setDocumentResults] = useState<Record<string, DocumentApprovalDetail>>(
-    {},
-  );
-  const [documentError, setDocumentError] = useState<ConversationTask['documentError']>(null);
+  const {
+    reminderResults,
+    setReminderResults,
+    reminderError,
+    setReminderError,
+    documentResults,
+    setDocumentResults,
+    documentError,
+    setDocumentError,
+    resetApprovalResults,
+  } = useConversationApprovalResults();
   const leaveAction = useRef<(() => void) | null>(null);
   const selectedRef = useRef(selected);
   const conversationRef = useRef(conversationId);
@@ -221,7 +234,6 @@ export function useConversationTask({
   const followed = useRef<string | null>(null);
   const [followGeneration, setFollowGeneration] = useState(0);
   const readRef = useRef<AbortController | null>(null);
-  const workspaceRef = useRef<AbortController | null>(null);
   const cancelRef = useRef<AbortController | null>(null);
   const sendRef = useRef<AbortController | null>(null);
   const reminderController = useRef<AbortController | null>(null);
@@ -249,50 +261,6 @@ export function useConversationTask({
     );
     if (mounted.current && !signal?.aborted) meRef.current = me;
     return me;
-  }
-
-  async function readModels() {
-    const request = ++modelRequest.current;
-    setModelState('loading');
-    setModelError(null);
-    try {
-      const data = ProviderListSchema.parse(
-        await readEnvelope(await fetch('/api/v1/model-providers', { cache: 'no-store' })),
-      );
-      if (!mounted.current || request !== modelRequest.current) return;
-      setModelProviders(data.items);
-      setDefaultSelection(data.default_selection);
-      setModelState('ready');
-    } catch (failure) {
-      if (!mounted.current || request !== modelRequest.current) return;
-      setModelState('error');
-      setModelError(failure instanceof Error ? failure.message : '模型列表读取失败。');
-    }
-  }
-
-  async function readWorkspaces() {
-    workspaceRef.current?.abort();
-    const request = new AbortController();
-    workspaceRef.current = request;
-    setWorkspaceState('loading');
-    setWorkspaceError(null);
-    try {
-      const data = await readEnvelope(
-        await fetch('/api/v1/workspaces', { cache: 'no-store', signal: request.signal }),
-      );
-      const items = z
-        .object({ items: z.array(workspaceSummarySchema) })
-        .strict()
-        .parse(data).items;
-      if (!mounted.current || request.signal.aborted) return;
-      setWorkspaces(items);
-      setWorkspaceState('ready');
-      setWorkspaceId((id) => (items.some((item) => item.workspace_id === id) ? id : ''));
-    } catch (failure) {
-      if (!mounted.current || request.signal.aborted) return;
-      setWorkspaceState('error');
-      setWorkspaceError(failure instanceof Error ? failure.message : '资料登记读取失败。');
-    }
   }
 
   function acceptEvent(event: ThreadEvent, text?: string) {
@@ -1189,40 +1157,35 @@ export function useConversationTask({
     }
   }
 
+  function restorePendingSend(id: string | null) {
+    const storageKey = `conversation-send:${id ?? 'new'}`;
+    const stored = sessionStorage.getItem(storageKey);
+    if (!stored) return;
+    setSendUncertain(true);
+    pendingStorage.current = storageKey;
+    try {
+      const pending = PendingSendSchema.parse(JSON.parse(stored));
+      if (pending.body.conversation_id !== (id ?? undefined))
+        throw new Error('原发送的会话身份不匹配。');
+      pendingSend.current = pending;
+      setInput(pending.text);
+    } catch (failure) {
+      setError(
+        `原发送结果未知，不能创建另一条消息。${failure instanceof Error ? failure.message : '原请求记录无法读取。'}`,
+      );
+    }
+  }
+
   useEffect(() => {
     mounted.current = true;
-    const storageKey = `conversation-send:${conversationId ?? 'new'}`;
-    const stored = sessionStorage.getItem(storageKey);
-    if (stored) {
-      setSendUncertain(true);
-      pendingStorage.current = storageKey;
-      try {
-        const pending = PendingSendSchema.parse(JSON.parse(stored));
-        if (pending.body.conversation_id !== (conversationId ?? undefined))
-          throw new Error('原发送的会话身份不匹配。');
-        pendingSend.current = pending;
-        setInput(pending.text);
-      } catch (failure) {
-        setError(
-          `原发送结果未知，不能创建另一条消息。${failure instanceof Error ? failure.message : '原请求记录无法读取。'}`,
-        );
-      }
-    }
-    const refreshModels = () => {
-      void readModels();
-    };
-    window.addEventListener('along:model-settings-changed', refreshModels);
-    void readModels();
+    restorePendingSend(conversationId);
     void refresh();
     return () => {
-      window.removeEventListener('along:model-settings-changed', refreshModels);
       mounted.current = false;
-      modelRequest.current++;
       selectionVersion.current++;
       streamRef.current?.abort();
       followRef.current?.abort();
       readRef.current?.abort();
-      workspaceRef.current?.abort();
       cancelRef.current?.abort();
       pauseController.current?.abort();
       sendRef.current?.abort();
@@ -1278,30 +1241,11 @@ export function useConversationTask({
     setRetryResume(null);
     setSendUncertain(false);
     setEffectsUnknown(false);
-    setReminderResults({});
-    setReminderError(null);
-    setDocumentResults({});
-    setDocumentError(null);
+    resetApprovalResults();
     setAmbiguousProposal(null);
     setFoldChoice('');
     setLeaving(false);
-    const storageKey = `conversation-send:${conversationId ?? 'new'}`;
-    const stored = sessionStorage.getItem(storageKey);
-    if (stored) {
-      pendingStorage.current = storageKey;
-      setSendUncertain(true);
-      try {
-        const pending = PendingSendSchema.parse(JSON.parse(stored));
-        if (pending.body.conversation_id !== (conversationId ?? undefined))
-          throw new Error('原发送的会话身份不匹配。');
-        pendingSend.current = pending;
-        setInput(pending.text);
-      } catch (failure) {
-        setError(
-          `原发送结果未知，不能创建另一条消息。${failure instanceof Error ? failure.message : '原请求记录无法读取。'}`,
-        );
-      }
-    }
+    restorePendingSend(conversationId);
     void refresh();
     // Refs distinguish an accepted new-send URL update from an explicit selection.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1399,88 +1343,22 @@ export function useConversationTask({
     compactGeneration,
   ]);
 
-  useEffect(() => {
-    if (intent === 'document' && !workspaceRef.current) void readWorkspaces();
-    // Workspace registration is only a prerequisite of the explicit document shortcut.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [intent]);
-
-  useEffect(() => {
-    if (
-      !selected ||
-      !run ||
-      run.run_id !== selected.runId ||
-      run.execution_lifecycle !== 'server-owned' ||
-      run.status !== 'running' ||
-      streaming
-    )
-      return;
-    const target = selected;
-    const key = `${target.conversationId}:${target.runId}:${followGeneration}`;
-    if (followed.current === key) return;
-    followed.current = key;
-    const controller = new AbortController();
-    followRef.current = controller;
-    const version = selectionVersion.current;
-    const valid = () =>
-      mounted.current && !controller.signal.aborted && version === selectionVersion.current;
-    let automaticPause = false;
-    void (async () => {
-      try {
-        await followRunEvents({
-          conversationId: target.conversationId,
-          runId: target.runId,
-          signal: controller.signal,
-          cursor: () => cursors.current.get(target.runId) ?? 0,
-          onEvent: (event) => {
-            if (!valid()) return;
-            acceptEvent(event);
-            if (event.type === 'message.delta') setLiveReply(true);
-          },
-          readStatus: async () => {
-            const current = await readRun(target.conversationId, target.runId, controller.signal);
-            if (
-              current.conversation_id !== target.conversationId ||
-              current.run_id !== target.runId
-            )
-              throw new Error('运行身份不匹配，未接纳状态。');
-            if (
-              valid() &&
-              current.status === 'paused' &&
-              current.pause?.reason === 'runtime' &&
-              current.pause.purpose === 'automatic_compact'
-            ) {
-              automaticPause = true;
-              setRun(current);
-            }
-            return current.status;
-          },
-        });
-        if (valid() && !automaticPause) await refresh();
-      } catch (failure) {
-        if (valid())
-          setReadError(
-            `${failure instanceof Error ? failure.message : '事件连接中断。'} 请读取最新状态后重试跟随；不会重发原请求。`,
-          );
-      } finally {
-        if (followRef.current === controller) followRef.current = null;
-      }
-    })();
-    return () => {
-      controller.abort();
-      if (followRef.current === controller) followRef.current = null;
-    };
-    // The identity, frozen lifecycle and status determine subscription ownership.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    selected?.conversationId,
-    selected?.runId,
-    run?.run_id,
-    run?.execution_lifecycle,
-    run?.status,
+  useConversationFollow({
+    selected,
+    run,
     streaming,
-    followGeneration,
-  ]);
+    generation: followGeneration,
+    followRef,
+    followed,
+    mounted,
+    selectionVersion,
+    cursors,
+    acceptEvent,
+    setLiveReply,
+    setRun,
+    refresh,
+    setReadError,
+  });
 
   useEffect(() => {
     if (
@@ -1562,65 +1440,15 @@ export function useConversationTask({
     run?.execution_lifecycle ??
     (selected ? transcript.get(selected.runId)?.execution_lifecycle : undefined);
 
-  useEffect(() => {
-    if (!streaming || lifecycle === 'server-owned') return;
-    const leavesConversation = (url: string) => {
-      const destination = new URL(url, location.href);
-      if (destination.origin !== location.origin) return true;
-      if (isWorkspacePath(destination.pathname)) {
-        const conversation = destination.searchParams.get('conversation_id');
-        const run = destination.searchParams.get('run_id');
-        return (
-          (conversation !== null && conversation !== conversationRef.current) ||
-          (run !== null && run !== selectedRef.current?.runId)
-        );
-      }
-      if (destination.pathname !== '/conversations') return true;
-      return (
-        destination.searchParams.get('conversation_id') !== conversationRef.current ||
-        Boolean(
-          destination.searchParams.get('run_id') &&
-          destination.searchParams.get('run_id') !== selectedRef.current?.runId,
-        )
-      );
-    };
-    const unload = (event: BeforeUnloadEvent) => {
-      if (leaveAllowed.current) return;
-      event.preventDefault();
-      event.returnValue = '';
-    };
-    const click = (event: MouseEvent) => {
-      if (
-        event.defaultPrevented ||
-        event.button !== 0 ||
-        event.metaKey ||
-        event.ctrlKey ||
-        event.shiftKey ||
-        event.altKey
-      )
-        return;
-      const anchor = event.target instanceof Element ? event.target.closest('a') : null;
-      if (!anchor || anchor.target === '_blank' || anchor.hasAttribute('download')) return;
-      const destination = new URL(anchor.href, window.location.href);
-      if (isSameReadingPage(destination.href, location.href)) return;
-      if (!leavesConversation(destination.href)) return;
-      event.preventDefault();
-      event.stopPropagation();
-      leaveAction.current = () => window.location.assign(destination.href);
-      setLeaving(true);
-    };
-    const unwatchHistory = watchHistoryNavigation((action) => {
-      leaveAction.current = action;
-      setLeaving(true);
-    }, leavesConversation);
-    document.addEventListener('click', click, true);
-    window.addEventListener('beforeunload', unload);
-    return () => {
-      document.removeEventListener('click', click, true);
-      window.removeEventListener('beforeunload', unload);
-      unwatchHistory();
-    };
-  }, [streaming, lifecycle]);
+  useConversationNavigationGuard({
+    streaming,
+    lifecycle,
+    conversation: conversationRef,
+    selected: selectedRef,
+    leaveAllowed,
+    leaveAction,
+    setLeaving,
+  });
 
   return {
     input,

@@ -350,6 +350,35 @@ describe('durable goal result consumer', () => {
     expect(actions).toBe(0);
   });
 
+  it('does not repeat a final answer already shown in the chat', () => {
+    const task = composerTask({
+      selected: { conversationId: cid, runId: rid },
+      run,
+      liveReply: true,
+    });
+    const markup = renderToStaticMarkup(createElement(RunStatusPanel, { task }));
+    expect(markup).toContain('data-testid="goal-result"');
+    expect(markup).not.toContain('<strong>Accepted setting remains saved.</strong>');
+  });
+
+  it('omits a completed result without an open question only when its answer is visible', () => {
+    const completed = {
+      ...run,
+      goal_result: { ...result, status: 'completed' as const, clarification: null },
+    };
+    const task = composerTask({
+      selected: { conversationId: cid, runId: rid },
+      run: completed,
+      liveReply: true,
+    });
+    const visible = renderToStaticMarkup(createElement(RunStatusPanel, { task }));
+    expect(visible).not.toContain('data-testid="goal-result"');
+    const unavailable = renderToStaticMarkup(
+      createElement(RunStatusPanel, { task: { ...task, liveReply: false } }),
+    );
+    expect(unavailable).toContain('<strong>Accepted setting remains saved.</strong>');
+  });
+
   it('does not infer a lifecycle or goal result for a completed legacy Run', () => {
     const markup = renderToStaticMarkup(
       createElement(RunStatusPanel, {
@@ -407,6 +436,25 @@ describe('composer consumer states', () => {
     expect(openingTag(markup, 'stop-reply')).not.toMatch(/\sdisabled(?:=|[\s>])/);
     expect(markup).not.toContain('data-testid="send-message"');
     expect(openingTag(markup, 'chat-tools')).toMatch(/\sdisabled(?:=|[\s>])/);
+    const input = markup.match(/<textarea\b[^>]*id="task-message"[^>]*>/)?.[0];
+    expect(input).toBeDefined();
+    expect(input).not.toMatch(/\sdisabled(?:=|[\s>])/);
+  });
+
+  it('protects the original draft while a send acknowledgement is unknown', () => {
+    const markup = renderToStaticMarkup(
+      createElement(TaskComposer, {
+        task: composerTask({
+          sendUncertain: true,
+          active: true,
+          eligibility: { allowed: false, reason: '原发送待核实' },
+        }),
+      }),
+    );
+    const input = markup.match(/<textarea\b[^>]*id="task-message"[^>]*>/)?.[0];
+    expect(input).toBeDefined();
+    expect(input).toMatch(/\sdisabled(?:=|[\s>])/);
+    expect(openingTag(markup, 'send-message')).toMatch(/\sdisabled(?:=|[\s>])/);
   });
 
   it('offers compact alongside stop while streaming', () => {

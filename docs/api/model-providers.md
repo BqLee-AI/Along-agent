@@ -2,25 +2,30 @@
 
 > Proposed：关联 [OpenSpec](../../openspec/changes/add-model-provider-settings/proposal.md)、[设计](../design/22-model-provider-settings.md)；本表不证明路由或 SDK 已上线。Base Path `/api/v1`；统一 envelope，成功 `data` 如下。所有端点响应包括错误均 `Cache-Control: no-store`；GET 需签名会话，POST 和会发外部请求的动作还需 session-bound CSRF、Origin 与既有 body 收集前门禁，strict JSON，不接受 owner 字段。
 
-`Provider = {id,name,enabled,base_url,has_api_key,key_hint,models}`；ID 为 UUID，model ID 为区分大小写的不透明完整字符串，`key_hint` 可 null、非敏感，`has_api_key` 不证明有效，允许无 Key 端点。不得回显完整 Key。`Selection = {provider_id,model_id}`。
+`Provider = {id,name,enabled,base_url,has_api_key,key_hint,models,model_context_windows,default_model_id}`；ID 为 UUID，model ID 为区分大小写的不透明完整字符串，`key_hint` 可 null、非敏感，`has_api_key` 不证明有效，允许无 Key 端点。不得回显完整 Key。`Selection = {provider_id,model_id}`。`models` 保持字符串数组，`model_context_windows` 为按模型 ID 索引的对象，每项是正安全整数 token（最大 9007199254740991）或 null；null 使用全局上下文窗口策略。`default_model_id` 是此接入的默认模型或 null。
 
-| 方法/路径                                                   | 请求                                      | 成功 data                                                     |
-| ----------------------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------- |
-| GET `/model-providers`                                      | —                                         | `{items:Provider[],default_selection:Selection                | null}`        |
-| POST `/model-providers`                                     | `{name}`                                  | 未配置的 `Provider`                                           |
-| POST `/model-providers/{provider_id}/actions/update`        | `{name?,enabled?,base_url?,credential?}`  | 更新后的 `Provider`                                           |
-| POST `/model-providers/{provider_id}/actions/delete`        | `{}`                                      | `{deleted:true}`                                              |
-| POST `/model-providers/{provider_id}/models/actions/sync`   | `{}`                                      | `{provider:Provider,added_model_ids:string[]}`                |
-| POST `/model-providers/{provider_id}/models`                | `{model_id}`                              | 更新后的 `Provider`；重复不增加                               |
-| POST `/model-providers/{provider_id}/models/actions/remove` | `{model_id}`                              | 更新后的 `Provider`；使用 body 以保留 `/` 等字符              |
-| POST `/model-providers/{provider_id}/actions/test`          | 可选 `base_url`、`credential`、`model_id` | `{text_stream,tool_round_trip,usage}`，每项 `{status:'passed' | 'failed'      | 'not_tested',latency_ms:number | null}` |
-| POST `/model-selection/actions/set-default`                 | `{selection:Selection                     | null}`                                                        | `{selection}` |
+| 方法/路径                                                           | 请求                                     | 成功 data                                                     |
+| ------------------------------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------- |
+| GET `/model-providers`                                              | —                                        | `{items:Provider[],default_selection:Selection                | null}`        |
+| POST `/model-providers`                                             | `{name}`                                 | 未配置的 `Provider`                                           |
+| POST `/model-providers/{provider_id}/actions/update`                | `{name?,enabled?,base_url?,credential?}` | 更新后的 `Provider`                                           |
+| POST `/model-providers/{provider_id}/actions/delete`                | `{}`                                     | `{deleted:true}`                                              |
+| POST `/model-providers/{provider_id}/models/actions/sync`           | `{}`                                     | `{provider:Provider,added_model_ids:string[]}`                |
+| POST `/model-providers/{provider_id}/models`                        | `{model_id,context_window_tokens?}`      | 更新后的 `Provider`；重复不覆盖已有设置                       |
+| POST `/model-providers/{provider_id}/models/actions/context-window` | `{model_id,context_window_tokens}`       | 更新已有模型窗口后的 `Provider`；可用 null 清除设置           |
+| POST `/model-providers/{provider_id}/models/actions/remove`         | `{model_id}`                             | 更新后的 `Provider`；使用 body 以保留 `/` 等字符              |
+| POST `/model-providers/{provider_id}/actions/default-model`         | `{model_id:string \| null}`              | 更新后的 `Provider`；设置时同时更新对话全局默认               |
+| POST `/model-providers/{provider_id}/actions/test-connection`       | `{base_url?,credential?}`                | `{status:'passed',latency_ms:number}`                         |
+| POST `/model-providers/{provider_id}/actions/test`                  | `{model_id,base_url?,credential?}`       | `{text_stream,tool_round_trip,usage}`，每项 `{status:'passed' | 'failed'      | 'not_tested',latency_ms:number | null}` |
+| POST `/model-selection/actions/set-default`                         | `{selection:Selection                    | null}`                                                        | `{selection}` |
 
-`credential` 为 `{action:'keep'}`、`{action:'replace',api_key:'…'}` 或 `{action:'clear'}`；省略等同 keep，空输入不删除。修改地址不可静默将旧 Key 发往新地址；未保存地址的检测必须显式提供新 Key 或明确不发送 Key。同步只使用已保存配置、网络前后比较版本，失败不删除模型；检测用合成内容，不创建 Run、不发历史或调用业务工具。未提供 `model_id` 时三项均为 `not_tested`；有模型时按实际执行的文本流、合成工具往返与 usage 结果分别报告，检测整体无法完成返回脱敏失败 envelope。列表出现模型不保证 Key 具有调用权限或流式/工具可用。
+`credential` 为 `{action:'keep'}`、`{action:'replace',api_key:'…'}` 或 `{action:'clear'}`；省略等同 keep，空输入不删除。修改地址不可静默将旧 Key 发往新地址；未保存地址的两种检测都必须显式提供新 Key 或明确不发送 Key。接口连通性检测通过受控出站路径请求 `GET {base_url}/models`，仅在请求成功并收到兼容 JSON 响应时返回 passed；不保存配置或同步模型，成功不保证任何模型可用。同步只使用已保存配置、网络前后比较版本，失败不删除模型；模型检测必须提供 `model_id`，用合成内容，不创建 Run、不发历史或调用业务工具，按实际执行的文本流、合成工具往返与 usage 结果分别报告，检测整体无法完成返回脱敏失败 envelope。列表出现模型不保证 Key 具有调用权限或流式/工具可用。
+
+新增模型时省略窗口等同 null；同步仅新增模型且不覆盖已有窗口，新同步模型为 null。模型不存在时编辑返回 404。Run 接纳时冻结所选模型窗口；后续编辑或清除仅影响新 Run，历史绑定的 null 继续使用全局策略。
 
 公网模型地址仅支持 HTTPS；HTTP 仅用于部署者显式放行的本地 IP origin。出站前统一拦截不符合条件的地址，不发送 Key 或对话内容。
 
-默认只允许本人已启用接入中的模型。删除/停用默认接入或移除默认模型与清除默认同事务；不挑替代。认证失败 401 `UNAUTHENTICATED`，跨 owner 403 `FORBIDDEN`，本人资源不存在 404 `NOT_FOUND`，字段无效 400 `VALIDATION_ERROR`，版本竞争或选择失效 409 `STATE_CONFLICT`。连接失败、鉴权失败、模型列表不支持、不兼容响应和超时须能以稳定脱敏类别区分；具体错误码及 numeric code 未经 contracts 确认前不在此虚构。不得返回原始 provider body、header、请求内容或 SDK 异常。
+默认只允许本人已启用、已保存地址的接入中的模型，允许无 Key 端点；每个接入的默认独立保存。设置接入默认时同时更新全局默认；清除此接入默认时，仅当全局默认属于该接入才一并清除。停用接入清除对应全局默认但保留接入默认；删除接入或移除其默认模型同事务清除相关默认，不挑替代。认证失败 401 `UNAUTHENTICATED`，跨 owner 403 `FORBIDDEN`，本人资源不存在 404 `NOT_FOUND`，字段无效 400 `VALIDATION_ERROR`，版本竞争或选择失效 409 `STATE_CONFLICT`。连接失败、鉴权失败、模型列表不支持、不兼容响应和超时须能以稳定脱敏类别区分；具体错误码及 numeric code 未经 contracts 确认前不在此虚构。不得返回原始 provider body、header、请求内容或 SDK 异常。
 
 检测发生脱敏连接/鉴权/超时等错误时不会返回上游原文或草稿密钥；有模型 ID 但模型 transport 未配置时返回 `503 NOT_READY`。草稿请求的 Key 不持久化，地址或凭据也不改变已保存配置。生产推理与检测使用同一 SDK 工厂和受控出站路径。
 

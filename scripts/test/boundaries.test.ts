@@ -123,6 +123,92 @@ describe.concurrent('D1 dependency boundaries (real depcruise)', () => {
     ).toEqual([]);
   });
 
+  it('allows alias-resolved views, viewmodels, models and shared HTTP', async () => {
+    const entry = 'apps/web/src/features/tasks/view/screen.ts';
+    const result = await cruise(entry, 'json');
+    expect(result.code, result.output).toBe(0);
+    const report = JSON.parse(result.output);
+    expect(report.summary.violations).toEqual([]);
+    const edges = report.modules.flatMap(
+      (module: {
+        source: string;
+        dependencies: { resolved: string; couldNotResolve?: boolean }[];
+      }) =>
+        module.dependencies.map((dependency) => ({
+          from: module.source,
+          to: dependency.resolved,
+          unresolved: dependency.couldNotResolve ?? false,
+        })),
+    );
+    expect(edges.every((edge: { unresolved: boolean }) => !edge.unresolved)).toBe(true);
+    expect(edges).toEqual(
+      expect.arrayContaining([
+        {
+          from: entry,
+          to: 'apps/web/src/features/tasks/viewmodel/controller.ts',
+          unresolved: false,
+        },
+        {
+          from: entry,
+          to: 'apps/web/src/features/tasks/model/task.ts',
+          unresolved: false,
+        },
+        {
+          from: 'apps/web/src/features/tasks/viewmodel/controller.ts',
+          to: 'apps/web/src/features/tasks/model/task.ts',
+          unresolved: false,
+        },
+        {
+          from: 'apps/web/src/features/tasks/model/task.ts',
+          to: 'apps/web/src/shared/http/client.ts',
+          unresolved: false,
+        },
+      ]),
+    );
+  });
+
+  it.each([
+    ['features/tasks/model/bad-view.ts', 'web-feature-model-no-presentation'],
+    ['features/tasks/model/bad-viewmodel.ts', 'web-feature-model-no-presentation'],
+    ['features/tasks/model/bad-route.ts', 'web-feature-model-no-presentation'],
+    ['features/tasks/model/bad-shell-view.ts', 'web-feature-model-no-presentation'],
+    ['features/tasks/model/bad-shared-ui.ts', 'web-feature-model-no-presentation'],
+    ['features/tasks/view/bad-app.ts', 'web-feature-no-app'],
+    ['shared/bad-feature.ts', 'web-shared-no-feature-or-shell'],
+    ['shared/bad-shell.ts', 'web-shared-no-feature-or-shell'],
+    ['features/tasks/model/bad-rootlib.ts', 'web-no-root-business-lib'],
+    ['features/tasks/viewmodel/bad-rootlib-relative.ts', 'web-no-root-business-lib'],
+  ])('rejects architectural dependency %s', async (entry, rule) => {
+    await expectRed(`apps/web/src/${entry}`, rule);
+  });
+
+  it('rejects obsolete root-lib aliases after the target is deleted', async () => {
+    const entry = 'apps/web/src/shared/bad-deleted-rootlib.ts';
+    const result = await cruise(entry);
+    expect(result.code, result.output).toBe(1);
+    expect(result.output).toContain(
+      `error web-no-root-business-lib: ${entry} → @/lib/deleted-business`,
+    );
+  });
+
+  it('retains missing aliases as unresolved dependencies in the graph', async () => {
+    const result = await cruise('apps/web/src/app/unresolved.ts', 'json');
+    const report = JSON.parse(result.output);
+    expect(report.modules).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: 'apps/web/src/app/unresolved.ts',
+          dependencies: expect.arrayContaining([
+            expect.objectContaining({
+              module: '@/shared/http/missing',
+              couldNotResolve: true,
+            }),
+          ]),
+        }),
+      ]),
+    );
+  });
+
   it.each(modules)(
     'rejects %s crossing into another module’s storage, including type imports',
     async (module) => {

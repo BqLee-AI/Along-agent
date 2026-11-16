@@ -6,13 +6,16 @@ import { Message } from '@lorelum/lumen-ui/pro/message';
 import { AssistantMarkdown } from './assistant-markdown';
 import { CopyReplyButton } from './copy-reply-button';
 
+const userBubbleClass =
+  'rounded-2xl bg-[color-mix(in_oklab,var(--brand-ink)_9%,var(--background))]! text-sm leading-6';
+
 export const MessageRow = memo(function MessageRow({ message }: { message: MessageHistoryItem }) {
   return (
     <li className="min-w-0 space-y-2" data-message-role={message.role}>
       <Message from={message.role === 'user' ? 'user' : 'assistant'}>
         <Message.Content
           variant={message.role === 'user' ? 'bubble' : 'plain'}
-          className="text-sm leading-6"
+          className={message.role === 'user' ? userBubbleClass : 'text-sm leading-6'}
         >
           {message.role === 'user' ? (
             <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{message.content}</p>
@@ -42,7 +45,7 @@ export function StreamingMessage({
     <section id="run-reply" className="min-w-0 space-y-6" aria-label="当前回复">
       {original !== null ? (
         <Message from="user" data-message-role="user">
-          <Message.Content variant="bubble" className="text-sm leading-6">
+          <Message.Content variant="bubble" className={userBubbleClass}>
             <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{original}</p>
           </Message.Content>
         </Message>

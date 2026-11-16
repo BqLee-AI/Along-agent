@@ -60,9 +60,7 @@ export function BriefSections({ workspace }: { workspace: TodayWorkspace }) {
             </dd>
           </div>
         </dl>
-        <p className={`mt-3 ${helperClass}`}>
-          仅为该日期的简报，不是全量提醒或活动记录；时间按原记录展示。
-        </p>
+        <p className={`mt-3 ${helperClass}`}>仅显示当日简报。</p>
       </div>
       {brief.meta.timezone_note && (
         <Alert variant="glass">
@@ -85,12 +83,8 @@ export function BriefSections({ workspace }: { workspace: TodayWorkspace }) {
           </Alert.Content>
         </Alert>
       )}
-      {brief.meta.brief_state === 'empty' && (
-        <p className={helperClass}>
-          该日期暂无简报记录。其他日期或尚未载入的事项，请进入对应列表核对。
-        </p>
-      )}
-      {groups.map(({ id, title, description, href, items, empty }) => (
+      {brief.meta.brief_state === 'empty' && <p className={helperClass}>当日暂无简报记录。</p>}
+      {groups.map(({ id, title, href, items, empty }) => (
         <section key={id} aria-labelledby={`brief-${id}`} className="min-w-0">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div className="flex min-w-0 items-baseline gap-2">
@@ -100,7 +94,6 @@ export function BriefSections({ workspace }: { workspace: TodayWorkspace }) {
               >
                 {title}
               </h2>
-              <p className={`truncate ${helperClass}`}>{description}</p>
             </div>
             {href && (
               <Link href={href} aria-label={`查看全部${title}`} className={`shrink-0 ${linkClass}`}>
@@ -110,9 +103,7 @@ export function BriefSections({ workspace }: { workspace: TodayWorkspace }) {
             )}
           </div>
           {items.length === 0 ? (
-            <p className={`${panelClass} px-4 py-5 ${helperClass}`}>
-              {empty} 其他日期、尚未载入或已变化的记录，请进入对应列表核对。
-            </p>
+            <p className={`${panelClass} px-4 py-5 ${helperClass}`}>{empty}</p>
           ) : (
             <ul className={`${panelClass} divide-y divide-separator`}>
               {items.map((item) => (
@@ -149,8 +140,7 @@ export function BriefSections({ workspace }: { workspace: TodayWorkspace }) {
         </section>
       ))}
       <p className={helperClass}>
-        资料任务与修改结果保存在原会话中。
-        <Link href="/conversations" className={`${linkClass} ml-2`}>
+        <Link href="/conversations" className={linkClass}>
           找回会话与结果
           <ArrowRight className="size-3.5" aria-hidden="true" />
         </Link>

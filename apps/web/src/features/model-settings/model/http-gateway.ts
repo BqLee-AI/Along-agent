@@ -1,5 +1,4 @@
 import {
-  ModelSelectionSchema,
   ProviderListSchema,
   ProviderTestResultSchema,
   ProviderViewSchema,
@@ -17,7 +16,9 @@ export type ProviderList = z.infer<typeof ProviderListSchema>;
 export type TestResult = z.infer<typeof ProviderTestResultSchema>;
 export type ProviderUpdate = SharedProviderUpdate;
 export type Credential = NonNullable<ProviderUpdate['credential']>;
-export type Draft = { base_url: string; credential: Credential; model_id?: string };
+export type Draft = { base_url: string; credential: Credential };
+const ConnectionResultSchema = z.object({ status: z.literal('passed'), latency_ms: z.number() });
+export type ConnectionResult = z.infer<typeof ConnectionResultSchema>;
 
 // A saved credential is bound to its saved endpoint, including for draft tests.
 export function validateDraft(provider: Provider, draft: Draft): string | null {
@@ -63,19 +64,38 @@ export async function syncModels(id: string) {
     .object({ provider: ProviderViewSchema, added_model_ids: z.array(z.string()) })
     .parse(await post(`${providerPath(id)}/models/actions/sync`, {}));
 }
-export async function addModel(id: string, model_id: string) {
-  return ProviderViewSchema.parse(await post(`${providerPath(id)}/models`, { model_id }));
+export async function addModel(id: string, model_id: string, context_window_tokens: number | null) {
+  return ProviderViewSchema.parse(
+    await post(`${providerPath(id)}/models`, { model_id, context_window_tokens }),
+  );
+}
+export async function updateModelContextWindow(
+  id: string,
+  model_id: string,
+  context_window_tokens: number | null,
+) {
+  return ProviderViewSchema.parse(
+    await post(`${providerPath(id)}/models/actions/context-window`, {
+      model_id,
+      context_window_tokens,
+    }),
+  );
 }
 export async function removeModel(id: string, model_id: string) {
   return ProviderViewSchema.parse(
     await post(`${providerPath(id)}/models/actions/remove`, { model_id }),
   );
 }
-export async function testProvider(id: string, draft: Draft) {
+export async function testConnection(id: string, draft: Draft) {
+  return ConnectionResultSchema.parse(
+    await post(`${providerPath(id)}/actions/test-connection`, draft),
+  );
+}
+export async function testModel(id: string, draft: Draft & { model_id: string }) {
   return ProviderTestResultSchema.parse(await post(`${providerPath(id)}/actions/test`, draft));
 }
-export async function setDefault(selection: Selection | null) {
-  return z
-    .object({ selection: ModelSelectionSchema.nullable() })
-    .parse(await post('/model-selection/actions/set-default', { selection }));
+export async function setDefault(id: string, model_id: string | null) {
+  return ProviderViewSchema.parse(
+    await post(`${providerPath(id)}/actions/default-model`, { model_id }),
+  );
 }

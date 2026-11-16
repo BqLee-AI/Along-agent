@@ -7,6 +7,7 @@ import {
   useConversationTask,
   type ConversationTask,
 } from '../src/features/conversations/viewmodel/use-conversation-task';
+import { ModelCatalogProvider } from '../src/features/model-settings/viewmodel/model-catalog-context';
 
 const cid = '11111111-1111-4111-8111-111111111111';
 const rid = '22222222-2222-4222-8222-222222222222';
@@ -66,7 +67,9 @@ async function host(initial: Selection): Promise<HookHost> {
     );
   }
   await act(async () => {
-    root.render(createElement(Consumer, initial));
+    root.render(
+      createElement(ModelCatalogProvider, { children: createElement(Consumer, initial) }),
+    );
   });
   return {
     get value() {
@@ -77,7 +80,9 @@ async function host(initial: Selection): Promise<HookHost> {
     },
     async select(next) {
       await act(async () => {
-        root.render(createElement(Consumer, next));
+        root.render(
+          createElement(ModelCatalogProvider, { children: createElement(Consumer, next) }),
+        );
       });
     },
     async unmount() {

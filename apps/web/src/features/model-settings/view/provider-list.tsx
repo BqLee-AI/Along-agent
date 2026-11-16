@@ -4,24 +4,26 @@ import { useState } from 'react';
 import { Plus } from 'lucide-react';
 import { Button } from '@lorelum/lumen-ui/components/button';
 import { Input } from '@lorelum/lumen-ui/components/input';
-import type { DefaultSelection, Provider } from '../model/model-config';
+import type { Provider } from '../model/model-config';
+import { availablePresets } from '../model/provider-presets';
+import { ProviderIcon } from './provider-icon';
 
 export function ProviderList({
   providers,
+  previewName,
   selectedId,
   disabled,
-  selection,
-  onClearDefault,
   onSelect,
+  onPreview,
   onAdd,
 }: {
   providers: Provider[];
+  previewName: string | null;
   selectedId: string | null;
   disabled: boolean;
-  selection: DefaultSelection;
-  onClearDefault: () => void;
+  onPreview: (name: string) => void;
   onSelect: (id: string) => void;
-  onAdd: (name: string) => Promise<boolean>;
+  onAdd: (name: string, apiHost?: string) => Promise<boolean>;
 }) {
   const [query, setQuery] = useState('');
   const [adding, setAdding] = useState(false);
@@ -29,6 +31,7 @@ export function ProviderList({
   const visible = providers.filter((item) =>
     item.name.toLowerCase().includes(query.trim().toLowerCase()),
   );
+  const presets = availablePresets(providers, query);
 
   return (
     <div className="flex min-w-0 flex-col gap-2 lg:w-52 lg:shrink-0">
@@ -42,7 +45,13 @@ export function ProviderList({
         />
       </div>
 
-      <ul className="flex min-h-0 flex-col gap-0.5" aria-label="模型服务商">
+      {visible.length > 0 ? (
+        <p className="px-2 pt-1 text-xs text-muted-foreground">已添加</p>
+      ) : null}
+      <ul
+        className="flex max-h-64 min-h-0 flex-col gap-0.5 overflow-y-auto"
+        aria-label="模型服务商"
+      >
         {visible.map((provider) => {
           const active = provider.id === selectedId;
           return (
@@ -51,17 +60,12 @@ export function ProviderList({
                 type="button"
                 disabled={disabled}
                 aria-current={active ? 'true' : undefined}
-                className={`flex h-9 w-full items-center gap-2 rounded-md px-2.5 text-left text-sm transition-colors disabled:opacity-60 ${
+                className={`flex min-h-12 w-full items-center gap-2.5 rounded-lg px-2 text-left text-sm transition-colors disabled:opacity-60 ${
                   active ? 'bg-foreground/10 font-medium' : 'hover:bg-foreground/5'
                 }`}
                 onClick={() => onSelect(provider.id)}
               >
-                <span
-                  className="grid size-5 shrink-0 place-items-center rounded bg-foreground/10 text-[11px] font-semibold"
-                  aria-hidden="true"
-                >
-                  {provider.name.slice(0, 1)}
-                </span>
+                <ProviderIcon name={provider.name} />
                 <span className="min-w-0 flex-1 truncate">{provider.name}</span>
                 {provider.enabled ? (
                   <span className="size-1.5 shrink-0 rounded-full bg-success" title="已启用">
@@ -72,10 +76,45 @@ export function ProviderList({
             </li>
           );
         })}
-        {visible.length === 0 ? (
+        {visible.length === 0 && presets.length === 0 ? (
           <li className="px-2.5 py-2 text-[13px] text-muted-foreground">没有匹配的服务商。</li>
         ) : null}
       </ul>
+
+      {presets.length > 0 ? (
+        <div className="space-y-1 border-t border-separator pt-2">
+          <p className="px-2 text-xs text-muted-foreground">常用服务商</p>
+          <ul className="max-h-64 space-y-1 overflow-y-auto" aria-label="常用服务商">
+            {presets.map((preset) => (
+              <li
+                key={preset.name}
+                className={`flex items-center rounded-lg transition-colors ${previewName === preset.name ? 'bg-foreground/10' : 'hover:bg-foreground/5'}`}
+              >
+                <button
+                  type="button"
+                  disabled={disabled}
+                  aria-current={previewName === preset.name ? 'true' : undefined}
+                  className="flex min-h-12 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2 text-left text-sm disabled:opacity-60"
+                  onClick={() => onPreview(preset.name)}
+                >
+                  <ProviderIcon name={preset.name} />
+                  <span className="min-w-0 flex-1 truncate">{preset.name}</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={disabled}
+                  aria-label={`添加 ${preset.name}`}
+                  title={`添加 ${preset.name}`}
+                  className="mr-1 grid size-9 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-foreground/10 hover:text-foreground disabled:opacity-60"
+                  onClick={() => void onAdd(preset.name, preset.apiHost)}
+                >
+                  <Plus className="size-4" aria-hidden="true" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       {adding ? (
         <form
@@ -134,26 +173,6 @@ export function ProviderList({
           添加服务商
         </Button>
       )}
-
-      <div className="mt-2 space-y-1 border-t border-separator pt-3">
-        <p className="text-xs leading-5 text-muted-foreground">
-          默认模型：
-          {selection
-            ? `${providers.find((item) => item.id === selection.provider_id)?.name ?? selection.provider_id} / ${selection.model_id}`
-            : '尚未设置'}
-        </p>
-        {selection ? (
-          <Button
-            type="button"
-            variant="clear"
-            color="default"
-            disabled={disabled}
-            onClick={onClearDefault}
-          >
-            清除默认模型
-          </Button>
-        ) : null}
-      </div>
     </div>
   );
 }

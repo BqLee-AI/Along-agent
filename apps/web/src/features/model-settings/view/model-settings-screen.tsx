@@ -1,15 +1,25 @@
 'use client';
 
+import { useState } from 'react';
 import { CheckCircle2 } from 'lucide-react';
 import { Button } from '@lorelum/lumen-ui/components/button';
 import { Skeleton } from '@lorelum/lumen-ui/components/skeleton';
 import { ErrorNotice } from '@/shared/ui/page';
+import { providerPresets } from '../model/provider-presets';
 import { useModelSettings } from '../viewmodel/use-model-settings';
 import { ProviderDetail } from './provider-detail';
+import { ProviderIcon } from './provider-icon';
 import { ProviderList } from './provider-list';
 
 export default function ModelSettingsScreen() {
   const vm = useModelSettings();
+  const [previewName, setPreviewName] = useState<string | null>(null);
+  const preview = providerPresets.find((preset) => preset.name === previewName) ?? null;
+  const add = async (name: string, apiHost?: string) => {
+    const added = await vm.addProvider(name, apiHost);
+    if (added) setPreviewName(null);
+    return added;
+  };
 
   if (vm.load.kind === 'loading') {
     return (
@@ -46,14 +56,43 @@ export default function ModelSettingsScreen() {
     <div className="flex min-w-0 flex-col gap-6 lg:flex-row">
       <ProviderList
         providers={vm.providers}
-        selectedId={vm.selected?.id ?? null}
+        previewName={previewName}
+        selectedId={preview ? null : (vm.selected?.id ?? null)}
         disabled={vm.working}
-        selection={vm.selection}
-        onClearDefault={() => void vm.setDefault(null)}
-        onSelect={vm.select}
-        onAdd={vm.addProvider}
+        onSelect={(id) => {
+          setPreviewName(null);
+          vm.select(id);
+        }}
+        onPreview={setPreviewName}
+        onAdd={add}
       />
-      {vm.selected ? (
+      {preview ? (
+        <div className="min-w-0 flex-1 space-y-6 pt-1">
+          <div className="flex items-center gap-4">
+            <ProviderIcon name={preview.name} large />
+            <div className="min-w-0 space-y-1">
+              <h2 className="text-base font-semibold">{preview.name}</h2>
+              <p className="text-sm text-muted-foreground">常用服务商 · 尚未添加</p>
+            </div>
+          </div>
+          <div className="space-y-2 rounded-xl border border-border bg-foreground/[0.025] p-4">
+            <p className="text-sm font-medium">baseURL</p>
+            <p className="break-all text-sm text-muted-foreground">{preview.apiHost}</p>
+            <p className="text-xs leading-5 text-muted-foreground">
+              添加后可修改地址，填写服务商提供的 API 密钥并保存。
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="solid"
+            disabled={vm.working}
+            onClick={() => void add(preview.name, preview.apiHost)}
+          >
+            添加 {preview.name}
+          </Button>
+          {vm.notice?.kind === 'failed' ? <ErrorNotice message={vm.notice.message} /> : null}
+        </div>
+      ) : vm.selected ? (
         <ProviderDetail key={vm.selected.id} provider={vm.selected} vm={vm} />
       ) : (
         <div className="space-y-2">
