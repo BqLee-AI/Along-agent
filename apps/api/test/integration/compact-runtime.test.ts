@@ -358,6 +358,30 @@ interface Fixture {
     const sourceGuard = input.guard;
     let guardCalls = 0;
     let cancelling: Promise<unknown> | undefined;
+    // Wait for the queued cancellation to commit after the real summary COMMIT,
+    // before the compact caller can start its separate candidate transaction.
+    input.pool = new Proxy(db.pool, {
+      get(target, property) {
+        if (property === 'connect')
+          return async () => {
+            const client = await target.connect();
+            return new Proxy(client, {
+              get(connection, key) {
+                if (key === 'query')
+                  return async (...queryArgs: unknown[]) => {
+                    const result = await Reflect.apply(connection.query, connection, queryArgs);
+                    if (queryArgs[0] === 'COMMIT' && cancelling) await cancelling;
+                    return result;
+                  };
+                const value = Reflect.get(connection, key, connection);
+                return typeof value === 'function' ? value.bind(connection) : value;
+              },
+            }) as PoolClient;
+          };
+        const value = Reflect.get(target, property, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
     input.guard = async (client, ids) => {
       await sourceGuard(client, ids);
       // The seventh guard is markCompactPublished, inside the summary transaction.
