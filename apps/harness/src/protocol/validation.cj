@@ -137,8 +137,13 @@ public func waitingCheck(v: JsonValue): Unit {
 }
 public func snapshotCheck(v: JsonValue): Unit {
     let o = v.asObject()
-    keys(o, ["version", "message_refs", "tool_refs", "next_call_no", "usage", "waiting"])
-    require(integer(field(o, "version"), 2) == 2)
+    let version = integer(field(o, "version"), 2)
+    require(version == 2 || version == 3)
+    if (version == 3) {
+        keys(o, ["version", "message_refs", "tool_refs", "next_call_no", "usage", "waiting", "native_state"])
+    } else {
+        keys(o, ["version", "message_refs", "tool_refs", "next_call_no", "usage", "waiting"])
+    }
     refsCheck(field(o, "message_refs")); refsCheck(field(o, "tool_refs"))
     integer(field(o, "next_call_no"), 1)
     usageCheck(field(o, "usage")); waitingCheck(field(o, "waiting"))

@@ -161,4 +161,46 @@ databaseTests('routing lifecycle schema admission against PG16', () => {
     },
     30000,
   );
+  it('upgrades 0028 to the pause schema and rejects a damaged live-pause index', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'pause-lifecycle-'));
+    const migrations = new URL('../../infra/migrations/', import.meta.url);
+    try {
+      const names = (await readdir(migrations)).filter((name) => name.endsWith('.sql')).sort();
+      for (const name of names.filter((item) => item.slice(0, 4) <= '0028')) {
+        await copyFile(new URL(name, migrations), join(directory, name));
+      }
+      await isolated(async (url) => {
+        await deployment(
+          url,
+          async (database) => {
+            expect((await database.initialize()).version).toBe('0028');
+          },
+          directory,
+        );
+        const pauseMigration = names.find((name) => name.startsWith('0029_'))!;
+        await copyFile(new URL(pauseMigration, migrations), join(directory, pauseMigration));
+        await deployment(
+          url,
+          async (database) => {
+            expect(await database.classify()).toMatchObject({ kind: 'supported', version: '0028' });
+            expect((await database.upgrade()).version).toBe('0029');
+            expect(await database.classify()).toMatchObject({ kind: 'supported', version: '0029' });
+          },
+          directory,
+        );
+        await sql(url, async (client) => {
+          await client.query('DROP INDEX harness_pauses_one_live_run');
+        });
+        await deployment(
+          url,
+          async (database) => {
+            expect((await database.classify()).kind).toBe('unknown');
+          },
+          directory,
+        );
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 120000);
 });

@@ -1,13 +1,16 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { ThreadEventSchema } from '@along/stream-protocol';
 import type { ThreadEvent } from '@along/stream-protocol';
-import type { GoalResult } from '@along/contracts';
+import type { GoalResult, RunView } from '@along/contracts';
 import { NextRequest } from 'next/server';
 import {
   collectRunTranscripts,
   consumeThreadStream,
   followRunEvents,
   mergeThreadEvents,
+  requestUserPause,
+  userPauseCanContinue,
+  postRunStream,
 } from '../src/features/conversations/model/conversation-run';
 import { readEnvelope } from '../src/shared/http/client';
 import { createServer } from 'node:http';
@@ -42,6 +45,114 @@ function event(
 function request(path: string, init?: { signal?: AbortSignal }): NextRequest {
   return new NextRequest(`http://web.test/api/${path}`, init);
 }
+
+describe('User pause actions', () => {
+  it('posts a user pause with a stable key and preserves pending', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchAction = (async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      return Response.json({
+        code: 0,
+        data: { status: 'pending', pause_id: rid },
+        msg: 'ok',
+        error: null,
+        request_id: 'request-1',
+      });
+    }) as typeof fetch;
+    const signal = new AbortController().signal;
+    expect(await requestUserPause(cid, rid, cid, 'csrf', signal, fetchAction)).toEqual({
+      status: 'pending',
+      pause_id: rid,
+    });
+    expect(calls[0]?.url).toBe(`/api/v1/conversations/${cid}/runs/${rid}/actions/pause`);
+    expect(calls[0]?.init?.method).toBe('POST');
+    expect(calls[0]?.init?.headers).toEqual({
+      'content-type': 'application/json',
+      'Idempotency-Key': cid,
+      'x-csrf-token': 'csrf',
+    });
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({ reason: 'user', purpose: 'none' });
+    expect(calls[0]?.init?.signal).toBe(signal);
+  });
+
+  it('posts an explicit continue for the same Run with its pause and key', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchAction = (async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      return new Response(`data: ${JSON.stringify(event(1, 'thread.completed'))}\n\n`);
+    }) as typeof fetch;
+    const response = await postRunStream(
+      `/api/v1/conversations/${cid}/runs/${rid}/actions/continue`,
+      { pause_id: rid },
+      'csrf',
+      new AbortController().signal,
+      cid,
+      fetchAction,
+    );
+    const received: ThreadEvent[] = [];
+    await consumeThreadStream(response, (value) => received.push(value));
+    expect(received.map((value) => value.type)).toEqual(['thread.completed']);
+    expect(calls[0]?.url).toEndWith(`/runs/${rid}/actions/continue`);
+    expect(calls[0]?.init?.method).toBe('POST');
+    expect(calls[0]?.init?.headers).toEqual({
+      'content-type': 'application/json',
+      accept: 'text/event-stream',
+      'Idempotency-Key': cid,
+      'x-csrf-token': 'csrf',
+    });
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({ pause_id: rid });
+  });
+
+  it('ends read-only following on a paused Run without posting a continuation', async () => {
+    const calls: Array<{ url: string; method?: string }> = [];
+    await followRunEvents({
+      conversationId: cid,
+      runId: rid,
+      signal: new AbortController().signal,
+      cursor: () => 0,
+      onEvent: () => {},
+      readStatus: async () => 'paused',
+      fetchEvents: async (url, init) => {
+        calls.push({ url: String(url), method: init.method });
+        return new Response('');
+      },
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.method).toBe('GET');
+    expect(calls[0]?.url).toContain(`/runs/${rid}/events?`);
+  });
+
+  it('surfaces a rejected pause', async () => {
+    const fetchAction = (async () =>
+      Response.json(
+        {
+          code: 1,
+          data: null,
+          msg: 'conflict',
+          error: { code: 'CONFLICT', message: 'pause unavailable', request_id: 'request-1' },
+          request_id: 'request-1',
+        },
+        { status: 409 },
+      )) as unknown as typeof fetch;
+    await expect(
+      requestUserPause(cid, rid, cid, null, new AbortController().signal, fetchAction),
+    ).rejects.toThrow('pause unavailable');
+  });
+
+  it('only allows explicit continuation of a confirmed user pause', () => {
+    const run = {
+      status: 'paused',
+      pause: { pause_id: rid, status: 'paused', reason: 'user', purpose: 'none' },
+    } as RunView;
+    expect(userPauseCanContinue(run)).toBe(true);
+    expect(userPauseCanContinue({ ...run, status: 'running' })).toBe(false);
+    expect(userPauseCanContinue({ ...run, status: 'suspended_approval', pause: null })).toBe(false);
+    expect(userPauseCanContinue({ ...run, pause: { ...run.pause!, status: 'pending' } })).toBe(
+      false,
+    );
+    expect(userPauseCanContinue(null)).toBe(false);
+  });
+});
 
 // These exercise the browser's actual event/read consumers and proxy stream,
 // not source text. Browser action/DOM evidence is collected by integration.

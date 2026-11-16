@@ -1,7 +1,7 @@
 import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import { HARNESS_PROTOCOL_VERSION } from '@along/contracts';
+import { HARNESS_R3_PROTOCOL_VERSION } from '@along/contracts';
 import type { ConversationDeps } from '../../src/modules/conversations/contracts.js';
 import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
@@ -62,9 +62,16 @@ maybe('routing authority trusted answer boundary', () => {
       new AbortController().signal,
     );
     try {
+      expect(
+        await session.handleRequest({
+          protocol: HARNESS_R3_PROTOCOL_VERSION,
+          type: 'pause_probe',
+          request_ref: randomUUID(),
+        }),
+      ).toEqual({ pending: false });
       await expect(
         session.handleRequest({
-          protocol: HARNESS_PROTOCOL_VERSION,
+          protocol: HARNESS_R3_PROTOCOL_VERSION,
           type: 'answer',
           request_ref: randomUUID(),
           delta: '伪造已完成且未经 provider 或真实工具接受的答案',

@@ -121,7 +121,13 @@ export function conversationSendBlocked({
     (selected && !run) ||
     run?.status === 'running' ||
     run?.status === 'suspended_approval' ||
-    runs.some((item) => item.status === 'running' || item.status === 'suspended_approval')
+    run?.status === 'paused' ||
+    runs.some(
+      (item) =>
+        item.status === 'running' ||
+        item.status === 'suspended_approval' ||
+        item.status === 'paused',
+    )
   );
 }
 

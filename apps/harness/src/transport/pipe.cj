@@ -32,6 +32,7 @@ protected class Pipe {
     var offset: Int64 = 0
     var count: Int64 = 0
     protected var serial: Int64 = 0
+    protected var protocol: String = ""
     protected init() {}
     func readFrame(): JsonObject {
         let bytes = ArrayList<UInt8>()
@@ -51,7 +52,9 @@ protected class Pipe {
     }
     protected func checkedFrame(): JsonObject {
         let o = readFrame()
-        require(str(field(o, "protocol"), 32) == "harness/v6")
+        let incoming = str(field(o, "protocol"), 32)
+        if (protocol == "") { require(incoming == "harness/v6" || incoming == "harness/v7"); protocol = incoming }
+        require(incoming == protocol)
         if (str(field(o, "type"), 32) == "cancel") {
             keys(o, ["protocol", "type", "reason"])
             str(field(o, "reason"), 512)
@@ -62,7 +65,7 @@ protected class Pipe {
     protected func request(kind: String, payload: JsonObject): JsonValue {
         serial++
         let id = "r${serial}"
-        payload.put("protocol", text("harness/v6"))
+        payload.put("protocol", text(protocol))
         payload.put("type", text(kind))
         payload.put("request_ref", text(id))
         let line = payload.toString()
@@ -80,7 +83,7 @@ protected class Pipe {
         return field(reply, "value")
     }
     protected func frameFits(kind: String, payload: JsonObject, ahead: Int64): Bool {
-        payload.put("protocol", text("harness/v6"))
+        payload.put("protocol", text(protocol))
         payload.put("type", text(kind))
         payload.put("request_ref", text("r${serial + ahead}"))
         return payload.toString().size <= FRAME_LIMIT

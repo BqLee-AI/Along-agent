@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { HARNESS_PROTOCOL_VERSION, DocumentApprovalReceiptSchema } from '@along/contracts';
+import { HARNESS_R3_PROTOCOL_VERSION, DocumentApprovalReceiptSchema } from '@along/contracts';
 import { rejectDocumentApproval } from '../../src/modules/approvals/document-actions.js';
 import {
   createHarnessSession,
@@ -82,18 +82,29 @@ maybe('delegated document rejection', () => {
       },
       null,
     );
-    if (!started.context) throw new Error('missing Run context');
-    const context = started.context;
+    if (!started.context?.userMessageId) throw new Error('missing Run user context');
+    const context = { ...started.context, userMessageId: started.context.userMessageId };
     const session = await createHarnessSession(
       deps,
       context,
       async () => true,
       new AbortController().signal,
     );
+    if (session.start.protocol !== HARNESS_R3_PROTOCOL_VERSION)
+      throw new Error('v7 harness protocol expected');
     const request = (type: string, fields: object) =>
-      ({ protocol: HARNESS_PROTOCOL_VERSION, request_ref: randomUUID(), type, ...fields }) as never;
+      ({
+        protocol: HARNESS_R3_PROTOCOL_VERSION,
+        request_ref: randomUUID(),
+        type,
+        ...fields,
+      }) as never;
+    const probe = async () => {
+      expect(await session.handleRequest(request('pause_probe', {}))).toEqual({ pending: false });
+    };
     const id = z.object({ invocation_id: z.string().uuid() });
     const readArgs = { workspace_id: 'documents', path: 'brief.txt' };
+    await probe();
     const read = id.parse(
       await session.handleRequest(
         request('reserve', { call_key: 'harness/1', tool_id: 'workspace_read', args: readArgs }),
@@ -115,6 +126,7 @@ maybe('delegated document rejection', () => {
       read_invocation_id: read.invocation_id,
       change: { kind: 'literal', old_text: 'Original', new_text: 'Updated' },
     };
+    await probe();
     const proposed = id.parse(
       await session.handleRequest(
         request('reserve', { call_key: 'harness/2', tool_id: 'workspace_propose_replace', args }),
@@ -158,7 +170,7 @@ maybe('delegated document rejection', () => {
       approval_id: receipt.approval_id,
     });
     if (suspend) await session.handleRequest(suspendRequest);
-    return { actor, context, deps, session, receipt, checkpoint, suspendRequest, root };
+    return { actor, context, deps, session, receipt, checkpoint, suspendRequest, root, probe };
   }
 
   it('atomically rejects the current waiting point without a new attempt or document write', async () => {
@@ -269,6 +281,7 @@ maybe('delegated document rejection', () => {
 
   it('records an early rejection but does not advance to the waiting point', async () => {
     const f = await fixture(false);
+    await f.probe();
     expect(
       await rejectDocumentApproval(f.deps, f.actor.userId, f.receipt.approval_id, {
         idempotency_key: randomUUID(),
@@ -279,7 +292,7 @@ maybe('delegated document rejection', () => {
     });
     await expect(
       f.session.handleRequest({
-        protocol: HARNESS_PROTOCOL_VERSION,
+        protocol: HARNESS_R3_PROTOCOL_VERSION,
         request_ref: randomUUID(),
         type: 'reserve',
         call_key: 'harness/3',

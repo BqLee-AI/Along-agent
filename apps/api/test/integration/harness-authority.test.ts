@@ -8,10 +8,12 @@ import { z } from 'zod';
 import type { Pool } from 'pg';
 import {
   HARNESS_PROTOCOL_VERSION,
+  HARNESS_R3_PROTOCOL_VERSION,
   DocumentApprovalReceiptSchema,
   type HarnessRequest,
   type HarnessSnapshot,
   type HarnessModelStep,
+  type HarnessStart,
   type WorkspaceSummary,
 } from '@along/contracts';
 import type { ThreadEvent } from '@along/stream-protocol';
@@ -30,7 +32,7 @@ import type {
 } from '../../src/modules/conversations/contracts.js';
 import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
 import {
-  createHarnessSession,
+  createHarnessSession as createAuthoritySession,
   cancelConversationRun,
   getRunView,
   inspectReleaseWaiting,
@@ -97,9 +99,9 @@ const timeContext = loadTimeContext('fixture-v1');
 interface Fixture {
   actor: SeededSession;
   started: StartResult;
-  context: RunContext;
+  context: RunContext & { userMessageId: string };
   events: ThreadEvent[];
-  session: HarnessSession;
+  session: LegacyHarnessSession;
   frame(request: HarnessRequest): Promise<unknown>;
 }
 interface WaitingFixture extends Fixture {
@@ -108,6 +110,51 @@ interface WaitingFixture extends Fixture {
   approvalId: string;
   snapshot: HarnessSnapshot;
   checkpointId: string;
+}
+
+type LegacyHarnessSession = Omit<HarnessSession, 'start'> & { start: HarnessStart };
+
+// Drive each session as the native harness does: use its negotiated protocol and
+// obtain a safe-point permit immediately before each action that consumes one.
+const authoritySessions = new WeakMap<HarnessSession, HarnessSession>();
+async function createHarnessSession(
+  ...args: Parameters<typeof createAuthoritySession>
+): Promise<LegacyHarnessSession> {
+  const authority = await createAuthoritySession(...args);
+  if (
+    authority.start.protocol !== HARNESS_PROTOCOL_VERSION &&
+    authority.start.protocol !== HARNESS_R3_PROTOCOL_VERSION
+  )
+    throw new Error('legacy harness protocol expected');
+  const session: LegacyHarnessSession = {
+    ...authority,
+    start: authority.start,
+    async handleRequest(frame) {
+      const request = { ...frame, protocol: authority.start.protocol } as HarnessRequest;
+      if (
+        authority.start.protocol === HARNESS_R3_PROTOCOL_VERSION &&
+        (request.type === 'model' ||
+          request.type === 'reserve' ||
+          request.type === 'finish_goal' ||
+          (request.type === 'finish' && request.outcome === 'done'))
+      ) {
+        await probe(authority);
+      }
+      return authority.handleRequest(request);
+    },
+  };
+  authoritySessions.set(session, authority);
+  return session;
+}
+
+async function probe(session: HarnessSession): Promise<void> {
+  expect(
+    await session.handleRequest({
+      protocol: HARNESS_R3_PROTOCOL_VERSION,
+      request_ref: randomUUID(),
+      type: 'pause_probe',
+    }),
+  ).toEqual({ pending: false });
 }
 
 maybe('harness durable authority against PostgreSQL', () => {
@@ -167,8 +214,8 @@ maybe('harness durable authority against PostgreSQL', () => {
       },
       null,
     );
-    if (!started.context) throw new Error('fresh context missing');
-    const context = started.context;
+    if (!started.context?.userMessageId) throw new Error('fresh user context missing');
+    const context = { ...started.context, userMessageId: started.context.userMessageId };
     const events: ThreadEvent[] = [];
     const session = await createHarnessSession(
       modelDeps(modelAnswer),
@@ -196,7 +243,7 @@ maybe('harness durable authority against PostgreSQL', () => {
     } as Extract<HarnessRequest, { type: T }>;
   }
   async function beginModelAnswer(
-    session: HarnessSession,
+    session: LegacyHarnessSession,
     context: RunContext,
     delta: string,
   ): Promise<string> {
@@ -282,13 +329,15 @@ maybe('harness durable authority against PostgreSQL', () => {
         INSERT INTO agent_runs(id,owner_id,conversation_id,agent_revision,mode,status,
           budget_max_iterations,budget_max_tokens,execution,tools_allowlist,frozen_context,input_message_id)
         SELECT $2,owner_id,conversation_id,agent_revision,mode,'running',
-          budget_max_iterations,budget_max_tokens,execution,$4::jsonb,frozen_context,input_message_id
+          budget_max_iterations,budget_max_tokens,execution,$4::jsonb,frozen_context-'execution_profile',input_message_id
         FROM agent_runs WHERE id=$1 RETURNING id,owner_id
       ) INSERT INTO run_attempts(id,owner_id,run_id,attempt_no,status)
         SELECT $3,owner_id,id,1,'running' FROM legacy`,
       [source.context.runId, runId, attemptId, JSON.stringify(allowlist)],
     );
-    const context = { ...source.context, runId, attemptId, allowlist: [...allowlist] };
+    const { executionProfile: _executionProfile, ...legacyContext } = source.context;
+    void _executionProfile;
+    const context = { ...legacyContext, runId, attemptId, allowlist: [...allowlist] };
     const inboundKey = randomUUID();
     await database.pool.query(
       `INSERT INTO conversation_idempotency(owner_id,idempotency_key,request_hash,
@@ -410,8 +459,8 @@ maybe('harness durable authority against PostgreSQL', () => {
       },
       null,
     );
-    if (!started.context) throw new Error('workspace history context missing');
-    const context = started.context;
+    if (!started.context?.userMessageId) throw new Error('workspace history user context missing');
+    const context = { ...started.context, userMessageId: started.context.userMessageId };
     const session = await createHarnessSession(
       deps,
       context,
@@ -616,7 +665,7 @@ maybe('harness durable authority against PostgreSQL', () => {
       },
       null,
     );
-    if (!second.context) throw new Error('second accepted context missing');
+    if (!second.context?.userMessageId) throw new Error('second accepted user context missing');
     const lateId = randomUUID();
     await database.pool.query(
       `INSERT INTO messages(id,owner_id,conversation_id,role,content,created_at)
@@ -879,7 +928,7 @@ maybe('harness durable authority against PostgreSQL', () => {
       async () => true,
       new AbortController().signal,
     );
-    expect(session.start.protocol).toBe(HARNESS_PROTOCOL_VERSION);
+    expect(session.start.protocol).toBe(HARNESS_R3_PROTOCOL_VERSION);
     expect(session.start.snapshot).toEqual({ ...legacy, version: 2 });
     expect(session.start.approval).toEqual({
       kind: 'task',
@@ -1084,7 +1133,8 @@ maybe('harness durable authority against PostgreSQL', () => {
       expect(view.can_resume).toBe(true);
       const key = randomUUID();
       const resumed = await resume(fixture, key);
-      if (!resumed.context) throw new Error('resume context missing');
+      if (!resumed.context?.userMessageId) throw new Error('resume user context missing');
+      const resumedContext = { ...resumed.context, userMessageId: resumed.context.userMessageId };
       const resumedEvents: ThreadEvent[] = [];
       const session = await createHarnessSession(
         deps,
@@ -1140,7 +1190,7 @@ maybe('harness durable authority against PostgreSQL', () => {
         ).rejects.toBeInstanceOf(HttpError);
       if (status === 'consumed') {
         await acceptModelAnswer(
-          { session, context: resumed.context, frame: (frame) => session.handleRequest(frame) },
+          { session, context: resumedContext, frame: (frame) => session.handleRequest(frame) },
           'answer',
         );
         await session.handleRequest(
@@ -1381,7 +1431,8 @@ maybe('harness durable authority against PostgreSQL', () => {
       },
       null,
     );
-    if (!second.context) throw new Error('second context missing');
+    if (!second.context?.userMessageId) throw new Error('second user context missing');
+    const secondContext = { ...second.context, userMessageId: second.context.userMessageId };
     const secondSession = await createHarnessSession(
       modelDeps('second assistant'),
       second.context,
@@ -1392,7 +1443,7 @@ maybe('harness durable authority against PostgreSQL', () => {
     await acceptModelAnswer(
       {
         session: secondSession,
-        context: second.context,
+        context: secondContext,
         frame: (frame) => secondSession.handleRequest(frame),
       },
       'second assistant',
@@ -1563,6 +1614,16 @@ maybe('harness durable authority against PostgreSQL', () => {
 
   it('cancel wins real attempt-lock races against reserve, snapshot and finish; no effect and one cancelled event', async () => {
     const fixture = await fresh();
+    // Each concurrent action needs its own permit before the attempt lock is held.
+    const reserveSession = authoritySessions.get(fixture.session)!;
+    const finishSession = await createAuthoritySession(
+      deps,
+      fixture.context,
+      async () => true,
+      new AbortController().signal,
+    );
+    await probe(reserveSession);
+    await probe(finishSession);
     const blocker = await database.pool.connect();
     const pid = (await blocker.query<{ pid: number }>('SELECT pg_backend_pid() pid')).rows[0]!.pid;
     await blocker.query('BEGIN');
@@ -1580,12 +1641,14 @@ maybe('harness durable authority against PostgreSQL', () => {
         { idempotency_key: key },
       );
       await blocked(database.pool, pid);
-      const reserve = fixture.frame(
-        request('reserve', { call_key: 'harness/1', tool_id: 'propose_task', args: {} }),
-      );
-      const finishing = fixture.frame(
-        request('finish', { outcome: 'done', usage: { iterations: 0, tokens: null } }),
-      );
+      const reserve = reserveSession.handleRequest({
+        ...request('reserve', { call_key: 'harness/1', tool_id: 'propose_task', args: {} }),
+        protocol: reserveSession.start.protocol,
+      });
+      const finishing = finishSession.handleRequest({
+        ...request('finish', { outcome: 'done', usage: { iterations: 0, tokens: null } }),
+        protocol: finishSession.start.protocol,
+      });
       const snapshotting = fixture.frame(
         request('snapshot', {
           context: {
@@ -1676,13 +1739,14 @@ maybe('harness durable authority against PostgreSQL', () => {
         fixture.frame(request('answer', { delta: 'invented text' })),
       ).rejects.toMatchObject({ errorCode: 'STATE_CONFLICT' });
       await expect(
-        fixture.frame(
-          request('model', {
+        authoritySessions.get(fixture.session)!.handleRequest({
+          ...request('model', {
             messages: [{ role: 'user', content: 'second model' }],
             remaining_tokens: 8000,
             max_output_tokens: 512,
           }),
-        ),
+          protocol: fixture.session.start.protocol,
+        }),
       ).rejects.toMatchObject({ errorCode: 'STATE_CONFLICT' });
       expect(await fixture.frame(request('answer', { delta: 'answer' }))).toEqual({
         accepted: true,
@@ -1979,16 +2043,18 @@ maybe('harness durable authority against PostgreSQL', () => {
             budget_max_iterations,budget_max_tokens,execution,tools_allowlist,frozen_context,input_message_id)
           SELECT $2,owner_id,conversation_id,agent_revision,mode,'running',
             budget_max_iterations,budget_max_tokens,execution,tools_allowlist,
-            frozen_context-'workspaceSummary',input_message_id FROM agent_runs WHERE id=$1
+            frozen_context-'workspaceSummary'-'execution_profile',input_message_id FROM agent_runs WHERE id=$1
           RETURNING id,owner_id
         ) INSERT INTO run_attempts (id,owner_id,run_id,attempt_no,status)
           SELECT $3,owner_id,id,1,'running' FROM legacy`,
         [f.context.runId, runId, attemptId],
       );
+      const { executionProfile: _executionProfile, ...legacyContext } = f.context;
+      void _executionProfile;
       await expect(
         createHarnessSession(
           deps,
-          { ...f.context, runId, attemptId },
+          { ...legacyContext, runId, attemptId },
           async () => true,
           new AbortController().signal,
         ),

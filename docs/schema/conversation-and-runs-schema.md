@@ -408,3 +408,9 @@ snapshot2 原字段/集合不变，typed views/context_slice 不写入快照正�
 - `0018_conversation_history.sql` 仅增加四个非唯一普通 B-tree 查询索引：`conversations(owner_id,created_at DESC,id DESC)`、`messages(owner_id,conversation_id,created_at,id) WHERE role IN ('user','assistant')`、`agent_runs(owner_id,conversation_id,created_at,id)`、`conversation_idempotency(run_id)`。最后一个服务于旧 Run 缺少 `input_message_id` 的回退查找：按 `run_id` 取全引用后，仍核全部引用的 owner/会话及原话歧义，不因索引加唯一约束或预先排除坏引用。不修改旧迁移或原行。
 - 新增索引核验沿 #67 已有 SQL verifier，验证四个索引的真实表、键、非唯一性、定义、有效/就绪/存活状态及版本；同步迁移扫描窄允许项和显式升级覆盖。只核列/约束的 JSON 增量不能冒充新普通索引结构校验，不扩建第二套迁移框架。旧三索引运行记录不视为四索引已验收，新增状态须有独立实际运行证据。
 - 列表标题/活动只做所属模块查询投影，分页按不变建立键保留微秒与 ID 顺序；Run 更新不搬页，跨请求不是数据库快照。批准与工具效果仍经所属模块公共只读投影组合，不跨模块直读私表。
+
+## R3 用户安全点暂停
+
+- `harness_pauses` 记录 owner、会话、Run、当前 attempt、幂等键、暂停用途、状态及安全点快照；Run 同时只能有一个 pending 或 paused 暂停。登记请求与持久快照分别代表请求和已到达安全点，不将批准等待写成用户暂停。
+- `harness_pause_resumes` 只追加保存用户继续的幂等身份与唯一后继 attempt；相同暂停不可产生多个后继。继续和取消按事务内资格裁决，取消或 Run 终态使未消费暂停失效。
+- 快照只由可信运行路径校验及持久化；原消息、已接受工具结果、预算和旧 Run 不回填或改写。暂停不代表可自动从任意崩溃恢复。

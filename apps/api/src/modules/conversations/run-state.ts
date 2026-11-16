@@ -143,6 +143,10 @@ export async function commitTerminal(
       : status === 'failed'
         ? 'thread.failed'
         : 'thread.cancelled';
+  await client.query(
+    `UPDATE harness_pauses SET state='invalidated' WHERE owner_id=$1 AND run_id=$2 AND state IN ('pending','paused')`,
+    [context.ownerId, context.runId],
+  );
   const event = await appendEvent(client, context, type, payload);
   if (!options?.preserveAttemptStatus)
     await finishAttempt(client, context.attemptId, status === 'done' ? 'done' : 'failed');
@@ -211,6 +215,18 @@ export async function viewOf(
   modelTransportAvailable: boolean,
 ): Promise<RunView> {
   const { run, attempt } = locked;
+  const pause = (
+    await client.query<{
+      id: string;
+      reason: 'user';
+      purpose: 'none';
+      state: 'pending' | 'paused';
+    }>(
+      `SELECT id,reason,purpose,state FROM harness_pauses
+       WHERE owner_id=$1 AND run_id=$2 AND state IN ('pending','paused')`,
+      [run.owner_id, run.id],
+    )
+  ).rows[0];
   const waiting =
     run.waiting_checkpoint_id && run.waiting_invocation_id && run.waiting_approval_id
       ? {
@@ -343,6 +359,14 @@ export async function viewOf(
     model_selection: modelSelection,
     status: run.status,
     attempt_id: attempt.id,
+    pause: pause
+      ? { pause_id: pause.id, reason: pause.reason, purpose: pause.purpose, status: pause.state }
+      : null,
+    can_pause:
+      run.execution === 'harness' &&
+      run.frozen_context?.execution_profile === 'pause/1' &&
+      run.status === 'running' &&
+      !pause,
     attempt_no: attempt.attempt_no,
     waiting:
       waiting && decision?.kind === 'document'

@@ -1,8 +1,8 @@
 # 仓颉原生 Harness
 
-生产源位于本目录，目标平台 Linux x86_64，仅使用继承的 stdin/stdout 交换 `harness/v6`；`v5` 与未知版本硬拒绝，不执行或写出旧 wire 协议。snapshot 仅接受/输出 `version: 2`。不监听端口、不持有模型凭据、不包含模型 fixture 或网络 transport。准确 wire DTO 见 `packages/contracts/src/harness.ts`、`goals.ts` 与 `routing.ts`；身份、授权、调用预约、效果、批准与持久事实由 TypeScript 裁决。
+生产源位于本目录，目标平台 Linux x86_64，仅使用继承的 stdin/stdout 交换 `harness/v6` 和 `harness/v7`；`v5` 与未知版本硬拒绝。v6 只接受 snapshot version 2；v7 接受 version 2（批准恢复）和 version 3（安全点暂停恢复），普通 checkpoint 仍输出 version 2。不监听端口、不持有模型凭据、不包含模型 fixture 或网络 transport。准确 wire DTO 见 `packages/contracts/src/harness.ts`、`goals.ts` 与 `routing.ts`；身份、授权、调用预约、效果、批准与持久事实由 TypeScript 裁决。
 
-源码按职责分层：`src/main.cj` 负责进程入口；`src/protocol/` 校验 wire 数据，`src/transport/` 负责管道帧及请求应答，`src/session/` 持有会话状态、恢复、路由及模型循环。分层不改变 v6 协议或 snapshot 版本。
+源码按职责分层：`src/main.cj` 负责进程入口；`src/protocol/` 校验 wire 数据，`src/transport/` 负责管道帧及请求应答，`src/session/` 持有会话状态、恢复、路由及模型循环。
 
 ## 可复现构建与安装
 
@@ -24,6 +24,8 @@ unknown 与取消后迟到调用另验证真实非事务调用核心到 native �
 
 原生目标合同的独立受控 pipe 用例位于 `apps/harness/test/contracts/trusted-goals.test.ts`；在同一 Linux 正式产物环境中设置上述 `HARNESS_BINARY` / `HARNESS_LIBRARY_PATH` 后执行 `bun test apps/harness/test/contracts/trusted-goals.test.ts`。它直接向真实二进制发送帧，覆盖 v5/畸形可信上下文硬拒绝、可信 system 层、保存/清除实际收据、显式 `finish_goal`、预算/取消/unknown 与 null profile 兼容；不替代 API/PG 原子性或真实模型验收。缺当前正式二进制时明确失败，不跳过。
 
+`apps/harness/test/contracts/pause-native.test.ts` 使用同一真实二进制覆盖 v7 安全点及恢复，不替代 API 的暂停登记、事务持久化和并发裁决合同。
+
 ## 模型传输配置
 
 用户通过模型配置选择供应商和模型；Harness Run 接纳时冻结选择，不使用部署模型作为回退。API 启动时读取：
@@ -42,6 +44,8 @@ unknown 与取消后迟到调用另验证真实非事务调用核心到 native �
 ## 执行与失败合同
 
 - 两端验证有界 UTF-8 NDJSON、版本、精确字段、唯一请求引用和对应回答。每次仅一个请求等待且立即 flush；帧上限1MiB。不完整帧、等待输入时 EOF、畸形/错配/超限失败并返回脱敏错误，不将 raw stderr/provider body 暴露给用户。
+- `pause/1` Run 使用 v7：native 在路由前、循环边界以及已完成模型结果待处理时发送 `pause_probe`；存在待处理请求时发送带 version 3 快照的 `pause_point`，仅在服务端确认后退出。快照保存受保护消息、真实工具观察及其模型历史、累计 usage、调用序号、拒绝状态和待处理模型结果；恢复不重放已接受的模型、工具或观察，不重置预算。v6 不发暂停帧；批准等待仍使用原 version 2 流程。
+- 在途模型流及工具调用先取得真实结果，unknown 效果失败而非确认暂停；已接受直接路由是不可拆分单元，未接受决策遇暂停则可在安全点停止。暂停登记、快照与观察的权威一致性、继续时权限复核及新 attempt 的持久化由服务端负责；暂停不是取消、失败或自动继续。
 - `start.trusted_context` 是 v6 必需判别字段。`null` 保留 legacy 原工具/批准/等待/快照/预算和原模型策略；非空仅接受 `version:1`、`delegation/1`、冻结的 `request-bound` 或 `server-owned` 与冻结时间能力、受管工作区安全摘要集合。生命周期由服务端提供，不由协议支持推断接纳能力。完整嵌套字段严格校验，UTC 锚为秒精度 `...Z`；本轮 input_message_id 必须指向实际 user 消息。可信上下文单独进入 system 层，用户/资料/观察不会升级为可信指令。
 - 新 profile 按实际冻结的工具和工作区集合使用已交付能力，不走 legacy direct routing 或 task 逐项批准。空集合不授予资料工具，可写工具还需冻结摘要含可写路径；旧 Run 不因修订号获得工具。明确保存/清除本人默认时区可自主执行；只本次指定时区不意味着保存。资料正文不能扩大委托，request-bound 不承诺离开后继续。
 - `finish_goal` 是模型控制出口，不是领域工具，也不预约 invocation。native 验证有界 GoalResult、逐项/聚合状态、clarification 和已接受收据 UUID 后发送同名请求及累计 usage；TS 按真实归属与领域事实原子保存结果/最终 answer/终态。完成一个工具不会自动完成目标；普通最终正文必须在原预算内再经模型提交结构化出口，不偷换为成功。设置观察不投影丢弃，模型工具观察含实际 invocation_id（不是 provider call ID）。失败/预算仍走原 `finish(failed)`，由 TS 保留既成/unknown 事实；取消已在 TS 提交，native 不制造第二终态。

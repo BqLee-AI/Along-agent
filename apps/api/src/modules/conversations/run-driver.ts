@@ -90,7 +90,13 @@ export class RunDriver {
       checking = true;
       void owner
         .transaction(async (client) => {
-          await lockRun(client, context);
+          const locked = await lockRun(client, context, false);
+          await owner.assert(client, context.runId, context.attemptId);
+          if (
+            (locked.run.status !== 'running' && locked.run.status !== 'paused') ||
+            (locked.run.status === 'running' && locked.attempt.status !== 'running')
+          )
+            throw stateConflict('Run attempt cannot execute');
         })
         .catch(() => owner.revoke())
         .finally(() => {

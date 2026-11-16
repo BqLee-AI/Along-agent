@@ -6,7 +6,9 @@ import {
   HarnessModelStepSchema,
   HarnessRequestSchema,
   HarnessSnapshotSchema,
+  HarnessPauseSnapshotSchema,
   HarnessStartSchema,
+  RunViewSchema,
 } from '../src/harness.js';
 
 const approvalId = '00000000-0000-4000-8000-000000000001';
@@ -273,6 +275,110 @@ describe('harness/v6 executable contract', () => {
         type: 'cancel',
         reason: 'legacy cancel',
       }).success,
+    ).toBe(false);
+  });
+});
+
+describe('harness/v7 user pause contract', () => {
+  const pauseSnapshot = {
+    ...snapshot,
+    version: 3,
+    waiting: null,
+    native_state: {
+      protected_messages: [{ role: 'user', content: 'Continue this task.' }],
+      units: [],
+      hard_denied: '',
+      closing_goal: false,
+      pending_model: null,
+    },
+  };
+  const frame = { protocol: 'harness/v7', request_ref: 'pause-1' };
+
+  it('accepts pause frames and version 3 restores only on v7', () => {
+    expect(HarnessPauseSnapshotSchema.safeParse(pauseSnapshot).success).toBe(true);
+    expect(HarnessRequestSchema.safeParse({ ...frame, type: 'pause_probe' }).success).toBe(true);
+    expect(
+      HarnessRequestSchema.safeParse({ ...frame, type: 'pause_point', context: pauseSnapshot })
+        .success,
+    ).toBe(true);
+    for (const type of ['pause_probe', 'pause_point']) {
+      expect(
+        HarnessRequestSchema.safeParse({
+          ...frame,
+          protocol: 'harness/v6',
+          type,
+          ...(type === 'pause_point' ? { context: pauseSnapshot } : {}),
+        }).success,
+      ).toBe(false);
+    }
+    expect(HarnessStartSchema.safeParse({ ...start, snapshot: pauseSnapshot }).success).toBe(false);
+    expect(
+      HarnessStartSchema.safeParse({ ...start, protocol: 'harness/v7', snapshot: pauseSnapshot })
+        .success,
+    ).toBe(true);
+    for (const protocol of ['harness/v6', 'harness/v7']) {
+      expect(HarnessStartSchema.safeParse({ ...start, protocol, snapshot }).success).toBe(true);
+    }
+  });
+
+  it('requires a strict safe-point snapshot without approval waiting or v8 fields', () => {
+    expect(
+      HarnessPauseSnapshotSchema.safeParse({ ...pauseSnapshot, waiting: snapshot.waiting }).success,
+    ).toBe(false);
+    expect(
+      HarnessPauseSnapshotSchema.safeParse({
+        ...pauseSnapshot,
+        native_state: { ...pauseSnapshot.native_state, history_index: 0 },
+      }).success,
+    ).toBe(false);
+    expect(
+      HarnessRequestSchema.safeParse({ ...frame, type: 'pause_point', context: snapshot }).success,
+    ).toBe(false);
+    expect(
+      HarnessRequestSchema.safeParse({ ...frame, type: 'pause_probe', after_measurement: true })
+        .success,
+    ).toBe(false);
+    expect(HarnessStartSchema.safeParse({ ...start, protocol: 'harness/v8' }).success).toBe(false);
+  });
+
+  it('supports v7 replies and cancellation without breaking v6', () => {
+    for (const protocol of ['harness/v6', 'harness/v7']) {
+      expect(
+        HarnessReplySchema.safeParse({ protocol, type: 'reply', reply_to: 'pause-1', value: null })
+          .success,
+      ).toBe(true);
+      expect(
+        HarnessCancelSchema.safeParse({ protocol, type: 'cancel', reason: 'stop' }).success,
+      ).toBe(true);
+    }
+  });
+
+  it('exposes only user pause state while retaining old run views', () => {
+    const view = {
+      run_id: messageId,
+      conversation_id: messageId,
+      execution: 'harness',
+      model_selection: { state: 'legacy_unavailable' },
+      status: 'paused',
+      attempt_id: invocationId,
+      attempt_no: 1,
+      waiting: null,
+      can_resume: false,
+    };
+    const pause = {
+      pause_id: approvalId,
+      reason: 'user',
+      purpose: 'none',
+      status: 'paused',
+    } as const;
+    expect(RunViewSchema.safeParse(view).success).toBe(true);
+    expect(RunViewSchema.parse({ ...view, pause, can_pause: false }).pause).toEqual(pause);
+    expect(RunViewSchema.safeParse({ ...view, pause: null }).success).toBe(true);
+    expect(
+      RunViewSchema.safeParse({ ...view, pause: { ...pause, reason: 'runtime' } }).success,
+    ).toBe(false);
+    expect(
+      RunViewSchema.safeParse({ ...view, pause: { ...pause, unexpected: true } }).success,
     ).toBe(false);
   });
 });

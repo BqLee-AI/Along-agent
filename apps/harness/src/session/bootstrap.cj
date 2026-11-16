@@ -186,7 +186,9 @@ extend Harness {
                 let status = str(field(result, "status"), 16)
                 if (status == "unknown") { bootstrapFailure = "TOOL_EFFECT_UNKNOWN" }
                 if (status == "ok") { acceptedReceipts.add(id) }
-                else if (status != "ok" && bootstrapFailure != "TOOL_EFFECT_UNKNOWN") {
+                else if (status != "ok" && bootstrapFailure != "TOOL_EFFECT_UNKNOWN" &&
+                    !(delegated && status == "denied" && !isNull(field(start, "snapshot")) &&
+                        integer(field(field(start, "snapshot").asObject(), "version"), 2) == 3)) {
                     bootstrapFailure = errorCheck(field(result, "error"))
                 }
             } else {
@@ -202,6 +204,8 @@ extend Harness {
         if (!isNull(snap)) {
             snapshotCheck(snap)
             let s = snap.asObject()
+            let version = integer(field(s, "version"), 2)
+            if (version == 3) { require(pipe.protocol == "harness/v7" && isNull(field(s, "waiting"))) }
             let frozenMessages = field(s, "message_refs").asArray()
             let frozenTools = field(s, "tool_refs").asArray()
             require(frozenMessages.size() == input.size() && frozenTools.size() == observations.size())
@@ -217,6 +221,36 @@ extend Harness {
             budgetState.tokensKnown = !isNull(field(u, "tokens"))
             if (budgetState.tokensKnown) { budgetState.knownTokens = integer(field(u, "tokens"), 0) }
             waiting = field(s, "waiting")
+            if (version == 3) {
+                let state = field(s, "native_state").asObject()
+                keys(state, ["protected_messages", "units", "hard_denied", "closing_goal", "pending_model"])
+                contextState.protectedMessages = field(state, "protected_messages").asArray()
+                let savedUnits = field(state, "units").asArray()
+                require(savedUnits.size() == observations.size())
+                contextState.units = ArrayList<ContextUnit>()
+                for (i in 0..savedUnits.size()) {
+                    let saved = savedUnits.get(i).getOrThrow().asObject()
+                    keys(saved, ["entries", "observation", "seen", "projected"])
+                    let observation = field(saved, "observation").asObject()
+                    observationCheck(observation)
+                    require(uuid(field(observation, "invocation_id")) == uuid(frozenTools.get(i).getOrThrow()))
+                    let projected = field(saved, "projected").asBool().getValue()
+                    require(projected == (str(field(observation, "view"), 16) == "projected"))
+                    let unit = ContextUnit(observation, field(saved, "seen").asBool().getValue(), projected)
+                    unit.entries = field(saved, "entries").asArray()
+                    contextState.units.add(unit)
+                }
+                hardDenied = str(field(state, "hard_denied"), 128)
+                closingGoal = field(state, "closing_goal").asBool().getValue()
+                pendingModel = field(state, "pending_model")
+                if (!isNull(pendingModel)) {
+                    let pending = pendingModel.asObject()
+                    keys(pending, ["content", "tool_calls"])
+                    if (!isNull(field(pending, "content"))) { str(field(pending, "content"), FRAME_LIMIT) }
+                    require(field(pending, "tool_calls").asArray().size() <= 1)
+                }
+                restoredPause = true
+            }
         } else {
             require(observations.size() == 0 && isNull(field(start, "approval")))
         }

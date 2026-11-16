@@ -20,8 +20,8 @@ class ContextUnit {
 
 class ConversationState {
     var messages = JsonArray()
-    let protectedMessages = JsonArray()
-    let units = ArrayList<ContextUnit>()
+    var protectedMessages = JsonArray()
+    var units = ArrayList<ContextUnit>()
     let messageRefs = JsonArray()
 }
 
@@ -53,6 +53,8 @@ protected class Harness {
     var hasOutputWorkspace: Bool = false
     var hardDenied: String = ""
     var closingGoal: Bool = false
+    var pendingModel: JsonValue = JsonNull()
+    var restoredPause: Bool = false
     let acceptedReceipts = HashSet<String>()
 
     protected init(pipe: Pipe) { this.pipe = pipe }

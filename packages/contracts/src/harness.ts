@@ -13,6 +13,7 @@ import {
 } from './goals.js';
 
 export const HARNESS_PROTOCOL_VERSION = 'harness/v6' as const;
+export const HARNESS_R3_PROTOCOL_VERSION = 'harness/v7' as const;
 export const HARNESS_MAX_FRAME_BYTES = 1024 * 1024;
 
 const uuid = z.string().uuid();
@@ -346,6 +347,7 @@ export const HarnessObservationSchema = z.discriminatedUnion('view', [
 export const ExecutionKindSchema = z.enum(['business', 'harness']);
 export const RunStatusSchema = z.enum([
   'running',
+  'paused',
   'suspended_approval',
   'done',
   'failed',
@@ -368,8 +370,8 @@ export const HarnessSnapshotSchema = z
   .object({ version: z.literal(2), ...snapshotFields })
   .strict();
 
-// Historical facts are readable, but only v2 may be written or executed. The
-// caller must verify legacy references are task receipts before bootstrapping.
+// Historical approval snapshots use v2 for execution. The caller must verify
+// legacy references are task receipts before bootstrapping.
 export const HistoricalHarnessSnapshotSchema = z.union([
   HarnessSnapshotSchema,
   z.object({ version: z.literal(1), ...snapshotFields }).strict(),
@@ -400,6 +402,40 @@ export const HarnessModelMessageSchema = z.union([
     .strict(),
   z.object({ role: z.literal('tool'), tool_call_id: reference, content: text }).strict(),
 ]);
+export const HarnessPauseSnapshotSchema = z
+  .object({
+    version: z.literal(3),
+    ...snapshotFields,
+    waiting: z.null(),
+    native_state: z
+      .object({
+        protected_messages: z.array(HarnessModelMessageSchema).max(256),
+        units: z
+          .array(
+            z
+              .object({
+                entries: z.array(HarnessModelMessageSchema).max(256),
+                observation: HarnessObservationSchema,
+                seen: z.boolean(),
+                projected: z.boolean(),
+              })
+              .strict(),
+          )
+          .max(64),
+        hard_denied: z.string().max(128),
+        closing_goal: z.boolean(),
+        pending_model: z
+          .object({
+            content: text.nullable(),
+            tool_calls: z.array(modelToolCallSchema).max(1),
+          })
+          .strict()
+          .nullable(),
+      })
+      .strict(),
+  })
+  .strict();
+
 export const HarnessModelReplySchema = z
   .object({
     message: z
@@ -423,7 +459,7 @@ export const HarnessModelStepSchema = z.discriminatedUnion('type', [
     .strict(),
 ]);
 const request = {
-  protocol: z.literal(HARNESS_PROTOCOL_VERSION),
+  protocol: z.enum([HARNESS_PROTOCOL_VERSION, HARNESS_R3_PROTOCOL_VERSION]),
   request_ref: reference,
 };
 export const HarnessRequestSchema = z
@@ -501,6 +537,10 @@ export const HarnessRequestSchema = z
       })
       .strict(),
     z.object({ ...request, type: z.literal('snapshot'), context: HarnessSnapshotSchema }).strict(),
+    z.object({ ...request, type: z.literal('pause_probe') }).strict(),
+    z
+      .object({ ...request, type: z.literal('pause_point'), context: HarnessPauseSnapshotSchema })
+      .strict(),
     z
       .object({
         ...request,
@@ -535,6 +575,12 @@ export const HarnessRequestSchema = z
       .strict(),
   ])
   .superRefine((value, context) => {
+    if (
+      (value.type === 'pause_point' || value.type === 'pause_probe') &&
+      value.protocol === HARNESS_PROTOCOL_VERSION
+    ) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: 'pause requires harness/v7' });
+    }
     if (value.type === 'route_probe' && (value.stage === 'facts') !== (value.facts_ref === null)) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
@@ -573,7 +619,7 @@ export const HarnessApprovalDecisionSchema = z.union([
 ]);
 export const HarnessStartSchema = z
   .object({
-    protocol: z.literal(HARNESS_PROTOCOL_VERSION),
+    protocol: z.enum([HARNESS_PROTOCOL_VERSION, HARNESS_R3_PROTOCOL_VERSION]),
     type: z.literal('start'),
     trusted_context: TrustedExecutionContextSchema.nullable(),
     messages: z
@@ -592,16 +638,20 @@ export const HarnessStartSchema = z
         max_tokens: z.number().int().positive(),
       })
       .strict(),
-    snapshot: HarnessSnapshotSchema.nullable(),
+    snapshot: z.union([HarnessSnapshotSchema, HarnessPauseSnapshotSchema]).nullable(),
     observations: z.array(HarnessObservationSchema).max(64),
     approval: HarnessApprovalDecisionSchema.nullable(),
     workspace: workspaceSummarySchema.nullable().optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (start) => start.protocol === HARNESS_R3_PROTOCOL_VERSION || start.snapshot?.version !== 3,
+    { message: 'pause snapshot requires harness/v7' },
+  );
 export const HarnessReplySchema = z.union([
   z
     .object({
-      protocol: z.literal(HARNESS_PROTOCOL_VERSION),
+      protocol: z.enum([HARNESS_PROTOCOL_VERSION, HARNESS_R3_PROTOCOL_VERSION]),
       type: z.literal('reply'),
       reply_to: reference,
       value: z.unknown(),
@@ -609,7 +659,7 @@ export const HarnessReplySchema = z.union([
     .strict(),
   z
     .object({
-      protocol: z.literal(HARNESS_PROTOCOL_VERSION),
+      protocol: z.enum([HARNESS_PROTOCOL_VERSION, HARNESS_R3_PROTOCOL_VERSION]),
       type: z.literal('reply'),
       reply_to: reference,
       error: z.object({ code: reference, message: z.string().max(8192) }).strict(),
@@ -618,7 +668,7 @@ export const HarnessReplySchema = z.union([
 ]);
 export const HarnessCancelSchema = z
   .object({
-    protocol: z.literal(HARNESS_PROTOCOL_VERSION),
+    protocol: z.enum([HARNESS_PROTOCOL_VERSION, HARNESS_R3_PROTOCOL_VERSION]),
     type: z.literal('cancel'),
     reason: z.string().max(512),
   })
@@ -658,6 +708,17 @@ export const RunViewSchema = z
           .strict(),
       ])
       .nullable(),
+    pause: z
+      .object({
+        pause_id: uuid,
+        reason: z.literal('user'),
+        purpose: z.literal('none'),
+        status: z.enum(['pending', 'paused']),
+      })
+      .strict()
+      .nullable()
+      .optional(),
+    can_pause: z.boolean().optional(),
     workspace: workspaceSummarySchema.optional(),
     workspaces: z.array(workspaceSummarySchema).optional(),
     can_resume: z.boolean(),
@@ -706,6 +767,7 @@ export const RunViewSchema = z
 export type ExecutionKind = z.infer<typeof ExecutionKindSchema>;
 export type HarnessUsage = z.infer<typeof HarnessUsageSchema>;
 export type HarnessSnapshot = z.infer<typeof HarnessSnapshotSchema>;
+export type HarnessPauseSnapshot = z.infer<typeof HarnessPauseSnapshotSchema>;
 export type HarnessTool = z.infer<typeof HarnessToolSchema>;
 export type HarnessModelReply = z.infer<typeof HarnessModelReplySchema>;
 export type HarnessRequest = z.infer<typeof HarnessRequestSchema>;

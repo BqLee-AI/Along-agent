@@ -38,6 +38,60 @@ export function runPath(conversationId: string, runId: string): string {
   return `/api/v1/conversations/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}`;
 }
 
+export async function requestUserPause(
+  conversationId: string,
+  runId: string,
+  key: string,
+  csrf: string | null,
+  signal: AbortSignal,
+  fetchAction: typeof fetch = fetch,
+) {
+  const response = await fetchAction(`${runPath(conversationId, runId)}/actions/pause`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'Idempotency-Key': key,
+      ...(csrf !== null ? { 'x-csrf-token': csrf } : {}),
+    },
+    body: JSON.stringify({ reason: 'user', purpose: 'none' }),
+    signal,
+  });
+  return z
+    .object({ status: z.enum(['pending', 'paused']), pause_id: z.string().uuid() })
+    .strict()
+    .parse(await readEnvelope(response));
+}
+
+export function postRunStream(
+  url: string,
+  body: object,
+  csrf: string | null,
+  signal: AbortSignal,
+  idempotencyKey?: string,
+  fetchAction: typeof fetch = fetch,
+): Promise<Response> {
+  return fetchAction(url, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      accept: 'text/event-stream',
+      ...(csrf !== null ? { 'x-csrf-token': csrf } : {}),
+      ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
+}
+
+export function userPauseCanContinue(run: RunView | null): boolean {
+  return (
+    run?.status === 'paused' &&
+    run.pause?.status === 'paused' &&
+    run.pause.reason === 'user' &&
+    run.pause.purpose === 'none'
+  );
+}
+
 export function conversationHref(conversationId: string, runId: string): string {
   return `/conversations?${new URLSearchParams({ conversation_id: conversationId, run_id: runId })}`;
 }
@@ -185,6 +239,7 @@ export async function followRunEvents({
 }
 
 export const runStatusLabel: Record<RunView['status'], string> = {
+  paused: '已暂停；等待明确继续',
   running: '运行中（读取不会自动继续）',
   suspended_approval: '运行已挂起；请核对决议与继续资格',
   done: '运行已结束（不等于目标完成）',

@@ -105,3 +105,12 @@ export const ResumeRunBodySchema = z
     idempotency_key: z.string().uuid(),
   })
   .strict();
+
+export const PauseRunBodySchema = z
+  .object({
+    reason: z.literal('user'),
+    purpose: z.literal('none'),
+  })
+  .strict();
+export const ContinueRunBodySchema = z.object({ pause_id: z.string().uuid() }).strict();
+export const ActionKeySchema = z.string().uuid();

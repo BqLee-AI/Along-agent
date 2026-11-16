@@ -17,6 +17,7 @@ import { ErrorNotice } from '@/shared/ui/page';
 import {
   modelSelectionLabel,
   runStatusLabel,
+  userPauseCanContinue,
 } from '@/features/conversations/model/conversation-run';
 import { shouldSubmitMessage } from '@/features/conversations/model/task';
 import type { ConversationTask } from '@/features/conversations/viewmodel/use-conversation-task';
@@ -167,6 +168,7 @@ export function RunStatusPanel({ task }: { task: ConversationTask }) {
   const resumable = Boolean(
     run &&
     !['done', 'failed', 'cancelled'].includes(run.status) &&
+    run.status !== 'paused' &&
     (run.can_resume || (run.execution_lifecycle !== 'server-owned' && task.retryResume)),
   );
   return (
@@ -265,6 +267,76 @@ export function RunStatusPanel({ task }: { task: ConversationTask }) {
             ))}
           </ul>
         </>
+      ) : null}
+      {run && (run.status === 'running' || run.status === 'paused') ? (
+        <section className="space-y-3 border-y border-separator py-4" aria-label="运行暂停控制">
+          <p role="status" aria-live="polite" className="font-medium">
+            {task.pauseBusy
+              ? '正在请求暂停…'
+              : run.pause?.status === 'pending'
+                ? '已请求暂停，正在等待安全点'
+                : run.status === 'paused'
+                  ? '运行已暂停'
+                  : '运行中'}
+          </p>
+          {run.pause?.status === 'pending' ? (
+            <p className="text-secondary-foreground">
+              当前模型流和已接受的工具操作仍需完成裁决；这不是停止或批准。
+            </p>
+          ) : run.status === 'paused' ? (
+            <p className="text-secondary-foreground">
+              只有明确继续才会恢复此运行；读取和刷新不会继续。
+            </p>
+          ) : null}
+          <div className="flex flex-wrap gap-2">
+            {run.status === 'running' && run.can_pause && !run.pause ? (
+              <Button
+                variant="glass"
+                color="default"
+                disabled={task.pauseBusy || task.stopping || task.reading}
+                onClick={() => void task.pause()}
+              >
+                暂停此运行
+              </Button>
+            ) : null}
+            {userPauseCanContinue(run) ? (
+              <Button
+                disabled={
+                  task.busy ||
+                  task.pauseBusy ||
+                  task.stopping ||
+                  task.streaming ||
+                  task.reading ||
+                  Boolean(task.readError) ||
+                  effectsUnknown
+                }
+                onClick={() => void task.continuePaused()}
+              >
+                {task.busy ? '正在继续…' : '明确继续此运行'}
+              </Button>
+            ) : null}
+            {run.pause || run.status === 'paused' ? (
+              <Button
+                variant="glass"
+                color="default"
+                disabled={task.reading}
+                onClick={() => void task.refresh(true)}
+              >
+                {task.reading ? '正在读取…' : '读取最新状态'}
+              </Button>
+            ) : null}
+            {run.status === 'paused' || run.pause?.status === 'pending' ? (
+              <Button
+                variant="clear"
+                color="default"
+                disabled={task.stopping}
+                onClick={() => void task.stop()}
+              >
+                {task.stopping ? '正在停止…' : '停止此运行'}
+              </Button>
+            ) : null}
+          </div>
+        </section>
       ) : null}
       {waiting || resumable ? (
         <section className="space-y-4 border-y border-separator py-4" data-testid="run-waiting">

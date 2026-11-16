@@ -19,7 +19,12 @@ export function conversationRunEntries(
   return entries;
 }
 export function conversationNeedsAction(run: RunView | null, effectsUnknown: boolean): boolean {
-  return effectsUnknown || run?.status === 'suspended_approval' || Boolean(run?.can_resume);
+  return (
+    effectsUnknown ||
+    run?.status === 'suspended_approval' ||
+    run?.status === 'paused' ||
+    Boolean(run?.can_resume)
+  );
 }
 export function otherBlockingRuns(
   runs: readonly ConversationRunHistoryItem[],
@@ -28,7 +33,7 @@ export function otherBlockingRuns(
   return runs.filter(
     (run) =>
       run.run_id !== selected?.runId &&
-      (run.status === 'suspended_approval' || run.status === 'running'),
+      (run.status === 'suspended_approval' || run.status === 'running' || run.status === 'paused'),
   );
 }
 export function runApprovalReferences(
@@ -65,6 +70,8 @@ export function composerBlockedReason(input: {
 }): string | null {
   if (input.effectsUnknown) return '原操作效果未知，不能重新发送；请只读核对。';
   if (input.reading) return '正在读取会话…';
+  if (input.run?.status === 'paused' || input.runs.some((run) => run.status === 'paused'))
+    return '原运行已暂停，请明确继续或停止。';
   if (
     input.run?.status === 'suspended_approval' ||
     input.runs.some((run) => run.status === 'suspended_approval')
