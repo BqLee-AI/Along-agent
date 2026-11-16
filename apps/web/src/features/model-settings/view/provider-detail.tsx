@@ -1,30 +1,40 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
+  Activity,
   CheckCircle2,
   ChevronDown,
   Eye,
   EyeOff,
+  FlaskConical,
   LoaderCircle,
+  KeyRound,
   Minus,
   Plus,
   RefreshCw,
+  RotateCcw,
+  Save,
+  Settings2,
+  Trash2,
 } from 'lucide-react';
 import { Badge } from '@lorelum/lumen-ui/components/badge';
 import { Button } from '@lorelum/lumen-ui/components/button';
 import { Input } from '@lorelum/lumen-ui/components/input';
 import { Label } from '@lorelum/lumen-ui/components/label';
+import { Select } from '@lorelum/lumen-ui/components/select';
 import { Switch } from '@lorelum/lumen-ui/components/switch';
+import { Toast, useToastManager } from '@lorelum/lumen-ui/components/toast';
 import { ErrorNotice } from '@/shared/ui/page';
 import {
+  canSetDefault,
   groupModels,
   isConfigured,
   modelLabel,
-  validateModelId,
   type Provider,
 } from '../model/model-config';
 import type { useModelSettings } from '../viewmodel/use-model-settings';
+import { ModelPanel } from './model-panel';
 
 type Vm = ReturnType<typeof useModelSettings>;
 
@@ -37,15 +47,34 @@ function FieldError({ id, message }: { id: string; message?: string }) {
 }
 
 function ModelList({ provider, vm }: { provider: Provider; vm: Vm }) {
-  const [adding, setAdding] = useState(false);
-  const [modelId, setModelId] = useState('');
+  const [panel, setPanel] = useState<{ modelId: string | null } | null>(null);
   const [closed, setClosed] = useState<Record<string, boolean>>({});
-  const [touched, setTouched] = useState(false);
-  const problem = touched ? validateModelId(modelId, provider) : null;
   const groups = groupModels(provider);
+  const defaultOptions = provider.models.map((model) => ({ value: model, label: model }));
 
   return (
     <section aria-label="模型" className="space-y-2">
+      <div className="space-y-1.5 pb-3">
+        <Label htmlFor="default-model">默认模型</Label>
+        <Select
+          items={[{ value: '', label: '未设置默认模型' }, ...defaultOptions]}
+          value={provider.defaultModelId ?? ''}
+          disabled={vm.working || !canSetDefault(provider, null)}
+          onValueChange={(value) => void vm.setDefault(value || null)}
+        >
+          <Select.Trigger id="default-model" className="w-full max-w-full" variant="glass">
+            <Select.Value />
+          </Select.Trigger>
+          <Select.Content className="!bg-popover">
+            <Select.Item value="">未设置默认模型</Select.Item>
+            {defaultOptions.map((option) => (
+              <Select.Item key={option.value} value={option.value}>
+                {option.label}
+              </Select.Item>
+            ))}
+          </Select.Content>
+        </Select>
+      </div>
       <div className="flex items-center gap-2">
         <h3 className="text-sm leading-5 font-semibold">模型</h3>
         <span className="text-xs text-muted-foreground">{provider.models.length}</span>
@@ -54,6 +83,9 @@ function ModelList({ provider, vm }: { provider: Provider; vm: Vm }) {
             type="button"
             variant="glass"
             color="default"
+            size="icon"
+            aria-label="同步模型"
+            title="同步模型"
             disabled={vm.working || !isConfigured(provider)}
             onClick={() => void vm.syncModels()}
           >
@@ -61,7 +93,6 @@ function ModelList({ provider, vm }: { provider: Provider; vm: Vm }) {
               className={`size-4 ${vm.busy === 'syncing' ? 'animate-spin' : ''}`}
               aria-hidden="true"
             />
-            同步模型
           </Button>
           <Button
             type="button"
@@ -69,53 +100,19 @@ function ModelList({ provider, vm }: { provider: Provider; vm: Vm }) {
             color="default"
             size="icon"
             aria-label="手动添加模型"
-            aria-expanded={adding}
+            aria-haspopup="dialog"
             disabled={vm.working}
-            onClick={() => setAdding((open) => !open)}
+            onClick={() => setPanel({ modelId: null })}
           >
             <Plus className="size-4" aria-hidden="true" />
           </Button>
         </div>
       </div>
 
-      {adding ? (
-        <form
-          className="flex items-start gap-2"
-          onSubmit={(event) => {
-            event.preventDefault();
-            setTouched(true);
-            if (validateModelId(modelId, provider)) return;
-            void vm.addModel(modelId).then((ok) => {
-              if (ok) {
-                setModelId('');
-                setTouched(false);
-              }
-            });
-          }}
-        >
-          <div className="min-w-0 flex-1 space-y-1">
-            <Input
-              variant="glass"
-              spellCheck={false}
-              autoComplete="off"
-              aria-label="模型 ID"
-              aria-invalid={Boolean(problem)}
-              placeholder="模型 ID，例如 vendor/model-name"
-              value={modelId}
-              onChange={(event) => setModelId(event.target.value)}
-            />
-            <FieldError id="model-id-error" message={problem ?? undefined} />
-          </div>
-          <Button type="submit" variant="solid" disabled={vm.working}>
-            添加
-          </Button>
-        </form>
-      ) : null}
-
       {groups.length === 0 ? (
         <p className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-[13px] leading-5 text-muted-foreground">
           还没有模型。
-          {isConfigured(provider) ? '点“同步模型”，或手动添加模型 ID。' : '先填好密钥和地址。'}
+          {isConfigured(provider) ? '点“同步模型”，或手动添加模型 ID。' : '先保存 baseURL。'}
         </p>
       ) : (
         <div className="space-y-2">
@@ -137,52 +134,59 @@ function ModelList({ provider, vm }: { provider: Provider; vm: Vm }) {
                 </button>
                 {folded ? null : (
                   <ul>
-                    {models.map((id) => (
-                      <li key={id} className="flex h-9 items-center gap-2 rounded-md px-2 text-sm">
-                        <span className="min-w-0 flex-1 truncate" title={id}>
-                          {modelLabel(id)}
-                        </span>
-                        <Button
-                          type="button"
-                          variant="clear"
-                          color="default"
-                          disabled={vm.working}
-                          aria-pressed={vm.testModel === id}
-                          onClick={() => vm.setTestModel(vm.testModel === id ? '' : id)}
-                        >
-                          {vm.testModel === id ? '检测模型' : '用于检测'}
-                        </Button>
-                        {vm.selection?.provider_id === provider.id &&
-                        vm.selection.model_id === id ? (
-                          <span className="text-xs text-muted-foreground">默认</span>
-                        ) : (
-                          <Button
-                            type="button"
-                            variant="clear"
-                            color="default"
-                            disabled={vm.working || !provider.enabled}
-                            onClick={() =>
-                              void vm.setDefault({ provider_id: provider.id, model_id: id })
-                            }
-                          >
-                            设为默认
-                          </Button>
-                        )}
-                        <Button
-                          type="button"
-                          variant="clear"
-                          color="default"
-                          size="icon"
-                          aria-label={`移除 ${id}`}
-                          disabled={vm.working}
-                          onClick={() => {
-                            if (window.confirm(`移除模型 ${id}？`)) void vm.removeModel(id);
-                          }}
-                        >
-                          <Minus className="size-4" aria-hidden="true" />
-                        </Button>
-                      </li>
-                    ))}
+                    {models.map((id) => {
+                      const test = vm.modelTests[id];
+                      return (
+                        <li key={id} className="rounded-md px-2 text-sm">
+                          <div className="flex min-h-9 items-center gap-2">
+                            <span className="min-w-0 flex-1 truncate" title={id}>
+                              {modelLabel(id)}
+                            </span>
+                            <Button
+                              type="button"
+                              variant="clear"
+                              color="default"
+                              size="icon"
+                              aria-label={`设置 ${id}`}
+                              title="模型设置"
+                              disabled={vm.working}
+                              onClick={() => setPanel({ modelId: id })}
+                            >
+                              <Settings2 className="size-4" aria-hidden="true" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="clear"
+                              color="default"
+                              size="icon"
+                              aria-label={`检测模型 ${id}`}
+                              title={`检测模型 ${id}`}
+                              disabled={vm.working}
+                              onClick={() => void vm.runModelTest(id)}
+                            >
+                              {test?.kind === 'testing' ? (
+                                <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+                              ) : (
+                                <FlaskConical className="size-4" aria-hidden="true" />
+                              )}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="clear"
+                              color="default"
+                              size="icon"
+                              aria-label={`移除 ${id}`}
+                              disabled={vm.working}
+                              onClick={() => {
+                                if (window.confirm(`移除模型 ${id}？`)) void vm.removeModel(id);
+                              }}
+                            >
+                              <Minus className="size-4" aria-hidden="true" />
+                            </Button>
+                          </div>
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
               </div>
@@ -190,21 +194,112 @@ function ModelList({ provider, vm }: { provider: Provider; vm: Vm }) {
           })}
         </div>
       )}
+      {panel ? (
+        <ModelPanel
+          key={panel.modelId ?? 'new'}
+          provider={provider}
+          modelId={panel.modelId}
+          working={vm.working}
+          error={vm.notice?.kind === 'failed' ? vm.notice.message : null}
+          onSave={panel.modelId ? vm.updateModel : vm.addModel}
+          onClose={() => setPanel(null)}
+        />
+      ) : null}
     </section>
   );
 }
 
-export function ProviderDetail({ provider, vm }: { provider: Provider; vm: Vm }) {
+export function ProviderDetail(props: { provider: Provider; vm: Vm }) {
+  return (
+    <Toast.Provider placement="top-end" timeout={10000} variant="solid">
+      <ProviderDetailContent {...props} />
+    </Toast.Provider>
+  );
+}
+
+function ProviderDetailContent({ provider, vm }: { provider: Provider; vm: Vm }) {
   const [showKey, setShowKey] = useState(false);
   const configured = isConfigured(provider);
+  const toast = useToastManager();
+  const previous = useRef({ connection: vm.connectionTest, models: vm.modelTests });
+  useEffect(() => {
+    const before = previous.current;
+    if (before.connection !== vm.connectionTest) {
+      const test = vm.connectionTest;
+      if (test.kind === 'ok') {
+        toast.add({
+          type: 'success',
+          title: '服务商接口已响应',
+          description: `${test.result.latency_ms} ms · 不代表模型可用`,
+        });
+      } else if (test.kind === 'failed') {
+        toast.add({
+          type: 'error',
+          title: '服务商检测失败',
+          description: test.message,
+          timeout: 10000,
+        });
+      }
+    }
+    for (const [id, test] of Object.entries(vm.modelTests)) {
+      if (before.models[id] === test) continue;
+      if (test.kind === 'ok') {
+        const entries = [
+          ['文本／流', test.result.text_stream],
+          ['工具往返', test.result.tool_round_trip],
+          ['用量', test.result.usage],
+        ] as const;
+        const complete = entries.every(([, result]) => result.status === 'passed');
+        const description = entries
+          .map(
+            ([label, result]) =>
+              `${label} ${result.status === 'passed' ? '通过' : result.status === 'failed' ? '失败' : '未测试'}${result.latency_ms === null ? '' : ` ${result.latency_ms} ms`}`,
+          )
+          .join(' · ');
+        toast.add({
+          type: complete ? 'success' : 'warning',
+          title: `${id} 检测${complete ? '通过' : '未全部通过'}`,
+          description,
+        });
+      } else if (test.kind === 'failed') {
+        toast.add({
+          type: 'error',
+          title: `${id} 检测失败`,
+          description: test.message,
+          timeout: 10000,
+        });
+      }
+    }
+    previous.current = { connection: vm.connectionTest, models: vm.modelTests };
+  }, [toast, vm.connectionTest, vm.modelTests]);
 
   return (
     <div className="min-w-0 flex-1 space-y-6" aria-busy={vm.working}>
       <div className="flex items-center gap-2 pr-10">
         <h2 className="min-w-0 truncate text-base leading-6 font-semibold">{provider.name}</h2>
         <Badge variant="glass">{configured ? '已配置' : '未配置'}</Badge>
-        <Switch
+        <Button
+          type="button"
           className="ml-auto"
+          variant="clear"
+          color="danger"
+          size="icon"
+          aria-label="删除接入"
+          title="删除接入"
+          disabled={vm.working}
+          onClick={() => {
+            if (
+              window.confirm(
+                '删除该接入？依赖它的运行后续可能无法调用；已发送的数据和已接受的效果不能撤回。',
+              )
+            )
+              void vm.deleteProvider();
+          }}
+        >
+          <Trash2 className="size-4" aria-hidden="true" />
+        </Button>
+        <Switch
+          className="shrink-0"
           color="success"
           aria-label={`启用 ${provider.name}`}
           checked={provider.enabled}
@@ -215,7 +310,7 @@ export function ProviderDetail({ provider, vm }: { provider: Provider; vm: Vm })
 
       {!configured ? (
         <p className="text-[13px] leading-5 text-muted-foreground">
-          配置 API 地址后可同步模型，也可使用不需要密钥的端点。
+          配置 baseURL 后可同步模型，也可使用不需要密钥的端点。
         </p>
       ) : null}
 
@@ -270,47 +365,45 @@ export function ProviderDetail({ provider, vm }: { provider: Provider; vm: Vm })
               type="button"
               variant="glass"
               color="default"
+              size="icon"
+              aria-label={vm.connectionTest.kind === 'testing' ? '检测服务商中' : '检测服务商连接'}
+              title="检测服务商连接"
               disabled={vm.working}
               onClick={() => void vm.runTest()}
             >
-              {vm.test.kind === 'testing' ? (
-                <>
-                  <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
-                  检测中
-                </>
+              {vm.connectionTest.kind === 'testing' ? (
+                <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
               ) : (
-                '检测'
+                <Activity className="size-4" aria-hidden="true" />
               )}
             </Button>
-          </div>
-          <p className="text-xs leading-5 text-muted-foreground">
-            {vm.testModel
-              ? `检测模型：${vm.testModel}`
-              : '可在下方模型列表中选择检测模型；未选择时各项为未测试。'}
-          </p>
-          <FieldError id="provider-api-key-error" message={vm.errors.apiKey} />
-          {provider.hasApiKey ? (
-            <p className="flex items-center gap-1 text-xs leading-5 text-muted-foreground">
-              已保存密钥，不会回显。
+            {provider.hasApiKey ? (
               <Button
                 type="button"
                 variant="clear"
                 color="danger"
-                className="h-6 px-1.5 text-xs"
+                size="icon"
+                aria-label="清除密钥"
+                title="清除密钥"
                 disabled={vm.working}
                 onClick={() => {
                   if (window.confirm('清除密钥会使使用旧密钥的运行无法继续调用模型。确定清除？'))
                     void vm.clearKey();
                 }}
               >
-                {vm.busy === 'clearing' ? '清除中…' : '清除密钥'}
+                {vm.busy === 'clearing' ? (
+                  <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <KeyRound className="size-4" aria-hidden="true" />
+                )}
               </Button>
-            </p>
-          ) : null}
+            ) : null}
+          </div>
+          <FieldError id="provider-api-key-error" message={vm.errors.apiKey} />
         </div>
 
         <div className="space-y-1.5">
-          <Label htmlFor="provider-api-host">API 地址</Label>
+          <Label htmlFor="provider-api-host">baseURL</Label>
           <Input
             id="provider-api-host"
             type="url"
@@ -329,35 +422,6 @@ export function ProviderDetail({ provider, vm }: { provider: Provider; vm: Vm })
         </div>
 
         <div className="space-y-2" aria-live="polite">
-          {vm.test.kind === 'ok' ? (
-            <div className="text-[13px] leading-5">
-              <p className="text-muted-foreground">上一次测试结果：</p>
-              <dl>
-                {(
-                  [
-                    ['文本／流', vm.test.result.text_stream],
-                    ['工具往返', vm.test.result.tool_round_trip],
-                    ['用量', vm.test.result.usage],
-                  ] as const
-                ).map(([label, result]) => (
-                  <div key={label}>
-                    <dt className="inline">{label}：</dt>
-                    <dd className="inline">
-                      {result.status === 'passed'
-                        ? '通过'
-                        : result.status === 'failed'
-                          ? '失败'
-                          : '未测试'}
-                      {result.latency_ms === null ? '' : `（${result.latency_ms} ms）`}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-            </div>
-          ) : null}
-          {vm.test.kind === 'failed' ? (
-            <ErrorNotice message={`检测失败：${vm.test.message}`} />
-          ) : null}
           {vm.notice?.kind === 'failed' ? (
             <ErrorNotice message={`没有完成：${vm.notice.message}`} />
           ) : null}
@@ -369,44 +433,41 @@ export function ProviderDetail({ provider, vm }: { provider: Provider; vm: Vm })
           ) : null}
         </div>
 
-        {vm.dirty ? (
-          <div className="flex gap-2">
-            <Button type="submit" variant="solid" disabled={vm.working}>
-              {vm.busy === 'saving' ? '保存中…' : '保存'}
-            </Button>
-            <Button
-              type="button"
-              variant="glass"
-              color="default"
-              disabled={vm.working}
-              onClick={vm.reset}
-            >
-              还原修改
-            </Button>
-          </div>
-        ) : null}
-        <Button
-          type="button"
-          variant="clear"
-          color="danger"
-          disabled={vm.working}
-          onClick={() => {
-            if (
-              window.confirm(
-                '删除该接入？依赖它的运行后续可能无法调用；已发送的数据和已接受的效果不能撤回。',
-              )
-            )
-              void vm.deleteProvider();
-          }}
-        >
-          删除接入
-        </Button>
+        <div className="flex gap-2">
+          {vm.dirty ? (
+            <>
+              <Button
+                type="submit"
+                variant="solid"
+                size="icon"
+                aria-label="保存"
+                title="保存"
+                disabled={vm.working}
+              >
+                {vm.busy === 'saving' ? (
+                  <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Save className="size-4" aria-hidden="true" />
+                )}
+              </Button>
+              <Button
+                type="button"
+                variant="glass"
+                color="default"
+                size="icon"
+                aria-label="还原修改"
+                title="还原修改"
+                disabled={vm.working}
+                onClick={vm.reset}
+              >
+                <RotateCcw className="size-4" aria-hidden="true" />
+              </Button>
+            </>
+          ) : null}
+        </div>
       </form>
 
       <ModelList key={provider.id} provider={provider} vm={vm} />
-      <p className="text-xs leading-5 text-muted-foreground">
-        同步使用已保存的地址和密钥，合并发现结果，不删除已有模型；模型列表不保证调用权限。
-      </p>
     </div>
   );
 }

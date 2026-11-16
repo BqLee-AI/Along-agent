@@ -327,6 +327,28 @@ describe('Run event consumers', () => {
     expect(calls).toBe(1);
   });
 
+  it('does not reconnect after a subscription is cancelled while checking status', async () => {
+    const controller = new AbortController();
+    let requests = 0;
+    await followRunEvents({
+      conversationId: cid,
+      runId: rid,
+      signal: controller.signal,
+      cursor: () => 0,
+      onEvent: () => {},
+      readStatus: async () => {
+        controller.abort();
+        return 'running';
+      },
+      retryDelay: 0,
+      fetchEvents: async () => {
+        requests++;
+        return new Response('');
+      },
+    });
+    expect(requests).toBe(1);
+  });
+
   it('does not turn normal approval suspension EOF into a terminal event', async () => {
     const incoming = [
       event(1, 'thread.started'),

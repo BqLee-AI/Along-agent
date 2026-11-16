@@ -5,7 +5,7 @@ import {
   confirmInlineReminder,
   inlineReminderWaiting,
   readInlineReminder,
-} from '../src/features/conversations/model/inline-reminder';
+} from '../src/features/approvals/model/inline-reminder';
 
 const approvalId = '11111111-1111-4111-8111-111111111111';
 const taskId = '22222222-2222-4222-8222-222222222222';

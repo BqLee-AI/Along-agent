@@ -8,19 +8,16 @@ import { BriefSections } from './brief-sections';
 import { BriefLoading } from './today-workspace-loading-screen';
 
 const destinations = [
-  { href: '/tasks', title: '我的提醒', description: '查看安排与真实结果', icon: Clock3 },
-  { href: '/approvals', title: '待我确认', description: '审阅方案，决定下一步', icon: CheckCheck },
-  { href: '/activity', title: '活动记录', description: '核对已经记录的步骤', icon: History },
+  { href: '/tasks', title: '我的提醒', icon: Clock3 },
+  { href: '/approvals', title: '待我确认', icon: CheckCheck },
+  { href: '/activity', title: '活动记录', icon: History },
 ];
 
 export function TodayWorkspaceScreen({ query }: { query: PageQuery }) {
   const workspace = loadTodayWorkspace(query);
   return (
     <div className="w-full min-w-0 space-y-8 [overflow-wrap:anywhere]">
-      <PageHeading
-        title="今日工作台"
-        description="查看简报，处理待确认事项，核对提醒与活动记录。"
-      />
+      <PageHeading title="工作台" />
       <section aria-label="日期简报" className="min-w-0">
         <Suspense fallback={<BriefLoading />}>
           <BriefSections workspace={workspace} />
@@ -29,7 +26,7 @@ export function TodayWorkspaceScreen({ query }: { query: PageQuery }) {
       <nav aria-label="事项与记录" className="min-w-0">
         <h2 className="mb-3 text-[13px] leading-5 font-medium text-muted-foreground">继续处理</h2>
         <ul className="grid gap-3 @md/workspace:grid-cols-3">
-          {destinations.map(({ href, title, description, icon: Icon }) => (
+          {destinations.map(({ href, title, icon: Icon }) => (
             <li key={href} className="min-w-0">
               <Link
                 href={href}
@@ -40,9 +37,6 @@ export function TodayWorkspaceScreen({ query }: { query: PageQuery }) {
                 </span>
                 <span className="min-w-0">
                   <span className="block text-sm leading-5 font-medium">{title}</span>
-                  <span className="mt-0.5 block text-[13px] leading-5 text-muted-foreground">
-                    {description}
-                  </span>
                 </span>
                 <ArrowUpRight
                   className="absolute top-4 right-4 size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-foreground"

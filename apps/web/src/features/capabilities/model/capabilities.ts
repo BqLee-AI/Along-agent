@@ -17,8 +17,8 @@ export const capabilities = {
   },
   profile: {
     title: '助理资料',
-    description: '查看和调整 Along 的个人设定。',
-    boundary: '这个功能还在准备中，暂时不能修改。',
+    description: '',
+    boundary: '',
     related: [],
   },
   skills: {

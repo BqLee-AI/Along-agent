@@ -168,31 +168,6 @@ export default function AccountDashboard({
           success="密码已更新，所有会话已撤销，请正式登录。"
         />
       </Section>
-      <Collection
-        path="sessions"
-        schema={auth.authSessionsSchema}
-        title="本人的会话"
-        render={(session) => (
-          <>
-            <h3 className="font-semibold">{session.current ? '当前会话' : '其他会话'}</h3>
-            <p>{session.device_summary ?? '无设备摘要'}</p>
-            <p>创建：{session.created_at}</p>
-            <p>到期：{session.expires_at}</p>
-            <p>{session.revoked_at ? `已撤销：${session.revoked_at}` : '未撤销'}</p>
-            {!session.revoked_at ? (
-              <AccountActionForm
-                path={`sessions/${session.id}/revoke`}
-                title={session.current ? '明确退出此会话' : '撤销此会话'}
-                fields={[]}
-                inputSchema={auth.authSessionRevokeSchema}
-                resultSchema={auth.authSessionRevokedSchema}
-                csrfToken={csrfToken}
-                success="会话撤销已确认。若撤销的是当前会话，请重新登录。"
-              />
-            ) : null}
-          </>
-        )}
-      />
       <Section title="批量撤销会话">
         {(['others', 'all'] as const).map((scope) => (
           <AccountActionForm

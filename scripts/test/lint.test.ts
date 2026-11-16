@@ -11,7 +11,7 @@ let target: string;
 beforeAll(() => {
   target = mkdtempSync(join(tmpdir(), 'along-lint-'));
   cpSync(join(root, 'scripts/fixtures/lint'), target, { recursive: true });
-  for (const group of ['red', 'green', 'policy']) {
+  for (const group of ['red', 'green', 'policy', 'architecture-red']) {
     const cwd = join(target, group);
     cpSync(join(root, '.oxlintrc.json'), join(cwd, '.oxlintrc.json'));
     mkdirSync(join(cwd, 'scripts'));
@@ -60,6 +60,20 @@ describe('lint policy with the real Oxlint CLI', () => {
     const result = lint('green');
     expect(result.code).toBe(0);
     expect(result.errors).toEqual([]);
+  });
+
+  it('rejects direct and global fetch calls only inside feature views, including nested files', () => {
+    const result = lint('architecture-red');
+    expect(result.code).toBe(1);
+    expect(result.errors).toHaveLength(19);
+    expect(result.errors.every((d) => d.code.includes('no-feature-view-fetch'))).toBe(true);
+    expect([...new Set(result.errors.map((d) => d.filename))].sort()).toEqual([
+      'apps/web/src/features/tasks/view/bad.js',
+      'apps/web/src/features/tasks/view/bad.jsx',
+      'apps/web/src/features/tasks/view/bad.ts',
+      'apps/web/src/features/tasks/view/bad.tsx',
+      'apps/web/src/features/tasks/view/nested/edges.ts',
+    ]);
   });
 
   it('still rejects explicit any, unused underscore/type-only values and unused expressions', () => {

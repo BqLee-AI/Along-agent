@@ -77,7 +77,11 @@
 
 /* 背景模糊在过渡中逐帧重算，实测会掉帧：设置面板打开时页面与遮罩不模糊，面板自身仅在静止后模糊。 */
 :root:has([data-testid='settings-panel'])
-  *:not([data-testid='settings-panel'], [data-testid='settings-panel'] *) {
+  *:not(
+    [data-testid='settings-panel'],
+    [data-testid='settings-panel'] *,
+    [data-testid='model-panel']
+  ) {
   backdrop-filter: none !important;
   box-shadow: none !important;
   border-color: transparent !important;

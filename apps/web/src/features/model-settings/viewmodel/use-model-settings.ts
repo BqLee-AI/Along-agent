@@ -1,15 +1,19 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as api from '../model/http-gateway';
+import { removeCatalogProvider, replaceCatalogProvider } from '../model/model-catalog';
 import {
+  canSetDefault,
   draftFrom,
   isDirty,
+  selectionAfterDefaultChange,
   validateDraft,
   type DraftField,
   type Provider,
   type ProviderDraft,
 } from '../model/model-config';
+import { useModelCatalog } from './model-catalog-context';
 
 export type LoadState =
   | { kind: 'loading' }
@@ -27,10 +31,10 @@ export type Busy =
   | 'deleting'
   | 'default';
 export type Notice = { kind: 'ok' | 'failed'; message: string } | null;
-export type TestState =
+export type TestState<T> =
   | { kind: 'idle' }
   | { kind: 'testing' }
-  | { kind: 'ok'; result: api.TestResult }
+  | { kind: 'ok'; result: T }
   | { kind: 'failed'; message: string };
 
 function messageOf(error: unknown): string {
@@ -44,6 +48,8 @@ function fromApi(provider: api.Provider): Provider {
     apiHost: provider.base_url,
     hasApiKey: provider.has_api_key,
     models: provider.models,
+    defaultModelId: provider.default_model_id,
+    modelContextWindows: provider.model_context_windows,
   };
 }
 function credential(draft: ProviderDraft, saved: Provider | null): api.Credential {
@@ -58,51 +64,56 @@ function credential(draft: ProviderDraft, saved: Provider | null): api.Credentia
 }
 
 export function useModelSettings() {
-  const [load, setLoad] = useState<LoadState>({ kind: 'loading' });
-  const [providers, setProviders] = useState<Provider[]>([]);
-  const [selection, setSelection] = useState<api.Selection | null>(null);
+  const catalog = useModelCatalog();
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const publish = (change: Parameters<typeof catalog.update>[0]) => {
+    if (mounted.current) catalog.update(change);
+    else void catalog.refresh();
+  };
+  const providers = useMemo(() => catalog.snapshot.items.map(fromApi), [catalog.snapshot.items]);
+  const selection = catalog.snapshot.default_selection;
+  const load: LoadState =
+    catalog.state === 'loading'
+      ? { kind: 'loading' }
+      : catalog.state === 'error'
+        ? { kind: 'failed', message: catalog.error ?? '模型列表读取失败。' }
+        : { kind: 'ready' };
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, ProviderDraft>>({});
   const [showErrors, setShowErrors] = useState(false);
   const [busy, setBusy] = useState<Busy>('idle');
   const [notice, setNotice] = useState<Notice>(null);
-  const [test, setTest] = useState<TestState>({ kind: 'idle' });
-  const [testModel, setTestModel] = useState('');
-  const epoch = useRef(0);
-  const read = useCallback(async () => {
-    const mine = ++epoch.current;
-    setLoad({ kind: 'loading' });
-    try {
-      const data = await api.listModelProviders();
-      if (mine !== epoch.current) return;
-      setProviders(data.items.map(fromApi));
-      setSelection(data.default_selection);
-      setSelectedId((current) =>
-        data.items.some((item) => item.id === current) ? current : (data.items[0]?.id ?? null),
-      );
-      setDrafts({});
-      setShowErrors(false);
-      setNotice(null);
-      setTest({ kind: 'idle' });
-      setLoad({ kind: 'ready' });
-    } catch (error) {
-      if (mine === epoch.current) setLoad({ kind: 'failed', message: messageOf(error) });
-    }
+  const [connectionTest, setConnectionTest] = useState<TestState<api.ConnectionResult>>({
+    kind: 'idle',
+  });
+  const [modelTests, setModelTests] = useState<Record<string, TestState<api.TestResult>>>({});
+  const clearTests = useCallback(() => {
+    setConnectionTest({ kind: 'idle' });
+    setModelTests({});
   }, []);
   useEffect(() => {
-    void read();
-    return () => {
-      epoch.current += 1;
-    };
-  }, [read]);
+    setSelectedId((current) =>
+      providers.some((item) => item.id === current) ? current : (providers[0]?.id ?? null),
+    );
+  }, [providers]);
   const selected = providers.find((item) => item.id === selectedId) ?? null;
   const draft = (selectedId && drafts[selectedId]) || draftFrom(selected);
   const errors = validateDraft(draft, selected);
   const dirty = isDirty(draft, selected);
   const working = busy !== 'idle';
-  const replace = (value: api.Provider, resetDraft = false) => {
+  const replace = (
+    value: api.Provider,
+    resetDraft = false,
+    changeSelection: (current: api.Selection | null) => api.Selection | null = (current) => current,
+  ) => {
     const provider = fromApi(value);
-    setProviders((list) => list.map((item) => (item.id === provider.id ? provider : item)));
+    publish((current) => replaceCatalogProvider(current, value, changeSelection));
     if (resetDraft) setDrafts((all) => ({ ...all, [provider.id]: draftFrom(provider) }));
   };
   const run = async (
@@ -115,7 +126,6 @@ export function useModelSettings() {
     setNotice(null);
     try {
       await action();
-      window.dispatchEvent(new Event('along:model-settings-changed'));
       setNotice({ kind: 'ok', message });
       return true;
     } catch (error) {
@@ -130,8 +140,7 @@ export function useModelSettings() {
     setSelectedId(id);
     setShowErrors(false);
     setNotice(null);
-    setTest({ kind: 'idle' });
-    setTestModel('');
+    clearTests();
   };
   const edit = (field: DraftField, value: string) => {
     if (!selectedId) return;
@@ -144,7 +153,7 @@ export function useModelSettings() {
       },
     }));
     setNotice(null);
-    setTest({ kind: 'idle' });
+    clearTests();
   };
   const save = async () => {
     setShowErrors(true);
@@ -165,25 +174,33 @@ export function useModelSettings() {
       )
     ) {
       setShowErrors(false);
-      setTest({ kind: 'idle' });
+      clearTests();
     }
   };
-  const runTest = async () => {
+  const runTest = async (modelId?: string) => {
     if (!selectedId || working) return;
     setShowErrors(true);
     if (Object.keys(errors).length) return;
     setBusy('testing');
     setNotice(null);
-    setTest({ kind: 'testing' });
+    if (modelId) setModelTests((all) => ({ ...all, [modelId]: { kind: 'testing' } }));
+    else setConnectionTest({ kind: 'testing' });
     try {
-      const result = await api.testProvider(selectedId, {
+      const request = {
         base_url: draft.apiHost.trim(),
         credential: credential(draft, selected),
-        ...(testModel.trim() ? { model_id: testModel.trim() } : {}),
-      });
-      setTest({ kind: 'ok', result });
+      };
+      if (modelId) {
+        const result = await api.testModel(selectedId, { ...request, model_id: modelId });
+        setModelTests((all) => ({ ...all, [modelId]: { kind: 'ok', result } }));
+      } else {
+        const result = await api.testConnection(selectedId, request);
+        setConnectionTest({ kind: 'ok', result });
+      }
     } catch (error) {
-      setTest({ kind: 'failed', message: messageOf(error) });
+      const state = { kind: 'failed' as const, message: messageOf(error) };
+      if (modelId) setModelTests((all) => ({ ...all, [modelId]: state }));
+      else setConnectionTest(state);
     } finally {
       setBusy('idle');
     }
@@ -193,7 +210,7 @@ export function useModelSettings() {
     setDrafts((all) => ({ ...all, [selectedId]: draftFrom(selected) }));
     setShowErrors(false);
     setNotice(null);
-    setTest({ kind: 'idle' });
+    clearTests();
   };
   const clearKey = async () => {
     if (!selectedId) return;
@@ -211,7 +228,7 @@ export function useModelSettings() {
       )
     ) {
       setShowErrors(false);
-      setTest({ kind: 'idle' });
+      clearTests();
     }
   };
   const setEnabled = async (enabled: boolean) => {
@@ -219,21 +236,31 @@ export function useModelSettings() {
     await run(
       'toggling',
       async () => {
-        replace(await api.updateProvider(selectedId, { enabled }));
-        if (!enabled)
-          setSelection((current) => (current?.provider_id === selectedId ? null : current));
+        replace(await api.updateProvider(selectedId, { enabled }), false, (current) =>
+          !enabled && current?.provider_id === selectedId ? null : current,
+        );
       },
-      enabled ? '已启用。' : '已停用；该接入的默认模型已清除。',
+      enabled ? '已启用。' : '已停用；如为全局默认，已清除全局默认。',
     );
   };
-  const addModel = async (id: string) =>
+  const addModel = async (id: string, contextWindow: number | null) =>
     selectedId
       ? run(
           'models',
           async () => {
-            replace(await api.addModel(selectedId, id.trim()));
+            replace(await api.addModel(selectedId, id.trim(), contextWindow));
           },
           '已添加模型。',
+        )
+      : false;
+  const updateModel = async (id: string, contextWindow: number | null) =>
+    selectedId
+      ? run(
+          'models',
+          async () => {
+            replace(await api.updateModelContextWindow(selectedId, id, contextWindow));
+          },
+          '模型设置已保存。',
         )
       : false;
   const removeModel = async (id: string) => {
@@ -241,12 +268,14 @@ export function useModelSettings() {
     await run(
       'models',
       async () => {
-        replace(await api.removeModel(selectedId, id));
-        setTestModel((current) => (current === id ? '' : current));
-        setTest({ kind: 'idle' });
-        setSelection((current) =>
+        replace(await api.removeModel(selectedId, id), false, (current) =>
           current?.provider_id === selectedId && current.model_id === id ? null : current,
         );
+        setModelTests((all) => {
+          const next = { ...all };
+          delete next[id];
+          return next;
+        });
       },
       '已移除模型。',
     );
@@ -261,16 +290,21 @@ export function useModelSettings() {
         '模型已同步。',
       );
   };
-  const addProvider = async (name: string) =>
+  const addProvider = async (name: string, apiHost = '') =>
     run(
       'adding',
       async () => {
-        const provider = fromApi(await api.createProvider(name.trim()));
-        setProviders((list) => [...list, provider]);
+        const saved = await api.createProvider(name.trim());
+        const provider = fromApi(saved);
+        publish((current) => ({ ...current, items: [...current.items, saved] }));
+        if (apiHost)
+          setDrafts((all) => ({
+            ...all,
+            [provider.id]: { ...draftFrom(provider), apiHost },
+          }));
         setSelectedId(provider.id);
         setShowErrors(false);
-        setTest({ kind: 'idle' });
-        setTestModel('');
+        clearTests();
       },
       '接入已创建，请填写配置。',
     );
@@ -280,25 +314,28 @@ export function useModelSettings() {
       'deleting',
       async () => {
         await api.deleteProvider(selectedId);
-        setProviders((list) => list.filter((item) => item.id !== selectedId));
+        publish((current) => removeCatalogProvider(current, selectedId));
         setSelectedId(null);
         setDrafts((all) => {
           const next = { ...all };
           delete next[selectedId];
           return next;
         });
-        setSelection((current) => (current?.provider_id === selectedId ? null : current));
       },
       '接入已删除。',
     );
   };
-  const setDefault = async (value: api.Selection | null) => {
+  const setDefault = async (modelId: string | null) => {
+    if (!selectedId || !selected || !canSetDefault(selected, modelId)) return;
     await run(
       'default',
       async () => {
-        setSelection((await api.setDefault(value)).selection);
+        const updated = await api.setDefault(selectedId, modelId);
+        replace(updated, false, (current) =>
+          selectionAfterDefaultChange(current, selectedId, modelId),
+        );
       },
-      value ? '默认模型已设置。' : '默认模型已清除。',
+      modelId !== null ? '默认模型已设置。' : '默认模型已清除。',
     );
   };
   return {
@@ -312,8 +349,8 @@ export function useModelSettings() {
     busy,
     working,
     notice,
-    test,
-    testModel,
+    connectionTest,
+    modelTests,
     select,
     edit,
     save,
@@ -322,15 +359,13 @@ export function useModelSettings() {
     runTest,
     setEnabled,
     addModel,
+    updateModel,
     removeModel,
     syncModels,
     addProvider,
     deleteProvider,
     setDefault,
-    setTestModel: (value: string) => {
-      setTestModel(value);
-      setTest({ kind: 'idle' });
-    },
-    reload: read,
+    runModelTest: (id: string) => runTest(id),
+    reload: catalog.refresh,
   };
 }

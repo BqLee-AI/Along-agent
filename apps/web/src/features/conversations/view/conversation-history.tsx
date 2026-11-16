@@ -9,7 +9,7 @@ import { Button } from '@lorelum/lumen-ui/components/button';
 import { Dialog } from '@lorelum/lumen-ui/components/dialog';
 import { Input } from '@lorelum/lumen-ui/components/input';
 import { Label } from '@lorelum/lumen-ui/components/label';
-import { useConversationHistory } from '../viewmodel/use-conversation-history';
+import type { ConversationHistoryResource } from '../viewmodel/use-conversation-history';
 import { ReadControls } from '@/shared/ui/read-controls';
 
 const HistoryRow = memo(function HistoryRow({
@@ -50,9 +50,13 @@ const HistoryRow = memo(function HistoryRow({
   );
 });
 
-export const ConversationHistory = memo(function ConversationHistory() {
+export const ConversationHistory = memo(function ConversationHistory({
+  history,
+}: {
+  history: ConversationHistoryResource;
+}) {
   const [historyOpen, setHistoryOpen] = useState(false);
-  const { state, read, search, setSearch, matches } = useConversationHistory();
+  const { state, read, search, setSearch, matches } = history;
   const openConversation = useCallback(() => setHistoryOpen(false), []);
   useEffect(() => {
     if (window.location.hash === '#conversation-history') setHistoryOpen(true);

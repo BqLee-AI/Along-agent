@@ -8,7 +8,7 @@ export interface ConversationLocation {
 }
 
 export const workspaceItems = [
-  { href: '/', label: '今日', icon: 'today' },
+  { href: '/', label: '概览', icon: 'today' },
   { href: '/tasks', label: '提醒', icon: 'reminders' },
   { href: '/memories', label: '记忆', icon: 'memory' },
   { href: '/profile', label: '助理', icon: 'profile' },

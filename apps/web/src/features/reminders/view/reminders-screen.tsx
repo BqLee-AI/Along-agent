@@ -13,7 +13,6 @@ export async function RemindersScreen({ query }: { query: PageQuery }) {
     <div className="min-w-0 space-y-6">
       <PageHeading
         title="提醒任务"
-        description="查看冻结时间、调度回执与后续记录。"
         actions={
           <nav aria-label="提醒关联页面" className="flex items-center gap-2">
             <Link href="/approvals" className={pillClass}>
@@ -32,9 +31,7 @@ export async function RemindersScreen({ query }: { query: PageQuery }) {
         </div>
         <TaskCollection key={status} initial={initial} status={status} returnTo={returnTo} />
       </section>
-      <p className="text-[13px] leading-5 text-muted-foreground">
-        提醒时间在创建时冻结。调度登记回执不代表通知已送达，通知记录也不表示已经阅读。
-      </p>
+      <p className="text-[13px] leading-5 text-muted-foreground">登记不代表提醒已送达或被查看。</p>
     </div>
   );
 }
