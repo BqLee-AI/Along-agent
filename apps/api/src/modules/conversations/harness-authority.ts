@@ -652,8 +652,16 @@ export async function continueConversationPause(
         const finalAnswer =
           !locked.run.frozen_context.authorization_revision &&
           snapshot.native_state.pending_model?.tool_calls.length === 0;
+        const pendingCalls = snapshot.native_state.pending_model?.tool_calls;
+        const finalGoal =
+          !!locked.run.frozen_context.authorization_revision &&
+          pendingCalls?.length === 1 &&
+          pendingCalls[0]?.function.name === 'finish_goal' &&
+          snapshot.usage.iterations <= locked.run.budget_max_iterations &&
+          (snapshot.usage.tokens === null || snapshot.usage.tokens < locked.run.budget_max_tokens);
         if (
           !finalAnswer &&
+          !finalGoal &&
           (snapshot.usage.iterations >= locked.run.budget_max_iterations ||
             (snapshot.usage.tokens !== null &&
               snapshot.usage.tokens >= locked.run.budget_max_tokens))
@@ -2023,6 +2031,12 @@ export async function createHarnessSession(
             const states = await readRunInvocationStates(client, toolContext(context));
             if (states.some((row) => row.state !== 'completed' || row.outcome_kind === 'failed'))
               throw stateConflict('cannot suspend unresolved tool effects');
+            // Approval waiting supersedes a not-yet-reached user pause on this attempt.
+            await client.query(
+              `UPDATE harness_pauses SET state='invalidated'
+               WHERE owner_id=$1 AND run_id=$2 AND attempt_id=$3 AND state='pending'`,
+              [context.ownerId, context.runId, context.attemptId],
+            );
             await client.query(
               `UPDATE agent_runs SET status='suspended_approval',waiting_checkpoint_id=$2,
           waiting_invocation_id=$3,waiting_approval_id=$4 WHERE id=$1`,

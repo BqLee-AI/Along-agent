@@ -194,5 +194,5 @@ strict body `{checkpoint_id,idempotency_key}`，仅 harness Run 的最后有效�
 
 - `POST /conversations/{cid}/runs/{rid}/actions/pause`，body 为 `{"reason":"user","purpose":"none"}`。响应给出 `pause_id` 和 `pending` 或 `paused`；在途模型流和已接纳工具动作须先按真实状态收尾，登记不等于已暂停。
 - `POST /conversations/{cid}/runs/{rid}/actions/continue`，body 为 `{"pause_id":"<uuid>"}`。仅显式继续有效的用户暂停，在同一 Run 创建唯一后继 attempt 并返回 SSE；预算累计、冻结权限及已接受效果保持，继续前重验当前资格。
-- 只读 direct 路由决策先接纳时该有界动作可完成；暂停先登记时不接纳新的 direct 决策。取消或终态使暂停资格失效；未知工具效果不能伪装为可恢复暂停。
+- 只读 direct 路由决策先接纳时该有界动作可完成；暂停先登记时不接纳新的 direct 决策。已接纳工具进入批准等待时，未到达的用户暂停失效，仍按原批准合同处理；取消或终态也使暂停资格失效。未知工具效果不能伪装为可恢复暂停。
 - GET、刷新或重连只读既有状态，不自动继续。暂停不等于批准，也不保证任意崩溃恢复。

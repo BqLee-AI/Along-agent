@@ -8,17 +8,17 @@
 
 > 授权、真实工具及 v6/SSE v2 见 [design/20 §1、§4–§9](../design/20-goal-scoped-delegation.md)。授权与冻结生命周期独立：早期 request-bound 仍断流取消，合格新 Run 冻结 server-owned；旧读取和安全门不变。
 
-> Proposed 用户模型配置见 [模型接入 API](model-providers.md) 和 [design/22](../design/22-model-provider-settings.md)。下列 29 端点数为现行基线，不含拟议新增端点；接纳、历史投影及 SDK 传输以变更实施与验收为准。
+> Proposed 用户模型配置见 [模型接入 API](model-providers.md) 和 [design/22](../design/22-model-provider-settings.md)；接纳、历史投影及 SDK 传输以对应合同与验收为准。
 
-> Proposed R3（#144）：手动 compact、暂停继续和跨会话记忆的目标合同见 [design/23](../design/23-r3-short-term-memory-and-compact.md) 与 [OpenSpec 增量](../../openspec/changes/define-r3-short-term-memory/proposal.md)；本表仍只统计现行路由，设计不代表接口已部署。
+> R3（#144）的用户暂停与显式继续见 [conversations API §9](conversations/conversations_routes.md#9-用户安全点暂停和继续)；手动 compact 和跨会话记忆的目标合同见 [design/23](../design/23-r3-short-term-memory-and-compact.md) 与 [OpenSpec 增量](../../openspec/changes/define-r3-short-term-memory/proposal.md)。
 
 ## 1. Base Path 与路由总数 [Required]
 
 - Base Path：`/api/v1`。下文路由表省略该前缀，如 `GET /me` 即 `GET /api/v1/me`。
-- 合同共 29 个业务端点 + 2 个探针：既有 v0 的 13 个业务端点、正式 Harness 的 3 个 Run 入口、R1 的 4 个工作区/文档批准入口、5 个窄账户入口、3 个历史集合读取入口及 1 个只读事件订阅入口：
+- 合同共 31 个业务端点 + 2 个探针：既有 v0 的 13 个业务端点、正式 Harness 的 3 个 Run 入口、R1 的 4 个工作区/文档批准入口、5 个窄账户入口、3 个历史集合读取入口、1 个只读事件订阅入口及 2 个用户暂停/继续入口：
   - auth：`GET /me`，`GET /auth/status`、`POST /auth/initialize`、`POST /auth/claim`、`POST /auth/sign-in`、`POST /auth/sign-out`（6；后5个是 #68 新增合同，详见 auth §4）。
   - brief：`GET /brief`（1）。
-  - conversations：`POST /conversations/messages`（SSE）、`GET /conversations/{id}`，Run 查询、取消和有限批准恢复，以及会话/消息/Run 历史集合和 Run 事件订阅（9；见 conversations §3、§6）。
+  - conversations：`POST /conversations/messages`（SSE）、`GET /conversations/{id}`，Run 查询、取消、有限批准恢复、用户暂停和继续，以及会话/消息/Run 历史集合和 Run 事件订阅（11；见 conversations §3、§6、§9）。
   - approvals：`GET /approvals`、`GET /approvals/{id}`、`POST /approvals/{id}/actions/confirm`、`POST /approvals/{id}/actions/reject`、`POST /approvals/{id}/actions/revise`（5；revise 见 approvals §6）。
   - tasks：`GET /tasks`、`GET /tasks/{id}`、`POST /tasks/{id}/actions/cancel`、`GET /tasks/{id}/events`（4）。
   - R1：`GET /workspaces`、文档批准详情、确认和拒绝（4；见 §8）。不提供工作区登记写接口或任意文件读写 HTTP 入口。

@@ -41,7 +41,7 @@ maybe('user pause and continue over HTTP', () => {
     await database?.close();
   });
 
-  async function fixture() {
+  async function fixture(maxIterations = 8) {
     const session = await seedAdmittedSession(database.pool);
     const foreign = await seedAdmittedSession(database.pool);
     await configureTestModel(database.pool, session.userId, 'fixture-transport-only');
@@ -97,7 +97,7 @@ maybe('user pause and continue over HTTP', () => {
       harness: {
         binaryPath: binaryPath!,
         libraryPath: process.env.HARNESS_LIBRARY_PATH,
-        maxIterations: 8,
+        maxIterations,
         maxTokens: 8000,
         contextPolicy: createContextPolicy({
           completionCap: 1024,
@@ -310,6 +310,25 @@ maybe('user pause and continue over HTTP', () => {
       expect((await f.post('continue', { pause_id: first.pause_id }, randomUUID())).status).toBe(
         409,
       );
+    } finally {
+      await f.close();
+    }
+  }, 45000);
+
+  it('continues an already generated final goal at the iteration limit', async () => {
+    const f = await fixture(2);
+    try {
+      const response = await f.post('pause', { reason: 'user', purpose: 'none' }, randomUUID());
+      expect(response.status).toBe(200);
+      const { pause_id } = (await response.json()).data;
+      f.release.resolve();
+      await paused(f, pause_id);
+      const continued = await f.post('continue', { pause_id }, randomUUID());
+      expect(continued.status).toBe(200);
+      await continued.text();
+      const view = await (await f.get()).json();
+      expect(view.data.status).toBe('done');
+      expect(f.calls()).toBe(2);
     } finally {
       await f.close();
     }
@@ -589,6 +608,83 @@ maybe('user pause and continue over HTTP', () => {
       }
     }, 30000);
   }
+
+  it('invalidates an outstanding pause when an accepted tool enters approval waiting', async () => {
+    const f = await fresh();
+    const session = await createHarnessSession(
+      deps(),
+      f.context,
+      async () => true,
+      new AbortController().signal,
+    );
+    try {
+      const protocol = HARNESS_R3_PROTOCOL_VERSION;
+      const args = {
+        raw_time_text: f.context.inputText,
+        timezone_hint: 'Asia/Shanghai',
+        note: '喝水',
+        occurrence: 'once' as const,
+      };
+      expect(
+        await session.handleRequest({
+          protocol,
+          request_ref: randomUUID(),
+          type: 'pause_probe',
+        }),
+      ).toEqual({ pending: false });
+      const reserve = (await session.handleRequest({
+        protocol,
+        request_ref: randomUUID(),
+        type: 'reserve',
+        call_key: 'harness/1',
+        tool_id: 'propose_task',
+        args,
+      })) as { invocation_id: string };
+      const pause = await f.post('pause', { reason: 'user', purpose: 'none' });
+      expect(pause.status).toBe(200);
+      const { pause_id } = (await pause.json()).data;
+      const outcome = (await session.handleRequest({
+        protocol,
+        request_ref: randomUUID(),
+        type: 'invoke',
+        invocation_id: reserve.invocation_id,
+        tool_id: 'propose_task',
+        args,
+      })) as { result: { approval: { approvalId: string } } };
+      const approvalId = outcome.result.approval.approvalId;
+      const checkpoint = (await session.handleRequest({
+        protocol,
+        request_ref: randomUUID(),
+        type: 'snapshot',
+        context: {
+          version: 2,
+          message_refs: [f.context.userMessageId],
+          tool_refs: [reserve.invocation_id],
+          next_call_no: 2,
+          usage: { iterations: 1, tokens: null },
+          waiting: { invocation_id: reserve.invocation_id, approval_id: approvalId },
+        },
+      })) as { checkpoint_ref: string };
+      await session.handleRequest({
+        protocol,
+        request_ref: randomUUID(),
+        type: 'suspend',
+        checkpoint_ref: checkpoint.checkpoint_ref,
+        invocation_id: reserve.invocation_id,
+        approval_id: approvalId,
+      });
+      expect(
+        (await database.pool.query('SELECT state FROM harness_pauses WHERE id=$1', [pause_id]))
+          .rows[0]?.state,
+      ).toBe('invalidated');
+      expect(
+        (await database.pool.query('SELECT status FROM agent_runs WHERE id=$1', [f.started.runId]))
+          .rows[0]?.status,
+      ).toBe('suspended_approval');
+    } finally {
+      await session.close();
+    }
+  }, 30000);
 
   it('rejects pause for a pre-profile v6 run without bypassing its original approval', async () => {
     const f = await fresh(true);
