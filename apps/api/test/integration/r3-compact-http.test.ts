@@ -9,7 +9,7 @@ import { createContextPolicy } from '../../src/modules/conversations/context-pol
 import { measureHarnessContext } from '../../src/modules/conversations/harness-context.js';
 import { loadHarnessServices } from '../../src/modules/conversations/harness-config.js';
 import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
-import { createHarnessModelTransport } from '../../src/modules/conversations/harness-model.js';
+import { createHarnessModelTransport } from '../../src/modules/model-providers/harness-model.js';
 import { createRunDriver, RunDriver } from '../../src/modules/conversations/run-driver.js';
 import { loadTimeContext } from '../../src/modules/time/context.js';
 import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
@@ -42,7 +42,17 @@ suite('native server-owned compact over HTTP', () => {
   });
 
   async function fixture(
-    mode: 'active' | 'idle' | 'invalid' | 'unknown' | 'cancel' | 'cancel-ignore',
+    mode:
+      | 'active'
+      | 'pending-tool'
+      | 'pending-tool-unknown'
+      | 'pending-goal'
+      | 'idle'
+      | 'idle-limited'
+      | 'invalid'
+      | 'unknown'
+      | 'cancel'
+      | 'cancel-ignore',
     productionPolicy = false,
   ) {
     const owner = await seedAdmittedSession(db.pool);
@@ -76,6 +86,7 @@ suite('native server-owned compact over HTTP', () => {
       void (async () => {
         const body = (await jsonBody(req)) as {
           messages: Array<{ role: string; content: string }>;
+          max_tokens?: number;
         };
         requests.push(body);
         const system = body.messages.find((message) => message.role === 'system')?.content ?? '';
@@ -94,6 +105,14 @@ suite('native server-owned compact over HTTP', () => {
           compactReady = true;
           await releaseCompact.promise;
           if (res.destroyed) return;
+          if (mode === 'idle-limited' && (body.max_tokens ?? 0) < 4096) {
+            res.writeHead(200, { 'content-type': 'text/event-stream' });
+            res.write(
+              `data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'length' }] })}\n\n`,
+            );
+            res.end('data: [DONE]\n\n');
+            return;
+          }
           const content =
             mode === 'invalid'
               ? 'not JSON'
@@ -125,7 +144,7 @@ suite('native server-owned compact over HTTP', () => {
                 id: `task-${taskCalls}`,
                 type: 'function',
                 function:
-                  taskCalls === 1
+                  taskCalls === 1 && mode !== 'pending-goal'
                     ? { name: 'get_user_prefs', arguments: '{}' }
                     : {
                         name: 'finish_goal',
@@ -139,7 +158,7 @@ suite('native server-owned compact over HTTP', () => {
               },
             ],
           },
-          usage: { total_tokens: 5 },
+          usage: taskCalls === 1 && mode === 'pending-tool-unknown' ? null : { total_tokens: 5 },
         });
       })().catch((error) => {
         modelError = error;
@@ -197,6 +216,7 @@ suite('native server-owned compact over HTTP', () => {
         libraryPath: process.env.HARNESS_LIBRARY_PATH,
         maxIterations: 8,
         maxTokens: 8000,
+        ...(mode === 'idle-limited' ? { compactCompletionCap: 4096 } : {}),
         contextPolicy: productionPolicy
           ? loadHarnessServices({
               HARNESS_BINARY: process.execPath,
@@ -441,6 +461,110 @@ suite('native server-owned compact over HTTP', () => {
     }
   }, 45000);
 
+  for (const mode of ['pending-tool', 'pending-tool-unknown', 'pending-goal'] as const) {
+    it(`compacts an accepted ${mode} response without replaying it or executing it before the pause`, async () => {
+      const f = await fixture(mode);
+      try {
+        const started = await f.post(
+          '/api/v1/conversations/messages',
+          {
+            conversation_id: f.conversationId,
+            execution: 'harness',
+            authorization_revision: 'delegation/1',
+            raw_text: 'Please read my preferences and answer.',
+          },
+          randomUUID(),
+        );
+        expect(started.status).toBe(200);
+        const runId = started.headers.get('x-run-id')!;
+        const path = `/api/v1/conversations/${f.conversationId}/runs/${runId}`;
+        await f.continuationEntered.promise;
+        const receipt = await f.receipt(await f.post(`${path}/actions/compact`, {}, randomUUID()));
+        expect(receipt.status).toBe('pending');
+        f.releaseContinuation.resolve();
+        await f.waitCompact(path, receipt.pause_id);
+        const paused = (
+          await db.pool.query('SELECT snapshot FROM harness_pauses WHERE id=$1', [receipt.pause_id])
+        ).rows[0].snapshot;
+        expect(paused.native_state.pending_model.tool_calls[0].function.name).toBe(
+          mode === 'pending-goal' ? 'finish_goal' : 'get_user_prefs',
+        );
+        expect(paused.usage).toEqual({
+          iterations: 1,
+          tokens: mode === 'pending-tool-unknown' ? null : 5,
+        });
+        expect(
+          (await db.pool.query('SELECT 1 FROM tool_invocations WHERE run_id=$1', [runId])).rowCount,
+        ).toBe(0);
+        expect(f.counts()).toEqual({ compact: 1, task: 1 });
+        f.releaseCompact.resolve();
+        const final = await f.until(
+          async () => f.receipt(await f.get(`${path}/compacts/${receipt.pause_id}`)),
+          (value) => value.status === 'continued' || value.status === 'failed',
+        );
+        expect(final.status).toBe('continued');
+        const continuation = (
+          await db.pool.query('SELECT snapshot FROM compact_continuations WHERE pause_id=$1', [
+            receipt.pause_id,
+          ])
+        ).rows[0].snapshot;
+        expect(continuation.native_state.pending_model).toEqual(paused.native_state.pending_model);
+        expect(continuation.usage).toEqual({
+          iterations: 2,
+          tokens: mode === 'pending-tool-unknown' ? null : 10,
+        });
+        const events = frames(await (await f.get(`${path}/events`)).text());
+        expect(events.at(-1)?.type).toBe('thread.completed');
+        expect(f.counts()).toEqual({ compact: 1, task: mode === 'pending-goal' ? 1 : 2 });
+        const tools = await db.pool.query(
+          "SELECT state FROM tool_invocations WHERE run_id=$1 AND tool_id='get_user_prefs'",
+          [runId],
+        );
+        expect(tools.rows).toEqual(mode === 'pending-goal' ? [] : [{ state: 'completed' }]);
+      } finally {
+        await f.close();
+      }
+    }, 45000);
+  }
+
+  it('cancels a pending tool response during compact without executing or replaying it', async () => {
+    const f = await fixture('pending-tool');
+    try {
+      const started = await f.post(
+        '/api/v1/conversations/messages',
+        {
+          conversation_id: f.conversationId,
+          execution: 'harness',
+          authorization_revision: 'delegation/1',
+          raw_text: 'Please read my preferences and answer.',
+        },
+        randomUUID(),
+      );
+      const runId = started.headers.get('x-run-id')!;
+      const path = `/api/v1/conversations/${f.conversationId}/runs/${runId}`;
+      await f.continuationEntered.promise;
+      const receipt = await f.receipt(await f.post(`${path}/actions/compact`, {}, randomUUID()));
+      f.releaseContinuation.resolve();
+      await f.waitCompact(path, receipt.pause_id);
+      expect(
+        (await f.post(`${path}/actions/cancel`, { idempotency_key: randomUUID() }, randomUUID()))
+          .status,
+      ).toBe(200);
+      f.releaseCompact.resolve();
+      const final = await f.until(
+        async () => f.receipt(await f.get(`${path}/compacts/${receipt.pause_id}`)),
+        (value) => value.status === 'cancelled',
+      );
+      expect(final.status).toBe('cancelled');
+      expect(
+        (await db.pool.query('SELECT 1 FROM tool_invocations WHERE run_id=$1', [runId])).rowCount,
+      ).toBe(0);
+      expect(f.counts()).toEqual({ compact: 1, task: 1 });
+    } finally {
+      await f.close();
+    }
+  }, 45000);
+
   for (const mode of ['cancel', 'cancel-ignore'] as const) {
     it(`bounds cancelled compact transport work in ${mode} mode`, async () => {
       const f = await fixture(mode);
@@ -515,7 +639,7 @@ suite('native server-owned compact over HTTP', () => {
     }, 45000);
   }
 
-  for (const mode of ['idle', 'invalid', 'unknown'] as const) {
+  for (const mode of ['idle', 'idle-limited', 'invalid', 'unknown'] as const) {
     it(`runs idle compact as a control Run and reports ${mode} truthfully`, async () => {
       const f = await fixture(mode);
       try {
@@ -541,7 +665,7 @@ suite('native server-owned compact over HTTP', () => {
           async () => f.receipt(await f.get(`${runPath}/compacts/${first.pause_id}`)),
           (r) => r.status === 'continued' || r.status === 'failed',
         );
-        if (mode === 'idle')
+        if (mode === 'idle' || mode === 'idle-limited')
           expect(final).toMatchObject({ status: 'continued', candidate_status: 'saved' });
         else if (mode === 'invalid')
           expect(final).toMatchObject({ status: 'failed', error_code: 'COMPACT_INVALID_RESPONSE' });
@@ -561,7 +685,7 @@ suite('native server-owned compact over HTTP', () => {
             ).rowCount,
           ).toBe(0);
         }
-        if (mode === 'idle') {
+        if (mode === 'idle' || mode === 'idle-limited') {
           const source = await db.pool.query(
             `SELECT s.message_id FROM compact_summary_sources s
             JOIN compact_summaries c ON c.id=s.summary_id
@@ -578,7 +702,7 @@ suite('native server-owned compact over HTTP', () => {
           },
           (v) => !['running', 'paused'].includes(v.status),
         );
-        expect(view.status).toBe(mode === 'idle' ? 'done' : 'failed');
+        expect(view.status).toBe(mode === 'idle' || mode === 'idle-limited' ? 'done' : 'failed');
         expect((await f.receipt(await f.post(`${path}/actions/compact`, {}, key))).run_id).toBe(
           first.run_id,
         );

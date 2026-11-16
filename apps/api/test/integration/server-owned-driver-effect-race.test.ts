@@ -12,7 +12,7 @@ import { withTransaction } from '../../src/db/transaction.js';
 import { confirmDocumentApproval } from '../../src/modules/approvals/document-actions.js';
 import { readDocumentApprovalReceipt } from '../../src/modules/approvals/decision.js';
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import { createHarnessModelTransport } from '../../src/modules/conversations/harness-model.js';
+import { createHarnessModelTransport } from '../../src/modules/model-providers/harness-model.js';
 import { RunDriver } from '../../src/modules/conversations/run-driver.js';
 import type { RunOwnership } from '../../src/modules/conversations/run-ownership.js';
 import {

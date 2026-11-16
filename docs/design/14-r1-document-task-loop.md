@@ -25,7 +25,7 @@
 | 文档授权       | approvals/document-service.ts、document-actions.ts、decision.ts；0016 | 独立批准/决议表、完整冻结内容、唯一 apply；跨模块 ID 经公共用例验证，不新增跨模块强 FK                                    |
 | 文件效果       | workspaces/replace.ts；tools/invocations.ts、query.ts                 | 非事务替换、真实 applied/conflict/unknown；unknown 不补报、不重写、不产生可恢复 checkpoint                                |
 | 历史与当前资格 | conversations/repository.ts、run-state.ts、harness-authority.ts       | 冻结摘要保留可读；新动作和继续重新核验登记，限定旧 task snapshot1 读取不扩权                                              |
-| 外部配置与预算 | conversations/harness-config.ts、harness-model.ts                     | 现行基线部署固定 provider 与预算，Run 预算跨 attempt 累计；拟议本人选择及版本冻结见 design/22                             |
+| 外部配置与预算 | conversations/harness-config.ts、model-providers/harness-model.ts     | 现行基线部署固定 provider 与预算，Run 预算跨 attempt 累计；拟议本人选择及版本冻结见 design/22                             |
 | 展示和证据     | packages/stream-protocol；Web Chat/document-approvals；ci/gates.json  | 保留七事件，不伪造 task 卡片；D8 按实际消费者及本次报告声明，不能替代真实模型或用户材料验收                               |
 
 路径均相对 apps/api/src/modules，除表中明确列出的跨包位置。#45–#47 的底座合同和历史证据保留其适用范围，不重做为 R1 新成果。

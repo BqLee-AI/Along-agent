@@ -107,6 +107,30 @@ describe('automatic compact policy', () => {
     ).toBeNull();
   });
 
+  test('reserves the independent compact output allowance before automatically pausing', () => {
+    const candidate = { ...base, compactOutputTokens: 900 };
+    expect(shouldAutoCompact(candidate)).toBe(false);
+    expect(shouldAutoCompact({ ...candidate, remainingTokens: 2100 })).toBe(true);
+  });
+
+  test('does not auto-pause when the compact output allowance cannot fit the known window', () => {
+    const candidate = {
+      ...base,
+      policy: { ...policy, windowTokens: 4096, triggerRatio: 0.8 },
+      contextPolicy: { ...base.contextPolicy, model_window_tokens: 4096 },
+      measurement: {
+        ...base.measurement,
+        input_meter: { ...base.measurement.input_meter, input_tokens: 3300 },
+      },
+      remainingTokens: 10000,
+      compactOutputTokens: 4096,
+    };
+    expect(shouldAutoCompact(candidate)).toBe(false);
+    expect(shouldAutoCompact({ ...candidate, compactOutputTokens: 3996 })).toBe(false);
+    expect(shouldAutoCompact({ ...candidate, compactOutputTokens: 3995 })).toBe(true);
+    expect(shouldAutoCompact({ ...candidate, compactOutputTokens: 500 })).toBe(true);
+  });
+
   test('only triggers at the explicitly supplied ratio with sufficient reserves', () => {
     expect(shouldAutoCompact(base)).toBe(true);
     expect(

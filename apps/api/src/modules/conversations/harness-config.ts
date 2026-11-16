@@ -1,5 +1,5 @@
 import { accessSync, constants } from 'node:fs';
-import { createUserConfiguredHarnessModelTransport } from './harness-model.js';
+import { createUserConfiguredHarnessModelTransport } from '../model-providers/harness-model.js';
 import { createContextPolicy } from './context-policy.js';
 import { measureHarnessContext } from './harness-context.js';
 import { outboundFetch } from '../model-providers/outbound.js';
@@ -65,12 +65,17 @@ export function loadHarnessServices(
   } catch {
     return null;
   }
+  const compactCompletionCap = Number(
+    environment.HARNESS_COMPACT_COMPLETION_CAP ?? Math.max(contextPolicy.completion_cap, 4096),
+  );
+  if (!Number.isSafeInteger(compactCompletionCap) || compactCompletionCap < 1) return null;
   return {
     binaryPath,
     libraryPath: environment.HARNESS_LIBRARY_PATH || '/app/harness/lib',
     maxIterations,
     maxTokens,
     autoCompactPlanningTokens,
+    compactCompletionCap,
     contextPolicy,
   };
 }
@@ -78,12 +83,14 @@ export function loadHarnessServices(
 /** The selected version is the only model source for Run and probe calls. */
 export const createUserModelTransport: NonNullable<ConversationDeps['modelTransport']> = async (
   config,
+  diagnostic,
 ) => ({
   model: createUserConfiguredHarnessModelTransport(
     {
       baseUrl: config.base_url,
       model: config.model_id,
       ...(config.api_key === null ? {} : { apiKey: config.api_key }),
+      ...(diagnostic ? { diagnostic } : {}),
     },
     outboundFetch,
   ),

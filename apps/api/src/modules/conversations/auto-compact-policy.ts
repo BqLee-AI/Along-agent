@@ -63,6 +63,7 @@ export function shouldAutoCompact(input: {
   measurement: HarnessContextMeasurement;
   remainingTokens: number | null;
   maxOutputTokens: number;
+  compactOutputTokens?: number;
   iterationsRemaining: number;
   uncoveredMessageCount: number;
 }): boolean {
@@ -75,6 +76,10 @@ export function shouldAutoCompact(input: {
     !measurement.success ||
     !(input.remainingTokens === null || nonnegative.safeParse(input.remainingTokens).success) ||
     !positive.safeParse(input.maxOutputTokens).success ||
+    !(
+      input.compactOutputTokens === undefined ||
+      positive.safeParse(input.compactOutputTokens).success
+    ) ||
     !nonnegative.safeParse(input.iterationsRemaining).success ||
     !positive.safeParse(input.uncoveredMessageCount).success
   )
@@ -98,6 +103,10 @@ export function shouldAutoCompact(input: {
     m.http_bytes > HARNESS_MAX_FRAME_BYTES ||
     m.output_ceiling < input.maxOutputTokens ||
     input.maxOutputTokens > c.completion_cap ||
+    // A nonempty compact request also needs input space in the known window.
+    (c.model_window_tokens !== null &&
+      (input.compactOutputTokens ?? input.maxOutputTokens) >=
+        c.model_window_tokens - c.reserve_tokens) ||
     (c.model_window_tokens !== null &&
       (m.input_meter.input_tokens > p.windowTokens ||
         c.reserve_tokens > p.windowTokens - m.input_meter.input_tokens ||
@@ -105,8 +114,9 @@ export function shouldAutoCompact(input: {
     input.iterationsRemaining <= p.continuationIterations ||
     (remaining !== null &&
       (remaining < p.compactInputTokens ||
-        remaining - p.compactInputTokens < input.maxOutputTokens ||
-        remaining - p.compactInputTokens - input.maxOutputTokens < p.continuationTokens))
+        remaining - p.compactInputTokens < (input.compactOutputTokens ?? input.maxOutputTokens) ||
+        remaining - p.compactInputTokens - (input.compactOutputTokens ?? input.maxOutputTokens) <
+          p.continuationTokens))
   )
     return false;
   return m.input_meter.input_tokens / p.windowTokens >= p.triggerRatio;

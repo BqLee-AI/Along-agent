@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
-import { ZodError } from 'zod';
+import { z, ZodError } from 'zod';
 import {
   HARNESS_PROTOCOL_VERSION,
   HARNESS_R3_PROTOCOL_VERSION,
@@ -290,6 +290,16 @@ async function contextOf(
     ...(frozen.autoCompactPolicy
       ? { autoCompactPolicy: AutoCompactPolicySchema.parse(frozen.autoCompactPolicy) }
       : {}),
+    ...(frozen.compactCompletionCap === undefined
+      ? {}
+      : {
+          compactCompletionCap: z
+            .number()
+            .int()
+            .positive()
+            .safe()
+            .parse(frozen.compactCompletionCap),
+        }),
     ...(frozen.workspaceGrant ? { workspaceGrant: frozen.workspaceGrant } : {}),
     ...(frozen.workspaceGrants ? { workspaceGrants: frozen.workspaceGrants } : {}),
     ...(frozen.authorization_revision
@@ -1092,7 +1102,6 @@ async function executeRuntimeCompactWork(
   try {
     if (
       (snapshot.usage.tokens !== null && snapshot.usage.tokens >= context.maxTokens) ||
-      snapshot.native_state.pending_model ||
       snapshot.usage.iterations + 1 >= context.maxIterations ||
       !snapshot.context.messages.length
     ) {
@@ -1102,13 +1111,19 @@ async function executeRuntimeCompactWork(
           : 'COMPACT_NO_CONTENT',
       );
     } else {
-      const transport = await deps.modelTransport(prepared.selected);
+      const transport = await deps.modelTransport(prepared.selected, {
+        runId: context.runId,
+        attemptId: context.attemptId,
+        operation: 'compact',
+      });
+      const compactCompletionCap =
+        context.compactCompletionCap ?? context.contextPolicy.completion_cap;
       await executeCompact({
         pool,
         binding,
         messageIds: snapshot.context.messages.map((message) => message.message_id),
         promptRevision: 'compact/1',
-        policy: context.contextPolicy,
+        policy: { ...context.contextPolicy, completion_cap: compactCompletionCap },
         budget: {
           iterationsRemaining: context.maxIterations - snapshot.usage.iterations,
           continuationIterations:
@@ -1121,7 +1136,7 @@ async function executeRuntimeCompactWork(
             prepared.purpose === 'automatic_compact'
               ? context.autoCompactPolicy!.continuationTokens
               : context.contextPolicy.completion_cap,
-          maxOutputTokens: context.contextPolicy.completion_cap,
+          maxOutputTokens: compactCompletionCap,
         },
         transport,
         signal,
@@ -1176,7 +1191,7 @@ async function executeRuntimeCompactWork(
               if (
                 seen ||
                 request.type !== 'context_preview' ||
-                request.pending_model ||
+                request.pending_model !== (snapshot.native_state.pending_model !== null) ||
                 request.remaining_tokens !== (total === null ? null : context.maxTokens - total) ||
                 request.max_output_tokens === 0
               )
@@ -2257,6 +2272,8 @@ export async function createHarnessSession(
                 measurement: measured.measurement,
                 remainingTokens: measured.remaining,
                 maxOutputTokens: measured.output,
+                compactOutputTokens:
+                  context.compactCompletionCap ?? context.contextPolicy.completion_cap,
                 iterationsRemaining: context.maxIterations - cumulative.iterations,
                 uncoveredMessageCount: context.r3Context.messages.length,
               })
@@ -2689,7 +2706,11 @@ export async function createHarnessSession(
           );
           if (!selected) throw stateConflict('legacy Run model binding unavailable');
           if (selected.model_id !== context.contextPolicy.model_binding.model) throw unavailable();
-          const transport = await deps.modelTransport(selected);
+          const transport = await deps.modelTransport(selected, {
+            runId: context.runId,
+            attemptId: context.attemptId,
+            operation: 'model',
+          });
           const measurement = await transport.measure(
             { ...request, type: 'measure_context' },
             tools,

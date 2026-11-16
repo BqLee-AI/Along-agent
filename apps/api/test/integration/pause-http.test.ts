@@ -7,7 +7,7 @@ import { HARNESS_PROTOCOL_VERSION, HARNESS_R3_PROTOCOL_VERSION } from '@along/co
 import { z } from 'zod';
 import { handleRequest } from '../../src/http/app.js';
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import { createHarnessModelTransport } from '../../src/modules/conversations/harness-model.js';
+import { createHarnessModelTransport } from '../../src/modules/model-providers/harness-model.js';
 import {
   continueConversationPause,
   createHarnessSession,

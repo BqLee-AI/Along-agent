@@ -21,7 +21,7 @@ import {
 import { acceptReminderDate } from '../../src/modules/conversations/reminder-date.js';
 import type { ConversationDeps } from '../../src/modules/conversations/contracts.js';
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import { createHarnessModelTransport } from '../../src/modules/conversations/harness-model.js';
+import { createHarnessModelTransport } from '../../src/modules/model-providers/harness-model.js';
 import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
 import { loadTimeContext } from '../../src/modules/time/context.js';
 import {
