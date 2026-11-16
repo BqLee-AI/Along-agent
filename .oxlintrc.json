@@ -75,6 +75,10 @@
     {
       "files": ["apps/web/**/*.{ts,tsx,js,jsx}"],
       "rules": { "along-boundaries/no-web-time": "error" }
+    },
+    {
+      "files": ["apps/web/src/features/*/view/**/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}"],
+      "rules": { "along-boundaries/no-feature-view-fetch": "error" }
     }
   ]
 }

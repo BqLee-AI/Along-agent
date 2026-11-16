@@ -13,6 +13,7 @@ import { useConversationTask } from '../viewmodel/use-conversation-task';
 import { useConversationPresentation } from '../viewmodel/use-conversation-presentation';
 import { useConversationScroll } from '../viewmodel/use-conversation-scroll';
 import { useComposerFocus } from '../viewmodel/use-composer-display';
+import { useConversationHistory } from '../viewmodel/use-conversation-history';
 import { ConversationHistory } from './conversation-history';
 import { ConversationSidebar } from './conversation-sidebar';
 import { ConversationContext } from './conversation-context';
@@ -37,6 +38,7 @@ export default function ConversationPane({
   sidebar = false,
 }: ConversationPaneProps) {
   const task = useConversationTask({ conversationId, runId, initialIntent });
+  const history = useConversationHistory();
   const { entries, blockedRuns, context, needsAction, showReminderResult } =
     useConversationPresentation(task);
   const selected = task.selected;
@@ -77,6 +79,7 @@ export default function ConversationPane({
             transition={{ duration: reduceMotion ? 0 : 0.2, ease: [0.32, 0.72, 0, 1] }}
           >
             <ConversationSidebar
+              history={history}
               activeId={selected ? selected.conversationId : conversationId}
               onNew={startNewConversation}
               onCollapse={() => setSidebarOpen(false)}
@@ -108,7 +111,7 @@ export default function ConversationPane({
           </div>
           <nav className="flex shrink-0 items-center gap-1" aria-label="会话操作">
             <div className={sidebar ? 'contents lg:hidden' : 'contents'}>
-              <ConversationHistory />
+              <ConversationHistory history={history} />
               <Link
                 href="/conversations"
                 onClick={startNewConversation}
@@ -164,11 +167,20 @@ export default function ConversationPane({
               >
                 {!task.messages.length && !task.liveReply && !task.reading ? (
                   <div
-                    className="flex min-h-[min(56dvh,520px)] flex-col items-center justify-center gap-6 py-10 text-center"
+                    className="relative flex min-h-[min(56dvh,520px)] flex-col items-center justify-center gap-6 py-10 text-center"
                     data-testid="chat-greeting"
                   >
-                    <h2 className="text-2xl leading-8 font-semibold">你好，想聊点什么？</h2>
-                    <div className="flex flex-wrap items-center justify-center gap-2">
+                    <div
+                      aria-hidden="true"
+                      className="pointer-events-none absolute inset-x-0 top-1/2 -z-0 mx-auto h-56 max-w-sm -translate-y-1/2 rounded-full bg-[radial-gradient(ellipse,color-mix(in_oklab,var(--brand-ink)_7%,transparent),transparent_70%)] dark:bg-[radial-gradient(ellipse,color-mix(in_oklab,var(--brand-ink)_10%,transparent),transparent_70%)]"
+                    />
+                    <div aria-hidden="true" className="relative">
+                      <Brand height={28} />
+                    </div>
+                    <h2 className="relative text-2xl leading-8 font-semibold tracking-tight">
+                      你好，想聊点什么？
+                    </h2>
+                    <div className="relative flex flex-wrap items-center justify-center gap-2">
                       {[
                         {
                           intent: 'chat',
@@ -182,7 +194,7 @@ export default function ConversationPane({
                         <button
                           key={intent}
                           type="button"
-                          className="inline-flex h-9 items-center gap-2 rounded-full px-4 text-sm text-foreground/80 ring-1 ring-foreground/[0.12] transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-50 max-lg:min-h-11"
+                          className="inline-flex h-9 items-center gap-2 rounded-full border-0 bg-transparent px-4 text-sm text-foreground/80 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-50 motion-reduce:transition-none max-lg:min-h-11"
                           disabled={task.active || task.reading}
                           onClick={() => {
                             task.setIntent(intent as TaskIntent);

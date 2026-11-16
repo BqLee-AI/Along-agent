@@ -164,6 +164,14 @@ export function RunStatusPanel({ task }: { task: ConversationTask }) {
   const transcript = task.transcript.get(selected.runId);
   const lifecycle = run?.execution_lifecycle ?? transcript?.execution_lifecycle;
   const goalResult = run?.goal_result ?? transcript?.goal_result;
+  const answerVisible =
+    Boolean(goalResult && task.liveReply) ||
+    Boolean(
+      goalResult &&
+      task.messages.some(
+        (message) => message.role === 'assistant' && message.content === goalResult.answer,
+      ),
+    );
   const waiting = run?.status === 'suspended_approval';
   const resumable = Boolean(
     run &&
@@ -247,9 +255,11 @@ export function RunStatusPanel({ task }: { task: ConversationTask }) {
       ) : null}
       {goalResult ? (
         <>
-          <div className="py-2 text-sm">
-            <GoalResultPanel result={goalResult} />
-          </div>
+          {goalResult.status !== 'completed' || goalResult.clarification || !answerVisible ? (
+            <div className="py-2 text-sm">
+              <GoalResultPanel result={goalResult} showAnswer={!answerVisible} />
+            </div>
+          ) : null}
           <ul className="space-y-3" aria-label="此次已创建的提醒">
             {run?.created_reminders?.map((receipt) => (
               <li key={receipt.invocation_id} className="space-y-1">
@@ -608,7 +618,7 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
       <PromptInput
         variant="glass"
         submitDisabled={!allowed}
-        className="flex min-h-0 min-w-0 flex-col gap-1 rounded-2xl bg-background! bg-none! p-2 shadow-[0_0_0_1px_rgba(0,0,0,0.06),0_1px_2px_rgba(0,0,0,0.04),0_4px_16px_rgba(0,0,0,0.06)]! dark:bg-secondary! dark:shadow-[0_0_0_1px_rgba(255,255,255,0.08),inset_0_1px_0_rgba(255,255,255,0.04),0_6px_24px_rgba(0,0,0,0.3)]!"
+        className="flex min-h-0 min-w-0 flex-col gap-1 rounded-2xl bg-background! bg-none! p-2 shadow-[0_0_0_1px_rgba(0,0,0,0.06),0_2px_6px_rgba(0,0,0,0.04),0_12px_32px_rgba(0,0,0,0.06)]! transition-shadow duration-200 focus-within:shadow-[0_0_0_1px_color-mix(in_oklab,var(--brand-ink)_35%,transparent),0_2px_8px_rgba(0,0,0,0.04),0_12px_32px_rgba(0,0,0,0.07)]! motion-reduce:transition-none dark:bg-secondary! dark:shadow-[0_0_0_1px_rgba(255,255,255,0.08),inset_0_1px_0_rgba(255,255,255,0.04),0_8px_28px_rgba(0,0,0,0.3)]! dark:focus-within:shadow-[0_0_0_1px_color-mix(in_oklab,var(--brand-ink)_45%,transparent),0_8px_28px_rgba(0,0,0,0.3)]!"
         onSubmit={(event) => {
           event.preventDefault();
           if (allowed) void task.send();
@@ -860,7 +870,7 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
                     type="button"
                     variant="clear"
                     color="default"
-                    className="max-w-48 gap-1 rounded-lg text-muted-foreground hover:text-foreground"
+                    className="max-w-48 gap-1 rounded-lg border-0 bg-transparent! bg-none! text-muted-foreground shadow-none! hover:bg-muted! hover:text-foreground"
                   />
                 }
                 disabled={task.sendUncertain}
@@ -930,7 +940,7 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
               type="submit"
               size="icon"
               color="primary"
-              className="rounded-full bg-brand-ink! text-background! transition-[opacity,scale]! duration-200! ease-out! hover:opacity-90 active:scale-95 disabled:scale-90 motion-reduce:transition-none!"
+              className="rounded-full bg-brand-ink! text-background! transition-[opacity,background-color]! duration-200! ease-out! hover:opacity-90 disabled:opacity-50 motion-reduce:transition-none!"
               disabled={!allowed}
               aria-label={command ? '执行压缩命令' : '发送消息'}
               data-testid="send-message"

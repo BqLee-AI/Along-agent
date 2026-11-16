@@ -7,15 +7,28 @@ import {
   removeModel,
   setDefault,
   syncModels,
-  testProvider,
+  testConnection,
+  testModel,
   updateProvider,
   validateDraft,
   type Provider,
 } from '../src/features/model-settings/model/http-gateway';
 import {
+  canSetDefault,
+  draftFrom,
+  groupModels,
+  isConfigured,
+  isDirty,
+  selectionAfterDefaultChange,
+  validateModelId,
   validateDraft as validateFormDraft,
   type Provider as FormProvider,
 } from '../src/features/model-settings/model/model-config';
+import { availablePresets } from '../src/features/model-settings/model/provider-presets';
+import {
+  removeCatalogProvider,
+  replaceCatalogProvider,
+} from '../src/features/model-settings/model/model-catalog';
 
 const provider: Provider = {
   id: '11111111-1111-4111-8111-111111111111',
@@ -25,6 +38,8 @@ const provider: Provider = {
   has_api_key: true,
   key_hint: null,
   models: ['vendor/model'],
+  default_model_id: null,
+  model_context_windows: { 'vendor/model': null },
 };
 const originalFetch = globalThis.fetch;
 afterEach(() => {
@@ -85,6 +100,8 @@ describe('model settings HTTP contract', () => {
       apiHost: provider.base_url,
       hasApiKey: true,
       models: [],
+      defaultModelId: null,
+      modelContextWindows: {},
     };
     const changed = {
       apiHost: 'https://new.test/v1',
@@ -140,34 +157,55 @@ describe('model settings HTTP contract', () => {
     } as const;
     const testCalls = installFetch(result);
     expect(
-      await testProvider(provider.id, {
+      await testModel(provider.id, {
         base_url: 'https://new.test/v1',
         credential: { action: 'replace', api_key: 'secret' },
         model_id: 'vendor/model',
       }),
     ).toEqual(result);
+    expect(testCalls[1]?.url).toBe(`/api/v1/model-providers/${provider.id}/actions/test`);
+    expect(new Headers(testCalls[1]?.init?.headers).get('x-csrf-token')).toBe('csrf');
     expect(JSON.parse(String(testCalls[1]?.init?.body))).toEqual({
       base_url: 'https://new.test/v1',
       credential: { action: 'replace', api_key: 'secret' },
       model_id: 'vendor/model',
     });
   });
+  it('tests provider connectivity independently with draft credentials and validates the response', async () => {
+    const result = { status: 'passed', latency_ms: 23 } as const;
+    const calls = installFetch(result);
+    const draft = { base_url: 'https://new.test/v1', credential: { action: 'clear' as const } };
+    expect(await testConnection(provider.id, draft)).toEqual(result);
+    expect(calls[1]?.url).toBe(`/api/v1/model-providers/${provider.id}/actions/test-connection`);
+    expect(new Headers(calls[1]?.init?.headers).get('x-csrf-token')).toBe('csrf');
+    expect(JSON.parse(String(calls[1]?.init?.body))).toEqual(draft);
+    installFetch({ status: 'passed', latency_ms: null });
+    await expect(testConnection(provider.id, draft)).rejects.toThrow();
+    installFetch(null, 409);
+    await expect(testConnection(provider.id, draft)).rejects.toThrow('配置已变化');
+  });
   it('uses saved configuration for sync and preserves opaque IDs in request bodies', async () => {
     const syncCalls = installFetch({ provider, added_model_ids: ['vendor/model'] });
     await syncModels(provider.id);
     expect(JSON.parse(String(syncCalls[1]?.init?.body))).toEqual({});
     const calls = installFetch(provider);
-    await addModel(provider.id, 'vendor/model');
+    await addModel(provider.id, 'vendor/model', null);
     await removeModel(provider.id, 'vendor/model');
     expect(calls[3]?.url).toEndWith('/models/actions/remove');
     expect(JSON.parse(String(calls[3]?.init?.body))).toEqual({ model_id: 'vendor/model' });
   });
-  it('clears the default explicitly and surfaces conflict responses', async () => {
-    const calls = installFetch({ selection: null });
-    await setDefault(null);
-    expect(JSON.parse(String(calls[1]?.init?.body))).toEqual({ selection: null });
+  it('sets and clears a provider default with the provider write route', async () => {
+    const updated = { ...provider, default_model_id: 'vendor/model' };
+    const calls = installFetch(updated);
+    expect(await setDefault(provider.id, 'vendor/model')).toEqual(updated);
+    expect(calls[1]?.url).toBe(`/api/v1/model-providers/${provider.id}/actions/default-model`);
+    expect(new Headers(calls[1]?.init?.headers).get('x-csrf-token')).toBe('csrf');
+    expect(JSON.parse(String(calls[1]?.init?.body))).toEqual({ model_id: 'vendor/model' });
+    const clearCalls = installFetch(provider);
+    expect(await setDefault(provider.id, null)).toEqual(provider);
+    expect(JSON.parse(String(clearCalls[1]?.init?.body))).toEqual({ model_id: null });
     installFetch(null, 409);
-    await expect(syncModels(provider.id)).rejects.toThrow('配置已变化');
+    await expect(setDefault(provider.id, null)).rejects.toThrow('配置已变化');
   });
   it('refuses mutations without a CSRF token', async () => {
     const calls: string[] = [];
@@ -179,7 +217,105 @@ describe('model settings HTTP contract', () => {
         confirmed_timezone: null,
       });
     }) as typeof fetch;
-    await expect(setDefault(null)).rejects.toThrow('CSRF');
+    await expect(setDefault(provider.id, null)).rejects.toThrow('CSRF');
     expect(calls).toEqual(['/api/v1/me']);
+  });
+});
+
+describe('model settings form helpers', () => {
+  const formProvider: FormProvider = {
+    id: 'p',
+    name: 'Example',
+    enabled: true,
+    apiHost: 'https://example.test/v1',
+    hasApiKey: true,
+    models: ['a/one', 'a/two', 'plain'],
+    defaultModelId: null,
+    modelContextWindows: {},
+  };
+
+  it('finds presets by alias and excludes providers already added', () => {
+    expect(availablePresets([], '智谱').map((item) => item.name)).toContain('智谱 BigModel');
+    expect(availablePresets([{ ...formProvider, name: '智谱 BigModel' }], 'bigmodel')).toEqual([]);
+    expect(availablePresets([], 'not-a-provider')).toEqual([]);
+  });
+  it('prefills an empty preset without replacing an existing address or credential', () => {
+    const preset = { ...formProvider, name: 'Z.AI', apiHost: '', hasApiKey: false };
+    expect(draftFrom(preset).apiHost).toBe('https://api.z.ai/api/paas/v4');
+    expect(draftFrom({ ...preset, apiHost: 'https://custom.test/v1' }).apiHost).toBe(
+      'https://custom.test/v1',
+    );
+    expect(draftFrom({ ...preset, hasApiKey: true }).apiHost).toBe('');
+  });
+
+  it('compares the trimmed host and tracks explicit credential changes', () => {
+    const draft = {
+      apiHost: ` ${formProvider.apiHost} `,
+      apiKey: '',
+      credentialAction: 'keep' as const,
+    };
+    expect(isDirty(draft, formProvider)).toBe(false);
+    expect(isDirty({ ...draft, apiKey: 'new', credentialAction: 'replace' }, formProvider)).toBe(
+      true,
+    );
+    expect(isDirty({ ...draft, credentialAction: 'clear' }, formProvider)).toBe(true);
+    expect(isConfigured(formProvider)).toBe(true);
+    expect(isConfigured({ ...formProvider, apiHost: '' })).toBe(false);
+    expect(isConfigured({ ...formProvider, hasApiKey: false })).toBe(true);
+  });
+
+  it('allows defaults only for models of an enabled provider with a saved endpoint', () => {
+    const keyless = { ...formProvider, hasApiKey: false };
+    expect(canSetDefault(keyless, 'a/one')).toBe(true);
+    expect(canSetDefault(keyless, null)).toBe(true);
+    expect(canSetDefault(keyless, 'other/model')).toBe(false);
+    expect(canSetDefault({ ...keyless, apiHost: '' }, 'a/one')).toBe(false);
+    expect(canSetDefault({ ...keyless, enabled: false }, 'a/one')).toBe(false);
+    expect(canSetDefault({ ...keyless, models: [] }, null)).toBe(false);
+  });
+
+  it('updates the global selection without clearing another provider', () => {
+    const other = { provider_id: 'other', model_id: 'model' };
+    expect(selectionAfterDefaultChange(other, 'p', 'a/one')).toEqual({
+      provider_id: 'p',
+      model_id: 'a/one',
+    });
+    expect(selectionAfterDefaultChange(other, 'p', null)).toEqual(other);
+    expect(
+      selectionAfterDefaultChange({ provider_id: 'p', model_id: 'a/one' }, 'p', null),
+    ).toBeNull();
+  });
+
+  it('validates model IDs and groups them by vendor prefix', () => {
+    expect(validateModelId('', formProvider)).not.toBeNull();
+    expect(validateModelId(' a/one ', formProvider)).not.toBeNull();
+    expect(validateModelId('b/new', formProvider)).toBeNull();
+    expect(groupModels(formProvider)).toEqual([
+      { group: 'a', models: ['a/one', 'a/two'] },
+      { group: 'Example', models: ['plain'] },
+    ]);
+  });
+});
+
+describe('shared saved model catalog', () => {
+  it('updates the saved provider and global default together', () => {
+    const snapshot = { items: [provider], default_selection: null };
+    const updated = { ...provider, default_model_id: 'vendor/model' };
+    const saved = replaceCatalogProvider(snapshot, updated, () => ({
+      provider_id: provider.id,
+      model_id: 'vendor/model',
+    }));
+    expect(saved.items[0]).toEqual(updated);
+    expect(saved.default_selection).toEqual({ provider_id: provider.id, model_id: 'vendor/model' });
+  });
+
+  it('clears only the deleted provider default', () => {
+    const selection = { provider_id: provider.id, model_id: 'vendor/model' };
+    const snapshot = { items: [provider], default_selection: selection };
+    expect(removeCatalogProvider(snapshot, 'another')).toEqual(snapshot);
+    expect(removeCatalogProvider(snapshot, provider.id)).toEqual({
+      items: [],
+      default_selection: null,
+    });
   });
 });

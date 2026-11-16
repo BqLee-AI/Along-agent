@@ -3,7 +3,7 @@
 import Link from '@/shell/view/workspace-link';
 import { memo } from 'react';
 import { ChevronsDown, PanelLeftClose, Plus, RefreshCw } from 'lucide-react';
-import { useConversationHistory } from '../viewmodel/use-conversation-history';
+import type { ConversationHistoryResource } from '../viewmodel/use-conversation-history';
 import { Brand } from '@/shared/ui/brand';
 
 const iconButton =
@@ -12,19 +12,21 @@ const iconButton =
 /** Navigation only: opening a conversation reads its record and never sends or resumes. */
 export const ConversationSidebar = memo(function ConversationSidebar({
   activeId,
+  history,
   onNew,
   onCollapse,
 }: {
+  history: ConversationHistoryResource;
   activeId: string | null;
   onNew: () => void;
   onCollapse: () => void;
 }) {
-  const { state, read, matches } = useConversationHistory();
+  const { state, read } = history;
   return (
     <aside
       aria-label="会话"
       data-testid="conversation-sidebar"
-      className="flex h-full w-64 shrink-0 flex-col border-r border-separator bg-muted/40 dark:bg-muted"
+      className="flex h-full w-64 shrink-0 flex-col border-r border-separator bg-foreground/5 backdrop-blur-xl dark:bg-foreground/[0.03]"
     >
       <div className="flex h-12 shrink-0 items-center justify-between pr-2 pl-4">
         <Brand height={20} />
@@ -77,7 +79,7 @@ export const ConversationSidebar = memo(function ConversationSidebar({
           <p className="px-2 py-3 text-[13px] text-muted-foreground">还没有已存会话</p>
         ) : null}
         <ul className="space-y-0.5">
-          {matches.map((item) => (
+          {state.items.map((item) => (
             <li key={item.conversation_id}>
               <Link
                 href={`/conversations?${new URLSearchParams({ conversation_id: item.conversation_id })}`}

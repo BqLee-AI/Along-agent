@@ -42,7 +42,9 @@ export function CapabilityScreen({ capability }: { capability: Capability }) {
         <span className="mt-5 inline-flex h-6 items-center rounded-full bg-foreground/[0.08] px-2.5 text-xs font-medium text-secondary-foreground">
           暂未开放
         </span>
-        <p className="mt-3 max-w-sm text-sm leading-6 text-muted-foreground">{page.boundary}</p>
+        {page.boundary && (
+          <p className="mt-3 max-w-sm text-sm leading-6 text-muted-foreground">{page.boundary}</p>
+        )}
         {page.related.length ? (
           <nav
             aria-label="相关入口"

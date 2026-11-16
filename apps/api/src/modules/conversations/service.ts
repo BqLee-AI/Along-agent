@@ -771,6 +771,8 @@ export async function startConversationRun(
         execution === 'harness'
           ? await ensureRunContextPolicy(client, ownerId, runId, {
               ...deps.harness!.contextPolicy,
+              model_window_tokens:
+                selected!.context_window_tokens ?? deps.harness!.contextPolicy.model_window_tokens,
               model_binding: {
                 ...deps.harness!.contextPolicy.model_binding,
                 model: selected!.model_id,
