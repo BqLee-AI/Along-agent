@@ -1,6 +1,6 @@
 # 23. R3 短期记忆、同 Run 暂停与 compact
 
-> 状态：暂停/继续按用户安全点合同实现；compact、上下文及记忆仍按 Proposed 合同分别实施和验收。
+> 状态：用户安全点暂停/继续及本人明确记忆的字面召回已实现；compact、上下文及语义召回按合同分别实施和验收。
 > 范围：通用安全点暂停/继续、手动及自动 compact、新 Run 上下文选择、本人跨会话短期记忆；行为变更先经 OpenSpec 评审。R2-A、已有批准和 delegation 除本文明确对新 profile 的变更外继续生效。
 > 非目标：R4 长期记忆、知识库 RAG、独立记忆平台、任意崩溃恢复、自动启用 R2-B、以记忆授权操作或删除原始事实。
 
@@ -11,6 +11,8 @@
 [Observed · 阶段 0] 基线没有摘要功能或通用暂停；批准 resume 必须匹配批准、waiting checkpoint 和决议，不能拿它模拟普通暂停。流活跃时只允许 `model_next` 和 `answer`；取消先提交终态撤销资格再 abort。`repository.ts` 的接纳选择最近 63 条可见历史加当前输入，读取要求最多 64 个、唯一且当前输入在末尾；快照逐位绑定冻结引用。`service.ts` 在接纳时冻结该集合。仓颉 `apps/harness/src/session/context.cj` 的 `projectOldest` 是确定性工具观察投影，不是对话摘要。R2-A 的 24 次/64000 tokens 是默认累计 Run 预算，不是模型窗口；窗口与输入计量可未知。详见 [design/18](18-r2a-harness-context.md) 与 [阶段 0](../verification/r3-stage-zero-2026-11-13.md)。
 
 用户可请求安全点暂停，并显式继续同一 Run；用户暂停与批准等待分开，状态和权限在持久层裁决。接口见 [conversations API §9](../api/conversations/conversations_routes.md#9-用户安全点暂停和继续)；实现不保证任意崩溃恢复。
+
+本人记忆通过新 `pause-memory/1` Run 的工具保存和字面召回，提供管理、修订、停止召回与来源查看；旧 `pause/1` 冻结工具清单不改变。来源资格和修订回执不证明模型准确理解用户意图或候选语义；记忆和原话都是低信任历史，不能用于授权。HTTP 边界见 [API §12](../api/README.md#12-本人短期记忆)。
 
 [Observed] 三项阶段 0 证据限制设计结论：
 

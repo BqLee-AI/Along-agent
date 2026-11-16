@@ -8,6 +8,7 @@ import {
   HarnessSnapshotSchema,
   HarnessPauseSnapshotSchema,
   HarnessStartSchema,
+  HarnessToolPayloadSchema,
   RunViewSchema,
 } from '../src/harness.js';
 
@@ -380,5 +381,76 @@ describe('harness/v7 user pause contract', () => {
     expect(
       RunViewSchema.safeParse({ ...view, pause: { ...pause, unexpected: true } }).success,
     ).toBe(false);
+  });
+});
+
+describe('literal memory harness contract', () => {
+  const item = {
+    memory_id: taskId,
+    content: 'historical fact',
+    conversation_id: approvalId,
+    message_ids: [messageId],
+    created_at: '2026-11-01T00:00:00Z',
+    updated_at: '2026-11-01T00:00:00Z',
+  };
+  const payload = { kind: 'memory_recall', items: [item], completeness: 'degraded' };
+  const observation = {
+    view: 'full',
+    invocation_id: invocationId,
+    tool_id: 'recall_memories',
+    result: { status: 'ok', result: payload },
+  };
+  const tool = { name: 'recall_memories', description: 'recall', parameters: {}, risk: 'low' };
+
+  it('accepts v7 memory results and rejects them on v6', () => {
+    expect(HarnessToolPayloadSchema.safeParse(payload).success).toBe(true);
+    expect(
+      HarnessToolPayloadSchema.safeParse({
+        kind: 'memory_saved',
+        memory_id: taskId,
+        content: 'fact',
+      }).success,
+    ).toBe(true);
+    expect(
+      HarnessStartSchema.safeParse({
+        ...start,
+        protocol: 'harness/v7',
+        tools: [tool],
+        observations: [observation],
+      }).success,
+    ).toBe(true);
+    expect(HarnessStartSchema.safeParse({ ...start, tools: [tool] }).success).toBe(false);
+    expect(HarnessStartSchema.safeParse({ ...start, observations: [observation] }).success).toBe(
+      false,
+    );
+    expect(
+      HarnessStartSchema.safeParse({
+        ...start,
+        protocol: 'harness/v7',
+        tools: [{ ...tool, name: 'read_memory_source' }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it('bounds and validates memory sources and excludes semantic matches', () => {
+    for (const message_ids of [
+      [],
+      [messageId, messageId],
+      ['invalid'],
+      Array(129).fill(messageId),
+    ]) {
+      expect(
+        HarnessToolPayloadSchema.safeParse({ ...payload, items: [{ ...item, message_ids }] })
+          .success,
+      ).toBe(false);
+    }
+    expect(
+      HarnessToolPayloadSchema.safeParse({ ...payload, items: [{ ...item, match: 'semantic' }] })
+        .success,
+    ).toBe(false);
+    expect(
+      HarnessToolPayloadSchema.safeParse({ ...payload, items: [{ ...item, extra: true }] }).success,
+    ).toBe(false);
+    expect(HarnessToolPayloadSchema.safeParse({ kind: 'memory_source' }).success).toBe(false);
   });
 });

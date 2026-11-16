@@ -15,6 +15,7 @@ import { appendEvent, commitTerminal } from './run-state.js';
 import {
   BUSINESS_TOOL_IDS,
   HARNESS_BASE_TOOL_IDS,
+  R3_MEMORY_TOOL_IDS,
   DELEGATION_TOOL_IDS,
   DELEGATION_WORKSPACE_READ_TOOL_IDS,
   DELEGATION_WORKSPACE_WRITE_TOOL_IDS,
@@ -390,6 +391,7 @@ export async function startConversationRun(
             : []),
         ];
       }
+      if (execution === 'harness') allowlist = [...allowlist, ...R3_MEMORY_TOOL_IDS];
       if (
         delegation &&
         input.clarification_of_run_id &&
@@ -472,7 +474,7 @@ export async function startConversationRun(
           })
         : undefined;
       const frozenContext = {
-        ...(execution === 'harness' ? { execution_profile: 'pause/1' as const } : {}),
+        ...(execution === 'harness' ? { execution_profile: 'pause-memory/1' as const } : {}),
         confirmedTimezone,
         anchorReceivedAtUtc: targetContinuation?.anchor ?? reminderDate.anchor,
         receivedAtUtc,
@@ -578,7 +580,7 @@ export async function startConversationRun(
           maxIterations,
           maxTokens,
           execution,
-          ...(execution === 'harness' ? { executionProfile: 'pause/1' as const } : {}),
+          ...(execution === 'harness' ? { executionProfile: 'pause-memory/1' as const } : {}),
           userMessageId,
           allowlist,
           ...(messageRefs ? { messageRefs } : {}),

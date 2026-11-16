@@ -13,7 +13,7 @@ import {
 } from '../../src/modules/conversations/harness-authority.js';
 import { startConversationRun } from '../../src/modules/conversations/service.js';
 import { loadTimeContext } from '../../src/modules/time/context.js';
-import { DELEGATION_TOOL_IDS } from '../../src/modules/tools/contracts.js';
+import { DELEGATION_TOOL_IDS, R3_MEMORY_TOOL_IDS } from '../../src/modules/tools/contracts.js';
 import {
   configureWorkspaceRegistry,
   resolveFrozenWorkspaceGrant,
@@ -163,7 +163,7 @@ maybe('delegated conversation workspace admission against PostgreSQL', () => {
     const row = await stored(run.runId);
     expect(row.frozen_context.workspaceGrants).toEqual([]);
     expect(row.frozen_context.trustedExecutionContext.workspaces).toEqual([]);
-    expect(row.tools_allowlist).toEqual([...DELEGATION_TOOL_IDS]);
+    expect(row.tools_allowlist).toEqual([...DELEGATION_TOOL_IDS, ...R3_MEMORY_TOOL_IDS]);
     expect(row.tools_allowlist).not.toContain('workspace_read');
   });
 

@@ -10,18 +10,19 @@
 
 > Proposed 用户模型配置见 [模型接入 API](model-providers.md) 和 [design/22](../design/22-model-provider-settings.md)；接纳、历史投影及 SDK 传输以对应合同与验收为准。
 
-> R3（#144）的用户暂停与显式继续见 [conversations API §9](conversations/conversations_routes.md#9-用户安全点暂停和继续)；手动 compact 和跨会话记忆的目标合同见 [design/23](../design/23-r3-short-term-memory-and-compact.md) 与 [OpenSpec 增量](../../openspec/changes/define-r3-short-term-memory/proposal.md)。
+> R3（#144）的用户暂停与显式继续见 [conversations API §9](conversations/conversations_routes.md#9-用户安全点暂停和继续)，本人记忆管理见 §12；compact 的目标合同见 [design/23](../design/23-r3-short-term-memory-and-compact.md)。
 
 ## 1. Base Path 与路由总数 [Required]
 
 - Base Path：`/api/v1`。下文路由表省略该前缀，如 `GET /me` 即 `GET /api/v1/me`。
-- 合同共 31 个业务端点 + 2 个探针：既有 v0 的 13 个业务端点、正式 Harness 的 3 个 Run 入口、R1 的 4 个工作区/文档批准入口、5 个窄账户入口、3 个历史集合读取入口、1 个只读事件订阅入口及 2 个用户暂停/继续入口：
+- 合同共 35 个业务端点 + 2 个探针：既有 v0 的 13 个业务端点、正式 Harness 的 3 个 Run 入口、R1 的 4 个工作区/文档批准入口、5 个窄账户入口、3 个历史集合读取入口、1 个只读事件订阅入口、2 个用户暂停/继续入口及 4 个本人记忆入口：
   - auth：`GET /me`，`GET /auth/status`、`POST /auth/initialize`、`POST /auth/claim`、`POST /auth/sign-in`、`POST /auth/sign-out`（6；后5个是 #68 新增合同，详见 auth §4）。
   - brief：`GET /brief`（1）。
   - conversations：`POST /conversations/messages`（SSE）、`GET /conversations/{id}`，Run 查询、取消、有限批准恢复、用户暂停和继续，以及会话/消息/Run 历史集合和 Run 事件订阅（11；见 conversations §3、§6、§9）。
   - approvals：`GET /approvals`、`GET /approvals/{id}`、`POST /approvals/{id}/actions/confirm`、`POST /approvals/{id}/actions/reject`、`POST /approvals/{id}/actions/revise`（5；revise 见 approvals §6）。
   - tasks：`GET /tasks`、`GET /tasks/{id}`、`POST /tasks/{id}/actions/cancel`、`GET /tasks/{id}/events`（4）。
   - R1：`GET /workspaces`、文档批准详情、确认和拒绝（4；见 §8）。不提供工作区登记写接口或任意文件读写 HTTP 入口。
+  - memories：本人记忆列表、详情、更正与停止召回（4；见 §12）。
 - 探针：`GET /healthz`、`GET /readyz`（不计入业务端点，不走 envelope，见 §6）。
 - Web 单端为 v0 唯一客户端；Electron 套壳后复用同一份路由，不新增端点 [Deferred：移动端/公开 OpenAPI 未定]。
 - R2-A #83 不新增公开路由/RunView/SSE 字段；[对话 API §7](conversations/conversations_routes.md#7-r2-a-上下文容量83) 定义容量/预算错误与只读不执行边界，[design/18](../design/18-r2a-harness-context.md) 定义内部 wire/来源工具。内部回取工具不计入 HTTP 端点数量。
@@ -162,6 +163,10 @@
 | 29  | GET  | `/conversations/{cid}/runs/{rid}/events`           | 是                    | 否     | —      | 按游标只读跟随 Run 已存事件                  | conversations/conversations_routes.md §3 |
 | 30  | POST | `/conversations/{cid}/runs/{rid}/actions/pause`    | 是                    | 是     | header | 请求用户安全点暂停                           | conversations/conversations_routes.md §9 |
 | 31  | POST | `/conversations/{cid}/runs/{rid}/actions/continue` | 是                    | 是     | header | 显式继续用户暂停的同一 Run；SSE              | conversations/conversations_routes.md §9 |
+| 32  | GET  | `/memories`                                        | 是                    | 否     | —      | 本人记忆列表                                 | §12                                      |
+| 33  | GET  | `/memories/{id}`                                   | 是                    | 否     | —      | 本人记忆详情及来源                           | §12                                      |
+| 34  | POST | `/memories/{id}/actions/correct`                   | 是                    | 是     | —      | 按修订更正记忆                               | §12                                      |
+| 35  | POST | `/memories/{id}/actions/stop-recall`               | 是                    | 是     | —      | 按修订停止召回                               | §12                                      |
 
 ## 8. R1 工作区与文档批准 [Required]
 
@@ -195,3 +200,10 @@
 - 今日简报、会话、消息、Run、提醒确认、任务及事件各自按原 GET 与游标读取。读取、翻页、展开、刷新和登录返回不自动补发业务 POST；活动只读取选中任务的事件，不无界扇出。
 - 文档校样完整呈现冻结内容，确认直接提交原 `preview.body`。确认仅授权，原 Run 的显式 resume 才进入后续执行；授权、效果与 Run 状态分别读取。`can_resume=false` 不提供原因，Web 不据此猜测未批准或撤权；`unknown` 不开放盲目重做。
 - 提醒详情仅沿实际 task/后继引用导航，不从 URL 附带参数构造原会话关联。401 才引导安全登录；403、404、依赖失败与无效响应保留各自类别，不能解释为成功空集合或模型缺配置。账户操作继续遵守 auth 合同的原身份与撤销回执边界。
+
+## 12. 本人短期记忆
+
+- `GET /memories` 支持 `limit` 和 `cursor`，仅列出本人记录；`GET /memories/{id}` 返回本人记忆和来源。原话通过已有本人会话消息接口查看，不凭记忆文本代替原始事实。
+- `POST /memories/{id}/actions/correct` 提交 `{content, conversationId, messageIds, expectedRevision, expiresAt?}`；来源必须是本人可访问的用户消息，修订冲突不覆盖。`POST /memories/{id}/actions/stop-recall` 提交 `{expectedRevision}`，停止后不再用于新召回，原始消息和已接受事实保留。
+- 当前模型召回只执行字面匹配，语义召回与索引管理另有合同。
+- 新 `pause-memory/1` Run 才可使用记忆保存及召回工具；旧冻结工具清单不扩权。保存提示要求模型只处理本人明确要求，但来源校验不证明模型对原话意图或语义的理解正确。记忆是低信任历史，不是授权或当前事实；空结果与降级不证明不存在。召回结果受接受账本大小约束，超出时仅返回完整条目的前缀并标记 `incomplete`。

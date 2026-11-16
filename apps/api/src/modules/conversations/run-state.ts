@@ -30,6 +30,7 @@ import {
   DELEGATION_WORKSPACE_WRITE_TOOL_IDS,
   DELEGATION_WORKSPACE_CREATE_TOOL_IDS,
   HARNESS_BASE_TOOL_IDS,
+  R3_MEMORY_TOOL_IDS,
   TOOL_IDS,
 } from '../tools/contracts.js';
 import { validateWorkspaceGrant, WorkspaceDeniedError } from '../workspaces/service.js';
@@ -206,7 +207,12 @@ export function supportsFrozenTools(run: RunRow): boolean {
     : frozen.workspaceGrant
       ? TOOL_IDS
       : HARNESS_BASE_TOOL_IDS;
-  return run.tools_allowlist.every((name) => supported.includes(name));
+  return run.tools_allowlist.every(
+    (name) =>
+      supported.includes(name) ||
+      (frozen.execution_profile === 'pause-memory/1' &&
+        (R3_MEMORY_TOOL_IDS as readonly string[]).includes(name)),
+  );
 }
 
 export async function viewOf(
@@ -364,7 +370,8 @@ export async function viewOf(
       : null,
     can_pause:
       run.execution === 'harness' &&
-      run.frozen_context?.execution_profile === 'pause/1' &&
+      (run.frozen_context?.execution_profile === 'pause/1' ||
+        run.frozen_context?.execution_profile === 'pause-memory/1') &&
       run.status === 'running' &&
       !pause,
     attempt_no: attempt.attempt_no,

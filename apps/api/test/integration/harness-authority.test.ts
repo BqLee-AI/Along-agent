@@ -2042,7 +2042,7 @@ maybe('harness durable authority against PostgreSQL', () => {
           INSERT INTO agent_runs (id,owner_id,conversation_id,agent_revision,mode,status,
             budget_max_iterations,budget_max_tokens,execution,tools_allowlist,frozen_context,input_message_id)
           SELECT $2,owner_id,conversation_id,agent_revision,mode,'running',
-            budget_max_iterations,budget_max_tokens,execution,tools_allowlist,
+            budget_max_iterations,budget_max_tokens,execution,tools_allowlist - 'remember_memory' - 'recall_memories',
             frozen_context-'workspaceSummary'-'execution_profile',input_message_id FROM agent_runs WHERE id=$1
           RETURNING id,owner_id
         ) INSERT INTO run_attempts (id,owner_id,run_id,attempt_no,status)
@@ -2226,7 +2226,7 @@ maybe('harness durable authority against PostgreSQL', () => {
       const started = await startConversationRun(deps, actor.userId, randomUUID(), body, null);
       const context = started.context!;
       expect(context.workspaceGrant).toEqual(getWorkspaceGrant(actor.userId, 'first'));
-      expect(context.allowlist).toEqual(TOOL_IDS);
+      expect(context.allowlist).toEqual([...TOOL_IDS, 'remember_memory', 'recall_memories']);
       const stored = (
         await database.pool.query(
           'SELECT frozen_context,tools_allowlist FROM agent_runs WHERE id=$1',
@@ -2234,7 +2234,7 @@ maybe('harness durable authority against PostgreSQL', () => {
         )
       ).rows[0];
       expect(stored.frozen_context.workspaceGrant).toEqual(context.workspaceGrant);
-      expect(stored.tools_allowlist).toEqual(TOOL_IDS);
+      expect(stored.tools_allowlist).toEqual([...TOOL_IDS, 'remember_memory', 'recall_memories']);
       const session = await createHarnessSession(
         deps,
         { ...context, workspaceGrant: getWorkspaceGrant(actor.userId, 'second') },
@@ -2242,7 +2242,11 @@ maybe('harness durable authority against PostgreSQL', () => {
         new AbortController().signal,
       );
       expect(session.start.workspace).toEqual(summary);
-      expect<readonly string[]>(session.start.tools.map((tool) => tool.name)).toEqual(TOOL_IDS);
+      expect<readonly string[]>(session.start.tools.map((tool) => tool.name)).toEqual([
+        ...TOOL_IDS,
+        'remember_memory',
+        'recall_memories',
+      ]);
       const view = await getRunView(deps, actor.userId, context.conversationId, context.runId);
       expect(view.workspace).toEqual(summary);
       expect(JSON.stringify({ start: session.start, view })).not.toContain(firstRoot);
@@ -2294,7 +2298,11 @@ maybe('harness durable authority against PostgreSQL', () => {
         },
         null,
       );
-      expect(legacy.context?.allowlist).toEqual(HARNESS_BASE_TOOL_IDS);
+      expect(legacy.context?.allowlist).toEqual([
+        ...HARNESS_BASE_TOOL_IDS,
+        'remember_memory',
+        'recall_memories',
+      ]);
       expect(
         (
           await database.pool.query(
@@ -2351,7 +2359,7 @@ maybe('harness durable authority against PostgreSQL', () => {
             new AbortController().signal,
           )
         ).start.tools.map((tool) => tool.name),
-      ).toEqual(HARNESS_BASE_TOOL_IDS);
+      ).toEqual([...HARNESS_BASE_TOOL_IDS, 'remember_memory', 'recall_memories']);
     } finally {
       await configureWorkspaceRegistry([]);
       await rm(directory, { recursive: true, force: true });

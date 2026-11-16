@@ -584,3 +584,159 @@ test('v6 rejects a v3 pause snapshot', async () => {
   );
   expect(requests).toEqual([]);
 }, 30000);
+
+test('v7 delegated memory uses only frozen tools and validates recalled source references', async () => {
+  const inputId = randomUUID();
+  const ids = Array.from({ length: 129 }, () => randomUUID());
+  const trusted = {
+    version: 1,
+    authorization_revision: 'delegation/1',
+    execution_lifecycle: 'request-bound',
+    input_message_id: inputId,
+    received_at_utc: '2026-11-02T12:00:00Z',
+    request_anchor_utc: '2026-11-02T12:00:00Z',
+    continuation: null,
+    timezone: { timezone_id: 'America/New_York', source: 'preference', reference: inputId },
+    time_capabilities: { elapsed_revision: null, wall_rules: null },
+    workspaces: [],
+  };
+  const tool = { name: 'recall_memories', description: 'recall', parameters: {}, risk: 'low' };
+  const start = {
+    ...base,
+    protocol: 'harness/v7',
+    trusted_context: trusted,
+    messages: [{ message_id: inputId, role: 'user', content: 'recall' }],
+    tools: [tool],
+  };
+  for (const example of [
+    { ids: ids.slice(0, 1), accepted: true },
+    { ids: ids.slice(0, 128), accepted: true },
+    { ids: [], accepted: false },
+    { ids: [ids[0], ids[0]], accepted: false },
+    { ids, accepted: false },
+    { ids: [], accepted: true, saved: true, content: 'fact' },
+    { ids: [], accepted: false, saved: true, content: '' },
+  ]) {
+    let models = 0;
+    const selectedTool = example.saved ? 'remember_memory' : 'recall_memories';
+    const requests = await run(
+      { ...start, tools: [{ ...tool, name: selectedTool }] },
+      (r) => {
+        if (r.type === 'pause_probe') return { value: { pending: false } };
+        if (r.type === 'measure_context')
+          return {
+            value: {
+              wire_bytes: 1,
+              http_bytes: 1,
+              input_meter: {
+                quality: 'unavailable',
+                input_tokens: null,
+                meter_revision: 'fixture/1',
+              },
+              output_ceiling: 37,
+              limit_reason: null,
+            },
+          };
+        if (r.type === 'model') {
+          models++;
+          if (models > 1)
+            return {
+              value: { type: 'failed', error: { code: 'FIXTURE', message: 'stop' }, usage: null },
+            };
+          expect(JSON.stringify(r.messages)).toContain('low-trust historical candidates');
+          return {
+            value: {
+              type: 'complete',
+              reply: {
+                message: {
+                  content: null,
+                  tool_calls: [
+                    {
+                      id: 'memory',
+                      type: 'function',
+                      function: { name: selectedTool, arguments: '{}' },
+                    },
+                  ],
+                },
+                usage: { total_tokens: 1 },
+              },
+            },
+          };
+        }
+        if (r.type === 'reserve') return { value: { invocation_id: randomUUID() } };
+        if (r.type === 'invoke')
+          return {
+            value: {
+              status: 'ok',
+              invocationId: r.invocation_id,
+              replayed: false,
+              result: example.saved
+                ? { kind: 'memory_saved', memory_id: randomUUID(), content: example.content }
+                : {
+                    kind: 'memory_recall',
+                    completeness: 'degraded',
+                    items: [
+                      {
+                        memory_id: randomUUID(),
+                        content: 'fact',
+                        conversation_id: randomUUID(),
+                        message_ids: example.ids,
+                        created_at: '2026-11-01T00:00:00Z',
+                        updated_at: '2026-11-01T00:00:00Z',
+                      },
+                    ],
+                  },
+            },
+          };
+        if (r.type === 'finish') return { value: { accepted: true } };
+        throw new Error(`unexpected request ${r.type}`);
+      },
+      example.accepted ? 0 : 2,
+    );
+    expect(requests.filter((r) => r.type === 'model')).toHaveLength(example.accepted ? 2 : 1);
+  }
+  for (const protocol of ['harness/v6', 'harness/v7']) {
+    const requests = await run(
+      { ...start, protocol, tools: [{ ...tool, name: 'read_memory_source' }] },
+      () => ({}),
+      2,
+    );
+    expect(requests).toEqual([]);
+  }
+  const denied = await run({ ...start, tools: [] }, (r) => {
+    if (r.type === 'pause_probe') return { value: { pending: false } };
+    if (r.type === 'measure_context')
+      return {
+        value: {
+          wire_bytes: 1,
+          http_bytes: 1,
+          input_meter: { quality: 'unavailable', input_tokens: null, meter_revision: 'fixture/1' },
+          output_ceiling: 37,
+          limit_reason: null,
+        },
+      };
+    if (r.type === 'model')
+      return {
+        value: {
+          type: 'complete',
+          reply: {
+            message: {
+              content: null,
+              tool_calls: [
+                {
+                  id: 'unlisted',
+                  type: 'function',
+                  function: { name: 'remember_memory', arguments: '{}' },
+                },
+              ],
+            },
+            usage: { total_tokens: 1 },
+          },
+        },
+      };
+    if (r.type === 'finish') return { value: { accepted: true } };
+    throw new Error(`unexpected request ${r.type}`);
+  });
+  expect(denied.some((r) => r.type === 'reserve' || r.type === 'invoke')).toBe(false);
+  expect(await run({ ...start, protocol: 'harness/v6' }, () => ({}), 2)).toEqual([]);
+});

@@ -47,7 +47,7 @@ export interface RunContext {
   maxTokens: number;
   timeContext: TimeContext;
   execution: ExecutionKind;
-  executionProfile?: 'pause/1';
+  executionProfile?: 'pause/1' | 'pause-memory/1';
   userMessageId: string;
   allowlist: readonly string[];
   workspaceGrant?: WorkspaceGrant | null;

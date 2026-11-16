@@ -9,6 +9,7 @@ import { handleRequest } from '../../src/http/app.js';
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
 import { createHarnessModelTransport } from '../../src/modules/conversations/harness-model.js';
 import {
+  continueConversationPause,
   createHarnessSession,
   resumeConversationRun,
 } from '../../src/modules/conversations/harness-authority.js';
@@ -235,7 +236,9 @@ maybe('user pause and continue over HTTP', () => {
           [f.run.runId],
         )
       ).rows[0]!;
-      expect(frozen.profile).toBe('pause/1');
+      expect(frozen.profile).toBe('pause-memory/1');
+      expect(frozen.tools_allowlist).toContain('remember_memory');
+      expect(frozen.tools_allowlist).toContain('recall_memories');
       expect(frozen.tools_allowlist).not.toContain('read_memory_source');
       expect(f.exposedTools()).not.toContain('read_memory_source');
       const pauseKey = randomUUID();
@@ -432,7 +435,7 @@ maybe('user pause and continue over HTTP', () => {
     }
     await database?.close();
   });
-  async function fresh(legacy = false) {
+  async function fresh(legacy: boolean | 'pause/1' = false) {
     const actor = await seedAdmittedSession(database.pool);
     await configureTestModel(database.pool, actor.userId, 'pause-authority-model');
     const started = await startConversationRun(
@@ -458,12 +461,13 @@ maybe('user pause and continue over HTTP', () => {
           INSERT INTO agent_runs (id,owner_id,conversation_id,agent_revision,mode,status,
             budget_max_iterations,budget_max_tokens,execution,tools_allowlist,frozen_context,input_message_id)
           SELECT $2,owner_id,conversation_id,agent_revision,mode,'running',
-            budget_max_iterations,budget_max_tokens,execution,tools_allowlist,
-            frozen_context - 'execution_profile',input_message_id
+            budget_max_iterations,budget_max_tokens,execution,tools_allowlist - 'remember_memory' - 'recall_memories',
+            CASE WHEN $4::boolean THEN jsonb_set(frozen_context, '{execution_profile}', '"pause/1"'::jsonb)
+                 ELSE frozen_context - 'execution_profile' END,input_message_id
           FROM agent_runs WHERE id=$1 RETURNING id,owner_id
         ) INSERT INTO run_attempts (id,owner_id,run_id,attempt_no,status)
           SELECT $3,owner_id,id,1,'running' FROM legacy`,
-        [started.runId, runId, attemptId],
+        [started.runId, runId, attemptId, legacy === 'pause/1'],
       );
       await database.pool.query(
         `INSERT INTO run_context_policies(run_id,owner_id,policy,policy_hash)
@@ -478,10 +482,14 @@ maybe('user pause and continue over HTTP', () => {
       );
       const historicalContext = { ...context };
       delete historicalContext.executionProfile;
+      if (legacy === 'pause/1') historicalContext.executionProfile = 'pause/1';
       context = {
         ...historicalContext,
         runId,
         attemptId,
+        allowlist: historicalContext.allowlist.filter(
+          (tool) => tool !== 'remember_memory' && tool !== 'recall_memories',
+        ),
       };
     }
     const path = `${base}/api/v1/conversations/${started.conversationId}/runs/${runId}`;
@@ -498,6 +506,62 @@ maybe('user pause and continue over HTTP', () => {
       });
     return { actor, started: { ...started, runId }, context, post };
   }
+
+  it('continues a frozen pause/1 Run without granting memory tools', async () => {
+    const f = await fresh('pause/1');
+    const session = await createHarnessSession(
+      deps(),
+      f.context,
+      async () => true,
+      new AbortController().signal,
+    );
+    try {
+      expect(session.start.protocol).toBe(HARNESS_R3_PROTOCOL_VERSION);
+      expect(session.start.tools.map((tool) => tool.name)).not.toContain('remember_memory');
+      expect(session.start.tools.map((tool) => tool.name)).not.toContain('recall_memories');
+      const response = await f.post('pause', { reason: 'user', purpose: 'none' });
+      expect(response.status).toBe(200);
+      const { pause_id } = z
+        .object({ data: z.object({ pause_id: z.string().uuid() }) })
+        .parse(await response.json()).data;
+      expect(
+        await session.handleRequest({
+          protocol: HARNESS_R3_PROTOCOL_VERSION,
+          request_ref: randomUUID(),
+          type: 'pause_point',
+          context: {
+            version: 3,
+            message_refs: [f.context.userMessageId],
+            tool_refs: [],
+            next_call_no: 1,
+            usage: { iterations: 0, tokens: 0 },
+            waiting: null,
+            native_state: {
+              protected_messages: [],
+              units: [],
+              hard_denied: '',
+              closing_goal: false,
+              pending_model: null,
+            },
+          },
+        }),
+      ).toEqual({ paused: true });
+      const resumed = await continueConversationPause(
+        deps(),
+        f.actor.userId,
+        f.started.conversationId,
+        f.started.runId,
+        randomUUID(),
+        { pause_id },
+        randomUUID(),
+      );
+      expect(resumed.context?.executionProfile).toBe('pause/1');
+      expect(resumed.context?.allowlist).not.toContain('remember_memory');
+      expect(resumed.context?.allowlist).not.toContain('recall_memories');
+    } finally {
+      await session.close();
+    }
+  }, 30000);
 
   for (const action of ['model', 'reserve'] as const) {
     it(`linearizes pause registration before a previously probed ${action}`, async () => {

@@ -64,6 +64,9 @@ import {
   isBoundedCancellationForNote,
   renderCancellationClarification,
 } from './reminder-cancel-scope.js';
+import { createMemoryService, type MemoryService } from '../memory/service.js';
+import { saveRecallReceipt, validateRecallReceipt } from '../memory/recall-receipt.js';
+import { conversationMemorySources, readMemoryRunSource } from '../conversations/memory-sources.js';
 
 const workspaceDenied = (): ToolResult => ({
   status: 'denied',
@@ -1072,6 +1075,7 @@ export function reserveToolInvocation(
     'workspace_grep',
     'workspace_read',
     'read_run_observation',
+    'recall_memories',
   ].includes(input.toolId);
   const reservation = {
     ...input,
@@ -1097,6 +1101,83 @@ export function invokeTool(
   if (input.toolId === 'workspace_apply_replace') return invokeWorkspaceApply(pool, ctx, input);
   if (input.toolId === 'workspace_replace') return invokeWorkspaceReplace(pool, ctx, input);
   if (input.toolId === 'workspace_create') return invokeWorkspaceCreate(pool, ctx, input);
+  if (input.toolId === 'recall_memories') {
+    let memory: MemoryService | undefined;
+    const revisions: { id: string; revision: number }[] = [];
+    return executeReadOnlyInvocation(
+      pool,
+      ctx,
+      input,
+      async (frozen) => {
+        const parsed = TOOL_INPUT_SCHEMAS.recall_memories.safeParse(input.args);
+        if (!parsed.success) return workspaceDenied();
+        memory = createMemoryService({ pool, sources: conversationMemorySources });
+        const result = await memory.recall(frozen.ownerId, parsed.data, ctx.signal, false);
+        const items: Array<{
+          memory_id: string;
+          content: string;
+          conversation_id: string;
+          message_ids: string[];
+          created_at: string;
+          updated_at: string;
+        }> = [];
+        let bytes = 0;
+        for (const item of result.items) {
+          const projected = {
+            memory_id: item.id,
+            content: item.content,
+            conversation_id: item.conversationId,
+            message_ids: item.messageIds,
+            created_at: item.createdAt,
+            updated_at: item.updatedAt,
+          };
+          const size = Buffer.byteLength(JSON.stringify(projected), 'utf8') + 1;
+          if (bytes + size > 220_000) break;
+          bytes += size;
+          items.push(projected);
+          revisions.push({ id: item.id, revision: item.revision });
+        }
+        return {
+          status: 'ok',
+          result: {
+            kind: 'memory_recall',
+            completeness: items.length < result.items.length ? 'incomplete' : result.completeness,
+            items,
+          },
+        };
+      },
+      async (client, observed) => {
+        if (observed.status !== 'ok' || observed.result.kind !== 'memory_recall') return;
+        if (!memory) throw new Error('memory recall context unavailable');
+        await saveRecallReceipt(client, ctx.ownerId, input.invocationId, revisions);
+        await validateRecallReceipt(
+          client,
+          memory,
+          ctx.ownerId,
+          input.invocationId,
+          observed.result.items.map((item) => item.memory_id),
+        );
+      },
+      async (client, accepted) => {
+        if (accepted.status !== 'ok') return true;
+        if (accepted.result.kind !== 'memory_recall') return false;
+        try {
+          await validateRecallReceipt(
+            client,
+            createMemoryService({ pool, sources: conversationMemorySources }),
+            ctx.ownerId,
+            input.invocationId,
+            accepted.result.items.map((item) => item.memory_id),
+          );
+          return true;
+        } catch (error) {
+          if (error instanceof HttpError && [403, 404, 409].includes(error.httpStatus))
+            return false;
+          throw error;
+        }
+      },
+    );
+  }
   if (input.toolId === 'read_run_observation') {
     return executeReadOnlyInvocation(pool, ctx, input, async (frozen) => {
       const parsed = TOOL_INPUT_SCHEMAS.read_run_observation.safeParse(input.args);
@@ -1237,6 +1318,24 @@ export function invokeTool(
   return executeLocalInvocation(pool, ctx, input, async (client, frozen) => {
     let executed: ToolExecution;
     switch (input.toolId) {
+      case 'remember_memory': {
+        const parsed = TOOL_INPUT_SCHEMAS.remember_memory.safeParse(input.args);
+        if (!parsed.success) return workspaceDenied();
+        const source = await readMemoryRunSource(client, frozen);
+        const memory = await createMemoryService({
+          pool,
+          sources: conversationMemorySources,
+        }).rememberInTransaction(client, frozen.ownerId, {
+          conversationId: frozen.conversationId,
+          messageIds: [source],
+          content: parsed.data.content,
+          idempotencyKey: input.invocationId,
+        });
+        return {
+          status: 'ok',
+          result: { kind: 'memory_saved', memory_id: memory.id, content: memory.content },
+        };
+      }
       case 'create_reminder':
         return runCreateReminder(client, frozen, input.args, input.invocationId);
       case 'set_user_timezone':

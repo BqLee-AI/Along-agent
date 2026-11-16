@@ -1,7 +1,6 @@
 import {
   ArrowUpRight,
   BookOpen,
-  Brain,
   Cable,
   FolderOpen,
   ListChecks,
@@ -17,7 +16,6 @@ import { capabilities } from '../model/capabilities';
 import type { Capability } from '../model/capabilities';
 
 const icons: Record<Capability, LucideIcon> = {
-  memories: Brain,
   materials: FolderOpen,
   journal: BookOpen,
   profile: UserRound,

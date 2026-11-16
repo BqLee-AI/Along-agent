@@ -49,7 +49,11 @@ import {
   WorkspaceCreateInputSchema,
 } from './schemas.js';
 import { assertContextSourceAuthorized } from './context-source.js';
-import { hydrateWorkspaceReadResult, readAcceptedInvocationResult } from './accepted-result.js';
+import {
+  hydrateWorkspaceReadResult,
+  readAcceptedInvocationResult,
+  validateAcceptedMemoryObservation,
+} from './accepted-result.js';
 
 const HASH_DOMAIN = 'along/tool-args/v1\0';
 const frozenSchema = z
@@ -677,6 +681,7 @@ export async function readInvocationSnapshots(
     const accepted = parseResult(await readAcceptedInvocationResult(client, ctx, row));
     if (resultKind(accepted) !== row.outcome_kind)
       throw stateConflict('invalid accepted tool result');
+    await validateAcceptedMemoryObservation(client, ctx.ownerId, invocationId, accepted);
     snapshots.push({
       invocation_id: row.invocation_id,
       tool_id: row.tool_id,
@@ -852,6 +857,7 @@ async function gate(
   row: Invocation,
   input: InvocationInput,
   canExecute: boolean,
+  validateReplay?: (client: PoolClient, result: ToolResult) => Promise<boolean>,
 ): Promise<ToolOutcome | null> {
   const digest = digestInvocationArgs(input.args);
   if (
@@ -917,6 +923,10 @@ async function gate(
   }
   if (row.state === 'completed') {
     const result = await readAcceptedInvocationResult(client, ctx, row);
+    if (validateReplay && (!canExecute || !(await validateReplay(client, result)))) {
+      await audit(client, ctx, row, 'denied', denied);
+      return { ...denied, invocationId: row.invocation_id, replayed: false };
+    }
     await audit(client, ctx, row, 'replayed', result);
     return { ...result, invocationId: row.invocation_id, replayed: true };
   }
@@ -972,10 +982,12 @@ export async function executeReadOnlyInvocation(
   ctx: ToolContext,
   input: InvocationInput,
   execute: (frozenContext: ToolContext) => Promise<ToolResult>,
+  validateBeforeAccept?: (client: PoolClient, observed: ToolResult) => Promise<void>,
+  validateBeforeReplay?: (client: PoolClient, accepted: ToolResult) => Promise<boolean>,
 ): Promise<ToolOutcome> {
   const qualified = await withRunTransaction(pool, ctx.ownership, async (client) => {
     const { row, canExecute } = await loadInvocation(client, ctx, input);
-    const gated = await gate(client, ctx, row, input, canExecute);
+    const gated = await gate(client, ctx, row, input, canExecute, validateBeforeReplay);
     if (gated) return { outcome: gated, frozen: null };
     if (row.execution_kind !== 'read_only' || row.state !== 'reserved')
       throw stateConflict('invocation is not a reserved read');
@@ -998,9 +1010,10 @@ export async function executeReadOnlyInvocation(
       await audit(client, ctx, row, 'denied', denied);
       return { ...denied, invocationId: row.invocation_id, replayed: false };
     }
-    const gated = await gate(client, ctx, row, input, canExecute);
+    const gated = await gate(client, ctx, row, input, canExecute, validateBeforeReplay);
     if (gated) return gated;
     executionContext(ctx, row);
+    await validateBeforeAccept?.(client, observed);
     const accepted = await accept(client, ctx, row, observed, 'accepted');
     return { ...accepted, invocationId: row.invocation_id, replayed: false };
   }).catch((error: unknown) => {

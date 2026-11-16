@@ -1,0 +1,79 @@
+{
+  "version": "0032",
+  "tables": ["r3_memory_vectors"],
+  "columns": [
+    {
+      "table": "r3_memory_vectors",
+      "name": "owner_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "r3_memory_vectors",
+      "name": "memory_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "r3_memory_vectors",
+      "name": "revision",
+      "type": "int4",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "r3_memory_vectors",
+      "name": "binding_sha256",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "r3_memory_vectors",
+      "name": "embedding",
+      "type": "_float4",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "r3_memory_vectors",
+      "name": "indexed_at",
+      "type": "timestamptz",
+      "required": true,
+      "default": "now()"
+    }
+  ],
+  "constraints": [
+    {
+      "table": "r3_memory_vectors",
+      "name": "r3_memory_vectors_binding_sha256_check",
+      "type": "c",
+      "columns": ["binding_sha256"],
+      "expression": "(binding_sha256 ~ '^[a-f0-9]{64}$'::text)"
+    },
+    {
+      "table": "r3_memory_vectors",
+      "name": "r3_memory_vectors_embedding_check",
+      "type": "c",
+      "columns": ["embedding"],
+      "expression": "((cardinality(embedding) = 512) AND (array_position(embedding, NULL::real) IS NULL))"
+    },
+    {
+      "table": "r3_memory_vectors",
+      "name": "r3_memory_vectors_pkey",
+      "type": "p",
+      "columns": ["owner_id", "memory_id", "revision", "binding_sha256"]
+    },
+    {
+      "table": "r3_memory_vectors",
+      "name": "r3_memory_vectors_owner_id_memory_id_revision_fkey",
+      "type": "f",
+      "columns": ["owner_id", "memory_id", "revision"],
+      "target": "r3_memory_revisions",
+      "delete_action": "a",
+      "target_columns": ["owner_id", "memory_id", "revision"]
+    }
+  ]
+}

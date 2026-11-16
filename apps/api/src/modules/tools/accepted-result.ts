@@ -8,6 +8,28 @@ import { readCreatedTaskReceipt } from '../tasks/create.js';
 import { hashBytes, strictUtf8 } from '../workspaces/service.js';
 import type { ToolContext, ToolResult } from './contracts.js';
 import { approvalReceiptSchema, parseResult, resultKind } from './result-schema.js';
+import { conversationMemorySources } from '../conversations/memory-sources.js';
+import { validateMemoryRevisions } from '../memory/authorization.js';
+import { validateRecallReceipt } from '../memory/recall-receipt.js';
+
+export async function validateAcceptedMemoryObservation(
+  client: PoolClient,
+  ownerId: string,
+  invocationId: string,
+  result: ToolResult,
+): Promise<void> {
+  if (result.status !== 'ok' || result.result.kind !== 'memory_recall') return;
+  await validateRecallReceipt(
+    client,
+    {
+      validateRecallInTransaction: (transaction, owner, items) =>
+        validateMemoryRevisions(transaction, conversationMemorySources, owner, items),
+    },
+    ownerId,
+    invocationId,
+    result.result.items.map((item) => item.memory_id),
+  );
+}
 
 const documentReceiptSchema = z
   .object({

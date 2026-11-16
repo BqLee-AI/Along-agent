@@ -45,7 +45,11 @@ import {
   readRunDocumentEvidence,
 } from '../tools/query.js';
 import type { ToolContext, ToolPayload } from '../tools/contracts.js';
-import { HARNESS_TOOL_DEFINITIONS, DELEGATION_TOOL_DEFINITIONS } from '../tools/catalog.js';
+import {
+  HARNESS_TOOL_DEFINITIONS,
+  DELEGATION_TOOL_DEFINITIONS,
+  R3_MEMORY_TOOL_DEFINITIONS,
+} from '../tools/catalog.js';
 import { GOAL_CONTROL_TOOL } from './goal-control.js';
 import { validateGoalResult } from './goal-result.js';
 import { validateWorkspaceGrant } from '../workspaces/service.js';
@@ -269,7 +273,7 @@ function buildHarnessStart(
     throw stateConflict('snapshot message reference conflict');
   const start: HarnessStart = {
     protocol:
-      context.executionProfile === 'pause/1'
+      context.executionProfile === 'pause/1' || context.executionProfile === 'pause-memory/1'
         ? HARNESS_R3_PROTOCOL_VERSION
         : HARNESS_PROTOCOL_VERSION,
     type: 'start',
@@ -278,15 +282,20 @@ function buildHarnessStart(
     context_policy: context.contextPolicy,
     routing_policy: routingPolicy,
     eligible_phase: eligiblePhase,
-    tools: (context.authorizationRevision
-      ? DELEGATION_TOOL_DEFINITIONS.map((tool) =>
-          tool.name === 'list_tasks' &&
-          !(context.allowlist.includes('get_task') && context.allowlist.includes('cancel_reminder'))
-            ? HARNESS_TOOL_DEFINITIONS.find((legacy) => legacy.name === 'list_tasks')!
-            : tool,
-        )
-      : HARNESS_TOOL_DEFINITIONS
-    ).filter((tool) => context.allowlist.includes(tool.name)),
+    tools: [
+      ...(context.authorizationRevision
+        ? DELEGATION_TOOL_DEFINITIONS.map((tool) =>
+            tool.name === 'list_tasks' &&
+            !(
+              context.allowlist.includes('get_task') &&
+              context.allowlist.includes('cancel_reminder')
+            )
+              ? HARNESS_TOOL_DEFINITIONS.find((legacy) => legacy.name === 'list_tasks')!
+              : tool,
+          )
+        : HARNESS_TOOL_DEFINITIONS),
+      ...(context.executionProfile === 'pause-memory/1' ? R3_MEMORY_TOOL_DEFINITIONS : []),
+    ].filter((tool) => context.allowlist.includes(tool.name)),
     budget: { max_iterations: context.maxIterations, max_tokens: context.maxTokens },
     snapshot,
     observations,
@@ -550,7 +559,7 @@ export async function requestConversationPause(
     }
     if (
       locked.run.execution !== 'harness' ||
-      locked.run.frozen_context?.execution_profile !== 'pause/1' ||
+      !['pause/1', 'pause-memory/1'].includes(locked.run.frozen_context?.execution_profile ?? '') ||
       locked.run.status !== 'running' ||
       locked.attempt.status !== 'running'
     )
@@ -640,7 +649,9 @@ export async function continueConversationPause(
         if (
           locked.run.status !== 'paused' ||
           !locked.run.frozen_context ||
-          locked.run.frozen_context.execution_profile !== 'pause/1' ||
+          !['pause/1', 'pause-memory/1'].includes(
+            locked.run.frozen_context.execution_profile ?? '',
+          ) ||
           !pause ||
           pause.state !== 'paused' ||
           pause.attempt_id !== locked.attempt.id ||
@@ -1421,7 +1432,7 @@ export async function createHarnessSession(
           throw stateConflict('model stream must complete before another action');
         if (request.type === 'pause_probe') {
           if (
-            context.executionProfile !== 'pause/1' ||
+            !['pause/1', 'pause-memory/1'].includes(context.executionProfile ?? '') ||
             request.protocol !== HARNESS_R3_PROTOCOL_VERSION
           )
             throw stateConflict('pause protocol not enabled for Run');
@@ -1440,7 +1451,7 @@ export async function createHarnessSession(
         }
         if (request.type === 'pause_point') {
           if (
-            context.executionProfile !== 'pause/1' ||
+            !['pause/1', 'pause-memory/1'].includes(context.executionProfile ?? '') ||
             request.protocol !== HARNESS_R3_PROTOCOL_VERSION
           )
             throw stateConflict('pause protocol not enabled for Run');
@@ -1636,7 +1647,10 @@ export async function createHarnessSession(
                 throw stateConflict('routing decision is immutable');
               return acceptRoutingDecision(client, context, payload);
             }
-            if (context.executionProfile === 'pause/1') {
+            if (
+              context.executionProfile === 'pause/1' ||
+              context.executionProfile === 'pause-memory/1'
+            ) {
               const pending = await client.query(
                 `SELECT 1 FROM harness_pauses WHERE owner_id=$1 AND run_id=$2 AND attempt_id=$3 AND state='pending'`,
                 [context.ownerId, context.runId, context.attemptId],
@@ -1791,7 +1805,11 @@ export async function createHarnessSession(
           return observation;
         }
         if (request.type === 'model' || request.type === 'measure_context') {
-          if (context.executionProfile === 'pause/1' && request.type === 'model') {
+          if (
+            (context.executionProfile === 'pause/1' ||
+              context.executionProfile === 'pause-memory/1') &&
+            request.type === 'model'
+          ) {
             if (!nextPermit) throw stateConflict('model requires a safe-point permit');
             nextPermit = false;
           }
@@ -1819,7 +1837,10 @@ export async function createHarnessSession(
           if (request.type === 'measure_context') return measurement;
           const scheduled = await guarded(async (client) => {
             await assertActionAuthority(client);
-            if (context.executionProfile === 'pause/1') {
+            if (
+              context.executionProfile === 'pause/1' ||
+              context.executionProfile === 'pause-memory/1'
+            ) {
               const pending = await client.query(
                 `SELECT 1 FROM harness_pauses WHERE owner_id=$1 AND run_id=$2 AND attempt_id=$3 AND state='pending'`,
                 [context.ownerId, context.runId, context.attemptId],
@@ -1864,7 +1885,10 @@ export async function createHarnessSession(
           return nextModelStep();
         }
         if (request.type === 'reserve') {
-          if (context.executionProfile === 'pause/1') {
+          if (
+            context.executionProfile === 'pause/1' ||
+            context.executionProfile === 'pause-memory/1'
+          ) {
             if (!nextPermit) throw stateConflict('tool reservation requires a safe-point permit');
             nextPermit = false;
           }
@@ -1925,7 +1949,9 @@ export async function createHarnessSession(
           };
           const toolCtx = { ...toolContext(context), signal: sessionSignal };
           const reserved =
-            routingDecision?.payload.decision !== 'direct' && context.executionProfile === 'pause/1'
+            routingDecision?.payload.decision !== 'direct' &&
+            (context.executionProfile === 'pause/1' ||
+              context.executionProfile === 'pause-memory/1')
               ? await reserveToolInvocation(pool, toolCtx, reservation, { deferOnPause: true })
               : await reserveToolInvocation(pool, toolCtx, reservation);
           if ('pauseRequested' in reserved) return { pause_requested: true };
@@ -2116,7 +2142,8 @@ export async function createHarnessSession(
         }
         if (request.type !== 'finish') throw stateConflict('unsupported terminal control');
         if (
-          context.executionProfile === 'pause/1' &&
+          (context.executionProfile === 'pause/1' ||
+            context.executionProfile === 'pause-memory/1') &&
           request.outcome === 'done' &&
           routingDecision?.payload.decision !== 'direct'
         ) {

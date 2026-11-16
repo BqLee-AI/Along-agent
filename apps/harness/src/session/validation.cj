@@ -151,6 +151,37 @@ extend Harness {
                 }
                 nonempty(field(payload, "alias_version"), 512)
             }
+            else if (kind == "memory_source") { require(false) }
+            else if (kind == "memory_saved") {
+                require(pipe.protocol == "harness/v7")
+                keys(payload, ["kind", "memory_id", "content"])
+                uuid(field(payload, "memory_id")); nonempty(field(payload, "content"), 12000)
+            }
+            else if (kind == "memory_recall") {
+                require(pipe.protocol == "harness/v7")
+                keys(payload, ["kind", "items", "completeness"])
+                let completeness = ref(field(payload, "completeness"))
+                require(completeness == "complete" || completeness == "degraded" || completeness == "incomplete")
+                let items = field(payload, "items").asArray()
+                require(items.size() <= 50)
+                for (value in items.getItems()) {
+                    let item = value.asObject()
+                    if (item.containsKey("match")) {
+                        keys(item, ["memory_id", "content", "conversation_id", "message_ids", "created_at", "updated_at", "match"])
+                        let matchKind = ref(field(item, "match"))
+                        require(matchKind == "literal" || matchKind == "unfiltered")
+                    } else {
+                        keys(item, ["memory_id", "content", "conversation_id", "message_ids", "created_at", "updated_at"])
+                    }
+                    uuid(field(item, "memory_id")); nonempty(field(item, "content"), 12000)
+                    uuid(field(item, "conversation_id"))
+                    let ids = field(item, "message_ids").asArray()
+                    require(ids.size() >= 1 && ids.size() <= 128)
+                    let seen = HashSet<String>()
+                    for (id in ids.getItems()) { require(seen.add(uuid(id))) }
+                    nonempty(field(item, "created_at"), 64); nonempty(field(item, "updated_at"), 64)
+                }
+            }
             else if (kind == "task_created") {
                 let elapsed = payload.containsKey("time_basis") || payload.containsKey("display_version")
                 if (elapsed) {
