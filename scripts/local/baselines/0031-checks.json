@@ -1,0 +1,75 @@
+{
+  "version": "0031",
+  "tables": ["r3_memory_recall_receipts"],
+  "columns": [
+    {
+      "table": "r3_memory_recall_receipts",
+      "name": "invocation_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "r3_memory_recall_receipts",
+      "name": "owner_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "r3_memory_recall_receipts",
+      "name": "revisions",
+      "type": "jsonb",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "r3_memory_recall_receipts",
+      "name": "created_at",
+      "type": "timestamptz",
+      "required": true,
+      "default": "now()"
+    }
+  ],
+  "constraints": [
+    {
+      "table": "r3_memory_recall_receipts",
+      "name": "r3_memory_recall_receipts_revisions_check",
+      "type": "c",
+      "columns": ["revisions"],
+      "expression": "((jsonb_typeof(revisions) = 'array'::text) AND (jsonb_array_length(revisions) <= 100))"
+    },
+    {
+      "table": "r3_memory_recall_receipts",
+      "name": "r3_memory_recall_receipts_pkey",
+      "type": "p",
+      "columns": ["invocation_id"]
+    },
+    {
+      "table": "r3_memory_recall_receipts",
+      "name": "r3_memory_recall_receipts_invocation_id_fkey",
+      "type": "f",
+      "columns": ["invocation_id"],
+      "target": "tool_invocations",
+      "delete_action": "r",
+      "target_columns": ["invocation_id"]
+    }
+  ],
+  "functions": [
+    {
+      "name": "r3_memory_recall_receipt_immutable",
+      "arguments": "",
+      "volatility": "v",
+      "strict": false,
+      "result": "trigger"
+    }
+  ],
+  "triggers": [
+    {
+      "table": "r3_memory_recall_receipts",
+      "name": "r3_memory_recall_receipt_no_mutation",
+      "type": 27,
+      "function": "r3_memory_recall_receipt_immutable"
+    }
+  ]
+}

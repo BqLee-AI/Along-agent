@@ -252,6 +252,17 @@ export async function validateGoalResult(
     )
       throw stateConflict('goal claims a document operation error as an effect');
   }
+  for (const state of states) {
+    if (
+      state.tool_id === 'remember_memory' &&
+      state.state === 'completed' &&
+      state.outcome_kind === 'success' &&
+      !goal.outcomes.some(
+        (item) => item.status === 'achieved' && item.receipt_refs.includes(state.invocation_id),
+      )
+    )
+      throw stateConflict('goal omits an accepted memory save');
+  }
   const settings = await readRunTimezoneSettings(client, context);
   for (const setting of settings) {
     if (
@@ -356,6 +367,7 @@ export async function interruptedGoalResult(
     creations,
     cancellations,
     documents,
+    memories,
     hasUnknown: unknown,
   } = await readRunInterruptionEvidence(client, binding);
   const inherited = await inheritedGoal(client, binding);
@@ -367,6 +379,13 @@ export async function interruptedGoalResult(
     status: 'achieved',
     receipt_refs: [setting.invocation_id],
   }));
+  outcomes.push(
+    ...memories.map((invocationId) => ({
+      description: '已保存本人记忆',
+      status: 'achieved' as const,
+      receipt_refs: [invocationId],
+    })),
+  );
   outcomes.push(...(inherited?.goal.outcomes.filter((item) => item.status === 'achieved') ?? []));
   const alreadyInherited = new Set(outcomes.flatMap((item) => item.receipt_refs));
   outcomes.push(

@@ -23,6 +23,7 @@ import {
   decodeWorkspaceContent,
   hydrateWorkspaceReadResult,
   readAcceptedInvocationResult,
+  validateAcceptedMemoryObservation,
 } from './accepted-result.js';
 import { readReminderTimeErrors } from './reminder-source.js';
 import {
@@ -160,7 +161,36 @@ export async function readRunInterruptionEvidence(client: PoolClient, binding: R
   const creations = await readCreatedReminders(client, binding);
   const cancellations = await readCancelledReminders(client, binding);
   const documents = (await readRunGoalDocumentEvidence(client, binding)).effects;
-  return { hasUnknown: rows[0]!.has_unknown, settings, creations, cancellations, documents };
+  const savedRows = await client.query<{
+    invocation_id: string;
+    tool_id: string;
+    result_version: number | null;
+    outcome_kind: string | null;
+    approval_id: string | null;
+    accepted_result: unknown;
+    frozen_context: unknown;
+  }>(
+    `SELECT invocation_id,tool_id,result_version,outcome_kind,approval_id,accepted_result,frozen_context
+     FROM tool_invocations WHERE owner_id=$1 AND conversation_id=$2 AND run_id=$3
+       AND tool_id='remember_memory' AND state='completed' AND outcome_kind='success'
+     ORDER BY accepted_at,invocation_id`,
+    [binding.ownerId, binding.conversationId, binding.runId],
+  );
+  const memories: string[] = [];
+  for (const row of savedRows.rows) {
+    const result = await readAcceptedInvocationResult(client, binding, row);
+    if (row.approval_id !== null || result.status !== 'ok' || result.result.kind !== 'memory_saved')
+      throw stateConflict('invalid accepted memory save');
+    memories.push(row.invocation_id);
+  }
+  return {
+    hasUnknown: rows[0]!.has_unknown,
+    settings,
+    creations,
+    cancellations,
+    documents,
+    memories,
+  };
 }
 
 async function readTimezoneSettings(
@@ -762,6 +792,7 @@ export async function readRunContextObservations(
         const result = await readAcceptedInvocationResult(client, ctx, { ...row, ...accepted });
         if (result.status === 'unknown' || resultKind(result) !== row.outcome_kind)
           throw contextSourceCorrupt();
+        await validateAcceptedMemoryObservation(client, ctx.ownerId, invocationId, result);
         observations.push(
           HarnessObservationSchema.parse({
             view: 'full',

@@ -31,6 +31,7 @@ export const DELEGATION_WORKSPACE_WRITE_TOOL_IDS = [
 ] as const;
 export const DELEGATION_WORKSPACE_CREATE_TOOL_IDS = ['workspace_create'] as const;
 export const CONTEXT_TOOL_IDS = ['read_run_observation'] as const;
+export const R3_MEMORY_TOOL_IDS = ['remember_memory', 'recall_memories'] as const;
 export const HARNESS_BASE_TOOL_IDS = [...BUSINESS_TOOL_IDS, ...CONTEXT_TOOL_IDS] as const;
 export const DELEGATION_TOOL_IDS = [
   'get_user_prefs',
@@ -47,7 +48,8 @@ export type ToolId =
   | (typeof TOOL_IDS)[number]
   | (typeof DELEGATION_TOOL_IDS)[number]
   | (typeof DELEGATION_WORKSPACE_WRITE_TOOL_IDS)[number]
-  | (typeof DELEGATION_WORKSPACE_CREATE_TOOL_IDS)[number];
+  | (typeof DELEGATION_WORKSPACE_CREATE_TOOL_IDS)[number]
+  | (typeof R3_MEMORY_TOOL_IDS)[number];
 
 export const TASK_STATES = [
   'saved',
@@ -189,6 +191,23 @@ export interface DocumentApprovalPayload {
   kind: 'document_approval';
   approval: DocumentApprovalReceipt;
 }
+export interface MemorySavedPayload {
+  kind: 'memory_saved';
+  memory_id: string;
+  content: string;
+}
+export interface MemoryRecallPayload {
+  kind: 'memory_recall';
+  items: {
+    memory_id: string;
+    content: string;
+    conversation_id: string;
+    message_ids: string[];
+    created_at: string;
+    updated_at: string;
+  }[];
+  completeness: 'degraded' | 'incomplete';
+}
 export type ToolPayload =
   | ApprovalPayload
   | DocumentApprovalPayload
@@ -201,6 +220,8 @@ export type ToolPayload =
   | PrefsPayload
   | TimezoneSettingPayload
   | TaskCreatedPayload
+  | MemorySavedPayload
+  | MemoryRecallPayload
   | EvidencePayload
   | WorkspaceResult;
 export type ToolResult =

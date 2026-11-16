@@ -414,3 +414,9 @@ snapshot2 原字段/集合不变，typed views/context_slice 不写入快照正�
 - `harness_pauses` 记录 owner、会话、Run、当前 attempt、幂等键、暂停用途、状态及安全点快照；Run 同时只能有一个 pending 或 paused 暂停。登记请求与持久快照分别代表请求和已到达安全点，不将批准等待写成用户暂停。
 - `harness_pause_resumes` 只追加保存用户继续的幂等身份与唯一后继 attempt；相同暂停不可产生多个后继。继续和取消按事务内资格裁决，取消或 Run 终态使未消费暂停失效。
 - 快照只由可信运行路径校验及持久化；原消息、已接受工具结果、预算和旧 Run 不回填或改写。暂停不代表可自动从任意崩溃恢复。
+
+## R3 本人短期记忆
+
+- `r3_memories` 保存 owner、当前修订与 active/stopped 状态；`r3_memory_revisions` 只追加，保存内容、来源会话和消息、过期时间。原始消息仍由 conversations 持有；保存和更正需验证本人来源与用户消息资格。
+- `r3_memory_requests` 为保存操作提供幂等身份；`r3_memory_recall_receipts` 与已接受的召回结果关联并冻结记忆修订，读取或重放时重新核验当前资格。停止或更正不改写原消息和既有工具事实。
+- `r3_memory_vectors` 是按 owner、记忆修订和编码器绑定保存的可重建派生索引；迁移不安装 pgvector。语义检索和 compact 派生记忆有独立合同，本阶段的模型召回只支持字面匹配。

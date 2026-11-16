@@ -231,6 +231,37 @@ export const HarnessToolPayloadSchema = z.union([
       alias_version: small,
     })
     .strict(),
+  z
+    .object({
+      kind: z.literal('memory_saved'),
+      memory_id: uuid,
+      content: z.string().min(1).max(12000),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('memory_recall'),
+      items: z
+        .array(
+          z
+            .object({
+              memory_id: uuid,
+              content: z.string().min(1).max(12000),
+              conversation_id: uuid,
+              message_ids: z
+                .array(uuid)
+                .min(1)
+                .max(128)
+                .refine((ids) => new Set(ids).size === ids.length),
+              created_at: z.string().datetime({ offset: true }),
+              updated_at: z.string().datetime({ offset: true }),
+            })
+            .strict(),
+        )
+        .max(50),
+      completeness: z.enum(['degraded', 'incomplete']),
+    })
+    .strict(),
   taskCreatedSchema,
   z.object({ kind: z.literal('effect_evidence'), evidence_ref: small }).strict(),
   z
@@ -647,6 +678,22 @@ export const HarnessStartSchema = z
   .refine(
     (start) => start.protocol === HARNESS_R3_PROTOCOL_VERSION || start.snapshot?.version !== 3,
     { message: 'pause snapshot requires harness/v7' },
+  )
+  .refine(
+    (start) =>
+      start.tools.every((tool) => tool.name !== 'read_memory_source') &&
+      (start.protocol === HARNESS_R3_PROTOCOL_VERSION ||
+        (start.tools.every(
+          (tool) => tool.name !== 'remember_memory' && tool.name !== 'recall_memories',
+        ) &&
+          start.observations.every(
+            (observation) =>
+              observation.view !== 'full' ||
+              observation.result.status !== 'ok' ||
+              (observation.result.result.kind !== 'memory_saved' &&
+                observation.result.result.kind !== 'memory_recall'),
+          ))),
+    { message: 'memory tools and observations require harness/v7; source lookup is unavailable' },
   );
 export const HarnessReplySchema = z.union([
   z

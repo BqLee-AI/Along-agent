@@ -1,4 +1,5 @@
-import { CapabilityScreen } from '@/features/capabilities/view/capability-screen';
+import MemoriesScreen from '@/features/memories/view/memories-screen';
+
 export default function MemoriesPage() {
-  return <CapabilityScreen capability="memories" />;
+  return <MemoriesScreen />;
 }

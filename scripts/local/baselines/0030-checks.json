@@ -1,0 +1,283 @@
+{
+  "version": "0030",
+  "tables": ["r3_memories", "r3_memory_revisions", "r3_memory_requests"],
+  "columns": [
+    {
+      "table": "r3_memories",
+      "name": "id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "r3_memories",
+      "name": "owner_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "r3_memories",
+      "name": "current_revision",
+      "type": "int4",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "r3_memories",
+      "name": "status",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "r3_memories",
+      "name": "created_at",
+      "type": "timestamptz",
+      "required": true,
+      "default": "now()"
+    },
+    {
+      "table": "r3_memories",
+      "name": "updated_at",
+      "type": "timestamptz",
+      "required": true,
+      "default": "now()"
+    },
+    {
+      "table": "r3_memory_revisions",
+      "name": "owner_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "r3_memory_revisions",
+      "name": "memory_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "r3_memory_revisions",
+      "name": "revision",
+      "type": "int4",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "r3_memory_revisions",
+      "name": "conversation_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "r3_memory_revisions",
+      "name": "message_ids",
+      "type": "_uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "r3_memory_revisions",
+      "name": "content",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "r3_memory_revisions",
+      "name": "source_kind",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "r3_memory_revisions",
+      "name": "summary_id",
+      "type": "uuid",
+      "required": false,
+      "default": ""
+    },
+    {
+      "table": "r3_memory_revisions",
+      "name": "expires_at",
+      "type": "timestamptz",
+      "required": false,
+      "default": ""
+    },
+    {
+      "table": "r3_memory_revisions",
+      "name": "created_at",
+      "type": "timestamptz",
+      "required": true,
+      "default": "now()"
+    },
+    {
+      "table": "r3_memory_requests",
+      "name": "owner_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "r3_memory_requests",
+      "name": "idempotency_key",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "r3_memory_requests",
+      "name": "request_hash",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "r3_memory_requests",
+      "name": "memory_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    }
+  ],
+  "constraints": [
+    {
+      "table": "r3_memories",
+      "name": "r3_memories_current_revision_check",
+      "type": "c",
+      "columns": ["current_revision"],
+      "expression": "(current_revision > 0)"
+    },
+    {
+      "table": "r3_memories",
+      "name": "r3_memories_status_check",
+      "type": "c",
+      "columns": ["status"],
+      "expression": "(status = ANY (ARRAY['active'::text, 'stopped'::text]))"
+    },
+    {
+      "table": "r3_memories",
+      "name": "r3_memories_pkey",
+      "type": "p",
+      "columns": ["id"]
+    },
+    {
+      "table": "r3_memories",
+      "name": "r3_memories_owner_id_id_key",
+      "type": "u",
+      "columns": ["owner_id", "id"]
+    },
+    {
+      "table": "r3_memory_revisions",
+      "name": "r3_memory_revisions_revision_check",
+      "type": "c",
+      "columns": ["revision"],
+      "expression": "(revision > 0)"
+    },
+    {
+      "table": "r3_memory_revisions",
+      "name": "r3_memory_revisions_message_ids_check",
+      "type": "c",
+      "columns": ["message_ids"],
+      "expression": "((cardinality(message_ids) > 0) AND (array_position(message_ids, NULL::uuid) IS NULL))"
+    },
+    {
+      "table": "r3_memory_revisions",
+      "name": "r3_memory_revisions_content_check",
+      "type": "c",
+      "columns": ["content"],
+      "expression": "((length(btrim(content)) >= 1) AND (length(btrim(content)) <= 12000))"
+    },
+    {
+      "table": "r3_memory_revisions",
+      "name": "r3_memory_revisions_source_kind_check",
+      "type": "c",
+      "columns": ["source_kind"],
+      "expression": "(source_kind = ANY (ARRAY['explicit'::text, 'compact'::text]))"
+    },
+    {
+      "table": "r3_memory_revisions",
+      "name": "r3_memory_revisions_check",
+      "type": "c",
+      "columns": ["source_kind", "summary_id"],
+      "expression": "((source_kind = 'compact'::text) = (summary_id IS NOT NULL))"
+    },
+    {
+      "table": "r3_memory_revisions",
+      "name": "r3_memory_revisions_pkey",
+      "type": "p",
+      "columns": ["owner_id", "memory_id", "revision"]
+    },
+    {
+      "table": "r3_memory_revisions",
+      "name": "r3_memory_revisions_owner_id_memory_id_fkey",
+      "type": "f",
+      "columns": ["owner_id", "memory_id"],
+      "target": "r3_memories",
+      "delete_action": "a",
+      "target_columns": ["owner_id", "id"]
+    },
+    {
+      "table": "r3_memories",
+      "name": "r3_memories_current_revision_fk",
+      "type": "f",
+      "columns": ["owner_id", "id", "current_revision"],
+      "deferred": true,
+      "target": "r3_memory_revisions",
+      "delete_action": "a",
+      "target_columns": ["owner_id", "memory_id", "revision"]
+    },
+    {
+      "table": "r3_memory_requests",
+      "name": "r3_memory_requests_idempotency_key_check",
+      "type": "c",
+      "columns": ["idempotency_key"],
+      "expression": "((length(idempotency_key) >= 1) AND (length(idempotency_key) <= 200))"
+    },
+    {
+      "table": "r3_memory_requests",
+      "name": "r3_memory_requests_pkey",
+      "type": "p",
+      "columns": ["owner_id", "idempotency_key"]
+    },
+    {
+      "table": "r3_memory_requests",
+      "name": "r3_memory_requests_owner_id_memory_id_fkey",
+      "type": "f",
+      "columns": ["owner_id", "memory_id"],
+      "target": "r3_memories",
+      "delete_action": "a",
+      "target_columns": ["owner_id", "id"]
+    }
+  ],
+  "functions": [
+    {
+      "name": "r3_memory_revision_immutable",
+      "arguments": "",
+      "volatility": "v",
+      "strict": false,
+      "result": "trigger"
+    }
+  ],
+  "triggers": [
+    {
+      "table": "r3_memory_revisions",
+      "name": "r3_memory_revision_no_mutation",
+      "type": 27,
+      "function": "r3_memory_revision_immutable"
+    }
+  ],
+  "indexes": [
+    {
+      "table": "r3_memories",
+      "name": "r3_memories_owner_active_idx",
+      "unique": false,
+      "method": "btree",
+      "predicate": "(status = 'active'::text)",
+      "keys": ["owner_id", "id"]
+    }
+  ]
+}

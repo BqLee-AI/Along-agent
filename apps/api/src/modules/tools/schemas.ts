@@ -137,6 +137,12 @@ export const ReadRunObservationInputSchema = z
   })
   .strict();
 export type ReadRunObservationInput = z.infer<typeof ReadRunObservationInputSchema>;
+export const RememberMemoryInputSchema = z
+  .object({ content: z.string().trim().min(1).max(12000) })
+  .strict();
+export const RecallMemoriesInputSchema = z
+  .object({ query: z.string().trim().min(1).max(500) })
+  .strict();
 
 export const TOOL_INPUT_SCHEMAS = {
   propose_task: ProposeTaskInputSchema,
@@ -156,4 +162,6 @@ export const TOOL_INPUT_SCHEMAS = {
   workspace_create: WorkspaceCreateInputSchema,
   workspace_apply_replace: WorkspaceApplyReplaceInputSchema,
   read_run_observation: ReadRunObservationInputSchema,
+  remember_memory: RememberMemoryInputSchema,
+  recall_memories: RecallMemoriesInputSchema,
 } as const;

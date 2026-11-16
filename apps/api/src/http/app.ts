@@ -19,6 +19,9 @@ import { handleWorkspaceRoute } from '../modules/workspaces/routes.js';
 import { handleConversationRoute } from '../modules/conversations/routes.js';
 import { handleTaskRoute } from '../modules/tasks/routes.js';
 import { handleBriefRoute } from '../modules/brief/routes.js';
+import { handleMemoryRoute } from '../modules/memory/routes.js';
+import { createMemoryService } from '../modules/memory/service.js';
+import { conversationMemorySources } from '../modules/conversations/memory-sources.js';
 import {
   handleModelProviderRoute,
   isModelProviderPath,
@@ -172,6 +175,7 @@ async function dispatchRequest(
       pathname.startsWith('/api/v1/conversations/') ||
       pathname === '/api/v1/tasks' ||
       pathname.startsWith('/api/v1/tasks/') ||
+      pathname.startsWith('/api/v1/memories/') ||
       isModelProviderPath(pathname));
   if (protectedPost) {
     const actor = await resolveActor(req);
@@ -190,6 +194,7 @@ async function dispatchRequest(
       /^\/api\/v1\/approvals\/[^/]+\/actions\/(?:confirm|reject|revise)$/.test(pathname) ||
       /^\/api\/v1\/document-approvals\/[^/]+\/actions\/(?:confirm|reject)$/.test(pathname) ||
       /^\/api\/v1\/tasks\/[^/]+\/actions\/cancel$/.test(pathname) ||
+      /^\/api\/v1\/memories\/[^/]+\/actions\/(?:correct|stop-recall)$/.test(pathname) ||
       isModelProviderWritePath(pathname);
     if (!writeRoute) {
       closeUnreadRequest(req, res);
@@ -376,6 +381,21 @@ async function dispatchRequest(
       });
       if (handled) return;
     }
+    sendJson(res, 404, failEnvelope(notFound('not found'), requestId), requestId);
+    return;
+  }
+
+  if (pathname === '/api/v1/memories' || pathname.startsWith('/api/v1/memories/')) {
+    if (
+      await handleMemoryRoute(req, res, url, {
+        service: deps.pool
+          ? createMemoryService({ pool: deps.pool, sources: conversationMemorySources })
+          : null,
+        resolveActor,
+        body,
+      })
+    )
+      return;
     sendJson(res, 404, failEnvelope(notFound('not found'), requestId), requestId);
     return;
   }

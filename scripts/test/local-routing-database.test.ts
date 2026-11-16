@@ -203,4 +203,79 @@ databaseTests('routing lifecycle schema admission against PG16', () => {
       await rm(directory, { recursive: true, force: true });
     }
   }, 120000);
+  it('upgrades each memory schema version without losing facts and rejects a damaged revision trigger', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'memory-lifecycle-'));
+    const migrations = new URL('../../infra/migrations/', import.meta.url);
+    try {
+      const names = (await readdir(migrations)).filter((name) => name.endsWith('.sql')).sort();
+      for (const name of names.filter((item) => item.slice(0, 4) <= '0029')) {
+        await copyFile(new URL(name, migrations), join(directory, name));
+      }
+      await isolated(async (url) => {
+        await deployment(
+          url,
+          async (database) => {
+            expect((await database.initialize()).version).toBe('0029');
+          },
+          directory,
+        );
+        const owner = randomUUID();
+        const memory = randomUUID();
+        const conversation = randomUUID();
+        const message = randomUUID();
+        for (const version of ['0030', '0031', '0032']) {
+          const name = names.find((item) => item.startsWith(`${version}_`))!;
+          await copyFile(new URL(name, migrations), join(directory, name));
+          await deployment(
+            url,
+            async (database) => {
+              expect((await database.upgrade()).version).toBe(version);
+              expect(await database.classify()).toMatchObject({ kind: 'supported', version });
+              expect(await database.classify()).toMatchObject({ kind: 'supported', version });
+            },
+            directory,
+          );
+          if (version === '0030') {
+            await sql(url, async (client) => {
+              await client.query('BEGIN');
+              await client.query(
+                `INSERT INTO r3_memories(id,owner_id,current_revision,status) VALUES ($1,$2,1,'active')`,
+                [memory, owner],
+              );
+              await client.query(
+                `INSERT INTO r3_memory_revisions(owner_id,memory_id,revision,conversation_id,message_ids,content,source_kind)
+                 VALUES ($1,$2,1,$3,ARRAY[$4::uuid],'保留的来源事实','explicit')`,
+                [owner, memory, conversation, message],
+              );
+              await client.query('COMMIT');
+            });
+          }
+          await sql(url, async (client) => {
+            const result = await client.query(
+              'SELECT content,message_ids FROM r3_memory_revisions WHERE owner_id=$1 AND memory_id=$2',
+              [owner, memory],
+            );
+            expect(result.rows).toEqual([{ content: '保留的来源事实', message_ids: [message] }]);
+          });
+        }
+        await sql(url, async (client) => {
+          await client.query(
+            'ALTER TABLE r3_memory_revisions DISABLE TRIGGER r3_memory_revision_no_mutation',
+          );
+        });
+        await deployment(
+          url,
+          async (database) => {
+            expect((await database.classify()).kind).toBe('unknown');
+            await expect(database.initialize()).rejects.toMatchObject({
+              code: 'unknown_database_refused',
+            });
+          },
+          directory,
+        );
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 120000);
 });

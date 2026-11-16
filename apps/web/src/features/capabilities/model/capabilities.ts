@@ -1,10 +1,4 @@
 export const capabilities = {
-  memories: {
-    title: '记忆',
-    description: '让 Along 记住你的偏好和重要的事，你可以随时查看和删除。',
-    boundary: '这个功能还在准备中。聊天内容不会被自动记成长期记忆。',
-    related: [{ href: '/conversations', label: '回到聊天' }],
-  },
   materials: {
     title: '资料',
     description: '管理 Along 能读取的文件和文件夹。',
