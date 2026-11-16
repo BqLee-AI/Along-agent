@@ -267,6 +267,11 @@ function merge(repo: string, base: string, head: string) {
   return git(repo, 'commit-tree', tree, '-p', base, '-p', head, '-m', 'PR merge fixture');
 }
 
+// Native Response body readers can stall Bun's parallel test workers.
+function response<T>(body: T, status = 200) {
+  return { ok: status >= 200 && status < 300, status, json: async () => body };
+}
+
 function context(repo: string, base: string, head: string, prior: string) {
   const steps = {
     plan: [`Select affected checks (${merge(repo, base, prior)})`],
@@ -285,7 +290,7 @@ function context(repo: string, base: string, head: string, prior: string) {
     repository: 'example/repo',
     token: 'fixture-token',
     fetch: async () =>
-      Response.json({
+      response({
         jobs: Object.entries(steps).map(([name, names]) => ({
           name,
           conclusion: 'success',
@@ -427,7 +432,7 @@ describe('prior successful gate reuse', () => {
         expect(
           await applyReuse(plan(['web']), [successfulRun(prior, base)], {
             ...ctx,
-            fetch: async () => Response.json({ jobs: [jobs[0], ...checks] }),
+            fetch: async () => response({ jobs: [jobs[0], ...checks] }),
           }),
         ).toEqual({ ...plan(['web']), reused: {} });
       }
@@ -445,7 +450,7 @@ describe('prior successful gate reuse', () => {
         expect(
           await applyReuse(plan(['web']), [successfulRun(prior, base)], {
             ...ctx,
-            fetch: async () => Response.json({ jobs }),
+            fetch: async () => response({ jobs }),
           }),
         ).toEqual({ ...plan(['web']), reused: {} });
       }
@@ -473,7 +478,7 @@ describe('prior successful gate reuse', () => {
       expect(
         await applyReuse(all, [successfulRun(prior, base)], {
           ...ctx,
-          fetch: async () => new Response('unavailable', { status: 503 }),
+          fetch: async () => response(null, 503),
         }),
       ).toEqual({ ...all, reused: {} });
       const controller = new AbortController();
