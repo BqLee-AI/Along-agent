@@ -681,7 +681,7 @@ export async function readInvocationSnapshots(
     const accepted = parseResult(await readAcceptedInvocationResult(client, ctx, row));
     if (resultKind(accepted) !== row.outcome_kind)
       throw stateConflict('invalid accepted tool result');
-    await validateAcceptedMemoryObservation(client, ctx.ownerId, invocationId, accepted);
+    await validateAcceptedMemoryObservation(client, ctx, invocationId, accepted);
     snapshots.push({
       invocation_id: row.invocation_id,
       tool_id: row.tool_id,
@@ -942,10 +942,11 @@ export async function executeLocalInvocation(
   ctx: ToolContext,
   input: InvocationInput,
   execute: (client: PoolClient, frozenContext: ToolContext) => Promise<ToolResult>,
+  validateBeforeReplay?: (client: PoolClient, accepted: ToolResult) => Promise<boolean>,
 ): Promise<ToolOutcome> {
   return withRunTransaction(pool, ctx.ownership, async (client) => {
     const { row, canExecute } = await loadInvocation(client, ctx, input);
-    const gated = await gate(client, ctx, row, input, canExecute);
+    const gated = await gate(client, ctx, row, input, canExecute, validateBeforeReplay);
     if (gated) return gated;
     if (row.execution_kind === 'non_transactional' || row.state !== 'reserved')
       throw stateConflict('invocation requires non-transactional coordinator');

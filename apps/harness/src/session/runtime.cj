@@ -1,6 +1,8 @@
 package along_harness.session
 
+import along_harness.protocol.*
 import along_harness.transport.*
+
 import std.collection.*
 import stdx.encoding.json.*
 
@@ -18,13 +20,20 @@ class ContextUnit {
     }
 }
 
+// The model-visible conversation and its durable provenance move together.
 class ConversationState {
     var messages = JsonArray()
     var protectedMessages = JsonArray()
+    var historyMessages = JsonArray()
+    var historyIndex: Int64 = 0
+    var r3Context = JsonObject()
+    var originalManifest = JsonObject()
+    var originalSummary: JsonValue = JsonNull()
     var units = ArrayList<ContextUnit>()
     let messageRefs = JsonArray()
 }
 
+// Provider usage, limits, and measurement policy belong to one budget.
 class BudgetState {
     var completionCap: Int64 = 1
     var modelWindow: Int64 = 0
@@ -34,6 +43,22 @@ class BudgetState {
     var tokensKnown: Bool = true
     var maxIterations: Int64 = 1
     var maxTokens: Int64 = 1
+
+    func usage(): JsonObject {
+        var tokens: JsonValue = JsonNull()
+        if (tokensKnown) { tokens = JsonInt(knownTokens) }
+        return obj([("iterations", JsonInt(iterations)), ("tokens", tokens)])
+    }
+
+    func acceptUsage(v: JsonValue, previouslyKnown: Bool): Unit {
+        tokensKnown = previouslyKnown
+        if (isNull(v)) { tokensKnown = false; return }
+        let u = v.asObject()
+        keys(u, ["total_tokens"])
+        let used = integer(field(u, "total_tokens"), 0)
+        require(knownTokens <= SAFE_INTEGER - used)
+        knownTokens += used
+    }
 }
 
 protected class Harness {
@@ -53,9 +78,9 @@ protected class Harness {
     var hasOutputWorkspace: Bool = false
     var hardDenied: String = ""
     var closingGoal: Bool = false
+    let acceptedReceipts = HashSet<String>()
     var pendingModel: JsonValue = JsonNull()
     var restoredPause: Bool = false
-    let acceptedReceipts = HashSet<String>()
 
     protected init(pipe: Pipe) { this.pipe = pipe }
 }

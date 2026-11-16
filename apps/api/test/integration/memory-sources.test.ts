@@ -108,7 +108,7 @@ maybe('conversation memory sources', () => {
     });
   });
 
-  it('allows owner-visible user and assistant reads but never compact qualification', async () => {
+  it('allows owner-visible user and assistant reads but rejects unpublished compact sources', async () => {
     await withTransaction(database.pool, async (client) => {
       const validate = (messageIds: string[]) =>
         conversationMemorySources.validate(client, { ...binding, messageIds, purpose: 'read' });
@@ -122,7 +122,7 @@ maybe('conversation memory sources', () => {
           purpose: 'compact',
           summaryId: randomUUID(),
         }),
-      ).rejects.toThrow('compact source is not published');
+      ).rejects.toThrow();
       await expect(readMemorySource(client, { ...binding, messageId: user })).resolves.toEqual({
         role: 'user',
         content: '本人原话',

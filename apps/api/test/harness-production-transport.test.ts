@@ -43,6 +43,30 @@ test('production user transport binds SDK measurement and calls only approved ou
       HARNESS_BINARY: process.execPath,
       HARNESS_COMPLETION_CAP: '32',
     });
+    expect(services?.contextPolicy).toMatchObject({
+      input_meter: 'estimated',
+      meter_revision: 'openai-json-utf8-estimate/1',
+      model_window_tokens: null,
+    });
+    const bounded = loadHarnessServices({
+      HARNESS_BINARY: process.execPath,
+      HARNESS_COMPLETION_CAP: '32',
+      HARNESS_MODEL_WINDOW_TOKENS: '10000',
+    });
+    expect(bounded?.contextPolicy.model_window_tokens).toBe(10000);
+    const planned = loadHarnessServices({
+      HARNESS_BINARY: process.execPath,
+      HARNESS_COMPLETION_CAP: '32',
+      HARNESS_AUTO_COMPACT_PLANNING_TOKENS: '8192',
+    });
+    expect(planned?.autoCompactPlanningTokens).toBe(8192);
+    expect(
+      loadHarnessServices({
+        HARNESS_BINARY: process.execPath,
+        HARNESS_COMPLETION_CAP: '32',
+        HARNESS_AUTO_COMPACT_PLANNING_TOKENS: '0',
+      }),
+    ).toBeNull();
     expect(services?.contextPolicy.completion_cap).toBe(32);
     const transport = await createUserModelTransport({
       base_url: `${origin}/v1`,
@@ -55,6 +79,22 @@ test('production user transport binds SDK measurement and calls only approved ou
       [],
       policy,
     );
+    const estimated = await transport.measure({ ...request, type: 'measure_context' }, [], {
+      ...services!.contextPolicy,
+      model_binding: {
+        ...services!.contextPolicy.model_binding,
+        model: 'configured-model',
+      },
+    });
+    expect(estimated.input_meter.quality).toBe('estimated');
+    expect(estimated.input_meter.input_tokens).toBeGreaterThan(0);
+    expect(estimated.input_meter.meter_revision).toBe('openai-json-utf8-estimate/1');
+    expect(estimated.input_meter.input_tokens).toBe(Math.ceil(estimated.http_bytes / 3));
+    expect(measurement.input_meter).toMatchObject({
+      quality: 'unavailable',
+      input_tokens: null,
+      meter_revision: 'unavailable/1',
+    });
     expect(calls).toBe(0);
     process.env.MODEL_PROVIDER_ALLOWED_LOCAL_ORIGINS = '';
     const blocked = [];

@@ -78,6 +78,7 @@ export function routingIdentity(value: unknown): string {
   throw stateConflict('routing identity requires finite JSON');
 }
 function bindingOf(binding: RoutingBinding) {
+  if (!binding.userMessageId) throw stateConflict('routing requires a user message');
   return {
     owner_id: binding.ownerId,
     run_id: binding.runId,

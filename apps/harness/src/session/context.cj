@@ -2,15 +2,11 @@ package along_harness.session
 
 import along_harness.protocol.*
 import along_harness.transport.*
+
 import std.collection.*
 import stdx.encoding.json.*
 
 extend Harness {
-    func usage(): JsonObject {
-        var tokens: JsonValue = JsonNull()
-        if (budgetState.tokensKnown) { tokens = JsonInt(budgetState.knownTokens) }
-        return obj([("iterations", JsonInt(budgetState.iterations)), ("tokens", tokens)])
-    }
     func message(role: String, content: String): Unit {
         modelMessage(obj([("role", text(role)), ("content", text(content))]))
     }
@@ -27,7 +23,17 @@ extend Harness {
     }
     func rebuildMessages(): Unit {
         contextState.messages = JsonArray()
-        for (entry in contextState.protectedMessages.getItems()) { contextState.messages.add(entry) }
+        var index: Int64 = 0
+        for (entry in contextState.protectedMessages.getItems()) {
+            if (pipe.protocol == "harness/v8" && index == contextState.historyIndex) {
+                for (history in contextState.historyMessages.getItems()) { contextState.messages.add(history) }
+            }
+            contextState.messages.add(entry)
+            index++
+        }
+        if (pipe.protocol == "harness/v8" && index == contextState.historyIndex) {
+            for (history in contextState.historyMessages.getItems()) { contextState.messages.add(history) }
+        }
         for (unit in contextState.units) {
             for (entry in unit.entries.getItems()) { contextState.messages.add(entry) }
         }
@@ -144,29 +150,77 @@ extend Harness {
         }
         throw Exception("unreachable")
     }
-    func policyCheck(v: JsonValue): Unit {
-        let p = v.asObject()
-        keys(p, ["revision", "completion_cap", "model_window_tokens", "input_meter", "meter_revision", "reserve_tokens", "model_binding"])
-        require(ref(field(p, "revision")) == "r2a/1")
-        budgetState.completionCap = integer(field(p, "completion_cap"), 1)
-        if (!isNull(field(p, "model_window_tokens"))) { budgetState.modelWindow = integer(field(p, "model_window_tokens"), 1) }
-        budgetState.reserveTokens = integer(field(p, "reserve_tokens"), 0)
-        let quality = ref(field(p, "input_meter"))
-        require(quality == "verified" || quality == "estimated" || quality == "unavailable")
-        let revision = str(field(p, "meter_revision"), FRAME_LIMIT)
-        require(revision.size > 0 && (quality == "unavailable" || revision != "unavailable/1"))
-        let binding = field(p, "model_binding").asObject()
-        keys(binding, ["model", "adapter_revision"])
-        require(str(field(binding, "model"), FRAME_LIMIT).size > 0)
-        require(str(field(binding, "adapter_revision"), FRAME_LIMIT).size > 0)
+    protected func previewContext(): Unit {
+        require(pipe.measureOnly && pipe.protocol == "harness/v8" && restoredPause && isNull(waiting))
+        rebuildMessages()
+        require(contextState.messages.size() > 0 && contextState.messages.size() <= 256)
+        var output = budgetState.completionCap
+        var remaining: JsonValue = JsonNull()
+        if (budgetState.tokensKnown) {
+            let available = if (budgetState.knownTokens < budgetState.maxTokens) { budgetState.maxTokens - budgetState.knownTokens } else { 0 }
+            remaining = JsonInt(available)
+            if (available < output) { output = available }
+        }
+        if (budgetState.iterations >= budgetState.maxIterations) { output = 0 }
+        let payload = obj([("messages", contextState.messages), ("remaining_tokens", remaining),
+            ("max_output_tokens", JsonInt(output)), ("pending_model", JsonBool(!isNull(pendingModel)))])
+        let modelPayload = obj([("messages", contextState.messages), ("remaining_tokens", remaining), ("max_output_tokens", JsonInt(output))])
+        require(pipe.frameFits("context_preview", payload, 1) && pipe.frameFits("model", modelPayload, 1))
+        pipe.ack("context_preview", payload, "accepted")
     }
-    func acceptUsage(v: JsonValue, previouslyKnown: Bool): Unit {
-        budgetState.tokensKnown = previouslyKnown
-        if (isNull(v)) { budgetState.tokensKnown = false; return }
-        let u = v.asObject()
-        keys(u, ["total_tokens"])
-        let used = integer(field(u, "total_tokens"), 0)
-        require(budgetState.knownTokens <= SAFE_INTEGER - used)
-        budgetState.knownTokens += used
+    func context(): JsonObject {
+        if (pipe.protocol == "harness/v8") {
+            let stateUnits = JsonArray()
+            for (unit in contextState.units) {
+                stateUnits.add(obj([("entries", unit.entries), ("observation", unit.observation),
+                    ("seen", JsonBool(unit.seen)), ("projected", JsonBool(unit.projected))]))
+            }
+            let state = obj([("protected_messages", contextState.protectedMessages), ("units", stateUnits),
+                ("hard_denied", text(hardDenied)), ("closing_goal", JsonBool(closingGoal)),
+                ("pending_model", pendingModel), ("history_index", JsonInt(contextState.historyIndex))])
+            return obj([("version", JsonInt(4)), ("original_manifest", contextState.originalManifest),
+                ("original_summary", contextState.originalSummary), ("context", contextState.r3Context), ("tool_refs", toolRefs),
+                ("next_call_no", JsonInt(nextCall)), ("usage", budgetState.usage()), ("waiting", waiting), ("native_state", state)])
+        }
+        return obj([("version", JsonInt(2)), ("message_refs", contextState.messageRefs), ("tool_refs", toolRefs),
+            ("next_call_no", JsonInt(nextCall)), ("usage", budgetState.usage()), ("waiting", waiting)])
+    }
+    func pausePoint(): Bool { return pausePointWithMarker(false) }
+    func pausePointWithMarker(afterMeasurement: Bool): Bool {
+        if (pipe.protocol == "harness/v6") { return false }
+        let payload = JsonObject()
+        if (afterMeasurement) {
+            require(pipe.protocol == "harness/v8")
+            payload.put("after_measurement", JsonBool(true))
+        }
+        let probe = pipe.request("pause_probe", payload).asObject()
+        keys(probe, ["pending"])
+        if (!field(probe, "pending").asBool().getValue()) { return false }
+        let stateUnits = JsonArray()
+        for (unit in contextState.units) {
+            stateUnits.add(obj([("entries", unit.entries), ("observation", unit.observation),
+                ("seen", JsonBool(unit.seen)), ("projected", JsonBool(unit.projected))]))
+        }
+        let state = obj([("protected_messages", contextState.protectedMessages), ("units", stateUnits),
+            ("hard_denied", text(hardDenied)), ("closing_goal", JsonBool(closingGoal)), ("pending_model", pendingModel)])
+        let snapshot = context()
+        if (pipe.protocol == "harness/v7") {
+            snapshot.put("version", JsonInt(3))
+            snapshot.put("native_state", state)
+        }
+        let reply = pipe.request("pause_point", obj([("context", snapshot)])).asObject()
+        keys(reply, ["paused"])
+        return field(reply, "paused").asBool().getValue()
+    }
+    func checkpoint(): String {
+        let reply = pipe.request("snapshot", obj([("context", context())])).asObject()
+        keys(reply, ["checkpoint_ref"])
+        return uuid(field(reply, "checkpoint_ref"))
+    }
+    protected func finish(outcome: String, code: String): Unit {
+        require(!delegated || outcome != "done" || pipe.compactControl)
+        let p = obj([("outcome", text(outcome)), ("usage", budgetState.usage())])
+        if (code != "") { p.put("error", obj([("code", text(code)), ("message", text("Harness stopped: ${code}"))])) }
+        pipe.ack("finish", p, "accepted")
     }
 }

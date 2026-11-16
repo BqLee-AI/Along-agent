@@ -41,6 +41,12 @@ function composerTask(overrides: Partial<ConversationTask> = {}): ConversationTa
     reading: false,
     stopping: false,
     pauseBusy: false,
+    compactStatus: null,
+    compactBusy: false,
+    compactAvailable: true,
+    compactRetryAllowed: false,
+    async retryCompact() {},
+    refreshCompact() {},
     streaming: false,
     retryResume: null,
     sendUncertain: false,
@@ -401,6 +407,45 @@ describe('composer consumer states', () => {
     expect(openingTag(markup, 'stop-reply')).not.toMatch(/\sdisabled(?:=|[\s>])/);
     expect(markup).not.toContain('data-testid="send-message"');
     expect(openingTag(markup, 'chat-tools')).toMatch(/\sdisabled(?:=|[\s>])/);
+  });
+
+  it('offers compact alongside stop while streaming', () => {
+    const markup = renderToStaticMarkup(
+      createElement(TaskComposer, {
+        task: composerTask({
+          input: '/compact',
+          streaming: true,
+          active: true,
+          selected: { conversationId: 'conversation', runId: 'run' },
+          eligibility: { allowed: false, reason: 'blocked' },
+        }),
+      }),
+    );
+    expect(openingTag(markup, 'stop-reply')).toContain('type="button"');
+    expect(openingTag(markup, 'send-message')).toContain('aria-label="执行压缩命令"');
+    expect(openingTag(markup, 'send-message')).not.toMatch(/\sdisabled(?:=|[\s>])/);
+  });
+
+  it('reports a status read failure without claiming compact completion', () => {
+    const markup = renderToStaticMarkup(
+      createElement(TaskComposer, {
+        task: composerTask({
+          compactStatus: {
+            phase: 'read_error',
+            message: '状态读取失败',
+            receipt: {
+              status: 'compacting',
+              run_id: '22222222-2222-4222-8222-222222222222',
+              pause_id: '11111111-1111-4111-8111-111111111111',
+            },
+          },
+          compactAvailable: false,
+        }),
+      }),
+    );
+    expect(markup).toContain('状态读取失败');
+    expect(markup).toContain('重新读取压缩状态');
+    expect(markup).not.toContain('压缩已完成');
   });
 
   it('disables new sends for controller-blocked and unresolved DST choices', () => {

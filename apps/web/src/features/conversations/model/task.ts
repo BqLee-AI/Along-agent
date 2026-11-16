@@ -21,6 +21,12 @@ export function selectResumeRequest(
 }
 
 export type TaskIntent = 'chat' | 'reminder' | 'document';
+/** Compact is a control command, including malformed arguments, never a message. */
+export function compactCommand(text: string): 'compact' | 'invalid' | null {
+  const value = text.trim();
+  if (value === '/compact') return 'compact';
+  return /^\/compact(?:\s|$)/.test(value) ? 'invalid' : null;
+}
 
 export function taskIntentFromQuery(query: {
   intent?: string | string[];

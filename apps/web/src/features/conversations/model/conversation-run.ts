@@ -24,6 +24,120 @@ export const ResumeRequestSchema = z
   })
   .strict();
 export type ResumeRequest = z.infer<typeof ResumeRequestSchema>;
+export const CompactReceiptSchema = z
+  .object({
+    status: z.enum([
+      'pending',
+      'paused',
+      'compacting',
+      'published',
+      'failed',
+      'cancelled',
+      'continued',
+      'no_content',
+    ]),
+    run_id: z.string().uuid().nullable(),
+    pause_id: z.string().uuid().nullable(),
+    error_code: z.string().nullable().optional(),
+    candidate_status: z.enum(['pending', 'saved', 'failed', 'cancelled']).nullable().optional(),
+  })
+  .passthrough()
+  .superRefine((value, context) => {
+    if (
+      value.status === 'no_content'
+        ? value.run_id !== null || value.pause_id !== null
+        : !value.run_id || !value.pause_id
+    )
+      context.addIssue({ code: z.ZodIssueCode.custom, message: '压缩回执身份不完整。' });
+  });
+export type CompactReceipt = z.infer<typeof CompactReceiptSchema>;
+
+export function compactIsFinal(receipt: CompactReceipt): boolean {
+  return ['continued', 'failed', 'cancelled', 'no_content'].includes(receipt.status);
+}
+
+export const CompactRequestSchema = z
+  .object({
+    conversationId: z.string().uuid(),
+    runId: z.string().uuid().nullable(),
+    key: z.string().uuid(),
+    receipt: CompactReceiptSchema.nullable(),
+  })
+  .strict();
+export type CompactRequest = z.infer<typeof CompactRequestSchema>;
+
+/** Drop subscriptions from the old attempt only for the selected continued Run. */
+export function handoffCompactStreams(
+  request: CompactRequest,
+  receipt: CompactReceipt,
+  selected: { conversationId: string; runId: string } | null,
+  admission: AbortController | null,
+  follower: AbortController | null,
+): boolean {
+  if (
+    receipt.status !== 'continued' ||
+    !request.runId ||
+    request.runId !== receipt.run_id ||
+    selected?.conversationId !== request.conversationId ||
+    selected.runId !== request.runId
+  )
+    return false;
+  admission?.abort();
+  follower?.abort();
+  return true;
+}
+
+export function compactRetryEligible(request: CompactRequest | null): boolean {
+  return Boolean(request && !request.receipt);
+}
+
+export async function postCompact(
+  request: CompactRequest,
+  csrf: string | null,
+  signal: AbortSignal,
+  fetchAction: typeof fetch = fetch,
+) {
+  const base = request.runId
+    ? runPath(request.conversationId, request.runId)
+    : `/api/v1/conversations/${encodeURIComponent(request.conversationId)}`;
+  const receipt = CompactReceiptSchema.parse(
+    await readEnvelope(
+      await fetchAction(`${base}/actions/compact`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'Idempotency-Key': request.key,
+          ...(csrf !== null ? { 'x-csrf-token': csrf } : {}),
+        },
+        body: '{}',
+        signal,
+      }),
+    ),
+  );
+  if (request.runId && receipt.run_id !== request.runId)
+    throw new Error('压缩回执与原运行不匹配。');
+  return receipt;
+}
+
+export async function readCompact(
+  conversationId: string,
+  runId: string,
+  pauseId: string,
+  signal: AbortSignal,
+  fetchAction: typeof fetch = fetch,
+) {
+  const receipt = CompactReceiptSchema.parse(
+    await readEnvelope(
+      await fetchAction(
+        `${runPath(conversationId, runId)}/compacts/${encodeURIComponent(pauseId)}`,
+        { method: 'GET', cache: 'no-store', signal },
+      ),
+    ),
+  );
+  if (receipt.run_id !== runId || receipt.pause_id !== pauseId)
+    throw new Error('压缩状态与原请求不匹配。');
+  return receipt;
+}
 
 export function modelSelectionLabel(
   selection: z.infer<typeof RunModelSelectionSchema> | undefined,
@@ -36,6 +150,19 @@ export function modelSelectionLabel(
 
 export function runPath(conversationId: string, runId: string): string {
   return `/api/v1/conversations/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}`;
+}
+
+export function conversationHref(conversationId: string, runId: string): string {
+  return `/conversations?${new URLSearchParams({ conversation_id: conversationId, run_id: runId })}`;
+}
+
+export async function readRun(
+  conversationId: string,
+  runId: string,
+  signal?: AbortSignal,
+): Promise<RunView> {
+  const response = await fetch(runPath(conversationId, runId), { cache: 'no-store', signal });
+  return RunViewSchema.parse(await readEnvelope(response));
 }
 
 export async function requestUserPause(
@@ -61,7 +188,6 @@ export async function requestUserPause(
     .strict()
     .parse(await readEnvelope(response));
 }
-
 export function postRunStream(
   url: string,
   body: object,
@@ -90,19 +216,6 @@ export function userPauseCanContinue(run: RunView | null): boolean {
     run.pause.reason === 'user' &&
     run.pause.purpose === 'none'
   );
-}
-
-export function conversationHref(conversationId: string, runId: string): string {
-  return `/conversations?${new URLSearchParams({ conversation_id: conversationId, run_id: runId })}`;
-}
-
-export async function readRun(
-  conversationId: string,
-  runId: string,
-  signal?: AbortSignal,
-): Promise<RunView> {
-  const response = await fetch(runPath(conversationId, runId), { cache: 'no-store', signal });
-  return RunViewSchema.parse(await readEnvelope(response));
 }
 
 export async function readHistoryEventPage(
@@ -239,9 +352,9 @@ export async function followRunEvents({
 }
 
 export const runStatusLabel: Record<RunView['status'], string> = {
-  paused: '已暂停；等待明确继续',
   running: '运行中（读取不会自动继续）',
   suspended_approval: '运行已挂起；请核对决议与继续资格',
+  paused: '已暂停；等待明确继续',
   done: '运行已结束（不等于目标完成）',
   failed: '运行失败',
   cancelled: '已停止；已发生的效果不会撤销',

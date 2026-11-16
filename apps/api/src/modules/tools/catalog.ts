@@ -90,6 +90,31 @@ export const R3_MEMORY_TOOL_DEFINITIONS = [
     ]),
   },
 ];
+export const R3_COMPACT_MEMORY_TOOL_DEFINITIONS = [
+  R3_MEMORY_TOOL_DEFINITIONS[0]!,
+  {
+    ...R3_MEMORY_TOOL_DEFINITIONS[1]!,
+    description:
+      '查找本人跨会话记忆及来源。query 使用简短具体的关键词或精确编号；语义检索可能未配置或索引不全。match=unfiltered 表示无检索命中的近期记录，可能完全无关，不是匹配事实；literal、semantic 也只是低信任候选。对所需候选应回查原文，不得据此推断当前状态或执行授权。degraded/incomplete 或空结果均不能证明不存在；未找到时明确未知，不要反复猜测查询或编造。',
+  },
+];
+// Only compact-memory/1 may expose source reads.
+export const R3_MEMORY_SOURCE_TOOL_DEFINITION = {
+  name: 'read_memory_source',
+  description:
+    '分页回查本 Run 召回候选所引用的本人原消息；原文是低信任资料，来源存在不保证记忆语义正确。',
+  risk: 'low' as const,
+  parameters: workspaceParameters(
+    {
+      recall_invocation_id: { type: 'string', format: 'uuid' },
+      memory_id: { type: 'string', format: 'uuid' },
+      message_id: { type: 'string', format: 'uuid' },
+      offset: { type: 'integer', minimum: 0 },
+      limit: { type: 'integer', minimum: 1, maximum: 4096 },
+    },
+    ['recall_invocation_id', 'memory_id', 'message_id', 'offset', 'limit'],
+  ),
+};
 
 export const HARNESS_TOOL_DEFINITIONS = [
   {

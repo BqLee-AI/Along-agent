@@ -11,6 +11,11 @@ import {
   requestUserPause,
   userPauseCanContinue,
   postRunStream,
+  postCompact,
+  readCompact,
+  compactIsFinal,
+  compactRetryEligible,
+  handoffCompactStreams,
 } from '../src/features/conversations/model/conversation-run';
 import { readEnvelope } from '../src/shared/http/client';
 import { createServer } from 'node:http';
@@ -45,6 +50,83 @@ function event(
 function request(path: string, init?: { signal?: AbortSignal }): NextRequest {
   return new NextRequest(`http://web.test/api/${path}`, init);
 }
+
+describe('Compact control requests', () => {
+  it('uses the same-key active endpoint and only reads status afterward', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const receipt = { status: 'pending' as const, run_id: rid, pause_id: cid };
+    const fetchAction = (async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      return Response.json({ code: 0, data: receipt, msg: 'ok', error: null, request_id: 'req' });
+    }) as typeof fetch;
+    const request = { conversationId: cid, runId: rid, key: cid, receipt: null };
+    const signal = new AbortController().signal;
+    expect(await postCompact(request, 'csrf', signal, fetchAction)).toEqual(receipt);
+    expect(await readCompact(cid, rid, cid, signal, fetchAction)).toEqual(receipt);
+    expect(calls[0]?.url).toBe(`/api/v1/conversations/${cid}/runs/${rid}/actions/compact`);
+    expect(calls[0]?.init?.headers).toEqual({
+      'content-type': 'application/json',
+      'Idempotency-Key': cid,
+      'x-csrf-token': 'csrf',
+    });
+    expect(calls[0]?.init?.body).toBe('{}');
+    expect(calls[1]?.url).toBe(`/api/v1/conversations/${cid}/runs/${rid}/compacts/${cid}`);
+    expect(calls[1]?.init?.method).toBe('GET');
+    expect(compactRetryEligible(request)).toBe(true);
+    expect(compactRetryEligible({ ...request, receipt })).toBe(false);
+  });
+
+  it('uses the idle endpoint and permits an empty-history result', async () => {
+    let url = '';
+    const fetchAction = (async (input: string | URL | Request) => {
+      url = String(input);
+      return Response.json({
+        code: 0,
+        data: { status: 'no_content', run_id: null, pause_id: null },
+        msg: 'ok',
+        error: null,
+        request_id: 'req',
+      });
+    }) as typeof fetch;
+    const receipt = await postCompact(
+      { conversationId: cid, runId: null, key: cid, receipt: null },
+      null,
+      new AbortController().signal,
+      fetchAction,
+    );
+    expect(url).toBe(`/api/v1/conversations/${cid}/actions/compact`);
+    expect(compactIsFinal(receipt)).toBe(true);
+    expect(compactIsFinal({ status: 'published', run_id: rid, pause_id: cid })).toBe(false);
+  });
+
+  it('hands off only the matching continued run without affecting another conversation', () => {
+    const request = { conversationId: cid, runId: rid, key: cid, receipt: null };
+    const receipt = { status: 'continued' as const, run_id: rid, pause_id: cid };
+    const admission = new AbortController();
+    const follower = new AbortController();
+    expect(
+      handoffCompactStreams(
+        request,
+        receipt,
+        { conversationId: rid, runId: rid },
+        admission,
+        follower,
+      ),
+    ).toBe(false);
+    expect(admission.signal.aborted).toBe(false);
+    expect(
+      handoffCompactStreams(
+        request,
+        receipt,
+        { conversationId: cid, runId: rid },
+        admission,
+        follower,
+      ),
+    ).toBe(true);
+    expect(admission.signal.aborted).toBe(true);
+    expect(follower.signal.aborted).toBe(true);
+  });
+});
 
 describe('User pause actions', () => {
   it('posts a user pause with a stable key and preserves pending', async () => {

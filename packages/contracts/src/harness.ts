@@ -14,6 +14,7 @@ import {
 
 export const HARNESS_PROTOCOL_VERSION = 'harness/v6' as const;
 export const HARNESS_R3_PROTOCOL_VERSION = 'harness/v7' as const;
+export const HARNESS_CONTEXT_PROTOCOL_VERSION = 'harness/v8' as const;
 export const HARNESS_MAX_FRAME_BYTES = 1024 * 1024;
 
 const uuid = z.string().uuid();
@@ -121,6 +122,44 @@ const taskCreatedSchema = z
         (task.tzdb_version !== null ||
           (task.timezone_id === 'UTC' && task.fold === 0 && task.resolved_utc_offset_seconds === 0))
       : task.display_version === undefined && task.tzdb_version !== null,
+  );
+
+export const ReadMemorySourceInputSchema = z
+  .object({
+    recall_invocation_id: uuid,
+    memory_id: uuid,
+    message_id: uuid,
+    offset: safe,
+    limit: positive.max(4096),
+  })
+  .strict();
+export const HarnessMemorySourceSchema = z
+  .object({
+    kind: z.literal('memory_source'),
+    recall_invocation_id: uuid,
+    memory_id: uuid,
+    conversation_id: uuid,
+    message_id: uuid,
+    role: z.enum(['user', 'assistant']),
+    content: z.string().max(8192),
+    offset: safe,
+    end: safe,
+    total: safe,
+    has_more: z.boolean(),
+  })
+  .strict()
+  .refine(
+    (source) => {
+      const length = Array.from(source.content).length;
+      return (
+        length <= 4096 &&
+        source.offset <= source.end &&
+        source.end <= source.total &&
+        source.end - source.offset === length &&
+        source.has_more === source.end < source.total
+      );
+    },
+    { message: 'invalid memory source slice' },
   );
 
 export const HarnessToolPayloadSchema = z.union([
@@ -247,6 +286,7 @@ export const HarnessToolPayloadSchema = z.union([
             .object({
               memory_id: uuid,
               content: z.string().min(1).max(12000),
+              match: z.enum(['literal', 'semantic', 'unfiltered']).optional(),
               conversation_id: uuid,
               message_ids: z
                 .array(uuid)
@@ -262,6 +302,7 @@ export const HarnessToolPayloadSchema = z.union([
       completeness: z.enum(['degraded', 'incomplete']),
     })
     .strict(),
+  HarnessMemorySourceSchema,
   taskCreatedSchema,
   z.object({ kind: z.literal('effect_evidence'), evidence_ref: small }).strict(),
   z
@@ -401,8 +442,8 @@ export const HarnessSnapshotSchema = z
   .object({ version: z.literal(2), ...snapshotFields })
   .strict();
 
-// Historical approval snapshots use v2 for execution. The caller must verify
-// legacy references are task receipts before bootstrapping.
+// Historical facts are readable, but only v2 may be written or executed. The
+// caller must verify legacy references are task receipts before bootstrapping.
 export const HistoricalHarnessSnapshotSchema = z.union([
   HarnessSnapshotSchema,
   z.object({ version: z.literal(1), ...snapshotFields }).strict(),
@@ -467,6 +508,92 @@ export const HarnessPauseSnapshotSchema = z
   })
   .strict();
 
+const r3Manifest = z.object({ message_ids: z.array(uuid).max(4096) }).strict();
+const r3SummaryRef = z
+  .object({
+    id: uuid,
+    revision: z
+      .string()
+      .regex(/^[1-9][0-9]*$/)
+      .max(128),
+  })
+  .strict();
+const r3Message = z
+  .object({
+    message_id: uuid,
+    role: z.enum(['user', 'assistant']),
+    content: text,
+  })
+  .strict();
+export const HarnessR3ContextSchema = z
+  .object({
+    manifest: r3Manifest,
+    summary: r3SummaryRef
+      .extend({ text, message_ids: z.array(uuid).max(4096) })
+      .strict()
+      .nullable(),
+    messages: z.array(r3Message).max(4096),
+    input: z.discriminatedUnion('type', [
+      z.object({ type: z.literal('user'), message_id: uuid, content: text }).strict(),
+      z.object({ type: z.literal('compact_control') }).strict(),
+    ]),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const ids = value.manifest.message_ids;
+    const positions = new Map(ids.map((id, index) => [id, index]));
+    const seen = new Set<string>();
+    const check = (part: string[]) => {
+      let previous = -1;
+      for (const id of part) {
+        const index = positions.get(id);
+        if (index === undefined || index <= previous || seen.has(id)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'invalid ordered context partition',
+          });
+          return;
+        }
+        seen.add(id);
+        previous = index;
+      }
+    };
+    if (positions.size !== ids.length)
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'duplicate manifest ID' });
+    check(value.summary?.message_ids ?? []);
+    check(value.messages.map((message) => message.message_id));
+    if (seen.size !== ids.length)
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'incomplete context partition' });
+    if (value.input.type === 'user' && positions.has(value.input.message_id)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'current input is not history' });
+    }
+  });
+export const HarnessR3SnapshotSchema = z
+  .object({
+    version: z.literal(4),
+    original_manifest: r3Manifest,
+    original_summary: r3SummaryRef.nullable(),
+    context: HarnessR3ContextSchema,
+    tool_refs: z
+      .array(uuid)
+      .max(64)
+      .refine((ids) => new Set(ids).size === ids.length),
+    next_call_no: positive,
+    usage: z.object({ iterations: safe, tokens: safe.nullable() }).strict(),
+    waiting: snapshotFields.waiting,
+    native_state: HarnessPauseSnapshotSchema.shape.native_state
+      .extend({ history_index: safe })
+      .strict(),
+  })
+  .strict()
+  .superRefine((snapshot, ctx) => {
+    if (JSON.stringify(snapshot.original_manifest) !== JSON.stringify(snapshot.context.manifest)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'original manifest changed' });
+    }
+    if (snapshot.native_state.history_index > snapshot.native_state.protected_messages.length) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'invalid protected history boundary' });
+    }
+  });
 export const HarnessModelReplySchema = z
   .object({
     message: z
@@ -490,7 +617,11 @@ export const HarnessModelStepSchema = z.discriminatedUnion('type', [
     .strict(),
 ]);
 const request = {
-  protocol: z.enum([HARNESS_PROTOCOL_VERSION, HARNESS_R3_PROTOCOL_VERSION]),
+  protocol: z.enum([
+    HARNESS_PROTOCOL_VERSION,
+    HARNESS_R3_PROTOCOL_VERSION,
+    HARNESS_CONTEXT_PROTOCOL_VERSION,
+  ]),
   request_ref: reference,
 };
 export const HarnessRequestSchema = z
@@ -540,6 +671,16 @@ export const HarnessRequestSchema = z
         max_output_tokens: positive,
       })
       .strict(),
+    z
+      .object({
+        ...request,
+        type: z.literal('context_preview'),
+        messages: z.array(HarnessModelMessageSchema).min(1).max(256),
+        remaining_tokens: safe.nullable(),
+        max_output_tokens: safe,
+        pending_model: z.boolean(),
+      })
+      .strict(),
     z.object({ ...request, type: z.literal('model_next'), model_ref: reference }).strict(),
     z
       .object({
@@ -567,10 +708,26 @@ export const HarnessRequestSchema = z
         args,
       })
       .strict(),
-    z.object({ ...request, type: z.literal('snapshot'), context: HarnessSnapshotSchema }).strict(),
-    z.object({ ...request, type: z.literal('pause_probe') }).strict(),
     z
-      .object({ ...request, type: z.literal('pause_point'), context: HarnessPauseSnapshotSchema })
+      .object({
+        ...request,
+        type: z.literal('snapshot'),
+        context: z.union([HarnessSnapshotSchema, HarnessR3SnapshotSchema]),
+      })
+      .strict(),
+    z
+      .object({
+        ...request,
+        type: z.literal('pause_probe'),
+        after_measurement: z.literal(true).optional(),
+      })
+      .strict(),
+    z
+      .object({
+        ...request,
+        type: z.literal('pause_point'),
+        context: z.union([HarnessPauseSnapshotSchema, HarnessR3SnapshotSchema]),
+      })
       .strict(),
     z
       .object({
@@ -606,11 +763,36 @@ export const HarnessRequestSchema = z
       .strict(),
   ])
   .superRefine((value, context) => {
+    if (value.type === 'context_preview' && value.protocol !== HARNESS_CONTEXT_PROTOCOL_VERSION) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'context preview requires harness/v8',
+      });
+    }
     if (
       (value.type === 'pause_point' || value.type === 'pause_probe') &&
       value.protocol === HARNESS_PROTOCOL_VERSION
     ) {
-      context.addIssue({ code: z.ZodIssueCode.custom, message: 'pause requires harness/v7' });
+      context.addIssue({ code: z.ZodIssueCode.custom, message: 'pause requires harness/v7 or v8' });
+    }
+    if (
+      value.type === 'pause_probe' &&
+      value.after_measurement &&
+      value.protocol !== HARNESS_CONTEXT_PROTOCOL_VERSION
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'measurement marker requires harness/v8',
+      });
+    }
+    if (
+      (value.type === 'snapshot' || value.type === 'pause_point') &&
+      (value.protocol === HARNESS_CONTEXT_PROTOCOL_VERSION) !== (value.context.version === 4)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'snapshot version does not match protocol',
+      });
     }
     if (value.type === 'route_probe' && (value.stage === 'facts') !== (value.facts_ref === null)) {
       context.addIssue({
@@ -682,6 +864,12 @@ export const HarnessStartSchema = z
   .refine(
     (start) =>
       start.tools.every((tool) => tool.name !== 'read_memory_source') &&
+      start.observations.every(
+        (observation) =>
+          observation.view !== 'full' ||
+          observation.result.status !== 'ok' ||
+          observation.result.result.kind !== 'memory_source',
+      ) &&
       (start.protocol === HARNESS_R3_PROTOCOL_VERSION ||
         (start.tools.every(
           (tool) => tool.name !== 'remember_memory' && tool.name !== 'recall_memories',
@@ -695,10 +883,88 @@ export const HarnessStartSchema = z
           ))),
     { message: 'memory tools and observations require harness/v7; source lookup is unavailable' },
   );
+export const HarnessR3ContextStartSchema = z
+  .object({
+    protocol: z.literal(HARNESS_CONTEXT_PROTOCOL_VERSION),
+    type: z.literal('start'),
+    mode: z.literal('measure_only').optional(),
+    trusted_context: TrustedExecutionContextSchema.nullable(),
+    r3_context: HarnessR3ContextSchema,
+    tools: z.array(HarnessToolSchema).max(64),
+    context_policy: ContextPolicySchema,
+    routing_policy: RoutingPolicySchema.nullable(),
+    eligible_phase: z.enum(['fresh_first_step', 'disabled']),
+    budget: z.object({ max_iterations: positive, max_tokens: positive }).strict(),
+    snapshot: HarnessR3SnapshotSchema.nullable(),
+    observations: z.array(HarnessObservationSchema).max(64),
+    approval: HarnessApprovalDecisionSchema.nullable(),
+    workspace: workspaceSummarySchema.nullable().optional(),
+  })
+  .strict()
+  .superRefine((start, ctx) => {
+    if (
+      start.mode === 'measure_only' &&
+      (!start.snapshot || start.snapshot.waiting !== null || start.approval !== null)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'measurement requires an unblocked v4 snapshot',
+      });
+    }
+    const current = start.r3_context;
+    if (
+      start.trusted_context &&
+      current.input.type === 'user' &&
+      start.trusted_context.input_message_id !== current.input.message_id
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'trusted input does not match current input',
+      });
+    }
+    if (
+      start.snapshot &&
+      (JSON.stringify(start.snapshot.original_manifest) !== JSON.stringify(current.manifest) ||
+        JSON.stringify(start.snapshot.context.input) !== JSON.stringify(current.input))
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'resume must retain original manifest and input',
+      });
+    }
+    if (start.snapshot) {
+      const previous = start.snapshot.context;
+      const covered = new Set(current.summary?.message_ids ?? []);
+      if (previous.summary?.message_ids.some((id) => !covered.has(id))) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'summary coverage cannot retreat' });
+      }
+      const priorMessages = new Map(
+        previous.messages.map((message) => [message.message_id, message]),
+      );
+      for (const message of current.messages) {
+        const prior = priorMessages.get(message.message_id);
+        if (!prior || prior.role !== message.role || prior.content !== message.content) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'uncovered history changed' });
+        }
+      }
+      if (
+        previous.summary &&
+        current.summary &&
+        previous.summary.id === current.summary.id &&
+        JSON.stringify(previous.summary) !== JSON.stringify(current.summary)
+      ) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'immutable summary changed' });
+      }
+    }
+  });
 export const HarnessReplySchema = z.union([
   z
     .object({
-      protocol: z.enum([HARNESS_PROTOCOL_VERSION, HARNESS_R3_PROTOCOL_VERSION]),
+      protocol: z.enum([
+        HARNESS_PROTOCOL_VERSION,
+        HARNESS_R3_PROTOCOL_VERSION,
+        HARNESS_CONTEXT_PROTOCOL_VERSION,
+      ]),
       type: z.literal('reply'),
       reply_to: reference,
       value: z.unknown(),
@@ -706,7 +972,11 @@ export const HarnessReplySchema = z.union([
     .strict(),
   z
     .object({
-      protocol: z.enum([HARNESS_PROTOCOL_VERSION, HARNESS_R3_PROTOCOL_VERSION]),
+      protocol: z.enum([
+        HARNESS_PROTOCOL_VERSION,
+        HARNESS_R3_PROTOCOL_VERSION,
+        HARNESS_CONTEXT_PROTOCOL_VERSION,
+      ]),
       type: z.literal('reply'),
       reply_to: reference,
       error: z.object({ code: reference, message: z.string().max(8192) }).strict(),
@@ -715,7 +985,11 @@ export const HarnessReplySchema = z.union([
 ]);
 export const HarnessCancelSchema = z
   .object({
-    protocol: z.enum([HARNESS_PROTOCOL_VERSION, HARNESS_R3_PROTOCOL_VERSION]),
+    protocol: z.enum([
+      HARNESS_PROTOCOL_VERSION,
+      HARNESS_R3_PROTOCOL_VERSION,
+      HARNESS_CONTEXT_PROTOCOL_VERSION,
+    ]),
     type: z.literal('cancel'),
     reason: z.string().max(512),
   })
@@ -758,8 +1032,8 @@ export const RunViewSchema = z
     pause: z
       .object({
         pause_id: uuid,
-        reason: z.literal('user'),
-        purpose: z.literal('none'),
+        reason: z.enum(['user', 'runtime']),
+        purpose: z.enum(['none', 'manual_compact', 'automatic_compact']),
         status: z.enum(['pending', 'paused']),
       })
       .strict()
@@ -815,6 +1089,9 @@ export type ExecutionKind = z.infer<typeof ExecutionKindSchema>;
 export type HarnessUsage = z.infer<typeof HarnessUsageSchema>;
 export type HarnessSnapshot = z.infer<typeof HarnessSnapshotSchema>;
 export type HarnessPauseSnapshot = z.infer<typeof HarnessPauseSnapshotSchema>;
+export type HarnessR3Context = z.infer<typeof HarnessR3ContextSchema>;
+export type HarnessR3Snapshot = z.infer<typeof HarnessR3SnapshotSchema>;
+export type HarnessR3ContextStart = z.infer<typeof HarnessR3ContextStartSchema>;
 export type HarnessTool = z.infer<typeof HarnessToolSchema>;
 export type HarnessModelReply = z.infer<typeof HarnessModelReplySchema>;
 export type HarnessRequest = z.infer<typeof HarnessRequestSchema>;

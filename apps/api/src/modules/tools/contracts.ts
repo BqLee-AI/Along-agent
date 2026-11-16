@@ -4,6 +4,8 @@ import type { TimeFailure } from '../time/normalize.js';
 import type { WorkspaceGrant, WorkspaceResult } from '@along/contracts';
 import type { DocumentApprovalReceipt, ElapsedTimeBasis } from '@along/contracts';
 import type { RunOwnership } from '../conversations/run-ownership.js';
+import type { HarnessMemorySourceSchema } from '@along/contracts';
+import type { z } from 'zod';
 
 export const BUSINESS_TOOL_IDS = [
   'propose_task',
@@ -32,6 +34,7 @@ export const DELEGATION_WORKSPACE_WRITE_TOOL_IDS = [
 export const DELEGATION_WORKSPACE_CREATE_TOOL_IDS = ['workspace_create'] as const;
 export const CONTEXT_TOOL_IDS = ['read_run_observation'] as const;
 export const R3_MEMORY_TOOL_IDS = ['remember_memory', 'recall_memories'] as const;
+export const R3_MEMORY_SOURCE_TOOL_ID = 'read_memory_source' as const;
 export const HARNESS_BASE_TOOL_IDS = [...BUSINESS_TOOL_IDS, ...CONTEXT_TOOL_IDS] as const;
 export const DELEGATION_TOOL_IDS = [
   'get_user_prefs',
@@ -49,7 +52,8 @@ export type ToolId =
   | (typeof DELEGATION_TOOL_IDS)[number]
   | (typeof DELEGATION_WORKSPACE_WRITE_TOOL_IDS)[number]
   | (typeof DELEGATION_WORKSPACE_CREATE_TOOL_IDS)[number]
-  | (typeof R3_MEMORY_TOOL_IDS)[number];
+  | (typeof R3_MEMORY_TOOL_IDS)[number]
+  | typeof R3_MEMORY_SOURCE_TOOL_ID;
 
 export const TASK_STATES = [
   'saved',
@@ -201,13 +205,15 @@ export interface MemoryRecallPayload {
   items: {
     memory_id: string;
     content: string;
+    match?: 'literal' | 'semantic' | 'unfiltered';
     conversation_id: string;
     message_ids: string[];
     created_at: string;
     updated_at: string;
   }[];
-  completeness: 'degraded' | 'incomplete';
+  completeness: 'complete' | 'degraded' | 'incomplete';
 }
+export type MemorySourcePayload = z.infer<typeof HarnessMemorySourceSchema>;
 export type ToolPayload =
   | ApprovalPayload
   | DocumentApprovalPayload
@@ -222,6 +228,7 @@ export type ToolPayload =
   | TaskCreatedPayload
   | MemorySavedPayload
   | MemoryRecallPayload
+  | MemorySourcePayload
   | EvidencePayload
   | WorkspaceResult;
 export type ToolResult =

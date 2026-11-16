@@ -1,14 +1,23 @@
 package along_harness
 
+import along_harness.protocol.*
 import along_harness.transport.*
 import along_harness.session.*
 import std.env.*
+import stdx.encoding.json.*
 
 main(): Int64 {
     let pipe = Pipe()
     let harness = Harness(pipe)
     try {
-        if (harness.bootstrap(pipe.checkedFrame())) { harness.loop() }
+        let start = pipe.checkedFrame()
+        if (start.containsKey("mode")) {
+            require(pipe.protocol == "harness/v8" && ref(field(start, "mode")) == "measure_only")
+            pipe.measureOnly = true
+        }
+        if (harness.bootstrap(start)) {
+            if (pipe.measureOnly) { harness.previewContext() } else { harness.loop() }
+        }
         return 0
     } catch (_: Cancelled) {
         // Cancellation already committed in TS; do not manufacture a second terminal receipt.

@@ -236,11 +236,11 @@ maybe('user pause and continue over HTTP', () => {
           [f.run.runId],
         )
       ).rows[0]!;
-      expect(frozen.profile).toBe('pause-memory/1');
+      expect(frozen.profile).toBe('compact-memory/1');
       expect(frozen.tools_allowlist).toContain('remember_memory');
       expect(frozen.tools_allowlist).toContain('recall_memories');
-      expect(frozen.tools_allowlist).not.toContain('read_memory_source');
-      expect(f.exposedTools()).not.toContain('read_memory_source');
+      expect(frozen.tools_allowlist).toContain('read_memory_source');
+      expect(f.exposedTools()).toContain('read_memory_source');
       const pauseKey = randomUUID();
       const body = { reason: 'user', purpose: 'none' };
       const denied = await f.post('pause', body, randomUUID(), f.foreignHeaders);

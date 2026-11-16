@@ -792,7 +792,7 @@ export async function readRunContextObservations(
         const result = await readAcceptedInvocationResult(client, ctx, { ...row, ...accepted });
         if (result.status === 'unknown' || resultKind(result) !== row.outcome_kind)
           throw contextSourceCorrupt();
-        await validateAcceptedMemoryObservation(client, ctx.ownerId, invocationId, result);
+        await validateAcceptedMemoryObservation(client, ctx, invocationId, result);
         observations.push(
           HarnessObservationSchema.parse({
             view: 'full',

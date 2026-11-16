@@ -7,6 +7,8 @@ import type { ConversationDeps } from './contracts.js';
 import { createRoutingRuntime, type RoutingRuntime } from './routing/index.js';
 
 const routingByDeps = new WeakMap<ConversationDeps, RoutingRuntime>();
+// A heuristic over the serialized request, not a provider tokenizer or usage.
+const ESTIMATED_METER_REVISION = 'openai-json-utf8-estimate/1';
 
 /** Freeze optional routing configuration once for each server dependency set. */
 export function routingRuntimeOf(deps: ConversationDeps): RoutingRuntime {
@@ -33,11 +35,16 @@ export function loadHarnessServices(
   // approval attempts. The document loop needs more than eight model rounds.
   const maxIterations = Number(environment.HARNESS_MAX_ITERATIONS ?? 24);
   const maxTokens = Number(environment.HARNESS_MAX_TOKENS ?? 64000);
+  const autoCompactPlanningTokens = Number(
+    environment.HARNESS_AUTO_COMPACT_PLANNING_TOKENS ?? 16384,
+  );
   if (
     !Number.isSafeInteger(maxIterations) ||
     maxIterations < 1 ||
     !Number.isSafeInteger(maxTokens) ||
-    maxTokens < 1
+    maxTokens < 1 ||
+    !Number.isSafeInteger(autoCompactPlanningTokens) ||
+    autoCompactPlanningTokens < 1
   )
     return null;
   let contextPolicy;
@@ -46,6 +53,8 @@ export function loadHarnessServices(
       // The accepted user selection replaces this template before persistence.
       model: 'unbound',
       completionCap: Number(environment.HARNESS_COMPLETION_CAP),
+      inputMeter: 'estimated',
+      meterRevision: ESTIMATED_METER_REVISION,
       ...(!environment.HARNESS_MODEL_WINDOW_TOKENS
         ? {}
         : { modelWindowTokens: Number(environment.HARNESS_MODEL_WINDOW_TOKENS) }),
@@ -61,6 +70,7 @@ export function loadHarnessServices(
     libraryPath: environment.HARNESS_LIBRARY_PATH || '/app/harness/lib',
     maxIterations,
     maxTokens,
+    autoCompactPlanningTokens,
     contextPolicy,
   };
 }
@@ -81,6 +91,14 @@ export const createUserModelTransport: NonNullable<ConversationDeps['modelTransp
     if (policy.model_binding.model !== config.model_id) {
       throw new Error('model measurement binding mismatch');
     }
-    return measureHarnessContext(request, tools, policy);
+    return measureHarnessContext(request, tools, policy, (body) =>
+      policy.meter_revision === ESTIMATED_METER_REVISION
+        ? {
+            quality: 'estimated',
+            input_tokens: Math.ceil(Buffer.byteLength(body, 'utf8') / 3),
+            meter_revision: ESTIMATED_METER_REVISION,
+          }
+        : { quality: 'unavailable', input_tokens: null, meter_revision: 'unavailable/1' },
+    );
   },
 });

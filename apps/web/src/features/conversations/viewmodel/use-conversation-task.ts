@@ -37,12 +37,23 @@ import {
   requestUserPause,
   userPauseCanContinue,
   postRunStream,
+  CompactRequestSchema,
+  postCompact,
+  readCompact,
+  compactIsFinal,
+  compactRetryEligible,
+  handoffCompactStreams,
 } from '@/features/conversations/model/conversation-run';
-import type { ResumeRequest } from '@/features/conversations/model/conversation-run';
+import type {
+  CompactReceipt,
+  CompactRequest,
+  ResumeRequest,
+} from '@/features/conversations/model/conversation-run';
 import {
   conversationSendBlocked,
   clarificationReplyReference,
   selectResumeRequest,
+  compactCommand,
   taskAdmission,
   taskSendEligibility,
 } from '@/features/conversations/model/task';
@@ -124,6 +135,16 @@ export interface ConversationTask {
   pause: () => Promise<void>;
   continuePaused: () => Promise<void>;
   pauseBusy: boolean;
+  compactStatus: {
+    phase: 'submitting' | 'waiting' | 'uncertain' | 'read_error' | 'done';
+    receipt: CompactReceipt | null;
+    message: string | null;
+  } | null;
+  compactBusy: boolean;
+  compactAvailable: boolean;
+  retryCompact: () => Promise<void>;
+  compactRetryAllowed: boolean;
+  refreshCompact: () => void;
   stop: () => Promise<void>;
   refresh: (clearError?: boolean) => Promise<void>;
   leaving: boolean;
@@ -168,6 +189,8 @@ export function useConversationTask({
   const [reading, setReading] = useState(Boolean(conversationId));
   const [stopping, setStopping] = useState(false);
   const [pauseBusy, setPauseBusy] = useState(false);
+  const [compactStatus, setCompactStatus] = useState<ConversationTask['compactStatus']>(null);
+  const [compactGeneration, setCompactGeneration] = useState(0);
   const [streaming, setStreaming] = useState(false);
   const [retryResume, setRetryResume] = useState<ResumeRequest | null>(null);
   const [sendUncertain, setSendUncertain] = useState(false);
@@ -190,6 +213,9 @@ export function useConversationTask({
   const stopRef = useRef(false);
   const pauseActionRef = useRef(false);
   const pauseController = useRef<AbortController | null>(null);
+  const compactRequest = useRef<CompactRequest | null>(null);
+  const compactController = useRef<AbortController | null>(null);
+  const compactLock = useRef(false);
   const streamRef = useRef<AbortController | null>(null);
   const followRef = useRef<AbortController | null>(null);
   const followed = useRef<string | null>(null);
@@ -287,6 +313,21 @@ export function useConversationTask({
       destination.searchParams.set('run_id', rid);
       // Passing Next's internal history state would skip its URL-state synchronization.
       window.history.replaceState(null, '', destination);
+      const version = selectionVersion.current;
+      void readRun(cid, rid)
+        .then((current) => {
+          if (
+            mounted.current &&
+            version === selectionVersion.current &&
+            current.conversation_id === cid &&
+            current.run_id === rid
+          )
+            setRun(current);
+        })
+        .catch(() => {
+          if (mounted.current && version === selectionVersion.current)
+            setReadError('运行状态读取失败，请重新读取会话。');
+        });
     }
     if (conversationRef.current !== cid) return;
     cursors.current.set(rid, Math.max(cursors.current.get(rid) ?? 0, event.seq));
@@ -515,7 +556,21 @@ export function useConversationTask({
         request.signal,
         idempotencyKey,
       );
+      if (idempotencyKey && response.ok && selectedRef.current) {
+        const target = selectedRef.current;
+        const current = await readRun(target.conversationId, target.runId, request.signal);
+        if (current.conversation_id !== target.conversationId || current.run_id !== target.runId)
+          throw new Error('运行身份不匹配。');
+        if (mounted.current && version === selectionVersion.current) setRun(current);
+      }
       await consumeThreadStream(response, (event) => {
+        if (
+          idempotencyKey &&
+          selectedRef.current &&
+          (event.payload.conversation_id !== selectedRef.current.conversationId ||
+            event.payload.run_id !== selectedRef.current.runId)
+        )
+          throw new Error('继续事件与原运行不匹配。');
         if (mounted.current && !request.signal.aborted && version === selectionVersion.current) {
           if (event.type === 'thread.failed') failedEvent = true;
           if (
@@ -530,10 +585,11 @@ export function useConversationTask({
       });
       if (!request.signal.aborted && !expectedEof) {
         const target = selectedRef.current;
-        if (!target) throw new Error('执行连接提前结束，未收到终态或挂起状态。');
-        const current = await readRun(target.conversationId, target.runId, request.signal);
+        const current =
+          target && (await readRun(target.conversationId, target.runId, request.signal));
         if (
-          current.conversation_id !== target.conversationId ||
+          !current ||
+          current.conversation_id !== target?.conversationId ||
           current.run_id !== target.runId ||
           current.status !== 'paused'
         )
@@ -572,7 +628,7 @@ export function useConversationTask({
   }
 
   const active = conversationSendBlocked({
-    busy: busy || stopping,
+    busy: busy || stopping || Boolean(compactStatus && compactStatus.phase !== 'done'),
     reading,
     readError,
     ready: historyReady,
@@ -592,7 +648,107 @@ export function useConversationTask({
   });
   const canReplyToClarification = Boolean(clarificationReplyReference(run, intent, true));
 
+  function finishCompact(request: CompactRequest, receipt: CompactReceipt) {
+    if (request.runId && request.runId !== receipt.run_id)
+      throw new Error('压缩回执与原运行不匹配。');
+    sessionStorage.removeItem(`conversation-compact:${request.conversationId}`);
+    compactRequest.current = null;
+    setCompactStatus({ phase: 'done', receipt, message: null });
+    if (
+      handoffCompactStreams(
+        request,
+        receipt,
+        selectedRef.current,
+        streamRef.current,
+        followRef.current,
+      )
+    ) {
+      // Reconnect read-only from the persisted cursor after dropping the old attempt.
+      followed.current = null;
+      setFollowGeneration((generation) => generation + 1);
+    }
+    void refresh();
+  }
+
+  async function compact(retry = false) {
+    const cid = conversationRef.current;
+    if (!cid || compactLock.current || stopRef.current || unknownRef.current || sendUncertain) {
+      if (!cid) setError('请先打开一个已有会话，再使用 /compact。');
+      return;
+    }
+    if (retry && !compactRetryEligible(compactRequest.current)) return;
+    if (!retry && compactRequest.current) return;
+    const selectedTarget = selectedRef.current;
+    const runId =
+      selectedTarget && (streamRef.current || run?.status === 'running')
+        ? selectedTarget.runId
+        : null;
+    const request = retry
+      ? compactRequest.current!
+      : {
+          conversationId: cid,
+          runId,
+          key: crypto.randomUUID(),
+          receipt: null,
+        };
+    if (request.conversationId !== cid) return;
+    const storageKey = `conversation-compact:${cid}`;
+    compactRequest.current = request;
+    sessionStorage.setItem(storageKey, JSON.stringify(request));
+    compactLock.current = true;
+    const controller = new AbortController();
+    compactController.current = controller;
+    const version = selectionVersion.current;
+    const valid = () =>
+      mounted.current &&
+      !controller.signal.aborted &&
+      conversationRef.current === cid &&
+      selectionVersion.current === version;
+    setCompactStatus({ phase: 'submitting', receipt: null, message: null });
+    setError(null);
+    try {
+      const me = await loadMe(controller.signal);
+      if (!valid()) return;
+      const receipt = await postCompact(request, me.csrf_token, controller.signal);
+      if (!valid()) return;
+      const next = { ...request, receipt };
+      compactRequest.current = next;
+      sessionStorage.setItem(storageKey, JSON.stringify(next));
+      if (compactIsFinal(receipt)) {
+        finishCompact(request, receipt);
+      } else setCompactStatus({ phase: 'waiting', receipt, message: null });
+      setInput((draft) => (compactCommand(draft) === 'compact' ? '' : draft));
+    } catch (failure) {
+      if (!valid()) return;
+      const rejected =
+        failure instanceof ApiReadError && [400, 401, 403, 404, 409, 422].includes(failure.status);
+      if (rejected) {
+        sessionStorage.removeItem(storageKey);
+        compactRequest.current = null;
+      }
+      setCompactStatus({
+        phase: rejected ? 'done' : 'uncertain',
+        receipt: null,
+        message: `${failure instanceof Error ? failure.message : '压缩请求结果未知。'}${rejected ? '' : ' 原请求结果未知，请勿发起新请求。'}`,
+      });
+    } finally {
+      if (compactController.current === controller) {
+        compactController.current = null;
+        compactLock.current = false;
+      }
+    }
+  }
+
   async function send(retry = false) {
+    const command = compactCommand(retry ? (pendingSend.current?.text ?? '') : input);
+    if (command) {
+      if (retry || command === 'invalid') {
+        setError(' /compact 不接受参数，也不能作为普通消息重试。'.trim());
+      } else {
+        await compact();
+      }
+      return;
+    }
     if (
       busyRef.current ||
       unknownRef.current ||
@@ -1068,9 +1224,9 @@ export function useConversationTask({
       readRef.current?.abort();
       workspaceRef.current?.abort();
       cancelRef.current?.abort();
+      pauseController.current?.abort();
       sendRef.current?.abort();
       reminderController.current?.abort();
-      pauseController.current?.abort();
       meRef.current = null;
     };
     // The persistent pane owns the controller; URL selection changes are handled below.
@@ -1088,10 +1244,11 @@ export function useConversationTask({
     streamRef.current = null;
     readRef.current?.abort();
     cancelRef.current?.abort();
-    sendRef.current?.abort();
-    reminderController.current?.abort();
     pauseController.current?.abort();
     pauseActionRef.current = false;
+    setPauseBusy(false);
+    sendRef.current?.abort();
+    reminderController.current?.abort();
     selectedRef.current = conversationId && runId ? { conversationId, runId } : null;
     conversationRef.current = conversationId;
     eventsRef.current = [];
@@ -1114,7 +1271,6 @@ export function useConversationTask({
     setStreaming(false);
     setBusy(false);
     setStopping(false);
-    setPauseBusy(false);
     setLiveReply(false);
     setLiveOriginal(null);
     setError(null);
@@ -1152,6 +1308,98 @@ export function useConversationTask({
   }, [conversationId, runId, initialIntent]);
 
   useEffect(() => {
+    compactController.current?.abort();
+    compactController.current = null;
+    compactLock.current = false;
+    compactRequest.current = null;
+    setCompactStatus(null);
+    if (!conversationId) return;
+    const stored = sessionStorage.getItem(`conversation-compact:${conversationId}`);
+    if (!stored) return;
+    try {
+      const request = CompactRequestSchema.parse(JSON.parse(stored));
+      if (request.conversationId !== conversationId) throw new Error('压缩请求会话不匹配。');
+      if (request.runId && request.receipt && request.runId !== request.receipt.run_id)
+        throw new Error('压缩回执与原运行不匹配。');
+      if (request.receipt && compactIsFinal(request.receipt)) {
+        finishCompact(request, request.receipt);
+      } else {
+        compactRequest.current = request;
+        setCompactStatus(
+          request.receipt
+            ? { phase: 'waiting', receipt: request.receipt, message: null }
+            : { phase: 'uncertain', receipt: null, message: '原压缩请求结果未知；不会自动重试。' },
+        );
+      }
+    } catch {
+      setCompactStatus({
+        phase: 'uncertain',
+        receipt: null,
+        message: '原压缩请求记录无法读取，不能安全重试。',
+      });
+    }
+    return () => {
+      compactController.current?.abort();
+    };
+  }, [conversationId, runId]);
+
+  useEffect(() => {
+    const request = compactRequest.current;
+    const receipt = request?.receipt;
+    if (compactStatus?.phase !== 'waiting' || !request || !receipt?.run_id || !receipt.pause_id)
+      return;
+    const controller = new AbortController();
+    const cid = request.conversationId;
+    const version = selectionVersion.current;
+    let timer = 0;
+    const valid = () =>
+      mounted.current &&
+      !controller.signal.aborted &&
+      conversationRef.current === cid &&
+      version === selectionVersion.current;
+    const poll = async () => {
+      try {
+        const current = await readCompact(
+          cid,
+          receipt.run_id!,
+          receipt.pause_id!,
+          controller.signal,
+        );
+        if (!valid()) return;
+        const next = { ...request, receipt: current };
+        compactRequest.current = next;
+        sessionStorage.setItem(`conversation-compact:${cid}`, JSON.stringify(next));
+        if (compactIsFinal(current)) {
+          finishCompact(request, current);
+          return;
+        }
+        setCompactStatus({ phase: 'waiting', receipt: current, message: null });
+        timer = window.setTimeout(() => void poll(), 1500);
+      } catch (failure) {
+        if (valid())
+          setCompactStatus({
+            phase: 'read_error',
+            receipt: compactRequest.current?.receipt ?? receipt,
+            message: `${failure instanceof Error ? failure.message : '读取压缩状态失败。'} 本次只读查询未继续运行。`,
+          });
+      }
+    };
+    void poll();
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+    };
+    // Polling is read-only and tied to the original operation identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    conversationId,
+    runId,
+    compactStatus?.phase,
+    compactStatus?.receipt?.pause_id,
+    compactGeneration,
+  ]);
+
+  useEffect(() => {
     if (intent === 'document' && !workspaceRef.current) void readWorkspaces();
     // Workspace registration is only a prerequisite of the explicit document shortcut.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1176,6 +1424,7 @@ export function useConversationTask({
     const version = selectionVersion.current;
     const valid = () =>
       mounted.current && !controller.signal.aborted && version === selectionVersion.current;
+    let automaticPause = false;
     void (async () => {
       try {
         await followRunEvents({
@@ -1195,10 +1444,19 @@ export function useConversationTask({
               current.run_id !== target.runId
             )
               throw new Error('运行身份不匹配，未接纳状态。');
+            if (
+              valid() &&
+              current.status === 'paused' &&
+              current.pause?.reason === 'runtime' &&
+              current.pause.purpose === 'automatic_compact'
+            ) {
+              automaticPause = true;
+              setRun(current);
+            }
             return current.status;
           },
         });
-        if (valid()) await refresh();
+        if (valid() && !automaticPause) await refresh();
       } catch (failure) {
         if (valid())
           setReadError(
@@ -1225,9 +1483,20 @@ export function useConversationTask({
   ]);
 
   useEffect(() => {
-    if (!selected || run?.run_id !== selected.runId || run.pause?.status !== 'pending') return;
+    if (
+      !selected ||
+      run?.run_id !== selected.runId ||
+      (run.pause?.status !== 'pending' &&
+        !(
+          run.status === 'paused' &&
+          run.pause?.reason === 'runtime' &&
+          run.pause.purpose === 'automatic_compact'
+        ))
+    )
+      return;
     const controller = new AbortController();
     const version = selectionVersion.current;
+    const automatic = run.pause?.reason === 'runtime' && run.pause.purpose === 'automatic_compact';
     let timer = 0;
     const poll = async () => {
       try {
@@ -1239,9 +1508,28 @@ export function useConversationTask({
           current.run_id !== selected.runId
         )
           throw new Error('运行身份不匹配。');
+        if (automatic && current.status === 'running' && !current.pause) {
+          // Drop the old attempt's streams and reconnect read-only from the
+          // persisted cursor. The accepted admission is never sent again.
+          streamRef.current?.abort();
+          followRef.current?.abort();
+          followRef.current = null;
+          followed.current = null;
+          setFollowGeneration((generation) => generation + 1);
+        }
         setRun(current);
-        if (current.pause?.status === 'pending') timer = window.setTimeout(() => void poll(), 1500);
-        else void refresh();
+        if (automatic && current.status !== 'running' && current.status !== 'paused') {
+          void refresh();
+          return;
+        }
+        if (
+          current.pause?.status === 'pending' ||
+          (current.status === 'paused' &&
+            current.pause?.reason === 'runtime' &&
+            current.pause.purpose === 'automatic_compact')
+        )
+          timer = window.setTimeout(() => void poll(), 1500);
+        else if (!automatic) void refresh();
       } catch (failure) {
         if (mounted.current && !controller.signal.aborted && version === selectionVersion.current) {
           setReadError(failure instanceof Error ? failure.message : '暂停状态读取失败。');
@@ -1254,7 +1542,15 @@ export function useConversationTask({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [selected?.conversationId, selected?.runId, run?.run_id, run?.pause?.status]);
+  }, [
+    selected?.conversationId,
+    selected?.runId,
+    run?.run_id,
+    run?.status,
+    run?.pause?.status,
+    run?.pause?.reason,
+    run?.pause?.purpose,
+  ]);
 
   const previousTranscript = useRef<Map<string, RunTranscript>>(new Map());
   const transcript = useMemo(() => {
@@ -1389,6 +1685,29 @@ export function useConversationTask({
     pause,
     continuePaused,
     pauseBusy,
+    compactStatus,
+    compactBusy: compactStatus?.phase === 'submitting',
+    compactAvailable:
+      !stopping &&
+      !pauseBusy &&
+      !sendUncertain &&
+      !effectsUnknown &&
+      (!compactStatus || compactStatus.phase === 'done') &&
+      (!streaming || Boolean(selected)),
+    compactRetryAllowed:
+      compactStatus?.phase === 'uncertain' && compactRetryEligible(compactRequest.current),
+    retryCompact: async () => {
+      await compact(true);
+    },
+    refreshCompact: () => {
+      if (compactRequest.current?.receipt)
+        setCompactStatus({
+          phase: 'waiting',
+          receipt: compactRequest.current.receipt,
+          message: null,
+        });
+      setCompactGeneration((value) => value + 1);
+    },
     stop,
     refresh: async (clearError) => {
       await refresh(clearError);

@@ -196,3 +196,9 @@ strict body `{checkpoint_id,idempotency_key}`，仅 harness Run 的最后有效�
 - `POST /conversations/{cid}/runs/{rid}/actions/continue`，body 为 `{"pause_id":"<uuid>"}`。仅显式继续有效的用户暂停，在同一 Run 创建唯一后继 attempt 并返回 SSE；预算累计、冻结权限及已接受效果保持，继续前重验当前资格。
 - 只读 direct 路由决策先接纳时该有界动作可完成；暂停先登记时不接纳新的 direct 决策。已接纳工具进入批准等待时，未到达的用户暂停失效，仍按原批准合同处理；取消或终态也使暂停资格失效。未知工具效果不能伪装为可恢复暂停。
 - GET、刷新或重连只读既有状态，不自动继续。暂停不等于批准，也不保证任意崩溃恢复。
+
+## 10. 手动与自动 compact
+
+- `POST /conversations/{cid}/runs/{rid}/actions/compact` 请求活动 Run 在安全点压缩并受控继续同一 Run；`POST /conversations/{cid}/actions/compact` 在会话空闲时接纳独立的用户控制 Run。两个请求均需 CSRF、UUID `Idempotency-Key` 和空对象 `{}`；同键重放不重复创建操作。没有可压缩内容时空闲操作返回 `no_content`，不伪造摘要。
+- `GET /conversations/{cid}/runs/{rid}/compacts/{pause_id}` 只读查询操作回执；等待、发布、继续、失败和取消以持久事实为准，不因读取而执行或继续。手动压缩与自动压缩均保留累计预算、原授权和已接受效果；普通用户暂停仍只能显式继续。
+- 自动触发使用冻结规划窗口的 80% 与应用估算，既不是实测窗口占用，也不替代供应商 usage；计量不可用时不自动触发。摘要和候选是可追溯的低信任历史，不是授权或语义正确性证明。

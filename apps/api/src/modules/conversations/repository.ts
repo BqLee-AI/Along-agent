@@ -19,6 +19,7 @@ import {
   type ThreadEvent,
 } from '@along/stream-protocol';
 import type { ReminderDateSource } from './reminder-date.js';
+import type { AutoCompactPolicy } from './auto-compact-policy.js';
 
 export interface RunRow {
   id: string;
@@ -53,7 +54,8 @@ export interface FrozenContext {
   createResolutionRevision?: 'create-resolution/1' | 'create-resolution/2';
   authorization_revision?: 'delegation/1';
   execution_lifecycle?: 'request-bound' | 'server-owned';
-  execution_profile?: 'pause/1' | 'pause-memory/1';
+  execution_profile?: 'pause/1' | 'pause-memory/1' | 'compact-memory/1';
+  autoCompactPolicy?: AutoCompactPolicy;
   trustedExecutionContext?: TrustedExecutionContext;
 }
 export interface LockedRun {

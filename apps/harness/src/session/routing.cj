@@ -2,6 +2,7 @@ package along_harness.session
 
 import along_harness.protocol.*
 import along_harness.transport.*
+
 import std.collection.*
 import stdx.encoding.json.*
 
@@ -105,7 +106,7 @@ extend Harness {
         let decisionRequest = obj([("decision", text(decision)), ("facts_ref", field(facts, "facts_ref")), ("candidate_intent", candidateIntent), ("reason", text(reason))])
         var receipt = pipe.request("route_decide", decisionRequest).asObject()
         while (receipt.containsKey("pause_requested")) {
-            require(pipe.protocol == "harness/v7")
+            require(pipe.protocol != "harness/v6")
             keys(receipt, ["pause_requested"])
             require(field(receipt, "pause_requested").asBool().getValue())
             if (pausePoint()) { return true }
@@ -149,7 +150,7 @@ extend Harness {
         require(kind == expectedKind)
         checkpoint()
         pipe.ack("render_route_result", obj([("decision_ref", text(decisionRef)), ("invocation_ref", text(id)), ("template_revision", field(policy, "renderer_revision"))]), "rendered")
-        pipe.ack("finish", obj([("outcome", text("done")), ("usage", usage())]), "accepted")
+        pipe.ack("finish", obj([("outcome", text("done")), ("usage", budgetState.usage())]), "accepted")
         return true
     }
 }

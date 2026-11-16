@@ -1,34 +1,122 @@
 import type { PoolClient } from 'pg';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
-import { stateConflict } from '../../http/errors.js';
+import { HarnessMemorySourceSchema, ReadMemorySourceInputSchema } from '@along/contracts';
+import { forbidden, stateConflict, validationError } from '../../http/errors.js';
 import { readDocumentApprovalReceipt } from '../approvals/decision.js';
 import { readFrozenToolApproval } from '../approvals/tool-result.js';
 import { readCreatedTaskReceipt } from '../tasks/create.js';
 import { hashBytes, strictUtf8 } from '../workspaces/service.js';
 import type { ToolContext, ToolResult } from './contracts.js';
 import { approvalReceiptSchema, parseResult, resultKind } from './result-schema.js';
-import { conversationMemorySources } from '../conversations/memory-sources.js';
+import { conversationMemorySources, readMemorySource } from '../conversations/memory-sources.js';
 import { validateMemoryRevisions } from '../memory/authorization.js';
 import { validateRecallReceipt } from '../memory/recall-receipt.js';
+import type { MemoryService } from '../memory/service.js';
+
+/** Revalidate the accepted recall and source ownership within the caller's transaction. */
+export async function readMemorySourceForRecall(
+  client: PoolClient,
+  ctx: Pick<ToolContext, 'ownerId' | 'conversationId' | 'runId'>,
+  service: Pick<MemoryService, 'validateRecallInTransaction'>,
+  rawInput: z.infer<typeof ReadMemorySourceInputSchema>,
+): Promise<z.infer<typeof HarnessMemorySourceSchema>> {
+  const profile = await client.query<{ profile: string | null }>(
+    `SELECT frozen_context->>'execution_profile' AS profile FROM agent_runs
+     WHERE id=$1 AND owner_id=$2 AND conversation_id=$3 FOR SHARE`,
+    [ctx.runId, ctx.ownerId, ctx.conversationId],
+  );
+  if (profile.rows[0]?.profile !== 'compact-memory/1') throw forbidden('memory source unavailable');
+  const input = ReadMemorySourceInputSchema.parse(rawInput);
+  const rows = await client.query<{
+    invocation_id: string;
+    tool_id: string;
+    result_version: number | null;
+    approval_id: string | null;
+    outcome_kind: string | null;
+    accepted_result: unknown;
+  }>(
+    `SELECT invocation_id,tool_id,result_version,approval_id,outcome_kind,accepted_result FROM tool_invocations
+     WHERE invocation_id=$1 AND owner_id=$2 AND conversation_id=$3 AND run_id=$4
+       AND tool_id='recall_memories' AND state='completed' FOR SHARE`,
+    [input.recall_invocation_id, ctx.ownerId, ctx.conversationId, ctx.runId],
+  );
+  const row = rows.rows[0];
+  if (!row) throw forbidden('memory source unavailable');
+  const accepted = await readAcceptedInvocationResult(client, ctx, row);
+  if (accepted.status !== 'ok' || accepted.result.kind !== 'memory_recall')
+    throw forbidden('memory source unavailable');
+  await validateRecallReceipt(
+    client,
+    service,
+    ctx.ownerId,
+    input.recall_invocation_id,
+    accepted.result.items.map((item) => item.memory_id),
+  );
+  const item = accepted.result.items.find((candidate) => candidate.memory_id === input.memory_id);
+  if (!item || !item.message_ids.includes(input.message_id))
+    throw forbidden('memory source unavailable');
+  const source = await readMemorySource(client, {
+    ownerId: ctx.ownerId,
+    conversationId: item.conversation_id,
+    messageId: input.message_id,
+  });
+  let total = 0;
+  let content = '';
+  for (const scalar of source.content) {
+    if (total >= input.offset && total - input.offset < input.limit) content += scalar;
+    total++;
+  }
+  if (input.offset > total) throw validationError('memory source offset out of range');
+  const end = Math.min(total, input.offset + input.limit);
+  return HarnessMemorySourceSchema.parse({
+    kind: 'memory_source',
+    recall_invocation_id: input.recall_invocation_id,
+    memory_id: input.memory_id,
+    conversation_id: item.conversation_id,
+    message_id: input.message_id,
+    role: source.role,
+    content,
+    offset: input.offset,
+    end,
+    total,
+    has_more: end < total,
+  });
+}
 
 export async function validateAcceptedMemoryObservation(
   client: PoolClient,
-  ownerId: string,
+  ctx: Pick<ToolContext, 'ownerId' | 'conversationId' | 'runId'>,
   invocationId: string,
   result: ToolResult,
 ): Promise<void> {
-  if (result.status !== 'ok' || result.result.kind !== 'memory_recall') return;
-  await validateRecallReceipt(
-    client,
-    {
-      validateRecallInTransaction: (transaction, owner, items) =>
-        validateMemoryRevisions(transaction, conversationMemorySources, owner, items),
-    },
-    ownerId,
-    invocationId,
-    result.result.items.map((item) => item.memory_id),
-  );
+  if (result.status !== 'ok') return;
+  const verifier = {
+    validateRecallInTransaction: (
+      transaction: PoolClient,
+      ownerId: string,
+      items: { id: string; revision: number }[],
+    ) => validateMemoryRevisions(transaction, conversationMemorySources, ownerId, items),
+  };
+  if (result.result.kind === 'memory_recall') {
+    await validateRecallReceipt(
+      client,
+      verifier,
+      ctx.ownerId,
+      invocationId,
+      result.result.items.map((item) => item.memory_id),
+    );
+  } else if (result.result.kind === 'memory_source') {
+    const source = result.result;
+    const current = await readMemorySourceForRecall(client, ctx, verifier, {
+      recall_invocation_id: source.recall_invocation_id,
+      memory_id: source.memory_id,
+      message_id: source.message_id,
+      offset: source.offset,
+      limit: Math.max(1, source.end - source.offset),
+    });
+    if (!isDeepStrictEqual(source, current)) throw stateConflict('memory source changed');
+  }
 }
 
 const documentReceiptSchema = z

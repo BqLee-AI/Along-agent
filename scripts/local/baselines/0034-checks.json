@@ -1,0 +1,374 @@
+{
+  "version": "0034",
+  "tables": ["compact_operations", "compact_continuations"],
+  "columns": [
+    {
+      "table": "compact_operations",
+      "name": "pause_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "compact_operations",
+      "name": "owner_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "compact_operations",
+      "name": "conversation_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "compact_operations",
+      "name": "run_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "compact_operations",
+      "name": "attempt_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "compact_operations",
+      "name": "status",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "compact_operations",
+      "name": "freeze_id",
+      "type": "uuid",
+      "required": false,
+      "default": ""
+    },
+    {
+      "table": "compact_operations",
+      "name": "summary_id",
+      "type": "uuid",
+      "required": false,
+      "default": ""
+    },
+    {
+      "table": "compact_operations",
+      "name": "error_code",
+      "type": "text",
+      "required": false,
+      "default": ""
+    },
+    {
+      "table": "compact_operations",
+      "name": "call_started",
+      "type": "bool",
+      "required": true,
+      "default": "false"
+    },
+    {
+      "table": "compact_operations",
+      "name": "usage_recorded",
+      "type": "bool",
+      "required": true,
+      "default": "false"
+    },
+    {
+      "table": "compact_operations",
+      "name": "usage_tokens",
+      "type": "int8",
+      "required": false,
+      "default": ""
+    },
+    {
+      "table": "compact_operations",
+      "name": "candidate_status",
+      "type": "text",
+      "required": true,
+      "default": "'pending'::text"
+    },
+    {
+      "table": "compact_operations",
+      "name": "candidate_error_code",
+      "type": "text",
+      "required": false,
+      "default": ""
+    },
+    {
+      "table": "compact_operations",
+      "name": "candidate_saved_count",
+      "type": "int4",
+      "required": true,
+      "default": "0"
+    },
+    {
+      "table": "compact_operations",
+      "name": "candidate_failed_count",
+      "type": "int4",
+      "required": true,
+      "default": "0"
+    },
+    {
+      "table": "compact_operations",
+      "name": "created_at",
+      "type": "timestamptz",
+      "required": true,
+      "default": "now()"
+    },
+    {
+      "table": "compact_operations",
+      "name": "updated_at",
+      "type": "timestamptz",
+      "required": true,
+      "default": "now()"
+    },
+    {
+      "table": "compact_continuations",
+      "name": "pause_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "compact_continuations",
+      "name": "attempt_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "compact_continuations",
+      "name": "snapshot",
+      "type": "jsonb",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "compact_continuations",
+      "name": "context",
+      "type": "jsonb",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "compact_continuations",
+      "name": "created_at",
+      "type": "timestamptz",
+      "required": true,
+      "default": "now()"
+    }
+  ],
+  "constraints": [
+    {
+      "table": "compact_operations",
+      "name": "compact_operations_status_check",
+      "type": "c",
+      "columns": ["status"],
+      "expression": "(status = ANY (ARRAY['pending'::text, 'running'::text, 'published'::text, 'failed'::text, 'cancelled'::text]))"
+    },
+    {
+      "table": "compact_continuations",
+      "name": "compact_continuations_pause_id_fkey",
+      "type": "f",
+      "columns": ["pause_id"],
+      "target": "compact_operations",
+      "delete_action": "r",
+      "target_columns": ["pause_id"]
+    },
+    {
+      "table": "compact_operations",
+      "name": "compact_operations_error_code_check",
+      "type": "c",
+      "columns": ["error_code"],
+      "expression": "((error_code IS NULL) OR ((length(error_code) >= 1) AND (length(error_code) <= 128)))"
+    },
+    {
+      "table": "compact_operations",
+      "name": "compact_operations_usage_tokens_check",
+      "type": "c",
+      "columns": ["usage_tokens"],
+      "expression": "((usage_tokens IS NULL) OR (usage_tokens >= 0))"
+    },
+    {
+      "table": "compact_operations",
+      "name": "compact_operations_candidate_status_check",
+      "type": "c",
+      "columns": ["candidate_status"],
+      "expression": "(candidate_status = ANY (ARRAY['pending'::text, 'saved'::text, 'failed'::text, 'cancelled'::text]))"
+    },
+    {
+      "table": "compact_operations",
+      "name": "compact_operations_candidate_error_code_check",
+      "type": "c",
+      "columns": ["candidate_error_code"],
+      "expression": "((candidate_error_code IS NULL) OR ((length(candidate_error_code) >= 1) AND (length(candidate_error_code) <= 128)))"
+    },
+    {
+      "table": "compact_operations",
+      "name": "compact_operations_candidate_saved_count_check",
+      "type": "c",
+      "columns": ["candidate_saved_count"],
+      "expression": "(candidate_saved_count >= 0)"
+    },
+    {
+      "table": "compact_operations",
+      "name": "compact_operations_candidate_failed_count_check",
+      "type": "c",
+      "columns": ["candidate_failed_count"],
+      "expression": "(candidate_failed_count >= 0)"
+    },
+    {
+      "table": "compact_operations",
+      "name": "compact_operations_check",
+      "type": "c",
+      "columns": ["usage_recorded", "call_started"],
+      "expression": "((NOT usage_recorded) OR call_started)"
+    },
+    {
+      "table": "compact_operations",
+      "name": "compact_operations_check1",
+      "type": "c",
+      "columns": ["usage_tokens", "usage_recorded"],
+      "expression": "((usage_tokens IS NULL) OR usage_recorded)"
+    },
+    {
+      "table": "compact_continuations",
+      "name": "compact_continuations_attempt_id_fkey",
+      "type": "f",
+      "columns": ["attempt_id"],
+      "target": "run_attempts",
+      "delete_action": "r",
+      "target_columns": ["id"]
+    },
+    {
+      "table": "compact_operations",
+      "name": "compact_operations_check2",
+      "type": "c",
+      "columns": ["status", "call_started", "freeze_id"],
+      "expression": "((status <> 'running'::text) OR (call_started AND (freeze_id IS NOT NULL)))"
+    },
+    {
+      "table": "compact_operations",
+      "name": "compact_operations_check3",
+      "type": "c",
+      "columns": ["status", "call_started", "usage_recorded", "summary_id"],
+      "expression": "((status <> 'published'::text) OR (call_started AND usage_recorded AND (summary_id IS NOT NULL)))"
+    },
+    {
+      "table": "compact_operations",
+      "name": "compact_operations_check4",
+      "type": "c",
+      "columns": ["summary_id", "status"],
+      "expression": "((summary_id IS NULL) OR (status = 'published'::text))"
+    },
+    {
+      "table": "compact_operations",
+      "name": "compact_operations_check5",
+      "type": "c",
+      "columns": ["status", "error_code"],
+      "expression": "((status <> 'failed'::text) OR (error_code IS NOT NULL))"
+    },
+    {
+      "table": "compact_operations",
+      "name": "compact_operations_check6",
+      "type": "c",
+      "columns": ["candidate_status", "candidate_error_code"],
+      "expression": "((candidate_status <> 'failed'::text) OR (candidate_error_code IS NOT NULL))"
+    },
+    {
+      "table": "compact_operations",
+      "name": "compact_operations_pkey",
+      "type": "p",
+      "columns": ["pause_id"]
+    },
+    {
+      "table": "compact_operations",
+      "name": "compact_operations_freeze_id_key",
+      "type": "u",
+      "columns": ["freeze_id"]
+    },
+    {
+      "table": "compact_operations",
+      "name": "compact_operations_summary_id_key",
+      "type": "u",
+      "columns": ["summary_id"]
+    },
+    {
+      "table": "compact_operations",
+      "name": "compact_operations_freeze_id_fkey",
+      "type": "f",
+      "columns": ["freeze_id"],
+      "target": "compact_freezes",
+      "delete_action": "r",
+      "target_columns": ["id"]
+    },
+    {
+      "table": "compact_operations",
+      "name": "compact_operations_summary_id_fkey",
+      "type": "f",
+      "columns": ["summary_id"],
+      "target": "compact_summaries",
+      "delete_action": "r",
+      "target_columns": ["id"]
+    },
+    {
+      "table": "compact_operations",
+      "name": "compact_operations_pause_id_owner_id_conversation_id_run_i_fkey",
+      "type": "f",
+      "columns": ["pause_id", "owner_id", "conversation_id", "run_id", "attempt_id"],
+      "target": "harness_pauses",
+      "delete_action": "r",
+      "target_columns": ["id", "owner_id", "conversation_id", "run_id", "attempt_id"]
+    },
+    {
+      "table": "compact_continuations",
+      "name": "compact_continuations_snapshot_check",
+      "type": "c",
+      "columns": ["snapshot"],
+      "expression": "(octet_length((snapshot)::text) <= 1048576)"
+    },
+    {
+      "table": "compact_continuations",
+      "name": "compact_continuations_context_check",
+      "type": "c",
+      "columns": ["context"],
+      "expression": "(octet_length((context)::text) <= 1048576)"
+    },
+    {
+      "table": "compact_continuations",
+      "name": "compact_continuations_pkey",
+      "type": "p",
+      "columns": ["pause_id"]
+    },
+    {
+      "table": "compact_continuations",
+      "name": "compact_continuations_attempt_id_key",
+      "type": "u",
+      "columns": ["attempt_id"]
+    }
+  ],
+  "triggers": [
+    {
+      "table": "compact_continuations",
+      "name": "compact_continuations_immutable",
+      "type": 27,
+      "function": "run_checkpoints_reject_mutation"
+    }
+  ],
+  "indexes": [
+    {
+      "table": "harness_pauses",
+      "name": "harness_pauses_compact_binding",
+      "unique": true,
+      "method": "btree",
+      "predicate": null,
+      "keys": ["id", "owner_id", "conversation_id", "run_id", "attempt_id"]
+    }
+  ]
+}

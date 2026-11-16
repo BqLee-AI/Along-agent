@@ -1,12 +1,64 @@
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Pool } from 'pg';
-import { stateConflict } from '../../http/errors.js';
+import { HttpError, stateConflict } from '../../http/errors.js';
 import type { ConversationDeps, RunContext } from './contracts.js';
-import { executeHarness } from './harness-authority.js';
+import { executeHarness, executeRuntimeCompact } from './harness-authority.js';
 import { latestAttemptId, lockRun } from './repository.js';
 import { RunOwnership } from './run-ownership.js';
 import { commitTerminal } from './run-state.js';
+import { failCompact, failCompactCandidates, recordCompactUsage } from './compact-operations.js';
+import { isActiveOwner } from '../identity/preferences.js';
+import type { PoolClient } from 'pg';
+
+async function interruptPausedCompact(
+  client: PoolClient,
+  context: Pick<
+    RunContext,
+    'ownerId' | 'conversationId' | 'runId' | 'attemptId' | 'requestId' | 'ownership'
+  >,
+  code: string,
+): Promise<void> {
+  const operation = (
+    await client.query<{
+      pause_id: string;
+      status: string;
+      call_started: boolean;
+      usage_recorded: boolean;
+      summary_id: string | null;
+      candidate_status: string;
+    }>(
+      `SELECT p.id AS pause_id,o.status,o.call_started,o.usage_recorded,o.summary_id,o.candidate_status
+      FROM harness_pauses p JOIN compact_operations o ON o.pause_id=p.id
+      WHERE p.owner_id=$1 AND p.run_id=$2 AND p.attempt_id=$3 AND p.state='paused' AND p.reason='runtime'
+      FOR UPDATE OF p,o`,
+      [context.ownerId, context.runId, context.attemptId],
+    )
+  ).rows[0];
+  if (!operation) return;
+  const binding = { ...context, pauseId: operation.pause_id };
+  if (operation.call_started && !operation.usage_recorded)
+    await recordCompactUsage(client, binding, null);
+  if (operation.status === 'pending' || operation.status === 'running')
+    await failCompact(client, binding, code);
+  else if (
+    operation.status === 'published' &&
+    operation.summary_id &&
+    operation.candidate_status === 'pending'
+  )
+    await failCompactCandidates(client, binding, operation.summary_id, code);
+  await commitTerminal(
+    client,
+    context,
+    'failed',
+    {
+      conversation_id: context.conversationId,
+      run_id: context.runId,
+      error: { code, message: '服务端 compact 执行中断。', http_status: 503 },
+    },
+    { preserveAttemptStatus: true },
+  );
+}
 
 /** Use the control pool's connection settings, with a separate bounded pool. */
 export function createRunDriver(pool: Pool): RunDriver {
@@ -84,19 +136,25 @@ export class RunDriver {
     const owner = context.ownership;
     if (!owner || !this.owners.has(owner) || this.stopping)
       throw stateConflict('Run execution owner unavailable');
+    let current = context;
+    const interrupted = new AbortController();
     let checking = false;
     const probe = setInterval(() => {
       if (checking || owner.signal.aborted) return;
       checking = true;
       void owner
         .transaction(async (client) => {
-          const locked = await lockRun(client, context, false);
-          await owner.assert(client, context.runId, context.attemptId);
-          if (
-            (locked.run.status !== 'running' && locked.run.status !== 'paused') ||
-            (locked.run.status === 'running' && locked.attempt.status !== 'running')
-          )
-            throw stateConflict('Run attempt cannot execute');
+          const attemptId = await latestAttemptId(client, current.ownerId, current.runId);
+          const locked = await lockRun(client, { ...current, attemptId }, false, false);
+          await owner.assert(client, current.runId, attemptId);
+          return (
+            !['running', 'paused'].includes(locked.run.status) ||
+            (locked.run.status === 'running' && locked.attempt.status !== 'running') ||
+            !(await isActiveOwner(client, current.ownerId))
+          );
+        })
+        .then((shouldInterrupt) => {
+          if (shouldInterrupt) interrupted.abort();
         })
         .catch(() => owner.revoke())
         .finally(() => {
@@ -106,11 +164,40 @@ export class RunDriver {
     probe.unref();
     const deadline = setTimeout(() => owner.revoke(), 5 * 60_000);
     deadline.unref();
-    const execution = executeHarness(deps, context, async () => true).finally(async () => {
-      clearInterval(probe);
-      clearTimeout(deadline);
-      await this.release(owner);
-    });
+    const execution = (async () => {
+      for (;;) {
+        await executeHarness(deps, current, async () => true, undefined, interrupted.signal);
+        if (owner.signal.aborted || interrupted.signal.aborted) break;
+        const next = await executeRuntimeCompact(deps, current, interrupted.signal);
+        if (!next) break;
+        current = next;
+      }
+    })()
+      .catch(async (error: unknown) => {
+        if (owner.signal.aborted) return;
+        try {
+          await owner.transaction(async (client) => {
+            const attemptId = await latestAttemptId(client, current.ownerId, current.runId);
+            const binding = { ...current, attemptId };
+            const locked = await lockRun(client, binding, false);
+            await owner.assert(client, current.runId, attemptId);
+            if (locked.run.status === 'paused')
+              await interruptPausedCompact(
+                client,
+                binding,
+                error instanceof HttpError ? error.errorCode : 'COMPACT_RUNTIME_FAILED',
+              );
+          });
+        } catch {
+          // Cancellation, authorization loss or database outage wins. The
+          // orphan scanner retries recovery once ownership is released.
+        }
+      })
+      .finally(async () => {
+        clearInterval(probe);
+        clearTimeout(deadline);
+        await this.release(owner);
+      });
     this.executions.add(execution);
     void execution.catch(() => undefined).finally(() => this.executions.delete(execution));
   }
@@ -126,9 +213,11 @@ export class RunDriver {
         owner_id: string;
         conversation_id: string;
       }>(
-        `SELECT id,owner_id,conversation_id FROM agent_runs
-         WHERE status='running' AND frozen_context->>'execution_lifecycle'='server-owned'
-           AND ($1::uuid IS NULL OR id > $1::uuid)
+        `SELECT id,owner_id,conversation_id FROM agent_runs r
+         WHERE r.frozen_context->>'execution_lifecycle'='server-owned'
+           AND (r.status='running' OR (r.status='paused' AND EXISTS (
+             SELECT 1 FROM harness_pauses p WHERE p.run_id=r.id AND p.state='paused' AND p.reason='runtime'
+           ))) AND ($1::uuid IS NULL OR id > $1::uuid)
          ORDER BY id LIMIT 32`,
         [this.scanAfter],
       );
@@ -149,6 +238,10 @@ export class RunDriver {
               requestId: randomUUID(),
             };
             const locked = await lockRun(client, binding, false, false);
+            if (locked.run.status === 'paused' && locked.attempt.status === 'done') {
+              await interruptPausedCompact(client, binding, 'COMPACT_RUNTIME_INTERRUPTED');
+              return;
+            }
             if (
               locked.run.status !== 'running' ||
               locked.attempt.status !== 'running' ||

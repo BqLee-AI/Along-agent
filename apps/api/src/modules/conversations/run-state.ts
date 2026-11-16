@@ -2,10 +2,16 @@ import type { PoolClient } from 'pg';
 import { ZodError } from 'zod';
 import {
   HistoricalHarnessSnapshotSchema,
+  HarnessR3SnapshotSchema,
   GoalResultSchema,
   workspaceGrantSchema,
 } from '@along/contracts';
-import type { HarnessApprovalDecision, HarnessSnapshot, RunView } from '@along/contracts';
+import type {
+  HarnessApprovalDecision,
+  HarnessR3Snapshot,
+  HarnessSnapshot,
+  RunView,
+} from '@along/contracts';
 import {
   THREAD_PROTOCOL_VERSION,
   ThreadEventSchema,
@@ -31,6 +37,7 @@ import {
   DELEGATION_WORKSPACE_CREATE_TOOL_IDS,
   HARNESS_BASE_TOOL_IDS,
   R3_MEMORY_TOOL_IDS,
+  R3_MEMORY_SOURCE_TOOL_ID,
   TOOL_IDS,
 } from '../tools/contracts.js';
 import { validateWorkspaceGrant, WorkspaceDeniedError } from '../workspaces/service.js';
@@ -130,7 +137,14 @@ export async function commitTerminal(
   // Only accepted assistant deltas become a message. A structured failure
   // without assistant output is a terminal event, not a synthesized turn.
   const text = goal?.answer ?? deltas.rows.map((row) => row.delta).join('');
-  if (text)
+  if (text) {
+    // Admission and compact publication freeze visible history under this same
+    // owner-scoped row lock. Hold it until the assistant message commits.
+    const conversation = await client.query(
+      'SELECT 1 FROM conversations WHERE id=$1 AND owner_id=$2 FOR UPDATE',
+      [context.conversationId, context.ownerId],
+    );
+    if (!conversation.rowCount) throw stateConflict('conversation unavailable');
     await insertMessage(client, {
       ownerId: context.ownerId,
       conversationId: context.conversationId,
@@ -138,6 +152,7 @@ export async function commitTerminal(
       content: text,
       requestId: null,
     });
+  }
   const type =
     status === 'done'
       ? 'thread.completed'
@@ -210,8 +225,10 @@ export function supportsFrozenTools(run: RunRow): boolean {
   return run.tools_allowlist.every(
     (name) =>
       supported.includes(name) ||
-      (frozen.execution_profile === 'pause-memory/1' &&
-        (R3_MEMORY_TOOL_IDS as readonly string[]).includes(name)),
+      ((frozen.execution_profile === 'pause-memory/1' ||
+        frozen.execution_profile === 'compact-memory/1') &&
+        (R3_MEMORY_TOOL_IDS as readonly string[]).includes(name)) ||
+      (frozen.execution_profile === 'compact-memory/1' && name === R3_MEMORY_SOURCE_TOOL_ID),
   );
 }
 
@@ -224,12 +241,12 @@ export async function viewOf(
   const pause = (
     await client.query<{
       id: string;
-      reason: 'user';
-      purpose: 'none';
+      reason: 'user' | 'runtime';
+      purpose: 'none' | 'manual_compact' | 'automatic_compact';
       state: 'pending' | 'paused';
     }>(
       `SELECT id,reason,purpose,state FROM harness_pauses
-       WHERE owner_id=$1 AND run_id=$2 AND state IN ('pending','paused')`,
+     WHERE owner_id=$1 AND run_id=$2 AND state IN ('pending','paused')`,
       [run.owner_id, run.id],
     )
   ).rows[0];
@@ -371,7 +388,8 @@ export async function viewOf(
     can_pause:
       run.execution === 'harness' &&
       (run.frozen_context?.execution_profile === 'pause/1' ||
-        run.frozen_context?.execution_profile === 'pause-memory/1') &&
+        run.frozen_context?.execution_profile === 'pause-memory/1' ||
+        run.frozen_context?.execution_profile === 'compact-memory/1') &&
       run.status === 'running' &&
       !pause,
     attempt_no: attempt.attempt_no,
@@ -410,7 +428,7 @@ export async function readSnapshot(
   client: PoolClient,
   run: RunRow,
   checkpointId: string,
-): Promise<HarnessSnapshot> {
+): Promise<HarnessSnapshot | HarnessR3Snapshot> {
   const checkpoint = (
     await client.query<{ payload: unknown }>(
       `SELECT c.payload FROM run_checkpoints c JOIN run_attempts a ON a.id=c.attempt_id
@@ -419,6 +437,8 @@ export async function readSnapshot(
     )
   ).rows[0];
   if (!checkpoint) throw stateConflict('invalid harness checkpoint');
+  if (run.frozen_context?.execution_profile === 'compact-memory/1')
+    return HarnessR3SnapshotSchema.parse(checkpoint.payload);
   const snapshot = HistoricalHarnessSnapshotSchema.parse(checkpoint.payload);
   if (snapshot.version === 1) {
     if (run.frozen_context?.workspaceGrant)

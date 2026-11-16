@@ -188,9 +188,10 @@ async function dispatchRequest(
     resolveActor = async () => actor;
     const writeRoute =
       pathname === '/api/v1/conversations/messages' ||
-      /^\/api\/v1\/conversations\/[^/]+\/runs\/[^/]+\/actions\/(?:cancel|resume|pause|continue)$/.test(
+      /^\/api\/v1\/conversations\/[^/]+\/runs\/[^/]+\/actions\/(?:cancel|resume|pause|continue|compact)$/.test(
         pathname,
       ) ||
+      /^\/api\/v1\/conversations\/[^/]+\/actions\/compact$/.test(pathname) ||
       /^\/api\/v1\/approvals\/[^/]+\/actions\/(?:confirm|reject|revise)$/.test(pathname) ||
       /^\/api\/v1\/document-approvals\/[^/]+\/actions\/(?:confirm|reject)$/.test(pathname) ||
       /^\/api\/v1\/tasks\/[^/]+\/actions\/cancel$/.test(pathname) ||

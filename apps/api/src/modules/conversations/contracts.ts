@@ -1,16 +1,28 @@
 import type { Pool } from 'pg';
-import type { ContextPolicy, ExecutionKind, HarnessStart, WorkspaceGrant } from '@along/contracts';
+import type {
+  ContextPolicy,
+  ExecutionKind,
+  HarnessR3Context,
+  HarnessStart,
+  WorkspaceGrant,
+} from '@along/contracts';
 import type { ThreadEvent } from '@along/stream-protocol';
 import type { TrustedExecutionContext } from '@along/contracts';
 import type { TimeContext } from '../time/context.js';
 import type { HarnessServices } from './harness-process.js';
 import type { RoutingRuntime } from './routing/index.js';
 import type { RunOwnership } from './run-ownership.js';
+import type { AutoCompactPolicy } from './auto-compact-policy.js';
 
 export interface ConversationDeps {
   pool: Pool | null;
   timeContext: TimeContext;
-  harness?: Omit<HarnessServices, 'model' | 'measure'> | null;
+  harness?:
+    | (Omit<HarnessServices, 'model' | 'measure'> & {
+        autoCompactPolicy?: AutoCompactPolicy;
+        autoCompactPlanningTokens?: number;
+      })
+    | null;
   routing?: RoutingRuntime;
   // A real adapter must enforce the common outbound policy and make measurement
   // describe the exact bytes its model transport sends. No deployment fallback.
@@ -47,9 +59,11 @@ export interface RunContext {
   maxTokens: number;
   timeContext: TimeContext;
   execution: ExecutionKind;
-  executionProfile?: 'pause/1' | 'pause-memory/1';
-  userMessageId: string;
+  /** Null only for a persisted compact control Run; never a message source. */
+  userMessageId: string | null;
+  compactControl?: true;
   allowlist: readonly string[];
+  autoCompactPolicy?: AutoCompactPolicy;
   workspaceGrant?: WorkspaceGrant | null;
   workspaceGrants?: WorkspaceGrant[];
   resumeCheckpointId?: string;
@@ -57,6 +71,8 @@ export interface RunContext {
   messages?: HarnessStart['messages'];
   contextPolicy?: ContextPolicy;
   authorizationRevision?: 'delegation/1';
+  executionProfile?: 'pause/1' | 'pause-memory/1' | 'compact-memory/1';
+  r3Context?: HarnessR3Context;
   trustedExecutionContext?: TrustedExecutionContext;
 }
 
