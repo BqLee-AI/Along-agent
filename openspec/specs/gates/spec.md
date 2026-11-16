@@ -337,10 +337,3 @@ CI SHALL 保留 checks、database 和 integration 三个 required checks；三�
 
 - WHEN 完整范围的数据库、调度、契约、Compose 或静态检查中任一失败或取消
 - THEN 对应 job 不成功，三个 required checks 的合并条件不满足；数据库与正式镜像检查独立运行，不共享可变数据库，不用退出码吞并放行
-
-#### Scenario: 正式运行时只构建一次
-
-- WHEN integration 或本地根契约命令执行
-- THEN 同一入口先从当前树构建正式镜像，合同消费者使用独立 PG；integration 的 Compose 额外复用该镜像且保留两轮全新卷
-- THEN ci/native-tests.txt 中的 native 集成场景在该镜像内执行；数据库入口排除同一清单，不以缺 native 的 skip 当作通过
-- THEN D8 必需消费者仍在本次实际报告中唯一通过；缓存仅复用匹配输入的构建层，不复用旧测试结果

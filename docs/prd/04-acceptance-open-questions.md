@@ -25,7 +25,7 @@
   - 同日本地 120 秒不报 `DATE_CHANGED`，真正本地午夜 20 秒仍问具体日期；无时区先问，缺日期/时段/事项不建批准。新 Run 冻结 anchor/received 与 `reminderDateSource`，不新建表/迁移、不回填旧 Run；工具重放、批准恢复、历史只沿原冻结，未来时间/确认有效期不变。纯函数、真实 HTTP/隔离 PG、正式 native 与真实模型质量须分别取证，规范采纳或历史运行证据不代替新锚实施验收。
   - delegation 的直接创建在结构化 time 澄清中只读提供真实规则错误和 DST 候选；first/second 补充沿同 owner/conversation 的唯一前序关系、相同原文和候选时区继承原锚，补齐后直接创建，无新批准。创建回执本身既不证明已排期，也不证明“尚未排期”，实时状态须读取实际记录。
 - [Required] 验收环境：单镜像 all 角色 + compose 冒烟；Postgres 唯一事实源；Redis 缺席不得影响验收（Redis 已延后）。
-- [Required] CI 合并检查为 `checks`、`database`、`integration`，分别负责静态/Web、PostgreSQL/升级、正式 native/Compose；三个 job 均须成功。PR 按实际范围验证，main 仅纯文档可跳过重集成，代码及未知范围 full。验证编排集中在 `scripts/ci/`；正式镜像同次构建复用，不跨 runner 分发。native 集成清单在镜像执行，不因宿主缺 native 静默跳过。分类与证据边界见 design/13 §3–§4。
+- [Required] CI 合并检查为 `checks`、`database`、`integration`，三者均须成功；按变更范围执行，跳过不计为本次运行证据。分类与验收边界见 design/13 §3–§4。
 - [Required] 工具链验收遵循 Bun 1.4.2 冻结安装、Oxlint 1.89.0、Oxfmt 0.74.0 与 `bun:test`；代码变更使用本地同一 `bun run verify`。依赖优先构建后串行执行全部 workspace 类型检查，保留源码、测试与 Next route typegen。文件级并行保留隔离及 mock/时钟恢复；只读边界 fixture 最多两个真实 CLI 并行。完整验证保留 API 双入口及契约包、真实 PostgreSQL 16 集成文件和 D9 指定集；D1/D2 原边界与断言不因调度改变（见 design/13 §3–§4）。
 - [Required] 同次 verify 仅复用成功 typecheck 构建的共享 packages；失败构建不消费，独立单元入口与跳过 typecheck 的 verify 仍真实准备包，不依赖旧 dist 或跨 job 产物。Compose 宿主不安装没有宿主消费者的依赖，镜像内仍真实执行 Bun 冻结安装、构建与运行；缺/有 `TZDB_VERSION` 两轮全新卷的就绪场景均须保留，格式错误不能作为警告放行。验收结果记在对应 change tasks / PR，不把未执行检查写成完成。
 - [Required · #43] HTTP入口在业务POST收集前复用身份与适用CSRF头门禁；原始JSON字节累计不超过131072（含分块/UTF8），超限413 PAYLOAD_TOO_LARGE，空/畸形JSON400 VALIDATION_ERROR，响应头/envelope/error的request_id一致。拒绝未消费上传先发有限响应再关闭，不等end或无界drain；合法小JSON与keep-alive、冻结确认/取消事务不回归。真实HTTP有限上传和隔离PG覆盖见对应PR；不以此声明DoS、代理缓冲、内存/吞吐或慢连接防护已验收（design/10 §1.1）。

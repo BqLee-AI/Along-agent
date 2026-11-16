@@ -83,7 +83,6 @@
 - PostgreSQL 集成测试每文件用 `createIntegrationDatabase()` 创建随机独立 schema，并在其中应用原始迁移；连接的 `search_path` 不回退 public，worker 不能消费其他文件的夹具。新连接用该句柄的 `connect()`，子进程显式继承该句柄的连接串；结束时 `close()` 只清理本文件创建的 schema。测试角色需有数据库 CREATE 权限。
 - 共享调度驱动放在非 `.test.ts` helper；测试文件不得互相导入来复用函数，避免重复注册套件。数据库夹具与临时故障注入只验证测试边界，不替代生产 Web、真实到点与强杀验收。
 - 并发测试若要求指定先提交者，须在该业务事务已取得目标行写锁后设置可观察屏障，再启动并确认后写者等待；不能把“先调用”或“先等待第三方行锁”当作取得写入权。夹具同步仅放在本文件的隔离 schema，结束时清理，不修改生产锁或添加重试。
-- 后端终止后的接管测试须用 `pg_terminate_backend` 的正数 timeout 确认退出，不能仅凭信号发送成功就假定锁已释放。
 
 ### 6.1 测试策略与测试先行
 
@@ -137,6 +136,5 @@
 
 - PR 必须附：① CI 全绿链接；② 关键测试输出（粘贴或 CI 日志链接）；③ 若触及 D1–D10，每条附变红测试链接或变异证明。
 - Reviewer 只看证据合入：无验收证据、无 Deferred 声明、无 Spec 引用的 PR 直接打回，不进入代码细节评审。
-- Required checks 为 `checks`、`database`、`integration`，三者均须成功；修改仓库保护规则时同步添加 `database`。PR 按范围执行；main 的纯文档改动也走文档范围，其他 main 代码改动保持 full。文档检查文案、规范和格式；Web 运行 verify 与生产构建；已知 API 业务保留数据库与正式 native/Compose，但跳过无关历史升级；独立数据库测试仅运行选中文件。native 文件清单为 `ci/native-tests.txt`，改动它们回退 full，不得缺 native 静默跳过。分类见 design/13 §4。
-- `scripts/ci/` 集中验证编排：`database.sh` 独占 PG，仅准备 API；`runtime.sh` 构建当前生产镜像一次，`contracts.sh` 和 `compose-smoke.sh` 同机复用，分别隔离数据库/卷。`checks` 承担 Web 构建，不阻塞数据库。D3–D6/D9 绑定 database，D7/D8 绑定 integration，D1/D2/D10 绑定 checks；D8 仍校验本次实际报告，不以声明/文件存在代替执行。CI 使用 Docker 层缓存而非旧测试结果，不做跨 runner 镜像传输。
-- 数据库历史升级文件统一限并发 2，API 构建与历史验证重叠，业务集成测试仍等待构建成功；不改用数据库模板或缓存测试结果。正式 Dockerfile 先复制 API/共享包源码及编译配置再构建，随后补齐运行资源与测试，避免仅改测试、文档或 Web 源码就重编 API。CI Compose 的 PG 不发布宿主端口，API 动态绑定回环端口，smoke 每轮读取实际映射。
+- Required checks 为 `checks`、`database`、`integration`，三者均须成功；合入本次拆分时须将 `database` 加入分支保护。按变更范围执行，分类规则见 [design/13 §4](docs/design/13-p0-bootstrap-and-ci-rules.md#4-ci-布局required)。
+- 数据库检查使用 `bash scripts/ci/database.sh`；正式 native 合同使用 `bun run test:contracts`。完整 CI 另运行 Compose 冒烟；D8 以本次实际报告为准。
