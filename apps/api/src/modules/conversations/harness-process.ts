@@ -2,7 +2,6 @@ import { spawn } from 'node:child_process';
 import type { Writable } from 'node:stream';
 import {
   HARNESS_MAX_FRAME_BYTES,
-  HARNESS_PROTOCOL_VERSION,
   HarnessRequestSchema,
   HarnessStartSchema,
   type ContextPolicy,
@@ -119,7 +118,7 @@ export async function runNativeHarness(options: NativeHarnessOptions): Promise<v
   const abort = () => {
     if (!child.stdin.destroyed && child.stdin.writable) {
       child.stdin.write(
-        `${JSON.stringify({ protocol: HARNESS_PROTOCOL_VERSION, type: 'cancel', reason: 'run cancelled' })}\n`,
+        `${JSON.stringify({ protocol: parsedStart.data.protocol, type: 'cancel', reason: 'run cancelled' })}\n`,
       );
     }
     terminate();
@@ -168,6 +167,7 @@ export async function runNativeHarness(options: NativeHarnessOptions): Promise<v
         }
         if (seenReferences.has(parsed.data.request_ref)) throw protocolError();
         const request = parsed.data;
+        if (request.protocol !== parsedStart.data.protocol) throw protocolError();
         seenReferences.add(request.request_ref);
         let reply: unknown;
         try {
@@ -188,13 +188,18 @@ export async function runNativeHarness(options: NativeHarnessOptions): Promise<v
           }
           if (result === undefined) throw protocolError();
           reply = {
-            protocol: HARNESS_PROTOCOL_VERSION,
+            protocol: parsedStart.data.protocol,
             type: 'reply',
             reply_to: request.request_ref,
             value: result,
           };
           terminal =
             request.type === 'suspend' ||
+            (request.type === 'pause_point' &&
+              typeof result === 'object' &&
+              result !== null &&
+              'paused' in result &&
+              result.paused === true) ||
             request.type === 'finish' ||
             (request.type === 'finish_goal' &&
               typeof result === 'object' &&
@@ -204,7 +209,7 @@ export async function runNativeHarness(options: NativeHarnessOptions): Promise<v
         } catch (error) {
           if (!(error instanceof HttpError)) throw error;
           reply = {
-            protocol: HARNESS_PROTOCOL_VERSION,
+            protocol: parsedStart.data.protocol,
             type: 'reply',
             reply_to: request.request_ref,
             error: { code: error.errorCode, message: 'harness request rejected' },

@@ -34,6 +34,9 @@ import {
   readRun,
   ResumeRequestSchema,
   runPath,
+  requestUserPause,
+  userPauseCanContinue,
+  postRunStream,
 } from '@/features/conversations/model/conversation-run';
 import type { ResumeRequest } from '@/features/conversations/model/conversation-run';
 import {
@@ -118,6 +121,9 @@ export interface ConversationTask {
   documentError: { approvalId: string; message: string } | null;
   confirmDocument: (detail: DocumentApprovalDetail) => Promise<void>;
   resume: () => Promise<void>;
+  pause: () => Promise<void>;
+  continuePaused: () => Promise<void>;
+  pauseBusy: boolean;
   stop: () => Promise<void>;
   refresh: (clearError?: boolean) => Promise<void>;
   leaving: boolean;
@@ -161,6 +167,7 @@ export function useConversationTask({
   const [busy, setBusy] = useState(false);
   const [reading, setReading] = useState(Boolean(conversationId));
   const [stopping, setStopping] = useState(false);
+  const [pauseBusy, setPauseBusy] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [retryResume, setRetryResume] = useState<ResumeRequest | null>(null);
   const [sendUncertain, setSendUncertain] = useState(false);
@@ -181,6 +188,8 @@ export function useConversationTask({
   const mounted = useRef(false);
   const busyRef = useRef(false);
   const stopRef = useRef(false);
+  const pauseActionRef = useRef(false);
+  const pauseController = useRef<AbortController | null>(null);
   const streamRef = useRef<AbortController | null>(null);
   const followRef = useRef<AbortController | null>(null);
   const followed = useRef<string | null>(null);
@@ -417,7 +426,10 @@ export function useConversationTask({
           unknownRef.current = true;
           setEffectsUnknown(true);
         }
-        replyPending = current.status === 'running' || current.status === 'suspended_approval';
+        replyPending =
+          current.status === 'running' ||
+          current.status === 'suspended_approval' ||
+          current.status === 'paused';
         const indexed = history.find((item) => item.run_id === current.run_id);
         if (
           current.authorization_revision === 'delegation/1' &&
@@ -479,7 +491,7 @@ export function useConversationTask({
     }
   }
 
-  async function stream(url: string, body: object, text?: string) {
+  async function stream(url: string, body: object, text?: string, idempotencyKey?: string) {
     const request = new AbortController();
     followRef.current?.abort();
     followed.current = null;
@@ -496,16 +508,13 @@ export function useConversationTask({
       const me = await loadMe(request.signal);
       if (!mounted.current || request.signal.aborted || version !== selectionVersion.current)
         return false;
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          accept: 'text/event-stream',
-          ...(me.csrf_token !== null ? { 'x-csrf-token': me.csrf_token } : {}),
-        },
-        body: JSON.stringify(body),
-        signal: request.signal,
-      });
+      const response = await postRunStream(
+        url,
+        body,
+        me.csrf_token,
+        request.signal,
+        idempotencyKey,
+      );
       await consumeThreadStream(response, (event) => {
         if (mounted.current && !request.signal.aborted && version === selectionVersion.current) {
           if (event.type === 'thread.failed') failedEvent = true;
@@ -519,8 +528,17 @@ export function useConversationTask({
           acceptEvent(event, text);
         }
       });
-      if (!request.signal.aborted && !expectedEof)
-        throw new Error('执行连接提前结束，未收到终态或批准挂起事件。');
+      if (!request.signal.aborted && !expectedEof) {
+        const target = selectedRef.current;
+        if (!target) throw new Error('执行连接提前结束，未收到终态或挂起状态。');
+        const current = await readRun(target.conversationId, target.runId, request.signal);
+        if (
+          current.conversation_id !== target.conversationId ||
+          current.run_id !== target.runId ||
+          current.status !== 'paused'
+        )
+          throw new Error('执行连接提前结束，未收到终态或挂起状态。');
+      }
       accepted = !failedEvent;
     } catch (failure) {
       if (mounted.current && !request.signal.aborted && version === selectionVersion.current) {
@@ -862,6 +880,108 @@ export function useConversationTask({
       });
   }
 
+  async function pause() {
+    const target = selectedRef.current;
+    if (
+      !target ||
+      pauseActionRef.current ||
+      stopRef.current ||
+      run?.status !== 'running' ||
+      !run.can_pause ||
+      run.pause
+    )
+      return;
+    pauseActionRef.current = true;
+    setPauseBusy(true);
+    setError(null);
+    const version = selectionVersion.current;
+    const controller = new AbortController();
+    pauseController.current = controller;
+    const valid = () =>
+      mounted.current && !controller.signal.aborted && version === selectionVersion.current;
+    try {
+      const me = await loadMe(controller.signal);
+      if (!valid()) return;
+      const storageKey = `run-pause:${target.conversationId}:${target.runId}:${run.attempt_id}`;
+      const key = sessionStorage.getItem(storageKey) ?? crypto.randomUUID();
+      sessionStorage.setItem(storageKey, key);
+      await requestUserPause(
+        target.conversationId,
+        target.runId,
+        key,
+        me.csrf_token,
+        controller.signal,
+      );
+      if (valid()) await refresh();
+    } catch (failure) {
+      if (valid()) {
+        setError(
+          `${failure instanceof Error ? failure.message : '暂停请求失败。'} 请读取运行状态，重试使用原请求键。`,
+        );
+        await refresh();
+      }
+    } finally {
+      if (pauseController.current === controller) {
+        pauseController.current = null;
+        pauseActionRef.current = false;
+        if (mounted.current && version === selectionVersion.current) setPauseBusy(false);
+      }
+    }
+  }
+
+  async function continuePaused() {
+    const target = selectedRef.current;
+    if (
+      !target ||
+      busyRef.current ||
+      pauseActionRef.current ||
+      stopRef.current ||
+      unknownRef.current ||
+      streamRef.current ||
+      !userPauseCanContinue(run)
+    )
+      return;
+    busyRef.current = true;
+    setBusy(true);
+    setError(null);
+    const version = selectionVersion.current;
+    const controller = new AbortController();
+    pauseController.current = controller;
+    const valid = () =>
+      mounted.current && !controller.signal.aborted && version === selectionVersion.current;
+    try {
+      const current = await readRun(target.conversationId, target.runId, controller.signal);
+      if (!valid()) return;
+      if (
+        current.conversation_id !== target.conversationId ||
+        current.run_id !== target.runId ||
+        !userPauseCanContinue(current) ||
+        current.pause?.pause_id !== run?.pause?.pause_id
+      )
+        throw new Error('暂停点已变化或不可继续，请读取最新状态。');
+      setRun(current);
+      const pauseId = current.pause!.pause_id;
+      const storageKey = `run-continue:${target.conversationId}:${target.runId}:${pauseId}`;
+      const key = sessionStorage.getItem(storageKey) ?? crypto.randomUUID();
+      sessionStorage.setItem(storageKey, key);
+      await stream(
+        `${runPath(target.conversationId, target.runId)}/actions/continue`,
+        { pause_id: pauseId },
+        undefined,
+        key,
+      );
+    } catch (failure) {
+      if (valid())
+        setError(`${failure instanceof Error ? failure.message : '继续失败。'} 请读取原运行状态。`);
+    } finally {
+      if (pauseController.current === controller) {
+        pauseController.current = null;
+        busyRef.current = false;
+        if (mounted.current && version === selectionVersion.current) setBusy(false);
+      }
+    }
+  }
+
   async function stop() {
     const target = selectedRef.current;
     if (!target || stopRef.current) return;
@@ -897,6 +1017,7 @@ export function useConversationTask({
         throw new Error('停止回执身份不匹配。');
       setRun(cancelled);
       // Abort only after the server accepts cancellation, never as a fake receipt.
+      pauseController.current?.abort();
       reminderController.current?.abort();
       followRef.current?.abort();
       streamRef.current?.abort();
@@ -949,6 +1070,7 @@ export function useConversationTask({
       cancelRef.current?.abort();
       sendRef.current?.abort();
       reminderController.current?.abort();
+      pauseController.current?.abort();
       meRef.current = null;
     };
     // The persistent pane owns the controller; URL selection changes are handled below.
@@ -968,6 +1090,8 @@ export function useConversationTask({
     cancelRef.current?.abort();
     sendRef.current?.abort();
     reminderController.current?.abort();
+    pauseController.current?.abort();
+    pauseActionRef.current = false;
     selectedRef.current = conversationId && runId ? { conversationId, runId } : null;
     conversationRef.current = conversationId;
     eventsRef.current = [];
@@ -990,6 +1114,7 @@ export function useConversationTask({
     setStreaming(false);
     setBusy(false);
     setStopping(false);
+    setPauseBusy(false);
     setLiveReply(false);
     setLiveOriginal(null);
     setError(null);
@@ -1098,6 +1223,38 @@ export function useConversationTask({
     streaming,
     followGeneration,
   ]);
+
+  useEffect(() => {
+    if (!selected || run?.run_id !== selected.runId || run.pause?.status !== 'pending') return;
+    const controller = new AbortController();
+    const version = selectionVersion.current;
+    let timer = 0;
+    const poll = async () => {
+      try {
+        const current = await readRun(selected.conversationId, selected.runId, controller.signal);
+        if (!mounted.current || controller.signal.aborted || version !== selectionVersion.current)
+          return;
+        if (
+          current.conversation_id !== selected.conversationId ||
+          current.run_id !== selected.runId
+        )
+          throw new Error('运行身份不匹配。');
+        setRun(current);
+        if (current.pause?.status === 'pending') timer = window.setTimeout(() => void poll(), 1500);
+        else void refresh();
+      } catch (failure) {
+        if (mounted.current && !controller.signal.aborted && version === selectionVersion.current) {
+          setReadError(failure instanceof Error ? failure.message : '暂停状态读取失败。');
+          timer = window.setTimeout(() => void poll(), 1500);
+        }
+      }
+    };
+    timer = window.setTimeout(() => void poll(), 1500);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [selected?.conversationId, selected?.runId, run?.run_id, run?.pause?.status]);
 
   const previousTranscript = useRef<Map<string, RunTranscript>>(new Map());
   const transcript = useMemo(() => {
@@ -1229,6 +1386,9 @@ export function useConversationTask({
     documentError,
     confirmDocument,
     resume,
+    pause,
+    continuePaused,
+    pauseBusy,
     stop,
     refresh: async (clearError) => {
       await refresh(clearError);

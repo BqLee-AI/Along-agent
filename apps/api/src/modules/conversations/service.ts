@@ -271,6 +271,11 @@ export async function startConversationRun(
         });
       }
       await client.query('SELECT id FROM conversations WHERE id=$1 FOR UPDATE', [conversation.id]);
+      const paused = await client.query(
+        "SELECT 1 FROM agent_runs WHERE owner_id=$1 AND conversation_id=$2 AND status='paused' LIMIT 1",
+        [ownerId, conversation.id],
+      );
+      if (paused.rowCount) throw stateConflict('conversation has a paused Run');
 
       const preferences = delegation ? await readUserPreferences(client, ownerId) : null;
       let confirmedTimezone = delegation
@@ -467,6 +472,7 @@ export async function startConversationRun(
           })
         : undefined;
       const frozenContext = {
+        ...(execution === 'harness' ? { execution_profile: 'pause/1' as const } : {}),
         confirmedTimezone,
         anchorReceivedAtUtc: targetContinuation?.anchor ?? reminderDate.anchor,
         receivedAtUtc,
@@ -572,6 +578,7 @@ export async function startConversationRun(
           maxIterations,
           maxTokens,
           execution,
+          ...(execution === 'harness' ? { executionProfile: 'pause/1' as const } : {}),
           userMessageId,
           allowlist,
           ...(messageRefs ? { messageRefs } : {}),

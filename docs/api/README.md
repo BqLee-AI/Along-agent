@@ -129,37 +129,39 @@
 
 ## 7. 全路由表 [Required]
 
-| #   | 方法 | 路径                                             | 鉴权                  | CSRF   | 幂等键 | 说明                                         | 详见                                     |
-| --- | ---- | ------------------------------------------------ | --------------------- | ------ | ------ | -------------------------------------------- | ---------------------------------------- |
-| 1   | GET  | `/me`                                            | 会话（自检）          | 否     | —      | 当前 actor 快照 + CSRF token                 | auth/auth_routes.md                      |
-| 2   | GET  | `/brief`                                         | 是                    | 否     | —      | 每日简报 + 卡片列表（v0 仅 day-in-progress） | brief/brief_routes.md                    |
-| 3   | POST | `/conversations/messages`                        | 是                    | 是     | 是     | 发送消息，SSE 流式回事件                     | conversations/conversations_routes.md    |
-| 4   | GET  | `/conversations/{id}`                            | 是                    | 否     | —      | 会话恢复（历史事件重放）                     | conversations/conversations_routes.md    |
-| 5   | GET  | `/approvals`                                     | 是                    | 否     | —      | 待确认/历史确认列表                          | approvals/approvals_routes.md            |
-| 6   | GET  | `/approvals/{id}`                                | 是                    | 否     | —      | 确认详情（冻结快照+回显）                    | approvals/approvals_routes.md            |
-| 7   | POST | `/approvals/{id}/actions/confirm`                | 是                    | 是     | 是     | 确认，体含 `presentation_hash`               | approvals/approvals_routes.md            |
-| 8   | POST | `/approvals/{id}/actions/reject`                 | 是                    | 是     | 是     | 拒绝                                         | approvals/approvals_routes.md            |
-| 9   | GET  | `/tasks`                                         | 是                    | 否     | —      | 任务列表                                     | tasks/tasks_routes.md                    |
-| 10  | GET  | `/tasks/{id}`                                    | 是                    | 否     | —      | 任务详情                                     | tasks/tasks_routes.md                    |
-| 11  | POST | `/tasks/{id}/actions/cancel`                     | 是                    | 是     | 是     | 取消（幂等）                                 | tasks/tasks_routes.md                    |
-| 12  | GET  | `/tasks/{id}/events`                             | 是                    | 否     | —      | 只追加事件账（按 recorded_at）               | tasks/tasks_routes.md                    |
-| 13  | POST | `/approvals/{id}/actions/revise`                 | 是                    | 是     | 是     | 显式完整修改，返回旧/新 ID，再读新详情确认   | approvals/approvals_routes.md §6         |
-| 14  | GET  | `/conversations/{cid}/runs/{rid}`                | 是                    | 否     | —      | owner-scoped Run/attempt/有效等待点，不执行  | conversations/conversations_routes.md §3 |
-| 15  | POST | `/conversations/{cid}/runs/{rid}/actions/cancel` | 是                    | 是     | 是     | 先持久取消，再通知/终止执行                  | conversations/conversations_routes.md §3 |
-| 16  | POST | `/conversations/{cid}/runs/{rid}/actions/resume` | 是                    | 是     | 是     | 最后有效批准等待点，同 Run 新 attempt；SSE   | conversations/conversations_routes.md §3 |
-| 17  | GET  | `/workspaces`                                    | 是                    | 否     | —      | 当前 owner 的可选受管工作区摘要              | §8                                       |
-| 18  | GET  | `/document-approvals/{id}`                       | 是                    | 否     | —      | 冻结全文预览、授权状态及实际效果             | §8                                       |
-| 19  | POST | `/document-approvals/{id}/actions/confirm`       | 是                    | 是     | body   | 核对完整预览，只记录授权，不写文件           | §8                                       |
-| 20  | POST | `/document-approvals/{id}/actions/reject`        | 是                    | 是     | body   | 记录拒绝，不自动创建替代批准                 | §8                                       |
-| 21  | GET  | `/auth/status`                                   | 匿名有限状态          | 否     | —      | 无写入，不披露候选身份                       | auth/auth_routes.md §4                   |
-| 22  | POST | `/auth/initialize`                               | 仅确证空安装 + Origin | Origin | —      | 唯一管理员单事务开户                         | auth/auth_routes.md §4                   |
-| 23  | POST | `/auth/claim`                                    | 旧签名会话 + Origin   | 是     | —      | 仅转正当前 actor                             | auth/auth_routes.md §4                   |
-| 24  | POST | `/auth/sign-in`                                  | Origin                | Origin | —      | 固定七天 credential 登录                     | auth/auth_routes.md §4                   |
-| 25  | POST | `/auth/sign-out`                                 | 签名会话 + Origin     | 是     | —      | 已确认撤销后清 Cookie                        | auth/auth_routes.md §4                   |
-| 26  | GET  | `/conversations`                                 | 是                    | 否     | —      | 本人会话发现，稳定有界分页                   | conversations/conversations_routes.md §6 |
-| 27  | GET  | `/conversations/{cid}/messages`                  | 是                    | 否     | —      | 本人会话可见消息档案                         | conversations/conversations_routes.md §6 |
-| 28  | GET  | `/conversations/{cid}/runs`                      | 是                    | 否     | —      | Run 索引、可信原话及指定 Run 点查            | conversations/conversations_routes.md §6 |
-| 29  | GET  | `/conversations/{cid}/runs/{rid}/events`         | 是                    | 否     | —      | 按游标只读跟随 Run 已存事件                  | conversations/conversations_routes.md §3 |
+| #   | 方法 | 路径                                               | 鉴权                  | CSRF   | 幂等键 | 说明                                         | 详见                                     |
+| --- | ---- | -------------------------------------------------- | --------------------- | ------ | ------ | -------------------------------------------- | ---------------------------------------- |
+| 1   | GET  | `/me`                                              | 会话（自检）          | 否     | —      | 当前 actor 快照 + CSRF token                 | auth/auth_routes.md                      |
+| 2   | GET  | `/brief`                                           | 是                    | 否     | —      | 每日简报 + 卡片列表（v0 仅 day-in-progress） | brief/brief_routes.md                    |
+| 3   | POST | `/conversations/messages`                          | 是                    | 是     | 是     | 发送消息，SSE 流式回事件                     | conversations/conversations_routes.md    |
+| 4   | GET  | `/conversations/{id}`                              | 是                    | 否     | —      | 会话恢复（历史事件重放）                     | conversations/conversations_routes.md    |
+| 5   | GET  | `/approvals`                                       | 是                    | 否     | —      | 待确认/历史确认列表                          | approvals/approvals_routes.md            |
+| 6   | GET  | `/approvals/{id}`                                  | 是                    | 否     | —      | 确认详情（冻结快照+回显）                    | approvals/approvals_routes.md            |
+| 7   | POST | `/approvals/{id}/actions/confirm`                  | 是                    | 是     | 是     | 确认，体含 `presentation_hash`               | approvals/approvals_routes.md            |
+| 8   | POST | `/approvals/{id}/actions/reject`                   | 是                    | 是     | 是     | 拒绝                                         | approvals/approvals_routes.md            |
+| 9   | GET  | `/tasks`                                           | 是                    | 否     | —      | 任务列表                                     | tasks/tasks_routes.md                    |
+| 10  | GET  | `/tasks/{id}`                                      | 是                    | 否     | —      | 任务详情                                     | tasks/tasks_routes.md                    |
+| 11  | POST | `/tasks/{id}/actions/cancel`                       | 是                    | 是     | 是     | 取消（幂等）                                 | tasks/tasks_routes.md                    |
+| 12  | GET  | `/tasks/{id}/events`                               | 是                    | 否     | —      | 只追加事件账（按 recorded_at）               | tasks/tasks_routes.md                    |
+| 13  | POST | `/approvals/{id}/actions/revise`                   | 是                    | 是     | 是     | 显式完整修改，返回旧/新 ID，再读新详情确认   | approvals/approvals_routes.md §6         |
+| 14  | GET  | `/conversations/{cid}/runs/{rid}`                  | 是                    | 否     | —      | owner-scoped Run/attempt/有效等待点，不执行  | conversations/conversations_routes.md §3 |
+| 15  | POST | `/conversations/{cid}/runs/{rid}/actions/cancel`   | 是                    | 是     | 是     | 先持久取消，再通知/终止执行                  | conversations/conversations_routes.md §3 |
+| 16  | POST | `/conversations/{cid}/runs/{rid}/actions/resume`   | 是                    | 是     | 是     | 最后有效批准等待点，同 Run 新 attempt；SSE   | conversations/conversations_routes.md §3 |
+| 17  | GET  | `/workspaces`                                      | 是                    | 否     | —      | 当前 owner 的可选受管工作区摘要              | §8                                       |
+| 18  | GET  | `/document-approvals/{id}`                         | 是                    | 否     | —      | 冻结全文预览、授权状态及实际效果             | §8                                       |
+| 19  | POST | `/document-approvals/{id}/actions/confirm`         | 是                    | 是     | body   | 核对完整预览，只记录授权，不写文件           | §8                                       |
+| 20  | POST | `/document-approvals/{id}/actions/reject`          | 是                    | 是     | body   | 记录拒绝，不自动创建替代批准                 | §8                                       |
+| 21  | GET  | `/auth/status`                                     | 匿名有限状态          | 否     | —      | 无写入，不披露候选身份                       | auth/auth_routes.md §4                   |
+| 22  | POST | `/auth/initialize`                                 | 仅确证空安装 + Origin | Origin | —      | 唯一管理员单事务开户                         | auth/auth_routes.md §4                   |
+| 23  | POST | `/auth/claim`                                      | 旧签名会话 + Origin   | 是     | —      | 仅转正当前 actor                             | auth/auth_routes.md §4                   |
+| 24  | POST | `/auth/sign-in`                                    | Origin                | Origin | —      | 固定七天 credential 登录                     | auth/auth_routes.md §4                   |
+| 25  | POST | `/auth/sign-out`                                   | 签名会话 + Origin     | 是     | —      | 已确认撤销后清 Cookie                        | auth/auth_routes.md §4                   |
+| 26  | GET  | `/conversations`                                   | 是                    | 否     | —      | 本人会话发现，稳定有界分页                   | conversations/conversations_routes.md §6 |
+| 27  | GET  | `/conversations/{cid}/messages`                    | 是                    | 否     | —      | 本人会话可见消息档案                         | conversations/conversations_routes.md §6 |
+| 28  | GET  | `/conversations/{cid}/runs`                        | 是                    | 否     | —      | Run 索引、可信原话及指定 Run 点查            | conversations/conversations_routes.md §6 |
+| 29  | GET  | `/conversations/{cid}/runs/{rid}/events`           | 是                    | 否     | —      | 按游标只读跟随 Run 已存事件                  | conversations/conversations_routes.md §3 |
+| 30  | POST | `/conversations/{cid}/runs/{rid}/actions/pause`    | 是                    | 是     | header | 请求用户安全点暂停                           | conversations/conversations_routes.md §9 |
+| 31  | POST | `/conversations/{cid}/runs/{rid}/actions/continue` | 是                    | 是     | header | 显式继续用户暂停的同一 Run；SSE              | conversations/conversations_routes.md §9 |
 
 ## 8. R1 工作区与文档批准 [Required]
 

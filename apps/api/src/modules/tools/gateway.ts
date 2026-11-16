@@ -1050,7 +1050,19 @@ export function reserveToolInvocation(
   pool: Pool,
   ctx: ToolContext,
   input: { callKey: string; toolId: string; args: unknown },
-): Promise<{ invocationId: string }> {
+): Promise<{ invocationId: string }>;
+export function reserveToolInvocation(
+  pool: Pool,
+  ctx: ToolContext,
+  input: { callKey: string; toolId: string; args: unknown },
+  options: { deferOnPause: true },
+): Promise<{ invocationId: string } | { pauseRequested: true }>;
+export function reserveToolInvocation(
+  pool: Pool,
+  ctx: ToolContext,
+  input: { callKey: string; toolId: string; args: unknown },
+  options?: { deferOnPause: true },
+): Promise<{ invocationId: string } | { pauseRequested: true }> {
   const readOnly = [
     'list_tasks',
     'get_task',
@@ -1061,7 +1073,7 @@ export function reserveToolInvocation(
     'workspace_read',
     'read_run_observation',
   ].includes(input.toolId);
-  return reserveInvocation(pool, ctx, {
+  const reservation = {
     ...input,
     executionKind:
       input.toolId === 'workspace_apply_replace' ||
@@ -1071,7 +1083,10 @@ export function reserveToolInvocation(
         : readOnly
           ? 'read_only'
           : 'local',
-  });
+  } as const;
+  return options
+    ? reserveInvocation(pool, ctx, reservation, options)
+    : reserveInvocation(pool, ctx, reservation);
 }
 
 export function invokeTool(

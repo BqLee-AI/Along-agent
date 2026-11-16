@@ -7,12 +7,21 @@ import stdx.encoding.json.*
 
 extend Harness {
     protected func loop(): Unit {
+        if (pipe.protocol == "harness/v7" && pausePoint()) { return }
         if (routeFirstStep()) { return }
-        if (budgetState.iterations < budgetState.maxIterations && budgetState.knownTokens < budgetState.maxTokens) { restoreBootstrap() }
+        if (!restoredPause && budgetState.iterations < budgetState.maxIterations && budgetState.knownTokens < budgetState.maxTokens) { restoreBootstrap() }
         while (true) {
+            if (pausePoint()) { return }
+            var m = JsonObject()
+            if (isNull(pendingModel)) {
             if (budgetState.iterations >= budgetState.maxIterations || budgetState.knownTokens >= budgetState.maxTokens) { finish("failed", "BUDGET_EXCEEDED"); return }
             let output = measuredOutput(true)
             var step = pipe.request("model", candidate(output)).asObject()
+            if (str(field(step, "type"), 32) == "pause_requested") {
+                require(pipe.protocol == "harness/v7")
+                keys(step, ["type"])
+                continue
+            }
             let modelRef = "r${pipe.serial}"
             budgetState.iterations++
             let previouslyKnown = budgetState.tokensKnown
@@ -42,12 +51,16 @@ extend Harness {
             let response = field(step, "reply").asObject()
             keys(response, ["message", "usage"])
             acceptUsage(field(response, "usage"), previouslyKnown)
-            let m = field(response, "message").asObject()
+            m = field(response, "message").asObject()
             keys(m, ["content", "tool_calls"])
+            let streamedContent = field(m, "content")
+            if (!isNull(streamedContent)) { str(streamedContent, FRAME_LIMIT) }
+            if (isNull(streamedContent)) { require(streamed.size == 0) }
+            else { require(str(streamedContent, FRAME_LIMIT) == String.fromUtf8(streamed.toArray())) }
+            } else {
+                m = pendingModel.asObject()
+            }
             let content = field(m, "content")
-            if (!isNull(content)) { str(content, FRAME_LIMIT) }
-            if (isNull(content)) { require(streamed.size == 0) }
-            else { require(str(content, FRAME_LIMIT) == String.fromUtf8(streamed.toArray())) }
             let calls = field(m, "tool_calls").asArray()
             require(calls.size() <= 64)
             if (budgetState.knownTokens > budgetState.maxTokens) { finish("failed", "BUDGET_EXCEEDED"); return }
@@ -56,6 +69,9 @@ extend Harness {
                 continue
             }
             if (calls.size() == 0) {
+                pendingModel = m
+                if (pausePoint()) { return }
+                pendingModel = JsonNull()
                 require(!isNull(content))
                 let answer = str(content, FRAME_LIMIT)
                 require(answer.size > 0)
@@ -70,6 +86,9 @@ extend Harness {
             }
             // Exhausted token budget cannot authorize another effect.
             if (budgetState.knownTokens >= budgetState.maxTokens) { finish("failed", "BUDGET_EXCEEDED"); return }
+            pendingModel = m
+            if (pausePoint()) { return }
+            pendingModel = JsonNull()
             let call = calls.get(0).getOrThrow().asObject()
             keys(call, ["id", "type", "function"])
             ref(field(call, "id")); require(str(field(call, "type"), 16) == "function")
@@ -114,6 +133,13 @@ extend Harness {
             if (toolRefs.size() >= 64) { finish("failed", "HARNESS_CONTEXT_LIMIT"); return }
             require(nextCall < SAFE_INTEGER)
             let reservation = pipe.request("reserve", obj([("call_key", text("harness/${nextCall}")), ("tool_id", text(name)), ("args", args)])).asObject()
+            if (reservation.containsKey("pause_requested")) {
+                require(pipe.protocol == "harness/v7")
+                keys(reservation, ["pause_requested"])
+                require(field(reservation, "pause_requested").asBool().getValue())
+                pendingModel = m
+                continue
+            }
             keys(reservation, ["invocation_id"])
             let id = uuid(field(reservation, "invocation_id"))
             let result = pipe.request("invoke", obj([("invocation_id", text(id)), ("tool_id", text(name)), ("args", args)]))

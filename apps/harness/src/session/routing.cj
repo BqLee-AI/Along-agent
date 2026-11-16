@@ -102,7 +102,15 @@ extend Harness {
         else if (intent != "" && !direct) { reason = "INTENT_DISABLED" }
         let decision = if (direct) { "direct" } else { "fallback" }
         let candidateIntent: JsonValue = if (direct) { text(intent) } else { JsonNull() }
-        let receipt = pipe.request("route_decide", obj([("decision", text(decision)), ("facts_ref", field(facts, "facts_ref")), ("candidate_intent", candidateIntent), ("reason", text(reason))])).asObject()
+        let decisionRequest = obj([("decision", text(decision)), ("facts_ref", field(facts, "facts_ref")), ("candidate_intent", candidateIntent), ("reason", text(reason))])
+        var receipt = pipe.request("route_decide", decisionRequest).asObject()
+        while (receipt.containsKey("pause_requested")) {
+            require(pipe.protocol == "harness/v7")
+            keys(receipt, ["pause_requested"])
+            require(field(receipt, "pause_requested").asBool().getValue())
+            if (pausePoint()) { return true }
+            receipt = pipe.request("route_decide", decisionRequest).asObject()
+        }
         keys(receipt, ["decision_ref", "decision", "intent", "tool_id", "args"])
         let decisionRef = uuid(field(receipt, "decision_ref"))
         require(ref(field(receipt, "decision")) == decision)

@@ -53,6 +53,7 @@ export interface FrozenContext {
   createResolutionRevision?: 'create-resolution/1' | 'create-resolution/2';
   authorization_revision?: 'delegation/1';
   execution_lifecycle?: 'request-bound' | 'server-owned';
+  execution_profile?: 'pause/1';
   trustedExecutionContext?: TrustedExecutionContext;
 }
 export interface LockedRun {

@@ -1,0 +1,299 @@
+{
+  "version": "0029",
+  "tables": ["harness_pauses", "harness_pause_resumes"],
+  "columns": [
+    {
+      "table": "harness_pauses",
+      "name": "id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "harness_pauses",
+      "name": "owner_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "harness_pauses",
+      "name": "conversation_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "harness_pauses",
+      "name": "run_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "harness_pauses",
+      "name": "attempt_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "harness_pauses",
+      "name": "idempotency_key",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "harness_pauses",
+      "name": "reason",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "harness_pauses",
+      "name": "purpose",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "harness_pauses",
+      "name": "resume_source",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "harness_pauses",
+      "name": "state",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "harness_pauses",
+      "name": "snapshot",
+      "type": "jsonb",
+      "required": false,
+      "default": ""
+    },
+    {
+      "table": "harness_pauses",
+      "name": "created_at",
+      "type": "timestamptz",
+      "required": true,
+      "default": "now()"
+    },
+    {
+      "table": "harness_pause_resumes",
+      "name": "owner_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "harness_pause_resumes",
+      "name": "idempotency_key",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "harness_pause_resumes",
+      "name": "run_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "harness_pause_resumes",
+      "name": "pause_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "harness_pause_resumes",
+      "name": "attempt_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "harness_pause_resumes",
+      "name": "source",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "harness_pause_resumes",
+      "name": "created_at",
+      "type": "timestamptz",
+      "required": true,
+      "default": "now()"
+    }
+  ],
+  "constraints": [
+    {
+      "table": "harness_pauses",
+      "name": "harness_pauses_reason_check",
+      "type": "c",
+      "columns": ["reason"],
+      "expression": "(reason = 'user'::text)"
+    },
+    {
+      "table": "harness_pauses",
+      "name": "harness_pauses_purpose_check",
+      "type": "c",
+      "columns": ["purpose"],
+      "expression": "(purpose = 'none'::text)"
+    },
+    {
+      "table": "harness_pauses",
+      "name": "harness_pauses_resume_source_check",
+      "type": "c",
+      "columns": ["resume_source"],
+      "expression": "(resume_source = 'user'::text)"
+    },
+    {
+      "table": "harness_pauses",
+      "name": "harness_pauses_state_check",
+      "type": "c",
+      "columns": ["state"],
+      "expression": "(state = ANY (ARRAY['pending'::text, 'paused'::text, 'consumed'::text, 'invalidated'::text]))"
+    },
+    {
+      "table": "harness_pauses",
+      "name": "harness_pauses_check",
+      "type": "c",
+      "columns": ["reason", "purpose", "resume_source"],
+      "expression": "((reason = 'user'::text) AND (purpose = 'none'::text) AND (resume_source = 'user'::text))"
+    },
+    {
+      "table": "harness_pauses",
+      "name": "harness_pauses_check1",
+      "type": "c",
+      "columns": ["state", "snapshot"],
+      "expression": "(((state = 'pending'::text) AND (snapshot IS NULL)) OR (state = 'invalidated'::text) OR ((state = ANY (ARRAY['paused'::text, 'consumed'::text])) AND (snapshot IS NOT NULL)))"
+    },
+    {
+      "table": "harness_pauses",
+      "name": "harness_pauses_pkey",
+      "type": "p",
+      "columns": ["id"]
+    },
+    {
+      "table": "harness_pauses",
+      "name": "harness_pauses_owner_id_idempotency_key_key",
+      "type": "u",
+      "columns": ["owner_id", "idempotency_key"]
+    },
+    {
+      "table": "harness_pauses",
+      "name": "harness_pauses_conversation_id_fkey",
+      "type": "f",
+      "columns": ["conversation_id"],
+      "target": "conversations",
+      "delete_action": "r",
+      "target_columns": ["id"]
+    },
+    {
+      "table": "harness_pauses",
+      "name": "harness_pauses_run_id_fkey",
+      "type": "f",
+      "columns": ["run_id"],
+      "target": "agent_runs",
+      "delete_action": "r",
+      "target_columns": ["id"]
+    },
+    {
+      "table": "harness_pauses",
+      "name": "harness_pauses_attempt_id_fkey",
+      "type": "f",
+      "columns": ["attempt_id"],
+      "target": "run_attempts",
+      "delete_action": "r",
+      "target_columns": ["id"]
+    },
+    {
+      "table": "harness_pause_resumes",
+      "name": "harness_pause_resumes_source_check",
+      "type": "c",
+      "columns": ["source"],
+      "expression": "(source = 'user'::text)"
+    },
+    {
+      "table": "harness_pause_resumes",
+      "name": "harness_pause_resumes_pkey",
+      "type": "p",
+      "columns": ["owner_id", "idempotency_key"]
+    },
+    {
+      "table": "harness_pause_resumes",
+      "name": "harness_pause_resumes_pause_id_key",
+      "type": "u",
+      "columns": ["pause_id"]
+    },
+    {
+      "table": "harness_pause_resumes",
+      "name": "harness_pause_resumes_attempt_id_key",
+      "type": "u",
+      "columns": ["attempt_id"]
+    },
+    {
+      "table": "harness_pause_resumes",
+      "name": "harness_pause_resumes_run_id_fkey",
+      "type": "f",
+      "columns": ["run_id"],
+      "target": "agent_runs",
+      "delete_action": "r",
+      "target_columns": ["id"]
+    },
+    {
+      "table": "harness_pause_resumes",
+      "name": "harness_pause_resumes_pause_id_fkey",
+      "type": "f",
+      "columns": ["pause_id"],
+      "target": "harness_pauses",
+      "delete_action": "r",
+      "target_columns": ["id"]
+    },
+    {
+      "table": "harness_pause_resumes",
+      "name": "harness_pause_resumes_attempt_id_fkey",
+      "type": "f",
+      "columns": ["attempt_id"],
+      "target": "run_attempts",
+      "delete_action": "r",
+      "target_columns": ["id"]
+    }
+  ],
+  "baseline_checks": [
+    {
+      "table": "agent_runs",
+      "name": "agent_runs_status_check",
+      "expression": "(status = ANY (ARRAY['running'::text, 'suspended_approval'::text, 'paused'::text, 'done'::text, 'failed'::text, 'cancelled'::text]))"
+    }
+  ],
+  "triggers": [
+    {
+      "table": "harness_pause_resumes",
+      "name": "harness_pause_resumes_no_update_delete",
+      "type": 27,
+      "function": "run_checkpoints_reject_mutation"
+    }
+  ],
+  "indexes": [
+    {
+      "table": "harness_pauses",
+      "name": "harness_pauses_one_live_run",
+      "unique": true,
+      "method": "btree",
+      "predicate": "(state = ANY (ARRAY['pending'::text, 'paused'::text]))",
+      "keys": ["run_id"]
+    }
+  ]
+}

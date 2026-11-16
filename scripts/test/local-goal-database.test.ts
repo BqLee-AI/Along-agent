@@ -68,9 +68,10 @@ databaseTests('trusted goal schema lifecycle admission against PG16', () => {
     '0024',
     '0025-elapsed',
     '0026',
+    '0028',
   ]) {
     const version = source.slice(0, 4);
-    it(`explicitly upgrades original ${source} to 0028 without rewriting existing identity or Run facts`, async () => {
+    it(`explicitly upgrades original ${source} to 0029 without rewriting existing identity or Run facts`, async () => {
       const directory = await mkdtemp(join(tmpdir(), `goal-${version}-`));
       const migrations = new URL('../../infra/migrations/', import.meta.url);
       try {
@@ -128,13 +129,13 @@ databaseTests('trusted goal schema lifecycle admission against PG16', () => {
               await client.query(
                 `SELECT jsonb_build_object(
               'identity',(SELECT to_jsonb(u) FROM users u WHERE id=$1),
-              'run',(SELECT to_jsonb(r)-'goal_result' FROM agent_runs r WHERE id=$2)) AS value`,
+              'run',(SELECT to_jsonb(r)-'goal_result'-'cancellation_scope_candidates' FROM agent_runs r WHERE id=$2)) AS value`,
                 [ownerId, runId],
               )
             ).rows[0].value;
           });
           await deployment(url, async (database) => {
-            expect(database.targetVersion).toBe('0028');
+            expect(database.targetVersion).toBe('0029');
             expect(await database.classify()).toMatchObject({
               kind: 'supported',
               version,
@@ -143,7 +144,7 @@ databaseTests('trusted goal schema lifecycle admission against PG16', () => {
             await expect(database.initialize()).rejects.toMatchObject({
               code: 'explicit_upgrade_required',
             });
-            expect((await database.upgrade()).version).toBe('0028');
+            expect((await database.upgrade()).version).toBe('0029');
           });
           await sql(url, async (client) => {
             expect(
@@ -164,6 +165,13 @@ databaseTests('trusted goal schema lifecycle admission against PG16', () => {
                 )
               ).rows[0],
             ).toEqual({ goal_result: null, cancellation_scope_candidates: null });
+            expect(
+              (
+                await client.query(`SELECT
+                (SELECT count(*)::int FROM harness_pauses) AS pauses,
+                (SELECT count(*)::int FROM harness_pause_resumes) AS resumes`)
+              ).rows[0],
+            ).toEqual({ pauses: 0, resumes: 0 });
             await client.query(`CREATE FUNCTION goal_reject_restart_ddl() RETURNS event_trigger LANGUAGE plpgsql AS $$
               BEGIN RAISE EXCEPTION 'read-only goal restart attempted DDL'; END; $$;
               CREATE EVENT TRIGGER goal_restart_readonly ON ddl_command_start EXECUTE FUNCTION goal_reject_restart_ddl()`);
@@ -172,10 +180,10 @@ databaseTests('trusted goal schema lifecycle admission against PG16', () => {
             await deployment(url, async (database) => {
               expect(await database.classify()).toMatchObject({
                 kind: 'supported',
-                version: '0028',
+                version: '0029',
               });
-              expect((await database.initialize()).version).toBe('0028');
-              expect((await database.upgrade()).version).toBe('0028');
+              expect((await database.initialize()).version).toBe('0029');
+              expect((await database.upgrade()).version).toBe('0029');
             });
           }
         });
@@ -188,7 +196,7 @@ databaseTests('trusted goal schema lifecycle admission against PG16', () => {
   it('requires true delegated terminal facts rather than SQL NULL from missing legacy or goal keys', async () => {
     await isolated(async (url) => {
       await deployment(url, async (database) => {
-        expect((await database.initialize()).version).toBe('0028');
+        expect((await database.initialize()).version).toBe('0029');
       });
       await sql(url, async (client) => {
         const ownerId = randomUUID();
@@ -235,6 +243,124 @@ databaseTests('trusted goal schema lifecycle admission against PG16', () => {
     });
   }, 30000);
 
+  it('enforces user-only pause integrity and append-only unique continuations', async () => {
+    await isolated(async (url) => {
+      await deployment(url, async (database) => {
+        expect((await database.initialize()).version).toBe('0029');
+      });
+      await sql(url, async (client) => {
+        const owner = randomUUID(),
+          conversation = randomUUID(),
+          run = randomUUID();
+        const attempt = randomUUID(),
+          successor = randomUUID(),
+          pause = randomUUID();
+        await client.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
+          conversation,
+          owner,
+        ]);
+        await client.query(
+          `INSERT INTO agent_runs(id,owner_id,conversation_id,agent_revision,mode,status,
+            budget_max_iterations,budget_max_tokens,frozen_context)
+           VALUES($1,$2,$3,'test','chat','paused',2,100,'{}')`,
+          [run, owner, conversation],
+        );
+        await client.query(
+          `INSERT INTO run_attempts(id,owner_id,run_id,attempt_no,status)
+           VALUES($1,$3,$4,1,'done'),($2,$3,$4,2,'running')`,
+          [attempt, successor, owner, run],
+        );
+        const insertPause = `INSERT INTO harness_pauses
+          (id,owner_id,conversation_id,run_id,attempt_id,idempotency_key,reason,purpose,resume_source,state,snapshot)
+          VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)`;
+        const args = (
+          id: string,
+          reason: string,
+          purpose: string,
+          source: string,
+          state: string,
+          snapshot: string | null,
+        ) => [
+          id,
+          owner,
+          conversation,
+          run,
+          attempt,
+          randomUUID(),
+          reason,
+          purpose,
+          source,
+          state,
+          snapshot,
+        ];
+        for (const invalid of [
+          args(randomUUID(), 'runtime', 'none', 'user', 'pending', null),
+          args(randomUUID(), 'user', 'manual_compact', 'user', 'pending', null),
+          args(randomUUID(), 'user', 'none', 'runtime', 'pending', null),
+          args(randomUUID(), 'user', 'none', 'user', 'pending', '{}'),
+          args(randomUUID(), 'user', 'none', 'user', 'paused', null),
+          args(randomUUID(), 'user', 'none', 'user', 'consumed', null),
+        ]) {
+          await expect(client.query(insertPause, invalid)).rejects.toMatchObject({ code: '23514' });
+        }
+        await client.query(insertPause, args(pause, 'user', 'none', 'user', 'pending', null));
+        await expect(
+          client.query(insertPause, args(randomUUID(), 'user', 'none', 'user', 'pending', null)),
+        ).rejects.toMatchObject({ code: '23505' });
+        await client.query(`UPDATE harness_pauses SET state='paused',snapshot='{}' WHERE id=$1`, [
+          pause,
+        ]);
+        const insertResume = `INSERT INTO harness_pause_resumes
+          (owner_id,idempotency_key,run_id,pause_id,attempt_id,source) VALUES($1,$2,$3,$4,$5,$6)`;
+        await expect(
+          client.query(insertResume, [owner, randomUUID(), run, pause, successor, 'runtime']),
+        ).rejects.toMatchObject({ code: '23514' });
+        const key = randomUUID();
+        await client.query(insertResume, [owner, key, run, pause, successor, 'user']);
+        await expect(
+          client.query(insertResume, [owner, randomUUID(), run, pause, attempt, 'user']),
+        ).rejects.toMatchObject({ code: '23505' });
+        await expect(
+          client.query('UPDATE harness_pause_resumes SET source=source WHERE pause_id=$1', [pause]),
+        ).rejects.toMatchObject({ code: 'P0001' });
+        await expect(
+          client.query('DELETE FROM harness_pause_resumes WHERE pause_id=$1', [pause]),
+        ).rejects.toMatchObject({ code: 'P0001' });
+      });
+    });
+  }, 30000);
+
+  it.each([
+    ['live pause index', 'DROP INDEX harness_pauses_one_live_run'],
+    ['pause snapshot check', 'ALTER TABLE harness_pauses DROP CONSTRAINT harness_pauses_check1'],
+    [
+      'resume append-only trigger',
+      'ALTER TABLE harness_pause_resumes DISABLE TRIGGER harness_pause_resumes_no_update_delete',
+    ],
+  ])(
+    'refuses damaged %s without repair',
+    async (_name, mutation) => {
+      await isolated(async (url) => {
+        await deployment(url, async (database) => {
+          expect((await database.initialize()).version).toBe('0029');
+        });
+        await sql(url, async (client) => {
+          await client.query(mutation);
+        });
+        await deployment(url, async (database) => {
+          expect((await database.classify()).kind).toBe('unknown');
+          await expect(database.initialize()).rejects.toMatchObject({
+            code: 'unknown_database_refused',
+          });
+          await expect(database.upgrade()).rejects.toMatchObject({
+            code: 'unsupported_upgrade_source',
+          });
+        });
+      });
+    },
+    30000,
+  );
+
   it.each([
     [
       'missing result constraint',
@@ -265,7 +391,7 @@ databaseTests('trusted goal schema lifecycle admission against PG16', () => {
     async (_name, mutation) => {
       await isolated(async (url) => {
         await deployment(url, async (database) => {
-          expect((await database.initialize()).version).toBe('0028');
+          expect((await database.initialize()).version).toBe('0029');
         });
         let before: unknown;
         const snapshot = `SELECT jsonb_build_object(

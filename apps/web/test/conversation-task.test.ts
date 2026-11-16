@@ -202,8 +202,8 @@ describe('conversation continuation safety', () => {
     }
   });
 
-  it('cannot bypass an older suspended or running Run by selecting a completed Run', () => {
-    for (const status of ['running', 'suspended_approval'] as const) {
+  it('cannot bypass an older paused, suspended or running Run by selecting a completed Run', () => {
+    for (const status of ['running', 'suspended_approval', 'paused'] as const) {
       expect(
         conversationSendBlocked({
           ...restoredConversation,

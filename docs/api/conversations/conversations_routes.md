@@ -173,7 +173,7 @@ strict body `{checkpoint_id,idempotency_key}`，仅 harness Run 的最后有效�
 - BUDGET_EXCEEDED/429 保持累计 token 额度、迭代耗尽语义；64 工具引用容量耗尽仍为 HARNESS_CONTEXT_LIMIT。输出 cap 不等于 Run 余额，估算不作 usage，缺 usage 保持 unknown。
 - TOOL_EFFECT_UNKNOWN、HARNESS_EXITED、HARNESS_PROTOCOL_ERROR 保留原义及脱敏规则；不因容量处理重发未知动作。模型/计量绑定不兼容按 HARNESS_UNAVAILABLE/503 在启动新 attempt 前拒绝，不隐式换模型。
 - 新工具 read_run_observation 经既有 ToolGateway，不新增公开“按 UUID 任意取结果”端点；当前授权及新 invocation/预算照常。context_slice 不是新 workspace_read，不足以 verified。
-- 继续仍是显式有效批准等待点、同 Run 唯一新 attempt；完整冻结输入/快照引用不丢弃。GET/刷新/重登/同入站补读不创建策略、调用模型/工具或自动继续。公开查询/错误不泄漏原正文、provider body 或计量配置秘密。
+- 批准恢复仍是显式有效批准等待点、同 Run 唯一新 attempt；完整冻结输入/快照引用不丢弃。用户安全点暂停与继续见 §9，不消费批准等待。GET/刷新/重登/同入站补读不创建策略、调用模型/工具或自动继续。公开查询/错误不泄漏原正文、provider body 或计量配置秘密。
 
 ## 8. R2-B 只读路由的公开边界（已实现，默认 off，#88）
 
@@ -187,3 +187,12 @@ strict body `{checkpoint_id,idempotency_key}`，仅 harness Run 的最后有效�
 - direct 回答是既有 provider 正文之外的明确受控来源：唯一真实只读成功 accepted_result、已接受 snapshot 和 TS 固定 renderer，不接受 native 自写正文，不伪造 provider 调用/usage。delta 与内部 render 回执同事务保存后才投影原 `message.delta`，成功终结须真实结果、回执及零模型；GET/重放只读这些原已存事实，不重新查工具或生成答案。
 - 展示不扩大工具结果含义：提醒仅当前有界活动集合，不宣称查全/筛选/已核实；时区仅本人记录的 timezone_id 或未设置，不声称写入；简报仅明确合法单日且最多50张，不将截页说成全量。精确模板及来源约束归 design/19 §9。
 - direct 前可拒识/可选编码失败回原 LLM，事实、协议、权限或 DB 错误不伪作正常拒识；direct 接纳后 reserve/invoke/render 任一失败不切 LLM、不新 slot 重做。原入站 hash/同键冲突、取消动作幂等和当前权限不变；取消先提交仍禁止迟到候选、工具动作或正文，编码等待可 abort。原 SSE 断连、终态和显式批准恢复语义保持。
+
+## 9. 用户安全点暂停和继续
+
+以下动作需当前用户有权访问会话；POST 要求 CSRF 和 UUID `Idempotency-Key`。同键成功后重试重放同一动作，不创建额外的暂停或继续。并发继续时，首个请求占用运行容量期间，同键请求可能先收到 409；稍后以同键重试可读取已接纳结果。
+
+- `POST /conversations/{cid}/runs/{rid}/actions/pause`，body 为 `{"reason":"user","purpose":"none"}`。响应给出 `pause_id` 和 `pending` 或 `paused`；在途模型流和已接纳工具动作须先按真实状态收尾，登记不等于已暂停。
+- `POST /conversations/{cid}/runs/{rid}/actions/continue`，body 为 `{"pause_id":"<uuid>"}`。仅显式继续有效的用户暂停，在同一 Run 创建唯一后继 attempt 并返回 SSE；预算累计、冻结权限及已接受效果保持，继续前重验当前资格。
+- 只读 direct 路由决策先接纳时该有界动作可完成；暂停先登记时不接纳新的 direct 决策。取消或终态使暂停资格失效；未知工具效果不能伪装为可恢复暂停。
+- GET、刷新或重连只读既有状态，不自动继续。暂停不等于批准，也不保证任意崩溃恢复。

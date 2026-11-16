@@ -40,6 +40,7 @@ function composerTask(overrides: Partial<ConversationTask> = {}): ConversationTa
     busy: false,
     reading: false,
     stopping: false,
+    pauseBusy: false,
     streaming: false,
     retryResume: null,
     sendUncertain: false,
@@ -62,6 +63,8 @@ function composerTask(overrides: Partial<ConversationTask> = {}): ConversationTa
     documentError: null,
     async confirmDocument() {},
     async resume() {},
+    async pause() {},
+    async continuePaused() {},
     async stop() {},
     async refresh() {},
     leaving: false,
@@ -257,6 +260,52 @@ describe('durable goal result consumer', () => {
     expect(markup).toContain('data-testid="server-owned-lifecycle"');
     expect(markup).not.toContain('data-testid="request-bound-lifecycle"');
     expect(markup).toContain('停止请使用停止按钮');
+  });
+
+  it('renders user pause controls separately from approval resume without executing actions', () => {
+    let actions = 0;
+    const selected = { conversationId: cid, runId: rid };
+    const paused = {
+      ...run,
+      status: 'paused' as const,
+      pause: {
+        pause_id: rid,
+        status: 'paused' as const,
+        reason: 'user' as const,
+        purpose: 'none' as const,
+      },
+    };
+    const markup = renderToStaticMarkup(
+      createElement(RunStatusPanel, {
+        task: composerTask({
+          selected,
+          run: paused,
+          async continuePaused() {
+            actions++;
+          },
+          async stop() {
+            actions++;
+          },
+        }),
+      }),
+    );
+    expect(markup).toContain('明确继续此运行');
+    expect(markup).toContain('读取和刷新不会继续');
+    expect(markup).toContain('停止此运行');
+    expect(markup).not.toContain('data-testid="resume-run"');
+    expect(actions).toBe(0);
+
+    const pending = renderToStaticMarkup(
+      createElement(RunStatusPanel, {
+        task: composerTask({
+          selected,
+          run: { ...paused, status: 'running', pause: { ...paused.pause, status: 'pending' } },
+        }),
+      }),
+    );
+    expect(pending).toContain('正在等待安全点');
+    expect(pending).not.toContain('明确继续此运行');
+    expect(pending).toContain('停止此运行');
   });
 
   it('keeps each durable goal status independent of Run done and preserves answer, outcomes, clarification and receipts without executing actions', () => {

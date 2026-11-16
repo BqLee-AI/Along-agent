@@ -25,6 +25,7 @@ import {
   cancelConversationRun,
   resumeConversationRun,
 } from './service.js';
+import { requestConversationPause, continueConversationPause } from './harness-authority.js';
 import type { ConversationDeps, StartResult } from './contracts.js';
 import type { TimeContext } from '../time/context.js';
 import type { RoutingRuntime } from './routing/index.js';
@@ -306,7 +307,7 @@ export async function handleConversationRoute(
     }
 
     const runMatch =
-      /^\/api\/v1\/conversations\/([^/]+)\/runs\/([^/]+)(?:\/actions\/(cancel|resume))?$/.exec(
+      /^\/api\/v1\/conversations\/([^/]+)\/runs\/([^/]+)(?:\/actions\/(cancel|resume|pause|continue))?$/.exec(
         pathname,
       );
     if (runMatch) {
@@ -330,6 +331,27 @@ export async function handleConversationRoute(
             deps.body,
           );
           sendJson(res, 200, okEnvelope(view, requestId), requestId);
+        } else if (runMatch[3] === 'pause') {
+          const pause = await requestConversationPause(
+            deps,
+            actor.ownerId,
+            conversationId,
+            runId,
+            deps.body,
+            idempotencyKeyOf(req),
+          );
+          sendJson(res, 200, okEnvelope(pause, requestId), requestId);
+        } else if (runMatch[3] === 'continue') {
+          const started = await continueConversationPause(
+            deps,
+            actor.ownerId,
+            conversationId,
+            runId,
+            requestId,
+            deps.body,
+            idempotencyKeyOf(req),
+          );
+          await streamRun(req, res, deps, started, actor, requestId);
         } else {
           const started = await resumeConversationRun(
             deps,

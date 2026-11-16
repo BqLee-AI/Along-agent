@@ -387,11 +387,23 @@ export async function assertDocumentTargetAvailable(
   throw stateConflict('same-target edit requires a fresh verified read');
 }
 
+export function reserveInvocation(
+  pool: Pool,
+  ctx: ToolContext,
+  input: ReservationInput,
+): Promise<{ invocationId: string }>;
+export function reserveInvocation(
+  pool: Pool,
+  ctx: ToolContext,
+  input: ReservationInput,
+  options: { deferOnPause: true },
+): Promise<{ invocationId: string } | { pauseRequested: true }>;
 export async function reserveInvocation(
   pool: Pool,
   ctx: ToolContext,
   input: ReservationInput,
-): Promise<{ invocationId: string }> {
+  options?: { deferOnPause: true },
+): Promise<{ invocationId: string } | { pauseRequested: true }> {
   const digest = digestInvocationArgs(input.args);
   if (input.callKey.length === 0 || input.callKey.length > 200)
     throw stateConflict('invalid tool call slot');
@@ -415,6 +427,15 @@ export async function reserveInvocation(
       return { invocationId: row.invocation_id };
     }
     if (!binding.canExecute) throw stateConflict('Run/attempt cannot reserve new tool execution');
+    // Pause registration takes the same attempt → Run locks, so the
+    // reservation and pause request have a single ordering.
+    if (options?.deferOnPause) {
+      const pending = await client.query(
+        `SELECT 1 FROM harness_pauses WHERE owner_id=$1 AND run_id=$2 AND attempt_id=$3 AND state='pending'`,
+        [ctx.ownerId, ctx.runId, ctx.attemptId],
+      );
+      if (pending.rowCount) return { pauseRequested: true };
+    }
     if (input.toolId === 'workspace_create' && ctx.authorizationRevision !== 'delegation/1')
       throw forbidden();
     let selected = ctx.workspaceGrant ?? null;

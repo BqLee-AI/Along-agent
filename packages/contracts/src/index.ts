@@ -6,6 +6,7 @@ export { HealthSchema } from './health.js';
 export type { Health } from './health.js';
 export {
   HARNESS_PROTOCOL_VERSION,
+  HARNESS_R3_PROTOCOL_VERSION,
   HARNESS_MAX_FRAME_BYTES,
   ExecutionKindSchema,
   RunStatusSchema,
@@ -17,6 +18,7 @@ export {
   HarnessToolPayloadSchema,
   HarnessToolResultSchema,
   HarnessSnapshotSchema,
+  HarnessPauseSnapshotSchema,
   HistoricalHarnessSnapshotSchema,
   HarnessTaskApprovalDecisionSchema,
   HarnessDocumentApprovalDecisionSchema,
@@ -39,6 +41,7 @@ export type {
   HarnessObservation,
   HarnessModelStep,
   HarnessSnapshot,
+  HarnessPauseSnapshot,
   HarnessTool,
   HarnessModelReply,
   HarnessRequest,

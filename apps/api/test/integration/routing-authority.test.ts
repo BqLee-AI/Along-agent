@@ -2,10 +2,11 @@ import { configureTestModel, controlledModelDeps } from '../helpers/model-select
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import {
-  HARNESS_PROTOCOL_VERSION,
+  HARNESS_R3_PROTOCOL_VERSION,
   RoutingFactsSchema,
   RoutingDecisionReplySchema,
   type HarnessRequest,
+  type HarnessStart,
   type RoutingPolicy,
   type RoutingFacts,
   type RoutingEmbedding,
@@ -24,6 +25,8 @@ import {
   createHarnessSession,
   cancelConversationRun,
   getRunView,
+  requestConversationPause,
+  continueConversationPause,
 } from '../../src/modules/conversations/harness-authority.js';
 import type { HarnessSession } from '../../src/modules/conversations/harness-authority.js';
 import { startConversationRun } from '../../src/modules/conversations/service.js';
@@ -55,7 +58,7 @@ function request<T extends HarnessRequest['type']>(
   value: Omit<Extract<HarnessRequest, { type: T }>, 'type' | 'protocol' | 'request_ref'>,
 ): Extract<HarnessRequest, { type: T }> {
   return {
-    protocol: HARNESS_PROTOCOL_VERSION,
+    protocol: HARNESS_R3_PROTOCOL_VERSION,
     request_ref: randomUUID(),
     type,
     ...value,
@@ -87,10 +90,10 @@ interface Fixture {
   deps: ConversationDeps;
   actor: SeededSession;
   started: StartResult;
-  context: RunContext;
+  context: RunContext & { userMessageId: string };
   events: ThreadEvent[];
   controller: AbortController;
-  session: HarnessSession;
+  session: Omit<HarnessSession, 'start'> & { start: HarnessStart };
   frame: HarnessSession['handleRequest'];
   counts(): { factsCalls: number; embeddingCalls: number; modelCalls: number; renderCalls: number };
   modelInputs: Extract<HarnessRequest, { type: 'model' }>[];
@@ -209,8 +212,8 @@ maybe('routing authority durable consumer behavior', () => {
       idempotency_key: key,
     };
     const started = await startConversationRun(deps, actor.userId, randomUUID(), body, null);
-    if (!started.context) throw new Error('fresh context missing');
-    const context = started.context;
+    if (!started.context?.userMessageId) throw new Error('fresh user context missing');
+    const context = { ...started.context, userMessageId: started.context.userMessageId };
     const events: ThreadEvent[] = [];
     const controller = new AbortController();
     const session = await createHarnessSession(
@@ -222,7 +225,28 @@ maybe('routing authority durable consumer behavior', () => {
       },
       controller.signal,
     );
-    const frame = session.handleRequest;
+    if (session.start.protocol !== HARNESS_R3_PROTOCOL_VERSION)
+      throw new Error('v7 harness protocol expected');
+    const legacySession = { ...session, start: session.start };
+    const probe = async () => {
+      expect(await session.handleRequest(request('pause_probe', {}))).toEqual({ pending: false });
+    };
+    await probe();
+    let directRoute = false;
+    const frame: HarnessSession['handleRequest'] = async (action) => {
+      if (
+        !directRoute &&
+        (action.type === 'model' ||
+          action.type === 'reserve' ||
+          action.type === 'finish_goal' ||
+          (action.type === 'finish' && action.outcome === 'done'))
+      ) {
+        await probe();
+      }
+      const result = await session.handleRequest(action);
+      if (action.type === 'route_decide' && action.decision === 'direct') directRoute = true;
+      return result;
+    };
     const counts = () => ({ factsCalls, embeddingCalls, modelCalls, renderCalls });
     return {
       deps,
@@ -231,7 +255,7 @@ maybe('routing authority durable consumer behavior', () => {
       context,
       events,
       controller,
-      session,
+      session: legacySession,
       frame,
       counts,
       body,
@@ -284,6 +308,230 @@ maybe('routing authority durable consumer behavior', () => {
         template_revision: 'test-renderer/1',
       }),
     );
+  }
+
+  it('pause wins before decision, with no direct receipt or tool, and resumes only once', async () => {
+    const f = await fixture();
+    try {
+      const facts = RoutingFactsSchema.parse(
+        await f.session.handleRequest(request('route_probe', { stage: 'facts', facts_ref: null })),
+      );
+      const pause = await requestConversationPause(
+        f.deps,
+        f.actor.userId,
+        f.context.conversationId,
+        f.context.runId,
+        { reason: 'user', purpose: 'none' },
+        randomUUID(),
+      );
+      expect(
+        await f.session.handleRequest(
+          request('route_decide', {
+            decision: 'direct',
+            facts_ref: facts.facts_ref,
+            candidate_intent: 'prefs_timezone_read',
+            reason: 'rule_match',
+          }),
+        ),
+      ).toEqual({ pause_requested: true });
+      expect(
+        (
+          await database.pool.query(
+            `SELECT 1 FROM run_checkpoints WHERE attempt_id=$1 AND kind='harness_routing_decision'`,
+            [f.context.attemptId],
+          )
+        ).rowCount,
+      ).toBe(0);
+      expect(
+        (
+          await database.pool.query('SELECT 1 FROM tool_invocations WHERE run_id=$1', [
+            f.context.runId,
+          ])
+        ).rowCount,
+      ).toBe(0);
+      expect(await f.session.handleRequest(request('pause_probe', {}))).toEqual({ pending: true });
+      expect(
+        await f.session.handleRequest(
+          request('pause_point', {
+            context: {
+              version: 3,
+              message_refs: [f.context.userMessageId],
+              tool_refs: [],
+              next_call_no: 1,
+              usage: { iterations: 0, tokens: 0 },
+              waiting: null,
+              native_state: {
+                protected_messages: [],
+                units: [],
+                hard_denied: '',
+                closing_goal: false,
+                pending_model: null,
+              },
+            },
+          }),
+        ),
+      ).toEqual({ paused: true });
+      const key = randomUUID();
+      const resumed = await continueConversationPause(
+        f.deps,
+        f.actor.userId,
+        f.context.conversationId,
+        f.context.runId,
+        randomUUID(),
+        { pause_id: pause.pause_id },
+        key,
+      );
+      if (!resumed.context) throw new Error('missing resumed context');
+      const successor = await createHarnessSession(
+        f.deps,
+        resumed.context,
+        async () => true,
+        new AbortController().signal,
+      );
+      try {
+        expect(successor.start.eligible_phase).toBe('disabled');
+        expect(successor.start.snapshot?.usage).toEqual({ iterations: 0, tokens: 0 });
+        const replay = await continueConversationPause(
+          f.deps,
+          f.actor.userId,
+          f.context.conversationId,
+          f.context.runId,
+          randomUUID(),
+          { pause_id: pause.pause_id },
+          key,
+        );
+        expect(replay.context).toBeNull();
+        expect(
+          (
+            await database.pool.query('SELECT 1 FROM run_attempts WHERE run_id=$1', [
+              f.context.runId,
+            ])
+          ).rowCount,
+        ).toBe(2);
+      } finally {
+        await successor.close();
+      }
+    } finally {
+      await f.session.close();
+    }
+  }, 30000);
+
+  it('accepted direct decision wins over later pause only for its exact authorized unit', async () => {
+    const f = await fixture();
+    try {
+      const decision = await decide(f);
+      const pause = await requestConversationPause(
+        f.deps,
+        f.actor.userId,
+        f.context.conversationId,
+        f.context.runId,
+        { reason: 'user', purpose: 'none' },
+        randomUUID(),
+      );
+      const toolId = decision.receipt.tool_id!,
+        args = decision.receipt.args!;
+      const reserved = (await f.session.handleRequest(
+        request('reserve', {
+          call_key: 'harness/1',
+          tool_id: toolId,
+          args,
+        }),
+      )) as { invocation_id: string };
+      const outcome = await f.session.handleRequest(
+        request('invoke', {
+          invocation_id: reserved.invocation_id,
+          tool_id: toolId,
+          args,
+        }),
+      );
+      await f.session.handleRequest(
+        request('snapshot', {
+          context: {
+            version: 2,
+            message_refs: [f.context.userMessageId],
+            tool_refs: [reserved.invocation_id],
+            next_call_no: 2,
+            usage: { iterations: 0, tokens: 0 },
+            waiting: null,
+          },
+        }),
+      );
+      await render(f, { ...decision, invocation: reserved.invocation_id, outcome });
+      await f.session.handleRequest(
+        request('finish', { outcome: 'done', usage: { iterations: 0, tokens: 0 } }),
+      );
+      expect(
+        (
+          await database.pool.query('SELECT state FROM harness_pauses WHERE id=$1', [
+            pause.pause_id,
+          ])
+        ).rows[0]?.state,
+      ).toBe('invalidated');
+      expect(
+        (
+          await database.pool.query('SELECT 1 FROM tool_invocations WHERE run_id=$1', [
+            f.context.runId,
+          ])
+        ).rowCount,
+      ).toBe(1);
+      expect(f.counts().modelCalls).toBe(0);
+      await expect(
+        continueConversationPause(
+          f.deps,
+          f.actor.userId,
+          f.context.conversationId,
+          f.context.runId,
+          randomUUID(),
+          { pause_id: pause.pause_id },
+          randomUUID(),
+        ),
+      ).rejects.toThrow();
+    } finally {
+      await f.session.close();
+    }
+  }, 30000);
+
+  for (const forged of ['tool', 'args'] as const) {
+    it(`rejects a forged ${forged} after direct decision even with a pending pause`, async () => {
+      const f = await fixture();
+      try {
+        const decision = await decide(f);
+        await requestConversationPause(
+          f.deps,
+          f.actor.userId,
+          f.context.conversationId,
+          f.context.runId,
+          { reason: 'user', purpose: 'none' },
+          randomUUID(),
+        );
+        const toolId = decision.receipt.tool_id!,
+          args = decision.receipt.args!;
+        const reserved = (await f.session.handleRequest(
+          request('reserve', {
+            call_key: 'harness/1',
+            tool_id: toolId,
+            args,
+          }),
+        )) as { invocation_id: string };
+        await expect(
+          f.session.handleRequest(
+            request('invoke', {
+              invocation_id: reserved.invocation_id,
+              tool_id: forged === 'tool' ? 'list_tasks' : toolId,
+              args: forged === 'args' ? { forged: true } : args,
+            }),
+          ),
+        ).rejects.toThrow();
+        const rows = await database.pool.query<{ state: string }>(
+          'SELECT state FROM tool_invocations WHERE run_id=$1',
+          [f.context.runId],
+        );
+        expect(rows.rows.map((row) => row.state)).toEqual(['reserved']);
+        expect(f.counts().modelCalls).toBe(0);
+      } finally {
+        await f.session.close();
+      }
+    }, 30000);
   }
 
   it('records off policy in admission, exposes no internal events and cannot probe', async () => {
