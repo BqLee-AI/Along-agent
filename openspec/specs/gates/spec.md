@@ -306,7 +306,7 @@ Docker/Compose SHALL 使用固定 Bun 的冻结安装、工作区构建与服务
 
 ### Requirement: CI 按变更范围验证
 
-CI SHALL 保留 checks 和 integration 两个 required checks；两个 job 均须成功。PR 按 base 与 checkout 的实际 diff 决定检查范围，main push 和无法确定的变更执行完整集合。被跳过的测试不作为本次执行证据。
+CI SHALL 保留 checks、database 和 integration 三个 required checks；三个 job 均须成功，分别负责静态/Web、PostgreSQL/升级、正式 native/Compose。PR 按 base 与 checkout 的实际 diff 决定检查范围；main push 仅允许按 before 到 checkout 的 diff 将纯文档分类为文档范围，代码 push 和无法确定的变更执行完整集合。被跳过的测试不作为本次执行证据。
 
 #### Scenario: 文档与 Web 变更
 
@@ -321,15 +321,26 @@ CI SHALL 保留 checks 和 integration 两个 required checks；两个 job 均�
 - THEN 保留数据库约束、完整 API 集成、native 合同及 Compose 检查，跳过不依赖这些源码的历史升级测试
 - WHEN PR 只修改允许的独立 API 数据库集成测试，可混合允许的文档
 - THEN 使用真实 PostgreSQL 和原迁移运行每个修改的测试文件，不运行未选中的测试、历史升级、native 合同或 Compose
+- WHEN 修改 ci/native-tests.txt 中的正式 native 集成文件
+- THEN 不得仅在缺 native 的宿主数据库入口运行；回退完整范围，在本次生产镜像内执行
 - WHEN 变更同时包含 Web 和 API，或者触及 identity、数据库共享设施、迁移、升级实现或 native 测试
 - THEN 回退完整范围
 
 #### Scenario: 未知或完整范围
 
-- WHEN PR 涉及其他路径、删除或重命名、无效或不可用 base、空 diff，或运行不是 PR
-- THEN 运行完整 verify、构建、真实数据库与调度、正式 native 消费者及 Compose 全新卷检查
+- WHEN PR 涉及其他路径、删除代码、无效或不可用 base、空 diff，或非 push/PR 事件
+- THEN 运行完整 verify、Web 构建、真实数据库与调度、正式 native 消费者及 Compose 全新卷检查
+- WHEN PR 或 main push 只删除或重命名允许的文档
+- THEN 同时检查新旧路径，运行文档检查，不因文件状态单独触发重集成
 
 #### Scenario: 完整范围任一检查失败
 
 - WHEN 完整范围的数据库、调度、契约、Compose 或静态检查中任一失败或取消
-- THEN 对应 job 不成功，两个 required checks 的合并条件不满足；并行运行不共享可变数据库，不用退出码吞并放行
+- THEN 对应 job 不成功，三个 required checks 的合并条件不满足；数据库与正式镜像检查独立运行，不共享可变数据库，不用退出码吞并放行
+
+#### Scenario: 正式运行时只构建一次
+
+- WHEN integration 或本地根契约命令执行
+- THEN 同一入口先从当前树构建正式镜像，合同消费者使用独立 PG；integration 的 Compose 额外复用该镜像且保留两轮全新卷
+- THEN ci/native-tests.txt 中的 native 集成场景在该镜像内执行；数据库入口排除同一清单，不以缺 native 的 skip 当作通过
+- THEN D8 必需消费者仍在本次实际报告中唯一通过；缓存仅复用匹配输入的构建层，不复用旧测试结果

@@ -136,5 +136,6 @@
 
 - PR 必须附：① CI 全绿链接；② 关键测试输出（粘贴或 CI 日志链接）；③ 若触及 D1–D10，每条附变红测试链接或变异证明。
 - Reviewer 只看证据合入：无验收证据、无 Deferred 声明、无 Spec 引用的 PR 直接打回，不进入代码细节评审。
-- Required checks 为 `checks`、`integration`，两者均须成功；PR 根据变更范围执行，main 完整验证。文档范围仅检查文案、规范和格式；Web 范围执行 `verify` 与 Web 构建；已知 API 业务源码保留完整 API 集成但跳过无关历史升级；独立 API 集成测试变更只运行选中测试；未知范围执行完整验证。详细路径规则见 `docs/design/13-p0-bootstrap-and-ci-rules.md §4`。
-- 完整范围下，`integration` 并行执行真实 PG 数据库/调度检查、独立 native 合同和两轮全新卷 Compose 冒烟；任何一项失败均阻塞。`scripts/check-gates-executable.mjs` 校验门禁声明及证据文件，不能证明本次运行了这些检查；根契约入口另校验本次 Bun JUnit 报告的 D8 必需消费者。
+- Required checks 为 `checks`、`database`、`integration`，三者均须成功；修改仓库保护规则时同步添加 `database`。PR 按范围执行；main 的纯文档改动也走文档范围，其他 main 代码改动保持 full。文档检查文案、规范和格式；Web 运行 verify 与生产构建；已知 API 业务保留数据库与正式 native/Compose，但跳过无关历史升级；独立数据库测试仅运行选中文件。native 文件清单为 `ci/native-tests.txt`，改动它们回退 full，不得缺 native 静默跳过。分类见 design/13 §4。
+- `scripts/ci/` 集中验证编排：`database.sh` 独占 PG，仅准备 API；`runtime.sh` 构建当前生产镜像一次，`contracts.sh` 和 `compose-smoke.sh` 同机复用，分别隔离数据库/卷。`checks` 承担 Web 构建，不阻塞数据库。D3–D6/D9 绑定 database，D7/D8 绑定 integration，D1/D2/D10 绑定 checks；D8 仍校验本次实际报告，不以声明/文件存在代替执行。CI 使用 Docker 层缓存而非旧测试结果，不做跨 runner 镜像传输。
+- 数据库历史升级文件统一限并发 2，API 构建与历史验证重叠，业务集成测试仍等待构建成功；不改用数据库模板或缓存测试结果。正式 Dockerfile 先复制 API/共享包源码及编译配置再构建，随后补齐运行资源与测试，避免仅改测试、文档或 Web 源码就重编 API。CI Compose 的 PG 不发布宿主端口，API 动态绑定回环端口，smoke 每轮读取实际映射。

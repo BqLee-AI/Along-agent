@@ -33,7 +33,10 @@ function fixture({ fullManifest = false, consumerCases = cases as unknown } = {}
     },
   };
   writeFileSync(join(target, 'ci/gates.json'), JSON.stringify(manifest));
-  writeFileSync(join(target, '.github/workflows/ci.yml'), 'jobs:\n  checks:\n  integration:\n');
+  writeFileSync(
+    join(target, '.github/workflows/ci.yml'),
+    'jobs:\n  checks:\n  database:\n  integration:\n',
+  );
   writeFileSync(join(target, 'consumer.test.ts'), '// Declaration fixture, not native evidence.\n');
   return { target, manifest };
 }

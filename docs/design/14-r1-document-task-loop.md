@@ -259,7 +259,7 @@ workspace_list/grep/read 走真实 initialize→listTools→callTool，返回实
 
 合同设计须通过独立审查、`openspec validate define-r1-document-task-loop --strict`、仓库文档/格式检查及既有合并门；PR 记录实际执行和未跑项，不把设计校验当作功能验收。
 
-实现集成负责人统一执行 `bun run verify`、`bun run test:contracts`、`bun run test:integration` 及受影响的 scheduler/迁移/空环境门，保留五个 required checks；同时负责补齐上述矩阵的真实 Web/模型/文件/MCP 证据。模块负责人已完成的有效验证直接复用，只补集成缺口；记录本次构建版本、关联 ID、文件前后/回读版本和实际调用结果。
+实现集成负责人统一执行 `bun run verify`、`bun run test:contracts`、`bun run test:integration` 及受影响的 scheduler/迁移/空环境门，当前 required checks 为 checks、database、integration（design/13 §4）；同时负责补齐上述矩阵的真实 Web/模型/文件/MCP 证据。模块负责人已完成的有效验证直接复用，只补集成缺口；记录本次构建版本、关联 ID、文件前后/回读版本和实际调用结果。
 
 A1–A4 是原任务/时间/调度用户标准，本次只要求其原合同回归，不把文档批准硬说成 A2 task 成功，也不把有限文件 unknown 说成已经证明任意 A3 恢复。D8/D10承载本次新增 R1 验收，其他 D 项按具体风险回归。
 

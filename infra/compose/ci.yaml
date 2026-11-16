@@ -1,0 +1,9 @@
+services:
+  postgres:
+    ports: !reset []
+  api:
+    image: ${CI_RUNTIME_IMAGE:?Build the current-tree runtime image first}
+    pull_policy: never
+    build: !reset null
+    ports: !override
+      - '127.0.0.1::3000'

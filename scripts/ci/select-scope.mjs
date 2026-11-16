@@ -11,16 +11,22 @@ function git(...args) {
 }
 
 function selectScope() {
-  if (process.env.GITHUB_EVENT_NAME !== 'pull_request') {
-    return ['full', 'not a pull request'];
+  const eventName = process.env.GITHUB_EVENT_NAME;
+  if (eventName !== 'pull_request' && eventName !== 'push') {
+    return ['full', 'unsupported event'];
   }
 
   try {
     const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
-    const base = event?.pull_request?.base?.sha;
+    const base = eventName === 'pull_request' ? event?.pull_request?.base?.sha : event?.before;
     if (typeof base !== 'string' || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(base)) {
-      return ['full', 'missing or invalid pull request base SHA'];
+      return ['full', 'missing or invalid base SHA'];
     }
+    const nativeTests = new Set(
+      readFileSync(new URL('../../ci/native-tests.txt', import.meta.url), 'utf8')
+        .trim()
+        .split(/\r?\n/),
+    );
 
     try {
       git('cat-file', '-e', `${base}^{commit}`);
@@ -33,7 +39,7 @@ function selectScope() {
       'diff',
       '--no-ext-diff',
       '--no-textconv',
-      '--find-renames',
+      '--no-renames',
       '--name-status',
       '-z',
       base,
@@ -49,25 +55,28 @@ function selectScope() {
     const apiTests = [];
     for (let i = 0; i < fields.length; i += 2) {
       const [status, path] = [fields[i], fields[i + 1]];
-      if ((status !== 'A' && status !== 'M') || !path)
-        return ['full', 'deletion, rename, or unsupported diff status'];
+      if (!['A', 'M', 'D'].includes(status) || !path) return ['full', 'unsupported diff status'];
       const docs =
         /^(?:docs|openspec)\/[\s\S]+\.(?:md|mdx)(?![\s\S])/.test(path) ||
         path === 'README.md' ||
         path === 'CONTRIBUTING.md';
+      if (status === 'D' && !docs) return ['full', 'deleted code or configuration'];
       const web = /^apps\/web\/(?:src|test)\/[\s\S]+/.test(path);
       const apiModule =
         /^apps\/api\/src\/modules\/(?:approvals|brief|conversations|notifications|tasks|time|tools|workspaces)\/[\s\S]+\.ts(?![\s\S])/.test(
           path,
         );
       const apiTest =
-        /^apps\/api\/test\/integration\/(?!harness-)[a-z0-9-]+\.test\.ts(?![\s\S])/.test(path);
+        /^apps\/api\/test\/integration\/(?!harness-)[a-z0-9-]+\.test\.ts(?![\s\S])/.test(path) &&
+        !nativeTests.has(path);
       if (!docs && !web && !apiModule && !apiTest)
         return ['full', `outside scoped paths: ${JSON.stringify(path)}`];
       if (web) hasWeb = true;
       if (apiModule) hasApi = true;
       if (apiTest) apiTests.push(path);
     }
+    if (eventName === 'push' && (hasWeb || hasApi || apiTests.length))
+      return ['full', 'main code changes'];
     if (hasWeb && (hasApi || apiTests.length)) return ['full', 'mixed Web and API changes'];
     if (hasApi) return ['api', `${fields.length / 2} changed file(s)`];
     if (apiTests.length)

@@ -47,7 +47,13 @@ function select(repo: string, base: string | null, event = 'pull_request'): stri
   const outputPath = join(repo, 'output.txt');
   writeFileSync(
     eventPath,
-    JSON.stringify(base === null ? {} : { pull_request: { base: { sha: base } } }),
+    JSON.stringify(
+      base === null
+        ? {}
+        : event === 'push'
+          ? { before: base }
+          : { pull_request: { base: { sha: base } } },
+    ),
   );
   writeFileSync(outputPath, '');
   const result = spawnSync('node', [script], {
@@ -138,6 +144,12 @@ describe('CI scope selector', () => {
     'scripts/local/database.mjs',
     'apps/api/test/integration/setup.ts',
     'apps/api/test/integration/harness-native.test.ts',
+    'apps/api/test/integration/memory-native-wiring.test.ts',
+    'apps/api/test/integration/pause-http.test.ts',
+    'apps/api/test/integration/r3-compact-http.test.ts',
+    'apps/api/test/integration/server-owned-native.test.ts',
+    'apps/api/test/integration/server-owned-resume-race.test.ts',
+    'apps/api/test/integration/server-owned-driver-effect-race.test.ts',
     'apps/api/src/modules/new-module/service.ts',
     'apps/api/src/modules/tasks/data.json',
     'apps/api/test/integration/fixtures/input.ts',
@@ -168,18 +180,38 @@ describe('CI scope selector', () => {
       }));
   }
 
-  it('uses full for a deletion even when all paths are documentation', () =>
+  it('keeps documentation deletions in the documentation scope', () =>
     fixture((repo, base) => {
       git(repo, 'rm', 'docs/old.md');
       git(repo, 'commit', '-qm', 'delete');
-      expect(select(repo, base)).toBe('scope=full');
+      expect(select(repo, base)).toBe('scope=docs');
     }));
 
-  it('uses full for a rename even when both paths are documentation', () =>
+  it('checks both sides of documentation renames', () =>
     fixture((repo, base) => {
       git(repo, 'mv', 'docs/rename.md', 'docs/renamed.md');
       git(repo, 'commit', '-qm', 'rename');
+      expect(select(repo, base)).toBe('scope=docs');
+    }));
+
+  it('does not classify a deleted Web source as documentation', () =>
+    fixture((repo, base) => {
+      git(repo, 'rm', 'apps/web/src/existing.ts');
+      commitFiles(repo, ['docs/new.md']);
       expect(select(repo, base)).toBe('scope=full');
+    }));
+
+  it('selects documentation on main but keeps code pushes full', () =>
+    fixture((repo, base) => {
+      commitFiles(repo, ['docs/new.md']);
+      expect(select(repo, base, 'push')).toBe('scope=docs');
+      commitFiles(repo, ['apps/web/src/existing.ts']);
+      expect(select(repo, base, 'push')).toBe('scope=full');
+    }));
+
+  it('does not narrow a push with an unavailable before commit', () =>
+    fixture((repo) => {
+      expect(select(repo, '0'.repeat(40), 'push')).toBe('scope=full');
     }));
 
   it('uses full when a web change is mixed with an unrelated file', () =>
@@ -204,12 +236,12 @@ describe('CI scope selector', () => {
       }
     }));
 
-  it('uses full for empty diffs, missing or unavailable bases, and non-PR events', () =>
+  it('uses full for empty diffs, missing bases, and unsupported events', () =>
     fixture((repo, base) => {
       expect(select(repo, base)).toBe('scope=full');
       commitFiles(repo, ['docs/new.md']);
       expect(select(repo, null)).toBe('scope=full');
       expect(select(repo, 'a'.repeat(40))).toBe('scope=full');
-      expect(select(repo, base, 'push')).toBe('scope=full');
+      expect(select(repo, base, 'workflow_dispatch')).toBe('scope=full');
     }));
 });
