@@ -84,7 +84,7 @@ export async function listApprovals(
   }
   params.push(filter.limit + 1);
   const { rows } = await client.query<ApprovalRow & { created_at_cursor: string }>(
-    `SELECT *, to_char(created_at, 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS created_at_cursor ` +
+    `SELECT *, to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS created_at_cursor ` +
       `FROM approvals WHERE ${where.join(' AND ')} ` +
       `ORDER BY created_at DESC, id DESC LIMIT $${params.length}`,
     params as never[],

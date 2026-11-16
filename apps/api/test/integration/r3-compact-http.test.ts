@@ -260,7 +260,7 @@ suite('native server-owned compact over HTTP', () => {
           value.ready ||
           value.modelError !== undefined ||
           value.status !== 200 ||
-          /\"status\":\"(?:failed|cancelled)\"/.test(value.body),
+          /"status":"(?:failed|cancelled)"/.test(value.body),
       );
       if (!state.ready) {
         const facts = await db.pool.query(

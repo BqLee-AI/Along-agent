@@ -66,6 +66,7 @@ Observed / Required / Proposed / Deferred 同 01。
 ### 4.1 非 D2 lint 规则映射
 
 旧 `typescript-eslint.configs.recommended` 不包含 `eslint:recommended`。原 20 条 TS 规则与 TS-only 的 4 条 core 规则均保留为 `error`；Oxlint 额外 correctness 规则为 `warn`，不降低下列错误级别。配置只加载 `eslint`、`typescript` 和仓库 D2 插件，不借工具默认值新增其他规则集。
+`require-yield` 仅对明确只抛错、不得产生模型事件的测试提供者作附理由的单行例外；不添加虚假 yield，不关闭全局规则或改变业务断言。
 
 | 原规则                                                   | Oxlint 1.89.0 规则                               |
 | -------------------------------------------------------- | ------------------------------------------------ |

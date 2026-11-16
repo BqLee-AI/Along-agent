@@ -1243,7 +1243,8 @@ export function createInvitedAccountService(
             expires_at: iso(row.expires_at),
             revoked_at: row.revoked_at ? iso(row.revoked_at) : null,
             current: row.id === actor.sessionId,
-            device_summary: row.user_agent?.replace(/[\x00-\x1f\x7f]/g, '').slice(0, 128) || null,
+            device_summary:
+              row.user_agent?.replace(/[^\x20-\x7e\u0080-\uffff]/g, '').slice(0, 128) || null,
           })),
           next_cursor: rows.length > p.limit ? cursor(actor, 'sessions', visible.at(-1)!) : null,
         };

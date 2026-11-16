@@ -266,7 +266,7 @@ suite('draft model provider probe', () => {
                   index: 0,
                   id: 'probe-call',
                   type: 'function',
-                  function: { name: 'probe_echo', arguments: '{\"value\":\"probe\"}' },
+                  function: { name: 'probe_echo', arguments: '{"value":"probe"}' },
                 },
               ],
             }
@@ -278,7 +278,7 @@ suite('draft model provider probe', () => {
           `data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: toolRequest ? 'tool_calls' : 'stop' }] })}\n\n`,
         );
         res.end(
-          'data: {\"choices\":[],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1,\"total_tokens\":3}}\n\ndata: [DONE]\n\n',
+          'data: {"choices":[],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}\n\ndata: [DONE]\n\n',
         );
       })().catch(() => res.destroy());
     });
@@ -338,6 +338,7 @@ suite('draft model provider probe', () => {
   });
   test('redacts upstream failures and forwards cancellation', async () => {
     const provider = await createProvider(pool, owner, 'Failure');
+    // oxlint-disable-next-line require-yield -- Failure-only provider intentionally emits no events.
     const broken: HarnessServices['model'] = async function* () {
       throw new Error('draft-secret upstream response');
     };

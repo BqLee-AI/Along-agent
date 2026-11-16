@@ -57,6 +57,7 @@ maybe('workspace create once permit', () => {
           maxIterations: 24,
           maxTokens: 8000,
           contextPolicy: createContextPolicy({ completionCap: 512, model: 'test' }),
+          // oxlint-disable-next-line require-yield -- Failure-only provider intentionally emits no events.
           model: async function* () {
             throw new Error('model not used');
           },
