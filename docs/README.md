@@ -36,7 +36,7 @@
 | 10   | [API 与流式通道](design/10-api-and-stream-design.md)                     | REST 真源、envelope、128KiB原始JSON字节边界与未消费流收尾、SSE版本化、WS延后                                                      |
 | 11   | [仓颉 Harness 与 TS 能力层](design/11-cangjie-runtime-spike.md)          | 正式 native/固定工具链/纯模型 transport；接入、消费者门与完整 R1 分级验收                                                         |
 | 12   | [a13n 六思想落点](design/12-a13n-principles-landing.md)                  | harness/checkpoint/自托管/revision/AG-UI 投影/readyz                                                                              |
-| 13   | [P0 开工与 CI 死规矩](design/13-p0-bootstrap-and-ci-rules.md)            | D1–D10、按变更范围验证、CI 职责与正式 native 执行证据                                                                             |
+| 13   | [P0 开工与 CI 死规矩](design/13-p0-bootstrap-and-ci-rules.md)            | D1–D10、按影响分流、未变输入的验证沿用与正式 native 执行证据                                                                      |
 | 14   | [R1 资料到简报任务闭环](design/14-r1-document-task-loop.md)              | 受管工作区与真实 MCP、legacy 精确批准、新委托精确编辑、一次许可及同 Run 新回读；设计不替代运行证据                                |
 | 15   | [R1 本地生命周期与配置复用](design/15-r1-local-lifecycle.md)             | #67 初始化/启停/升级目标合同、原配置与目录身份保留、数据库分流及 #68 接口；不代表运行验收                                         |
 | 16   | [R1 账户与正式登录](design/16-r1-account-access.md)                      | #68 唯一管理员、原身份转正、库适配、固定会话、401 只读恢复及本机登记收尾合同；独立实验与验收                                      |

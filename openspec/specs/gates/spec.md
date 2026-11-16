@@ -306,14 +306,14 @@ Docker/Compose SHALL 使用固定 Bun 的冻结安装、工作区构建与服务
 
 ### Requirement: CI 按变更范围验证
 
-CI SHALL 保留 checks、database 和 integration 三个 required checks；三个 job 均须成功，分别负责静态/Web、PostgreSQL/升级、正式 native/Compose。PR 按 base 与 checkout 的实际 diff 决定检查范围；main push 仅允许按 before 到 checkout 的 diff 将纯文档分类为文档范围，代码 push 和无法确定的变更执行完整集合。被跳过的测试不作为本次执行证据。
+CI SHALL 保留 checks、database 和 integration 三个 required checks，分别负责静态/Web、PostgreSQL/升级、正式 native/Compose。PR 按累计 diff、main push 按 before diff 选择受影响检查的并集；三者均须成功。跳过或沿用的检查不得记为本次执行。
 
 #### Scenario: 文档与 Web 变更
 
 - WHEN PR 仅修改允许的文档路径
 - THEN 运行文案、OpenSpec 和格式检查，不构建应用或启动数据库、native 与 Compose
-- WHEN PR 仅修改 Web 源码或测试及允许的文档
-- THEN 运行完整 verify 和 Web 构建，不运行无关的重集成
+- WHEN PR 或 main push 仅修改 Web 源码、样式或测试及允许的文档
+- THEN 运行 Web 的 lint、类型检查、单元测试、依赖边界及构建，不运行后端构建、数据库或 native；Web 依赖清单及 vendor 变化另验证受影响的生产镜像
 
 #### Scenario: 已知 API 业务源码或数据库测试变更
 
@@ -322,14 +322,14 @@ CI SHALL 保留 checks、database 和 integration 三个 required checks；三�
 - WHEN PR 只修改允许的独立 API 数据库集成测试，可混合允许的文档
 - THEN 使用真实 PostgreSQL 和原迁移运行每个修改的测试文件，不运行未选中的测试、历史升级、native 合同或 Compose
 - WHEN 修改 ci/native-tests.txt 中的正式 native 集成文件
-- THEN 不得仅在缺 native 的宿主数据库入口运行；回退完整范围，在本次生产镜像内执行
-- WHEN 变更同时包含 Web 和 API，或者触及 identity、数据库共享设施、迁移、升级实现或 native 测试
-- THEN 回退完整范围
+- THEN 在正式镜像内执行，不交给缺 native 的宿主数据库入口；共享数据库及 identity 变更保留历史升级检查
+- WHEN 同时修改多个已知范围
+- THEN 执行各范围所需检查的并集，不自动扩大为所有检查
 
 #### Scenario: 未知或完整范围
 
-- WHEN PR 涉及其他路径、删除代码、无效或不可用 base、空 diff，或非 push/PR 事件
-- THEN 运行完整 verify、Web 构建、真实数据库与调度、正式 native 消费者及 Compose 全新卷检查
+- WHEN 涉及未知路径/状态、无效或不可用 base、空 diff，或非 push/PR 事件
+- THEN 运行完整静态检查、Web 构建、真实数据库与调度、正式 native 消费者及 Compose 全新卷检查
 - WHEN PR 或 main push 只删除或重命名允许的文档
 - THEN 同时检查新旧路径，运行文档检查，不因文件状态单独触发重集成
 
@@ -337,3 +337,10 @@ CI SHALL 保留 checks、database 和 integration 三个 required checks；三�
 
 - WHEN 完整范围的数据库、调度、契约、Compose 或静态检查中任一失败或取消
 - THEN 对应 job 不成功，三个 required checks 的合并条件不满足；数据库与正式镜像检查独立运行，不共享可变数据库，不用退出码吞并放行
+
+#### Scenario: 未变化输入沿用已执行证据
+
+- WHEN 同一 PR 的祖先版本已有成功检查，目标分支 SHA、该检查相关输入及 CI 定义均未变化，且此前实际执行范围覆盖本次所需范围
+- THEN 可省略该检查并关联原运行；当前变更的检查仍执行
+- WHEN 原检查失败、跳过、未完成，或输入/目标分支变化、证据不可用
+- THEN 不得以该记录放行，正常执行受影响检查

@@ -11,70 +11,101 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      plan: ${{ steps.select.outputs.plan }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select affected checks
+        id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/ci/select-scope.mjs
+
   checks:
+    needs: plan
+    if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
       TZ: Pacific/Kiritimati
+      OPENSPEC_TELEMETRY: '0'
     steps:
+      - name: Require validation plan
+        env:
+          PLAN_RESULT: ${{ needs.plan.result }}
+        run: test "$PLAN_RESULT" = success
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
-          fetch-depth: 0
           persist-credentials: false
-      - name: Select checks
-        id: scope
-        run: node scripts/ci/select-scope.mjs
       - uses: ./.github/actions/setup
       - name: Check documentation
-        if: steps.scope.outputs.scope == 'docs'
-        run: |
-          bun scripts/scan-copy-claims.mjs
-          bunx --bun --no-install openspec validate --all --strict
-          bun run format:check
-      - name: Verify code
-        if: steps.scope.outputs.scope != 'docs'
-        run: bun run verify
-      - name: Build Web
-        if: steps.scope.outputs.scope == 'web' || steps.scope.outputs.scope == 'full'
-        run: bun run --bun --filter @along/web build
+        run: bun scripts/ci/checks.mjs docs
+      - name: Check Web
+        if: contains(fromJSON(needs.plan.outputs.plan).checks, 'web')
+        run: bun scripts/ci/checks.mjs web
+      - name: Check API
+        if: contains(fromJSON(needs.plan.outputs.plan).checks, 'api')
+        run: bun scripts/ci/checks.mjs api
+      - name: Check packages
+        if: contains(fromJSON(needs.plan.outputs.plan).checks, 'packages')
+        run: bun scripts/ci/checks.mjs packages
+      - name: Check tooling
+        if: contains(fromJSON(needs.plan.outputs.plan).checks, 'tooling')
+        run: bun scripts/ci/checks.mjs tooling
+      - name: Check harness
+        if: contains(fromJSON(needs.plan.outputs.plan).checks, 'harness')
+        run: bun scripts/ci/checks.mjs harness
 
   database:
+    needs: plan
+    if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Select checks
-        id: scope
-        run: node scripts/ci/select-scope.mjs
-      - uses: ./.github/actions/setup
-        if: steps.scope.outputs.scope != 'docs' && steps.scope.outputs.scope != 'web'
-      - name: Verify PostgreSQL
-        if: steps.scope.outputs.scope != 'docs' && steps.scope.outputs.scope != 'web'
+      - name: Require validation plan
         env:
-          CI_SCOPE: ${{ steps.scope.outputs.scope }}
-          CI_API_TESTS: ${{ steps.scope.outputs.api_tests }}
+          PLAN_RESULT: ${{ needs.plan.result }}
+        run: test "$PLAN_RESULT" = success
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        if: fromJSON(needs.plan.outputs.plan).database.mode != 'none'
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        if: fromJSON(needs.plan.outputs.plan).database.mode != 'none'
+      - name: Verify PostgreSQL
+        if: fromJSON(needs.plan.outputs.plan).database.mode != 'none'
+        env:
+          CI_SCOPE: ${{ fromJSON(needs.plan.outputs.plan).database.mode }}
+          CI_API_TESTS: ${{ join(fromJSON(needs.plan.outputs.plan).database.tests, ' ') }}
         run: bash scripts/ci/database.sh
 
   integration:
+    needs: plan
+    if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - name: Require validation plan
+        env:
+          PLAN_RESULT: ${{ needs.plan.result }}
+        run: test "$PLAN_RESULT" = success
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        if: fromJSON(needs.plan.outputs.plan).runtime
         with:
-          fetch-depth: 0
           persist-credentials: false
-      - name: Select checks
-        id: scope
-        run: node scripts/ci/select-scope.mjs
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
-        if: steps.scope.outputs.scope == 'full' || steps.scope.outputs.scope == 'api'
+        if: fromJSON(needs.plan.outputs.plan).runtime
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        if: steps.scope.outputs.scope == 'full' || steps.scope.outputs.scope == 'api'
+        if: fromJSON(needs.plan.outputs.plan).runtime
         with:
           path: ${{ runner.temp }}/along-build-cache
           key: ${{ runner.os }}-runtime-${{ hashFiles('infra/docker/Dockerfile', 'apps/harness/artifacts.lock', 'bun.lock') }}-${{ github.sha }}
@@ -82,7 +113,7 @@ jobs:
             ${{ runner.os }}-runtime-${{ hashFiles('infra/docker/Dockerfile', 'apps/harness/artifacts.lock', 'bun.lock') }}-
             ${{ runner.os }}-runtime-
       - name: Verify production runtime
-        if: steps.scope.outputs.scope == 'full' || steps.scope.outputs.scope == 'api'
+        if: fromJSON(needs.plan.outputs.plan).runtime
         env:
           CI_DOCKER_CACHE: ${{ runner.temp }}/along-build-cache
         run: bash scripts/ci/runtime.sh

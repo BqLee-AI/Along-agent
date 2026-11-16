@@ -137,4 +137,4 @@
 - PR 必须附：① CI 全绿链接；② 关键测试输出（粘贴或 CI 日志链接）；③ 若触及 D1–D10，每条附变红测试链接或变异证明。
 - Reviewer 只看证据合入：无验收证据、无 Deferred 声明、无 Spec 引用的 PR 直接打回，不进入代码细节评审。
 - Required checks 为 `checks`、`database`、`integration`，三者均须成功；合入本次拆分时须将 `database` 加入分支保护。按变更范围执行，分类规则见 [design/13 §4](docs/design/13-p0-bootstrap-and-ci-rules.md#4-ci-布局required)。
-- 数据库检查使用 `bash scripts/ci/database.sh`；正式 native 合同使用 `bun run test:contracts`。完整 CI 另运行 Compose 冒烟；D8 以本次实际报告为准。
+- 数据库检查使用 `bash scripts/ci/database.sh`，正式 native 合同使用 `bun run test:contracts`；分域静态检查使用 `bun scripts/ci/checks.mjs <web|api|packages|tooling|harness>`。CI 仅执行受影响检查，沿用记录须关联输入未变化的原成功运行；D8 以对应实际报告为准。

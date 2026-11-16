@@ -54,12 +54,13 @@ Observed / Required / Proposed / Deferred 同 01。
 ## 4. CI 布局（Required）
 
 - CI 保留三个 required checks：`checks` 负责静态/Web，`database` 负责 PostgreSQL/历史升级，`integration` 负责正式 native/Compose；三者均须成功。
-- PR 按 base 与 checkout 的实际 diff 分类；main push 按事件的 `before` 分类，仅纯文档可跳过重检查，代码 push 仍完整验证。文档范围包括 `docs/`、`openspec/` Markdown 及根 `README.md`、`CONTRIBUTING.md`，允许删除和重命名，但同时检查新旧路径。空 diff、无效/不可用 base、删除代码、未知路径和非 push/PR 事件回退 full。Web-only 运行 verify 和 Web 构建；已知非 identity API 业务模块变更运行完整数据库业务、native 和 Compose，但跳过历史升级；仅修改独立数据库测试则只运行选中测试。`ci/native-tests.txt` 中依赖正式 native 的文件不能归类为数据库测试独立范围。
-- `checks` 运行 `bun run verify`，Web/full 范围另构建 Web。`database` 经 `scripts/ci/database.sh` 执行真实 PG16 迁移、约束、调度及适用历史升级。`integration` 经 `scripts/ci/runtime.sh` 构建当前生产镜像，供合同与两轮全新卷 Compose 共用；检查彼此隔离，任一失败均阻塞，跳过不计为执行证据。
+- `plan` 按 PR 累计 diff 或 main push 的 `before` diff 计算各检查的并集。Web 源码/样式只运行 Web 检查；API、共享包、数据库、native 和运行镜像分别按消费者展开，不因混合改动自动全量。删除/重命名检查涉及的路径；未知输入、无效 base 和空 diff 回退完整验证。具体路径由 `scripts/ci/select-scope.mjs` 及其行为测试维护。
+- `checks` 经 `scripts/ci/checks.mjs` 独立执行 Web、API、共享包、工具脚本及 Harness 静态检查，文档检查每次执行；本地整仓 `bun run verify` 保留。`database` 经 `scripts/ci/database.sh` 执行适用的真实 PG16 检查；`integration` 经 `scripts/ci/runtime.sh` 执行正式 native/Compose。Web 只构建自身的 contracts/stream-protocol 依赖，不构建后端。
+  同一 PR 可沿用祖先提交已实际成功执行的检查，但须目标分支 SHA、该检查的相关 Git 输入及 CI 定义均一致；数据库记录还须覆盖当前测试集合。失败、跳过、证据不可用或输入变化时执行受影响检查；摘要关联原运行，不把沿用记为本次执行。
 - 每个 job 独立满足自己的构建前置，不借用其他 job 的 `dist/`。`bun run build:packages` 保留 Bun 按依赖拓扑构建共享包，`bun run build` 先包后应用，`bun run build:api` 构建 API 及依赖；开发、类型检查和测试入口同样先满足包依赖。共享包构建成功后，`typecheck` 使用 Bun `--sequential` 串行执行各 workspace 的类型检查，保留全部源码、测试与 Next route typegen。同次 `verify` 仅在 `typecheck` 成功后允许单元步骤复用其共享 packages；失败即停、不消费失败构建。独立单元入口及跳过 typecheck 的 verify 仍真实构建，不通过旧 `dist/` 或跨次运行标记判定准备完成。
 - 测试使用 `bun:test`，保留既有断言、文件级状态隔离及 mock/spy/时钟恢复，不把文件级并行换成共享状态的用例内 concurrent。只读边界 fixture 最多同时启动两个真实 dependency-cruiser CLI。`bun run test:unit` 排除数据库集与正式 native 合同集；`bun run test:contracts` 运行 §4.2 的合同及 `ci/native-tests.txt` 中的 native 集成文件，CI 数据库入口排除同一清单。`bun run test:integration` 包含真实 PG 集成文件；`bun run test:scheduler` 跑 D9 指定集。DB 使用真实 PG16、原迁移和明确测试环境，不削弱约束换绿。
 - D1 继续由 Bun 下的 dependency-cruiser 执行原出边、契约依赖与环检测规则；D2 仍由 AST 插件及展示投影测试守护，不以独立文本扫描代替。非 D2 lint 规则须显式映射并记录差异，不整体关闭正确性规则或扩大 ignore。
-- Compose 使用 `infra/compose/ci.yaml` 复用本次镜像，不使用用户的 `local.yaml`；两轮全新卷分别验证缺 TZDB 时 `/readyz` 503 + `TZDB_UNAVAILABLE`、提供版本后 200，以及 `/healthz` 200、未认证业务401。缓存仅复用构建层，不复用测试结果。
+- Compose 使用 `infra/compose/ci.yaml` 复用本次镜像，不使用用户的 `local.yaml`；两轮全新卷分别验证缺 TZDB 时 `/readyz` 503 + `TZDB_UNAVAILABLE`、提供版本后 200，以及 `/healthz` 200、未认证业务401。镜像缓存仅复用构建层，检查沿用按上述证据规则判断。
 
 ### 4.1 非 D2 lint 规则映射
 
