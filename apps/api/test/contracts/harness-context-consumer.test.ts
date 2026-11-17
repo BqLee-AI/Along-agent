@@ -20,7 +20,7 @@ import {
   type WorkspaceResult,
 } from '@along/contracts';
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import { createHarnessModelTransport } from '../../src/modules/conversations/harness-model.js';
+import { createHarnessModelTransport } from '../../src/modules/model-providers/harness-model.js';
 import {
   configureWorkspaceRegistry,
   type WorkspaceRegistration,

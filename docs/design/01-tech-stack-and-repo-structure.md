@@ -55,10 +55,14 @@ Along-agent/
         modules/            # conversations/tools/业务模块与存储
         worker/             # Scheduler claim/lease/fencing + Notifier 投递
     web/                    # Next.js App Router（Web 先行；后被 Electron 套同一份）
-      src/app/              # Next.js 页面
-      src/lib/              # HTTP 客户端与展示辅助
+      src/app/              # 路由参数、RSC/身份入口与 feature screen 组装
+      src/shell/            # model/viewmodel/view：持续聊天与工作区的 URL、表面及框架
+      src/features/         # account/brief/approvals/reminders/conversations/capabilities
+        <feature>/model/    # 功能类型、数据访问、协议转换与纯业务投影
+        <feature>/viewmodel/# 功能状态、命令、异步生命周期与请求清理（按需）
+        <feature>/view/     # screen、展示与 DOM adapter
+      src/shared/           # http/、session/、无业务 ui/；不承接功能业务
       vendor/               # 按上游 commit 固定的 LumenUI 官方分发包
-      src/features/         # 对话、批准、提醒与账户的功能 View/controller
   packages/
     contracts/              # 跨模块契约：zod + JSON Schema + 契约测试（进程内/远程同一套）
     stream-protocol/        # SSE/AG-UI 投影版本化 zod（对照 thread-stream.schema.json）
@@ -123,25 +127,67 @@ packages/contracts ──depends──▶ zod（仅此）
 
 ## 6. R1 Web：个人助理与职责边界
 
-组件从 `@lorelum/lumen-ui/components/*` 直接导入，采用单套 Base UI 底层，不保留 Radix 或本地 shadcn 基础组件副本。包由上游官方构建和打包入口生成，固定源码 commit、包 SHA-256 与单一 bun.lock；分发包随 Web 源码保留，冻结安装与 Docker 构建不依赖私有 GitHub 登录或在线发布。`postcss.config.mjs` 使用 `@tailwindcss/postcss`，`src/app/globals.css` 导入 Tailwind v4、官方 theme.css 并扫描包内样式；LumenProvider 统一页面与 portal 的默认 Linen 主题。布局和业务状态由应用拥有；控件与面板直接使用库原生玻璃材质，不新增主题 token、surface slot 样式或手工模糊/阴影，不用 CSS 仿造库外效果。对话独立 loading 保持对话栏、消息区与底部输入布局，不借用首页骨架。RSC 仍负责页面组装，交互组件按实际需要进入 Client 边界；菜单与离开确认迁移须保留键盘、焦点和活动 SSE 保护。现代浏览器基线随 Tailwind v4（Chrome 111+、Safari 16.4+、Firefox 128+）；窄屏布局不意味着支持旧浏览器。
+组件从 `@lorelum/lumen-ui/components/*` 直接导入，采用单套 Base UI 底层，不保留 Radix 或本地 shadcn 基础组件副本。包由上游官方构建和打包入口生成，固定源码 commit、包 SHA-256 与单一 bun.lock；分发包随 Web 源码保留，冻结安装与 Docker 构建不依赖私有 GitHub 登录或在线发布。`postcss.config.mjs` 使用 `@tailwindcss/postcss`，`src/app/globals.css` 导入 Tailwind v4、官方 theme.css 并扫描包内样式；`shared/ui/app-theme.tsx` 通过 LumenProvider 固定浅色 Linen，并统一页面、portal 与减少动态效果策略。不新增平行主题、字体或控件库，不手工仿造玻璃。标题 24px/32px、正文 16px/28px、辅助 14px/22px，以间距和分隔组织内容，不为每段消息套卡片。现代浏览器基线随 Tailwind v4（Chrome 111+、Safari 16.4+、Firefox 128+）；窄屏布局不意味着支持旧浏览器。
 
-### 页面与资源入口
+### 持续聊天与工作区
 
-- 桌面和窄屏共用顶部导航：「助理」进入对话 `/conversations`；「事项」菜单收纳今日安排 `/`、我的提醒 `/tasks`、待我确认 `/approvals` 和活动记录 `/activity`；账户 `/account` 放独立头像菜单。首页以开始对话为主，提醒/资料为次级入口，今日简报按需展开。登录 `/login` 只常驻必要字段与动作，帮助说明收纳；首次建号 `/setup`、原身份转正 `/claim`、退出 `/logout` 保留各自确认与保护。品牌回首页，提供跳到正文入口，不将资源链接并排铺成一层。
-- 对话默认使用已有无 workspace 的 `harness`；居中消息区独立滚动，输入框常驻视口底部，同一会话可以明确发起下一轮。提醒/资料工具位于输入框左侧「＋」菜单并可移除，分别固定 `business` / `harness`；`intent=reminder|document` 只预选新消息表单，身份 query 优先。选择、填写、切换目标不发送；资料必须显式选择读取成功的登记，不默选首项、不接受任意宿主 root。完整可读/可写相对范围与受管副本说明按需展开，空登记与读取失败分开；无写范围可执行只读资料任务。
-- 会话按建立时间发现，沿原 `conversation_id/run_id` 深链读取连续消息、多个 Run、批准和效果；消息档案不猜与某 Run 的对应，不重复拼接同一回复的流式与最终存储文本。主动执行、批准挂起、发送结果或工具效果未知时保留输入及真实原因，不允许新发送绕过原运行；历史恢复只 GET，下一轮必须明确发送。文档批准从原 Run 进入 `/document-approvals/{id}`，不伪造文档批准集合。提醒确认与提醒任务不冒充资料历史；活动是任务范围索引与选中任务的事件账，不是全局 Agent 审计。
-- 会话、消息、事件、提醒确认、任务及活动相关分页沿各自服务端游标 GET，保留先前获取的内容、局部错误和未推进游标。打开、展开、刷新、回退与重登恢复均不自动发业务 POST，不宣称首批或已加载范围为全量。
+全应用覆盖今日、聊天及历史、提醒、批准、活动、完整文档校样、账户及认证；不是代表页或只读关联区方案，不保留旧顶部导航作为并行实现。桌面 1024px 起左侧持续聊天、右侧真实工作区，展开时约等分，两区独立滚动；工作区收起后聊天扩宽，正文保持可读行宽。工作区内部按自身容器布局，不再依据整个视口添加固定侧栏。
 
-### Server / Client / controller / data
+工作区主入口为「今日」「提醒」「记忆」「助理」（助理资料），设置独立可达。今日提供真实提醒、待我确认和活动记录入口；批准和活动不是全局 Agent 审计。窄屏只有聊天或工作区一个可见表面，主要导航固定为「聊天、今日、提醒、记忆、助理」五项；隐藏区不可聚焦，不覆盖输入。跳到主要内容、表面切换后的焦点与键盘操作由 shell/view 负责。
 
-| 边界                                     | 职责                                                                                                                                                                                                         |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `app` 的 page/layout（Server Component） | 解析路由身份、服务端读取和页面组装；不因共享布局或交互组件而将全站客户端化                                                                                                                                   |
-| Client View / 基础组件                   | 底部输入、工具菜单、保留阅读位置的聊天滚动、安全 Markdown、完整审阅、焦点与展开；例如 `task-views.tsx`，不编排执行生命周期                                                                                   |
-| 功能 controller/hook                     | `use-conversation-task.ts` 归属发送、原 Run SSE、GET、继续/取消在途及原幂等键；历史分页独立，文档决议由 `useDocumentApproval` 归属，提醒与账户操作各有独立控制                                               |
-| 数据访问与纯投影                         | `lib/api.ts` 服务端 HTTP，`conversation-run.ts` 传输/解析/事件聚合，`document-loop.ts` 精确批准与效果投影，功能数据模块负责对应只读分页；复用 contracts/stream-protocol，不导入 API 私有实现、不复制领域授权 |
+| 页面 / 路由                                  | 内容与边界                                                                               |
+| -------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| 今日 `/`                                     | 真实日期/时区、简报、提醒、待确认与活动入口；只读聚合，不是全部任务                      |
+| 聊天及历史 `/conversations`                  | 新对话、连续消息、会话发现、原 Run/批准/效果与历史分页；历史筛选仅覆盖已读取记录         |
+| 提醒 `/tasks`、`/tasks/{id}`                 | 真实定时提醒、状态、调度及取消回执、通知与事件；不是普通待办                             |
+| 提醒确认 `/approvals`、`/approvals/{id}`     | 冻结提醒列表/详情、确认、拒绝及显式修改；不混入文档批准                                  |
+| 活动 `/activity`                             | 任务范围索引与选中任务事件，各有游标；不是全局全量时间线                                 |
+| 文档批准 `/document-approvals/{id}`          | 从原 Run 可深链审阅完整冻结全文，独立新标签；没有文档批准集合路由                        |
+| 账户 `/account`                              | 原身份、认证状态、已有受管资料登记及本机维护边界                                         |
+| 认证 `/login`、`/setup`、`/claim`、`/logout` | 正式登录、核验空安装后建号、原身份转正、明确退出；使用独立认证表面，不显示聊天工作区     |
+| 设置 `/settings`                             | 分类进入账户、模型、资料及扩展；模型配置使用真实 API，未接通能力不提供虚构设置或保存动作 |
+| 记忆 `/memories`                             | 查看本人来源记忆，可显式更正或停止使用；来源可追溯不代表内容已核实                       |
+| 资料 `/materials`                            | 资料库管理未接通；不影响聊天资料工具显式选择已有受管登记                                 |
+| 日记 `/journal`、助理资料 `/profile`         | 读取/编辑未接通，无自动归档或无法保存的编辑表单                                          |
+| 技能 `/skills`、连接 `/connectors`           | 管理未接通，无可安装目录、启用动作、外部授权或虚构已连接服务                             |
+| 渠道 `/channels`、设备 `/devices`            | 接入/管理未接通，无配对码、注册、在线或可控制状态承诺                                    |
+| 普通待办 `/todos`                            | 未接通，与真实提醒 `/tasks` 分开，不暗含排期、通知或执行                                 |
 
-URL 拥有选中资源身份；controller 清理所属 GET/SSE，隔离迟到响应。继续绑定原 Run/checkpoint/请求键，取消以服务端事实为准，断开连接不等于成功取消或回滚既成效果。活动连接的离开语义沿原取消合同，不承诺后台继续；批准链接独立新标签，避免因审阅提前断开原流。
+这些未接通页由 `features/capabilities/model/capabilities.ts` 定义边界与关联入口，`view` 负责展示，不因存在路由而声明后台能力。`app/api/[...path]/route.ts` 是原同源 HTTP/SSE 传输入口，不是新增业务页面或授权层。
+
+### URL、身份与唯一生命周期
+
+`app/layout.tsx` 的 RSC 读取身份并组装 `shell/view/app-shell.tsx`；shell 只持有一个不以路径为 key 的 `ConversationPane`，`/conversations/page.tsx` 不再创建第二个会话实例。工作区切换、收起/展开和窄屏表面切换保留同一聊天实例与草稿，不重挂载、不重连原 SSE、不重发、不取消。显式新对话、选中另一会话/Run、真正离开应用或转入认证，仍按原在途离开保护处理；不因此承诺服务端后台执行。
+
+选中身份由 `conversation_id` 与可选 `run_id` 表达。`shell/model/navigation.ts` 的 `shellLocation` 解析身份及表面，`isWorkspacePath`/`workspaceHref` 配合 `WorkspaceLink` 只为工作区目的地继承当前身份；显式新对话、历史身份深链和认证目的地保留自己的 URL 语义。`surface=chat` 保留工作区路径与身份，但只显示聊天；重新展开恢复对应路径，不新建会话。刷新、直接深链与返回依 URL 恢复身份/表面，无效身份不读取或执行其中的操作。
+
+对话默认使用已有无 workspace 的 `harness`；消息区独立滚动，输入常驻聊天区底部。同一会话可以明确发送下一轮；提醒/资料工具位于「＋」菜单并可移除，分别固定 `business` / `harness`。`intent=reminder|document` 只预选新消息表单，身份 query 优先；选择、填写、切换目标不发送。资料必须显式选择读取成功的登记，不默选首项、不接受任意宿主 root；完整可读/可写相对范围与受管副本说明按需展开，空登记与读取失败分开，无写范围仍可执行只读资料任务。
+
+执行中仍可编辑草稿，但发送资格继续受原 Run、批准挂起、未知发送及未知效果限制；不得用新消息绕过原运行。成功结束仅在输入仍等于本次提交文本时清空，不清除 SSE 期间新编辑的草稿。消息档案不猜与某 Run 的对应，不重复拼接同一回复的流式与最终存储文本。会话、消息、事件、提醒确认、任务和活动分页沿各自服务端游标 GET，保留既有内容、局部错误和未推进游标；打开、展开、刷新、回退与重登恢复均不自动业务 POST，不把首批/已加载范围称为全量。
+
+### Feature-owned MVVM 与 RSC 边界
+
+| 边界                                                                               | 职责与实际入口                                                                                                           |
+| ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `app/` page/layout（RSC）                                                          | 解析路由参数、身份入口与 feature screen 组装；不拥有业务页面编排、分页状态或第二个会话控制器，不将全站客户端化           |
+| `shell/model`                                                                      | 路由、导航项目、身份与表面 URL 投影；不拥有 Run、批准或领域资格                                                          |
+| `shell/viewmodel/use-workspace-shell.ts`                                           | 持续会话身份、表面与工作区导航状态；不重复执行生命周期                                                                   |
+| `shell/view`                                                                       | 双区框架、五项窄屏导航、可见性和焦点；`WorkspaceLink` 处理工作区身份继承                                                 |
+| `features/*/model`                                                                 | 功能类型、数据访问、协议校验/转换、冻结内容和纯业务投影；复用 contracts/stream-protocol，不依赖 view/组件或 API 私有实现 |
+| `features/*/viewmodel`                                                             | 功能状态、显式命令、异步生命周期、迟到响应隔离和请求清理；无交互状态的功能不设空壳层                                     |
+| `features/*/view`                                                                  | RSC screen、Client 展示及 DOM adapter；负责布局、焦点、完整审阅和局部反馈，不直接客户端 fetch 或编排业务执行             |
+| `shared/http/{client,server,result,page,use-page}`                                 | 通用 HTTP、envelope/错误结果及只读分页基础设施，不承接领域资格                                                           |
+| `shared/session/{identity,navigation}`、`shared/ui/{app-theme,page,read-controls}` | 跨功能身份/安全返回与无业务 UI、主题/Motion 策略；不另立根业务 `lib/` 或组件实现                                         |
+
+功能所有权分别归 `account`、`brief`、`approvals`、`reminders`、`conversations`、`capabilities`。例如 `approvals/model/{approval,approvals.server,document-loop}` 拥有冻结批准与精确提交，`reminders/model/{data,reminder-server,types,presentation}` 拥有提醒读取和投影，`account/model` 与 `account/viewmodel/account-screen.ts` 拥有账户读取/资格与操作；RSC screen 可调用自己的服务端数据边界，不把领域规则放回 `app/`。被替代的根业务文件及兼容 re-export 不作为第二条调用路径保留。
+
+`features/conversations/viewmodel/use-conversation-task.ts` 的 `useConversationTask` 是发送、原 Run SSE、GET、显式继续/取消、未知发送保护与原幂等键的唯一所有者；历史读取与纯派生分别由同 feature 的 viewmodel/model 承接。文档决议由 `features/approvals/viewmodel/useDocumentApproval.ts` 归属，提醒和账户操作拥有各自 viewmodel。继续绑定原 Run/checkpoint/请求键；取消以服务端事实为准，断开连接不等于成功取消或回滚既成效果。批准链接独立新标签，避免因审阅提前断开原流。
+
+### DOM、Markdown 与 Motion
+
+`features/conversations/viewmodel/use-conversation-scroll.ts` 是聊天 DOM 滚动跟随的单一 adapter：只观察聊天内容和 viewport 的 ResizeObserver 将变化合并到 animation frame，先读取几何信息再按跟随状态写滚动位置；手动阅读不强拉到底，支持回到最新及定位本聊天范围内的原卡片。工作区另有独立滚动容器，不用全页滚动驱动聊天执行。
+
+`view/assistant-markdown.tsx` 的 `AssistantMarkdown` 与 `view/conversation-messages.tsx` 的 `MessageRow` 使用 memo，历史 Markdown 与实时增量共用安全渲染但保持独立更新边界。Motion 通过共享主题统一尊重减少动态效果，只做导航选中等局部反馈；无全页进入位移，首屏正文不等待动画，动画不控制请求、恢复资格或完成状态。这些是实现结构与约束，不是性能改善或检查通过的证据；同负载测量、真实路由往返、长历史/节点定位与 SSE/输入并发的取证方法见[持续对话与工作区方案](../demo/desktop-experience-plan.md)。
 
 ### 批准、效果与错误
 

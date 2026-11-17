@@ -31,7 +31,7 @@ import {
 } from '../../src/modules/conversations/service.js';
 import type { ConversationDeps, RunContext } from '../../src/modules/conversations/contracts.js';
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import { createHarnessModelTransport } from '../../src/modules/conversations/harness-model.js';
+import { createHarnessModelTransport } from '../../src/modules/model-providers/harness-model.js';
 import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
 import { seedAdmittedSession as seedSession } from '../integration/setup.js';
 import type { SeededSession } from '../../src/modules/identity/seed.js';

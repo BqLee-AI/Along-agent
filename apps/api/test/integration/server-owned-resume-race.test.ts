@@ -13,7 +13,7 @@ import { confirmDocumentApproval } from '../../src/modules/approvals/document-ac
 import { readDocumentApprovalReceipt } from '../../src/modules/approvals/decision.js';
 import { configureWorkspaceRegistry } from '../../src/modules/workspaces/service.js';
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import { createHarnessModelTransport } from '../../src/modules/conversations/harness-model.js';
+import { createHarnessModelTransport } from '../../src/modules/model-providers/harness-model.js';
 import { createRunDriver } from '../../src/modules/conversations/run-driver.js';
 import { startConversationRun } from '../../src/modules/conversations/service.js';
 import { loadTimeContext } from '../../src/modules/time/context.js';
@@ -266,7 +266,7 @@ maybe('server-owned approval resume across processes', () => {
         import { randomUUID } from 'node:crypto';
         import { once } from 'node:events';
         import { createContextPolicy } from './src/modules/conversations/context-policy.ts';
-        import { createHarnessModelTransport } from './src/modules/conversations/harness-model.ts';
+        import { createHarnessModelTransport } from './src/modules/model-providers/harness-model.ts';
         import { createRunDriver } from './src/modules/conversations/run-driver.ts';
         import { resumeConversationRun } from './src/modules/conversations/harness-authority.ts';
         import { loadTimeContext } from './src/modules/time/context.ts';

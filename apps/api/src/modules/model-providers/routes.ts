@@ -4,9 +4,13 @@ import type { z } from 'zod';
 import {
   ProviderCreateSchema,
   ProviderUpdateSchema,
+  ProviderConnectionTestSchema,
   ProviderTestSchema,
   ProviderModelSchema,
+  ProviderModelCreateSchema,
+  ProviderModelContextWindowSchema,
   ProviderDefaultSchema,
+  ProviderModelDefaultSchema,
   EmptyActionSchema,
 } from '@along/contracts';
 import type { ActorResolver } from '../../http/auth.js';
@@ -27,14 +31,17 @@ import {
   listProviders,
   removeModel,
   setDefault,
+  setProviderDefault,
+  setModelContextWindow,
   syncModels,
   testProvider,
+  testProviderConnection,
   updateProvider,
 } from './service.js';
 import type { ConversationDeps } from '../conversations/contracts.js';
 
 const providerPath =
-  /^\/api\/v1\/model-providers\/([^/]+)(?:\/(actions\/(?:update|delete|test)|models(?:\/actions\/(?:sync|remove))?))?$/;
+  /^\/api\/v1\/model-providers\/([^/]+)(?:\/(actions\/(?:update|delete|test|test-connection|default-model)|models(?:\/actions\/(?:sync|remove|context-window))?))?$/;
 export function isModelProviderPath(pathname: string): boolean {
   return (
     pathname === '/api/v1/model-providers' ||
@@ -97,6 +104,22 @@ export async function handleModelProviderRoute(
         await deleteProvider(pool, owner, id);
         data = { deleted: true };
         break;
+      case 'actions/default-model':
+        data = await setProviderDefault(
+          pool,
+          owner,
+          id,
+          parse(ProviderModelDefaultSchema, deps.body).model_id,
+        );
+        break;
+      case 'actions/test-connection':
+        data = await testProviderConnection(
+          pool,
+          owner,
+          id,
+          parse(ProviderConnectionTestSchema, deps.body),
+        );
+        break;
       case 'actions/test': {
         const controller = new AbortController();
         const onClose = () => controller.abort();
@@ -116,9 +139,22 @@ export async function handleModelProviderRoute(
         }
         break;
       }
-      case 'models':
-        data = await addModel(pool, owner, id, parse(ProviderModelSchema, deps.body).model_id);
+      case 'models': {
+        const input = parse(ProviderModelCreateSchema, deps.body);
+        data = await addModel(pool, owner, id, input.model_id, input.context_window_tokens);
         break;
+      }
+      case 'models/actions/context-window': {
+        const input = parse(ProviderModelContextWindowSchema, deps.body);
+        data = await setModelContextWindow(
+          pool,
+          owner,
+          id,
+          input.model_id,
+          input.context_window_tokens,
+        );
+        break;
+      }
       case 'models/actions/remove':
         data = await removeModel(pool, owner, id, parse(ProviderModelSchema, deps.body).model_id);
         break;

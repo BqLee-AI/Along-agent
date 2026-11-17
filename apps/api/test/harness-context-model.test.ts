@@ -1,8 +1,11 @@
 import { afterEach, expect, test } from 'bun:test';
 import { createServer, type Server } from 'node:http';
-import { createHarnessModelTransport } from '../src/modules/conversations/harness-model.js';
+import { createHarnessModelTransport } from '../src/modules/model-providers/harness-model.js';
 import { createContextPolicy } from '../src/modules/conversations/context-policy.js';
-import { measureHarnessContext } from '../src/modules/conversations/harness-context.js';
+import {
+  buildHarnessModelBody,
+  measureHarnessContext,
+} from '../src/modules/conversations/harness-context.js';
 import type { HarnessRequest } from '@along/contracts';
 
 const servers: Server[] = [];
@@ -137,6 +140,42 @@ test('missing current meter and missing provider usage remain unknown rather tha
     limit_reason: null,
     input_meter: { quality: 'unavailable', input_tokens: null, meter_revision: 'unavailable/1' },
   });
+});
+
+test('SDK preview serializes an accepted unanswered tool call without inventing a result', async () => {
+  const candidate: Extract<HarnessRequest, { type: 'measure_context' }> = {
+    protocol: 'harness/v8',
+    type: 'measure_context',
+    request_ref: 'preview',
+    messages: [
+      { role: 'user', content: 'read preferences' },
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [
+          {
+            id: 'pending-call',
+            type: 'function',
+            function: { name: 'get_user_prefs', arguments: '{}' },
+          },
+        ],
+      },
+    ],
+    remaining_tokens: 1000,
+    max_output_tokens: 37,
+  };
+  const body = JSON.parse(await buildHarnessModelBody('bounded', candidate, []));
+  expect(body.messages.at(-1)).toMatchObject({
+    role: 'assistant',
+    tool_calls: [
+      {
+        id: 'pending-call',
+        type: 'function',
+        function: { name: 'get_user_prefs', arguments: '{}' },
+      },
+    ],
+  });
+  expect(body.messages.some((message: { role: string }) => message.role === 'tool')).toBe(false);
 });
 
 test('SDK preflight meters the exact body later sent without contacting the provider', async () => {

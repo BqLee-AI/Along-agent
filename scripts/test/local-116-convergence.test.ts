@@ -192,8 +192,8 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
   it('initializes an empty database at the converged version', async () => {
     await isolated(async (url) => {
       await deployment(url, async (db) => {
-        expect((await db.initialize()).version).toBe('0036');
-        expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0036' });
+        expect((await db.initialize()).version).toBe('0038');
+        expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0038' });
       });
       await sql(url, async (client) => {
         expect(
@@ -219,9 +219,170 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
           '0034',
           '0035',
           '0036',
+          '0037',
+          '0038',
         ]);
       });
     });
+  }, 30000);
+
+  it('upgrades 0028 to the current version and rejects a weakened window constraint', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'model-window-0028-'));
+    try {
+      for (const name of (await readdir(migrations)).filter(
+        (name) => name.endsWith('.sql') && name.slice(0, 4) <= '0028',
+      )) {
+        await copyFile(new URL(name, migrations), join(directory, name));
+      }
+      await isolated(async (url) => {
+        await deployment(
+          url,
+          async (db) => {
+            expect((await db.initialize()).version).toBe('0028');
+          },
+          directory,
+        );
+        await deployment(url, async (db) => {
+          expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0028' });
+          expect((await db.upgrade()).version).toBe('0038');
+          expect((await db.initialize()).version).toBe('0038');
+        });
+        await sql(url, async (client) => {
+          await client.query(
+            'ALTER TABLE model_provider_models DROP CONSTRAINT model_provider_models_context_window_tokens_check',
+          );
+        });
+        await deployment(url, async (db) => {
+          expect(await db.classify()).toMatchObject({ kind: 'unknown' });
+        });
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 30000);
+
+  it('upgrades provider defaults without losing facts and recognizes schema drift', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'provider-default-0037-'));
+    try {
+      for (const name of (await readdir(migrations)).filter(
+        (name) => name.endsWith('.sql') && name.slice(0, 4) <= '0037',
+      )) {
+        await copyFile(new URL(name, migrations), join(directory, name));
+      }
+      await isolated(async (url) => {
+        await deployment(
+          url,
+          async (db) => {
+            expect((await db.initialize()).version).toBe('0037');
+          },
+          directory,
+        );
+        const owner = randomUUID();
+        const selected = randomUUID();
+        const other = randomUUID();
+        const selectedVersion = randomUUID();
+        const otherVersion = randomUUID();
+        const before = await sql(url, async (client) => {
+          await client.query('BEGIN');
+          await client.query(
+            `INSERT INTO model_providers(id, owner_id, name, current_version_id)
+             VALUES ($1, $3, 'selected', $4), ($2, $3, 'other', $5)`,
+            [selected, other, owner, selectedVersion, otherVersion],
+          );
+          await client.query(
+            `INSERT INTO model_provider_versions(id, owner_id, provider_id)
+             VALUES ($1, $3, $4), ($2, $3, $5)`,
+            [selectedVersion, otherVersion, owner, selected, other],
+          );
+          await client.query(
+            `INSERT INTO model_provider_models(provider_id, model_id)
+             VALUES ($1, 'chosen'), ($1, 'alternate'), ($2, 'other-only')`,
+            [selected, other],
+          );
+          await client.query(
+            'INSERT INTO model_provider_defaults(owner_id, provider_id, model_id) VALUES ($1, $2, $3)',
+            [owner, selected, 'chosen'],
+          );
+          await client.query('COMMIT');
+          return (await client.query('SELECT * FROM model_provider_defaults')).rows;
+        });
+        await deployment(url, async (db) => {
+          expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0037' });
+          expect((await db.upgrade()).version).toBe('0038');
+          expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0038' });
+        });
+        await sql(url, async (client) => {
+          expect((await client.query('SELECT * FROM model_provider_defaults')).rows).toEqual(
+            before,
+          );
+          expect(
+            (
+              await client.query(
+                'SELECT id, default_model_id FROM model_providers WHERE owner_id=$1 ORDER BY name',
+                [owner],
+              )
+            ).rows,
+          ).toEqual([
+            { id: other, default_model_id: null },
+            { id: selected, default_model_id: 'chosen' },
+          ]);
+          await expect(
+            client.query("UPDATE model_providers SET default_model_id='other-only' WHERE id=$1", [
+              selected,
+            ]),
+          ).rejects.toMatchObject({ code: '23503' });
+          await expect(
+            client.query(
+              "DELETE FROM model_provider_models WHERE provider_id=$1 AND model_id='chosen'",
+              [selected],
+            ),
+          ).rejects.toMatchObject({ code: '23503' });
+          await client.query(
+            "UPDATE model_providers SET default_model_id='alternate' WHERE id=$1",
+            [selected],
+          );
+          await client.query(
+            await readFile(new URL('0038_model_provider_defaults.sql', migrations), 'utf8'),
+          );
+          expect(
+            (
+              await client.query('SELECT default_model_id FROM model_providers WHERE id=$1', [
+                selected,
+              ])
+            ).rows[0].default_model_id,
+          ).toBe('alternate');
+          await client.query(
+            'ALTER TABLE model_providers DROP CONSTRAINT model_providers_default_model_fk',
+          );
+        });
+        await deployment(url, async (db) => {
+          expect(await db.classify()).toMatchObject({
+            kind: 'unknown',
+            reason: 'baseline_additional_constraints_mismatch',
+          });
+        });
+      });
+      await isolated(async (url) => {
+        await deployment(
+          url,
+          async (db) => {
+            expect((await db.initialize()).version).toBe('0037');
+          },
+          directory,
+        );
+        await sql(url, (client) =>
+          client.query('ALTER TABLE model_providers ADD COLUMN default_model_id text'),
+        );
+        await deployment(url, async (db) => {
+          expect(await db.classify()).toMatchObject({
+            kind: 'unknown',
+            reason: 'baseline_unstamped_migration_objects',
+          });
+        });
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   }, 30000);
 
   for (const history of ['main', 'legacy'] as const) {
@@ -237,7 +398,7 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
           await expect(db.initialize()).rejects.toMatchObject({
             code: 'explicit_upgrade_required',
           });
-          expect((await db.upgrade()).version).toBe('0036');
+          expect((await db.upgrade()).version).toBe('0038');
         });
         await sql(url, async (client) => {
           expect(await facts(client, history)).toEqual(before);
@@ -275,11 +436,13 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
             '0034',
             '0035',
             '0036',
+            '0037',
+            '0038',
           ]);
         });
         await deployment(url, async (db) => {
-          expect((await db.initialize()).version).toBe('0036');
-          expect((await db.upgrade()).version).toBe('0036');
+          expect((await db.initialize()).version).toBe('0038');
+          expect((await db.upgrade()).version).toBe('0038');
         });
       });
     }, 30000);
@@ -317,7 +480,7 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
             url,
             async (db) => {
               expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0025' });
-              expect((await db.upgrade()).version).toBe('0036');
+              expect((await db.upgrade()).version).toBe('0038');
             },
             directory,
           );
@@ -366,7 +529,7 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
           version: '0026',
           reason: 'explicit_upgrade_required',
         });
-        expect((await db.upgrade()).version).toBe('0036');
+        expect((await db.upgrade()).version).toBe('0038');
       });
       await sql(url, async (client) => {
         expect(await facts(client, 'legacy')).toEqual(before.facts);
@@ -476,7 +639,7 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
           ).toBe('0');
         });
         await deployment(url, async (db) => {
-          expect((await db.upgrade()).version).toBe('0036');
+          expect((await db.upgrade()).version).toBe('0038');
         });
         await sql(url, async (client) => expect(await facts(client, 'legacy')).toEqual(before));
       } finally {

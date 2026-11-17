@@ -13,12 +13,14 @@ Issue: #144
 
 ## Spec 路径与设计
 
-唯一详细 Proposed 设计：[design/23](../../../docs/design/23-r3-short-term-memory-and-compact.md)；阶段 0 事实：[实验记录](../../../docs/verification/r3-stage-zero-2026-11-13.md)。本 change 不修改已生效 specs，不表示已实现或验收。
+唯一详细 Proposed 设计：[design/23](../../../docs/design/23-r3-short-term-memory-and-compact.md)；阶段 0 事实：[实验记录](../../../docs/verification/r3-stage-zero-2026-11-13.md)。本 change 不直接修改已生效 specs；合同本身不证明实现或验收。
 
 - [agent-runtime delta](specs/agent-runtime/spec.md)：暂停安全点、取消/恢复和预算、摘要。
 - [conversations delta](specs/conversations/spec.md)：新旧 Run 边界、compact 与原文。
 - [short-term-memory delta](specs/short-term-memory/spec.md)：记忆来源、隔离与检索。
 
-## 非目标 / Deferred
+## MVP 验收与非目标
 
-不实施代码、迁移或部署，不归档；不扩展到任意崩溃恢复或 R4。top-k、相关性阈值、TTL、历史回填、自动触发数值均待实验及实施决策，不以固定默认值或小样本结果充当质量保证。阶段 0 一次协议错误的原因未知；网络波动只是可能性，不是结论；重试成功也不是完整 Web/native/Run 验收。
+本次合并以可达的真实路径和必要基础行为为门槛：真实手动与自动 compact、同 Run 继续和跨会话有来源记忆，以及适用的受控安全、权限、预算、取消不重放和旧冻结资格验证分别取证。语义结果只作为候选，须能回查来源并如实标示不完整或降级；原始事实与既有安全合同不降级。证据分清真实路径、隔离合成场景和受控测试，不将样本推成统计保证。
+
+代表性质量基准、排序调优、统计保证和原安装真实数据试验不作为本次合并前置，也不因此声称已验证。原安装部署仍须遵守备份、资格盘点、前向迁移及恢复安全要求。R4、任意崩溃恢复、自动启用 R2-B 不在本次范围；top-k、相关性阈值、TTL 和历史回填不构成质量承诺。阶段 0 的协议错误原因未知，不能归因于网络。

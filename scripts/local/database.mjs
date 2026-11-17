@@ -646,13 +646,10 @@ export class DeploymentDatabase {
             await this.#verifyAdditional(migration.verify);
             continue;
           }
-          const later = applied
-            .slice(index + 1)
-            .flatMap((item) =>
-              typeof item.verify === 'object' && item.verify !== null ? [item.verify] : [],
-            );
+          const later = applied.slice(index + 1).map((item) => item.verify);
+          const manifests = later.filter((item) => typeof item === 'object' && item !== null);
           const columns = migration.verify.columns.map((column) =>
-            later.reduce(
+            manifests.reduce(
               (current, manifest) =>
                 (manifest.alter_columns ?? []).find(
                   (change) => change.table === current.table && change.name === current.name,
@@ -660,23 +657,16 @@ export class DeploymentDatabase {
               column,
             ),
           );
-          const constraints = [
-            ...migration.verify.constraints.map((constraint) =>
-              later.reduce(
-                (current, manifest) =>
-                  (manifest.alter_constraints ?? []).find(
-                    (change) => change.table === current.table && change.name === current.name,
-                  ) ?? current,
-                constraint,
-              ),
+          const constraints = migration.verify.constraints.map((constraint) =>
+            manifests.reduce(
+              (current, manifest) =>
+                (manifest.alter_constraints ?? []).find(
+                  (change) => change.table === current.table && change.name === current.name,
+                ) ?? current,
+              constraint,
             ),
-            ...later.flatMap((manifest) =>
-              manifest.constraints.filter((constraint) =>
-                migration.verify.tables.includes(constraint.table),
-              ),
-            ),
-          ];
-          await this.#verifyAdditional({ ...migration.verify, columns, constraints });
+          );
+          await this.#verifyAdditional({ ...migration.verify, columns, constraints }, later);
         }
       } catch (error) {
         if (this.#lost) throw error;
@@ -733,7 +723,7 @@ export class DeploymentDatabase {
     );
     return present.rows[0].present;
   }
-  async #verifyAdditional(manifest) {
+  async #verifyAdditional(manifest, later = []) {
     if (typeof manifest === 'string') return this.#query(manifest);
     const tables = [...new Set(manifest.columns.map((c) => c.table))];
     const columns = (
@@ -764,7 +754,10 @@ export class DeploymentDatabase {
     for (const table of manifest.tables) {
       if (
         columns.filter((c) => c.table_name === table).length !==
-        manifest.columns.filter((c) => c.table === table).length
+        manifest.columns.filter((c) => c.table === table).length +
+          later
+            .flatMap((m) => (typeof m === 'object' && m !== null ? m.columns : []))
+            .filter((c) => c.table === table).length
       )
         fail('baseline_additional_columns_mismatch');
     }
@@ -786,7 +779,10 @@ export class DeploymentDatabase {
     ).rows;
     if (
       constraints.filter((c) => manifest.tables.includes(c.table_name)).length !==
-      manifest.constraints.filter((c) => manifest.tables.includes(c.table)).length
+      manifest.constraints.filter((c) => manifest.tables.includes(c.table)).length +
+        later
+          .flatMap((m) => (typeof m === 'object' && m !== null ? m.constraints : []))
+          .filter((c) => manifest.tables.includes(c.table)).length
     )
       fail('baseline_additional_constraints_mismatch');
     for (const expected of manifest.constraints) {

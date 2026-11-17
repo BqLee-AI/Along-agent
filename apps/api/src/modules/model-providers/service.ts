@@ -6,6 +6,7 @@ import {
   type HarnessModelReply,
   type HarnessRequest,
   type HarnessTool,
+  type ProviderConnectionTest,
   type ProviderTest,
   type ProviderUpdate,
   type ProviderView,
@@ -26,7 +27,11 @@ import type { ConversationDeps } from '../conversations/contracts.js';
 import type { HarnessServices } from '../conversations/harness-process.js';
 
 export type ModelSelection = { provider_id: string; model_id: string };
-export type ResolvedSelection = ModelSelection & { provider_name: string; version_id: string };
+export type ResolvedSelection = ModelSelection & {
+  provider_name: string;
+  version_id: string;
+  context_window_tokens: number | null;
+};
 export type RunSelectionView = ModelSelection & { state: 'available'; provider_name: string };
 
 /** Serialize owner configuration decisions, including the absence of a default. */
@@ -65,13 +70,18 @@ export async function resolveSelection(
   const row = provider.rows[0];
   if (!row || row.deleted_at) throw notFound('provider not found');
   if (row.owner_id !== ownerId) throw forbidden();
-  const model = await client.query(
-    'SELECT 1 FROM model_provider_models WHERE provider_id = $1 AND model_id = $2',
+  const model = await client.query<{ context_window_tokens: number | null }>(
+    'SELECT context_window_tokens::float8 AS context_window_tokens FROM model_provider_models WHERE provider_id = $1 AND model_id = $2',
     [selected.provider_id, selected.model_id],
   );
   if (!row.enabled || !row.base_url || !model.rowCount)
     throw stateConflict('model selection unavailable');
-  return { ...selected, provider_name: row.name, version_id: row.current_version_id };
+  return {
+    ...selected,
+    provider_name: row.name,
+    version_id: row.current_version_id,
+    context_window_tokens: model.rows[0]!.context_window_tokens,
+  };
 }
 
 export async function bindRunSelection(
@@ -86,8 +96,8 @@ export async function bindRunSelection(
   ]);
   if (!run.rowCount) throw notFound('run not found');
   const inserted = await client.query(
-    `INSERT INTO model_provider_run_bindings (run_id, owner_id, version_id, provider_id, provider_name, model_id)
-    SELECT $1, $2, id, provider_id, $5, $6 FROM model_provider_versions
+    `INSERT INTO model_provider_run_bindings (run_id, owner_id, version_id, provider_id, provider_name, model_id, context_window_tokens)
+    SELECT $1, $2, id, provider_id, $5, $6, $7 FROM model_provider_versions
     WHERE id = $3 AND owner_id = $2 AND provider_id = $4 AND revoked_at IS NULL`,
     [
       runId,
@@ -96,6 +106,7 @@ export async function bindRunSelection(
       selected.provider_id,
       selected.provider_name,
       selected.model_id,
+      selected.context_window_tokens,
     ],
   );
   if (!inserted.rowCount) throw stateConflict('model version unavailable');
@@ -140,15 +151,21 @@ export async function resolveRunSelection(
   client: PoolClient,
   ownerId: string,
   runId: string,
-): Promise<{ base_url: string; api_key: string | null; model_id: string } | null> {
+): Promise<{
+  base_url: string;
+  api_key: string | null;
+  model_id: string;
+  context_window_tokens: number | null;
+} | null> {
   const result = await client.query<{
     provider_id: string;
     base_url: string;
     credential_ciphertext: string | null;
     revoked_at: Date | null;
     model_id: string;
+    context_window_tokens: number | null;
   }>(
-    `SELECT b.provider_id, b.model_id, v.base_url, v.credential_ciphertext, v.revoked_at
+    `SELECT b.provider_id, b.model_id, b.context_window_tokens::float8 AS context_window_tokens, v.base_url, v.credential_ciphertext, v.revoked_at
        FROM model_provider_run_bindings b JOIN model_provider_versions v ON v.id = b.version_id AND v.owner_id = b.owner_id AND v.provider_id = b.provider_id
       WHERE b.run_id = $1 AND b.owner_id = $2`,
     [runId, ownerId],
@@ -159,6 +176,7 @@ export async function resolveRunSelection(
   return {
     base_url: row.base_url,
     model_id: row.model_id,
+    context_window_tokens: row.context_window_tokens,
     api_key: row.credential_ciphertext
       ? decryptCredential(credentialKey(), ownerId, row.provider_id, row.credential_ciphertext)
       : null,
@@ -170,6 +188,7 @@ interface ProviderRow {
   owner_id: string;
   name: string;
   enabled: boolean;
+  default_model_id: string | null;
   deleted_at: Date | null;
   current_version_id: string;
   base_url: string;
@@ -199,8 +218,8 @@ async function ownedProvider(
 }
 
 async function providerView(client: PoolClient, row: ProviderRow): Promise<ProviderView> {
-  const models = await client.query<{ model_id: string }>(
-    'SELECT model_id FROM model_provider_models WHERE provider_id = $1 ORDER BY model_id',
+  const models = await client.query<{ model_id: string; context_window_tokens: number | null }>(
+    'SELECT model_id, context_window_tokens::float8 AS context_window_tokens FROM model_provider_models WHERE provider_id = $1 ORDER BY model_id',
     [row.id],
   );
   return {
@@ -210,7 +229,11 @@ async function providerView(client: PoolClient, row: ProviderRow): Promise<Provi
     base_url: row.base_url,
     has_api_key: row.credential_ciphertext !== null,
     key_hint: null,
+    default_model_id: row.default_model_id,
     models: models.rows.map((model) => model.model_id),
+    model_context_windows: Object.fromEntries(
+      models.rows.map((model) => [model.model_id, model.context_window_tokens]),
+    ),
   };
 }
 
@@ -330,7 +353,7 @@ export async function deleteProvider(pool: Pool, ownerId: string, id: string): P
       [ownerId, id],
     );
     await client.query(
-      'UPDATE model_providers SET deleted_at = now() WHERE id = $1 AND owner_id = $2',
+      'UPDATE model_providers SET deleted_at = now(), default_model_id = NULL WHERE id = $1 AND owner_id = $2',
       [id, ownerId],
     );
   });
@@ -341,14 +364,34 @@ export async function addModel(
   ownerId: string,
   id: string,
   modelId: string,
+  contextWindowTokens: number | null = null,
 ): Promise<ProviderView> {
   return withTransaction(pool, async (client) => {
     await lockOwner(client, ownerId);
     const row = await ownedProvider(client, ownerId, id);
     await client.query(
-      'INSERT INTO model_provider_models(provider_id,model_id) VALUES ($1,$2) ON CONFLICT DO NOTHING',
-      [id, modelId],
+      'INSERT INTO model_provider_models(provider_id,model_id,context_window_tokens) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING',
+      [id, modelId, contextWindowTokens],
     );
+    return providerView(client, row);
+  });
+}
+
+export async function setModelContextWindow(
+  pool: Pool,
+  ownerId: string,
+  id: string,
+  modelId: string,
+  contextWindowTokens: number | null,
+): Promise<ProviderView> {
+  return withTransaction(pool, async (client) => {
+    await lockOwner(client, ownerId);
+    const row = await ownedProvider(client, ownerId, id);
+    const result = await client.query(
+      'UPDATE model_provider_models SET context_window_tokens = $3 WHERE provider_id = $1 AND model_id = $2',
+      [id, modelId, contextWindowTokens],
+    );
+    if (!result.rowCount) throw notFound('model not found');
     return providerView(client, row);
   });
 }
@@ -366,6 +409,10 @@ export async function removeModel(
       'DELETE FROM model_provider_defaults WHERE owner_id = $1 AND provider_id = $2 AND model_id = $3',
       [ownerId, id, modelId],
     );
+    if (row.default_model_id === modelId) {
+      await client.query('UPDATE model_providers SET default_model_id = NULL WHERE id = $1', [id]);
+      row.default_model_id = null;
+    }
     await client.query(
       'DELETE FROM model_provider_models WHERE provider_id = $1 AND model_id = $2',
       [id, modelId],
@@ -390,11 +437,51 @@ export async function setDefault(
       'SELECT 1 FROM model_provider_models WHERE provider_id = $1 AND model_id = $2',
       [selection.provider_id, selection.model_id],
     );
-    if (!row.enabled || !model.rowCount) throw stateConflict('model selection unavailable');
+    if (!row.enabled || !row.base_url.trim() || !model.rowCount)
+      throw stateConflict('model selection unavailable');
+    await client.query('UPDATE model_providers SET default_model_id = $2 WHERE id = $1', [
+      selection.provider_id,
+      selection.model_id,
+    ]);
     await client.query(
       'INSERT INTO model_provider_defaults(owner_id,provider_id,model_id) VALUES ($1,$2,$3) ON CONFLICT(owner_id) DO UPDATE SET provider_id=excluded.provider_id, model_id=excluded.model_id',
       [ownerId, selection.provider_id, selection.model_id],
     );
+  });
+}
+
+export async function setProviderDefault(
+  pool: Pool,
+  ownerId: string,
+  id: string,
+  modelId: string | null,
+): Promise<ProviderView> {
+  return withTransaction(pool, async (client) => {
+    await lockOwner(client, ownerId);
+    const row = await ownedProvider(client, ownerId, id);
+    if (modelId !== null) {
+      const model = await client.query(
+        'SELECT 1 FROM model_provider_models WHERE provider_id = $1 AND model_id = $2',
+        [id, modelId],
+      );
+      if (!row.enabled || !row.base_url.trim() || !model.rowCount)
+        throw stateConflict('model selection unavailable');
+      await client.query(
+        'INSERT INTO model_provider_defaults(owner_id,provider_id,model_id) VALUES ($1,$2,$3) ON CONFLICT(owner_id) DO UPDATE SET provider_id=excluded.provider_id, model_id=excluded.model_id',
+        [ownerId, id, modelId],
+      );
+    } else {
+      await client.query(
+        'DELETE FROM model_provider_defaults WHERE owner_id = $1 AND provider_id = $2',
+        [ownerId, id],
+      );
+    }
+    await client.query('UPDATE model_providers SET default_model_id = $2 WHERE id = $1', [
+      id,
+      modelId,
+    ]);
+    row.default_model_id = modelId;
+    return providerView(client, row);
   });
 }
 
@@ -487,15 +574,12 @@ const probeTool: HarnessTool = {
   risk: 'low',
 };
 
-/** Uses the same single-step transport as inference, never a business tool gateway. */
-export async function testProvider(
+async function resolveProbeConfig(
   pool: Pool,
   ownerId: string,
   id: string,
-  input: ProviderTest,
-  factory?: ConversationDeps['modelTransport'],
-  signal?: AbortSignal,
-): Promise<ProbeResult> {
+  input: ProviderConnectionTest,
+): Promise<{ baseUrl: string; key: string | null }> {
   const row = await withTransaction(pool, async (client) => {
     await lockOwner(client, ownerId);
     const current = await ownedProvider(client, ownerId, id);
@@ -504,13 +588,6 @@ export async function testProvider(
       throw validationError('changing endpoint requires replacing or clearing the credential');
     return current;
   });
-  const result: ProbeResult = {
-    text_stream: untested(),
-    tool_round_trip: untested(),
-    usage: untested(),
-  };
-  if (!input.model_id) return result;
-  if (!factory) throw notReady('model provider test transport unavailable');
   const baseUrl = input.base_url ?? row.base_url;
   if (!baseUrl) throw stateConflict('provider unavailable');
   const action = input.credential ?? { action: 'keep' as const };
@@ -522,6 +599,44 @@ export async function testProvider(
         : row.credential_ciphertext
           ? decryptCredential(credentialKey(), ownerId, id, row.credential_ciphertext)
           : null;
+  return { baseUrl, key };
+}
+
+/** Probe the provider endpoint without synchronizing or changing its configuration. */
+export async function testProviderConnection(
+  pool: Pool,
+  ownerId: string,
+  id: string,
+  input: ProviderConnectionTest,
+  request: typeof outboundJson = outboundJson,
+): Promise<{ status: 'passed'; latency_ms: number }> {
+  const { baseUrl, key } = await resolveProbeConfig(pool, ownerId, id, input);
+  const start = performance.now();
+  try {
+    await request(baseUrl, 'models', key);
+  } catch (error) {
+    externalFailure(error);
+  }
+  return { status: 'passed', latency_ms: Math.max(0, Math.round(performance.now() - start)) };
+}
+
+/** Uses the same single-step transport as inference, never a business tool gateway. */
+export async function testProvider(
+  pool: Pool,
+  ownerId: string,
+  id: string,
+  input: ProviderTest,
+  factory?: ConversationDeps['modelTransport'],
+  signal?: AbortSignal,
+): Promise<ProbeResult> {
+  if (!input.model_id) throw validationError('model id required');
+  const { baseUrl, key } = await resolveProbeConfig(pool, ownerId, id, input);
+  const result: ProbeResult = {
+    text_stream: untested(),
+    tool_round_trip: untested(),
+    usage: untested(),
+  };
+  if (!factory) throw notReady('model provider test transport unavailable');
   const probeSignal = signal
     ? AbortSignal.any([signal, AbortSignal.timeout(30_000)])
     : AbortSignal.timeout(30_000);

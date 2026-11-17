@@ -34,13 +34,13 @@ export function TaskCollection({
   );
   return (
     <div className="min-w-0 space-y-4" aria-busy={busy}>
-      <p className="text-[13px] leading-5 text-muted-foreground">
-        {index
-          ? '当前获取的提醒范围。选择一项才读取其事件，不代表全局活动。'
-          : '这里只列提醒，不包含资料任务；不额外读取批准来拼接标题。'}
-      </p>
+      {index && (
+        <p className="text-[13px] leading-5 text-muted-foreground">
+          当前获取的提醒范围。选择一项才读取其事件，不代表全局活动。
+        </p>
+      )}
       {page?.items.length === 0 ? (
-        <EmptyState title="此范围没有提醒任务" description="确认提醒提议后才会创建任务。">
+        <EmptyState title="此范围没有提醒任务">
           <Button
             variant="glass"
             color="default"

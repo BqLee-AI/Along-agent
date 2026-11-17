@@ -1,0 +1,36 @@
+{
+  "version": "0037",
+  "tables": [],
+  "columns": [
+    {
+      "table": "model_provider_models",
+      "name": "context_window_tokens",
+      "type": "int8",
+      "required": false,
+      "default": ""
+    },
+    {
+      "table": "model_provider_run_bindings",
+      "name": "context_window_tokens",
+      "type": "int8",
+      "required": false,
+      "default": ""
+    }
+  ],
+  "constraints": [
+    {
+      "table": "model_provider_models",
+      "name": "model_provider_models_context_window_tokens_check",
+      "type": "c",
+      "columns": ["context_window_tokens"],
+      "expression": "((context_window_tokens > 0) AND (context_window_tokens <= '9007199254740991'::bigint))"
+    },
+    {
+      "table": "model_provider_run_bindings",
+      "name": "model_provider_run_bindings_context_window_tokens_check",
+      "type": "c",
+      "columns": ["context_window_tokens"],
+      "expression": "((context_window_tokens > 0) AND (context_window_tokens <= '9007199254740991'::bigint))"
+    }
+  ]
+}

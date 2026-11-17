@@ -1,9 +1,10 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { createServer, type Server } from 'node:http';
 import { HARNESS_PROTOCOL_VERSION, type HarnessRequest } from '@along/contracts';
-import { createUserConfiguredHarnessModelTransport } from '../src/modules/conversations/harness-model.js';
+import { createUserConfiguredHarnessModelTransport } from '../src/modules/model-providers/harness-model.js';
 import { createContextPolicy } from '../src/modules/conversations/context-policy.js';
 import { measureHarnessContext } from '../src/modules/conversations/harness-context.js';
+import { OutboundError } from '../src/modules/model-providers/outbound.js';
 
 const servers: Server[] = [];
 afterEach(async () => {
@@ -63,6 +64,61 @@ test('a denied network operation never falls back or exposes the boundary error'
     ]);
   } finally {
     globalFetch.mockRestore();
+  }
+});
+
+test('reports a safe outbound failure category without exposing error details', async () => {
+  const warn = spyOn(console, 'warn').mockImplementation(() => {});
+  try {
+    const transport = createUserConfiguredHarnessModelTransport(config, async () => {
+      throw new OutboundError('blocked_address');
+    });
+    const steps = await Array.fromAsync(transport(request, [], new AbortController().signal));
+    expect(steps.at(-1)).toMatchObject({ type: 'failed', error: { code: 'HARNESS_UNAVAILABLE' } });
+    expect(warn.mock.calls.map((args) => JSON.parse(String(args[0])))).toContainEqual({
+      event: 'MODEL_TRANSPORT_UNAVAILABLE',
+      reason: 'outbound_blocked_address',
+    });
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(config.baseUrl);
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+test('reports an outbound disconnect while reading an accepted response body', async () => {
+  const warn = spyOn(console, 'warn').mockImplementation(() => {});
+  try {
+    let sent = false;
+    const transport = createUserConfiguredHarnessModelTransport(
+      config,
+      async () =>
+        new Response(
+          new ReadableStream({
+            pull(controller) {
+              if (!sent) {
+                sent = true;
+                controller.enqueue(new TextEncoder().encode(chunk({ content: 'accepted' })));
+              } else {
+                controller.error(new OutboundError('connection'));
+              }
+            },
+          }),
+          { headers: { 'content-type': 'text/event-stream' } },
+        ),
+    );
+    const steps = await Array.fromAsync(transport(request, [], new AbortController().signal));
+    expect(steps.at(-1)).toMatchObject({
+      type: 'failed',
+      error: { code: 'HARNESS_UNAVAILABLE' },
+      usage: null,
+    });
+    expect(warn.mock.calls.map((args) => JSON.parse(String(args[0])))).toContainEqual({
+      event: 'MODEL_TRANSPORT_UNAVAILABLE',
+      reason: 'outbound_connection',
+    });
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(config.baseUrl);
+  } finally {
+    warn.mockRestore();
   }
 });
 

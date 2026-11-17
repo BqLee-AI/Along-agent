@@ -26,11 +26,14 @@ export interface ConversationDeps {
   routing?: RoutingRuntime;
   // A real adapter must enforce the common outbound policy and make measurement
   // describe the exact bytes its model transport sends. No deployment fallback.
-  modelTransport?: (config: {
-    base_url: string;
-    api_key: string | null;
-    model_id: string;
-  }) => Promise<{
+  modelTransport?: (
+    config: {
+      base_url: string;
+      api_key: string | null;
+      model_id: string;
+    },
+    diagnostic?: { runId: string; attemptId: string; operation: 'compact' | 'model' },
+  ) => Promise<{
     model: HarnessServices['model'];
     measure: NonNullable<HarnessServices['measure']>;
   }>;
@@ -70,6 +73,7 @@ export interface RunContext {
   messageRefs?: readonly string[];
   messages?: HarnessStart['messages'];
   contextPolicy?: ContextPolicy;
+  compactCompletionCap?: number;
   authorizationRevision?: 'delegation/1';
   executionProfile?: 'pause/1' | 'pause-memory/1' | 'compact-memory/1';
   r3Context?: HarnessR3Context;

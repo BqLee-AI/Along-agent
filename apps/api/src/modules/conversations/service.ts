@@ -231,10 +231,13 @@ export async function startIdleCompact(
       const receivedAtUtc = utcSecondIso(clock);
       const maxIterations = deps.harness!.maxIterations,
         maxTokens = deps.harness!.maxTokens;
+      const compactCompletionCap =
+        deps.harness!.compactCompletionCap ?? deps.harness!.contextPolicy.completion_cap;
       const frozenContext = {
         execution_profile: 'compact-memory/1',
         execution_lifecycle: 'server-owned',
         compactControl: true,
+        compactCompletionCap,
         confirmedTimezone: null,
         anchorReceivedAtUtc: receivedAtUtc,
         receivedAtUtc,
@@ -302,6 +305,7 @@ export async function startIdleCompact(
         r3Context,
         messages: r3Context.messages,
         contextPolicy,
+        compactCompletionCap,
         timeContext: deps.timeContext,
       };
       buildHarnessStart(context, null, [], null);
@@ -632,6 +636,9 @@ export async function startConversationRun(
         execution === 'harness' ? deps.harness!.maxIterations : BUSINESS_MAX_ITERATIONS;
       const maxTokens = execution === 'harness' ? deps.harness!.maxTokens : BUSINESS_MAX_TOKENS;
       const useR3Context = execution === 'harness' && !!ownership;
+      const compactCompletionCap = useR3Context
+        ? (deps.harness!.compactCompletionCap ?? deps.harness!.contextPolicy.completion_cap)
+        : undefined;
       if (useR3Context) allowlist = [...allowlist, R3_MEMORY_SOURCE_TOOL_ID];
       const selected =
         execution === 'harness'
@@ -711,6 +718,7 @@ export async function startConversationRun(
             }
           : {}),
         ...(autoCompactPolicy ? { autoCompactPolicy } : {}),
+        ...(compactCompletionCap === undefined ? {} : { compactCompletionCap }),
         confirmedTimezone,
         anchorReceivedAtUtc: targetContinuation?.anchor ?? reminderDate.anchor,
         receivedAtUtc,
@@ -771,6 +779,8 @@ export async function startConversationRun(
         execution === 'harness'
           ? await ensureRunContextPolicy(client, ownerId, runId, {
               ...deps.harness!.contextPolicy,
+              model_window_tokens:
+                selected!.context_window_tokens ?? deps.harness!.contextPolicy.model_window_tokens,
               model_binding: {
                 ...deps.harness!.contextPolicy.model_binding,
                 model: selected!.model_id,
@@ -827,6 +837,7 @@ export async function startConversationRun(
         userMessageId,
         allowlist,
         ...(autoCompactPolicy ? { autoCompactPolicy } : {}),
+        ...(compactCompletionCap === undefined ? {} : { compactCompletionCap }),
         ...(messageRefs ? { messageRefs } : {}),
         ...(r3Context
           ? {

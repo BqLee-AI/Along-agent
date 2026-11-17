@@ -38,10 +38,16 @@
 ## 预算
 
 - 新 harness 默认最多24迭代、64000 token，由部署服务端 `HARNESS_MAX_ITERATIONS/HARNESS_MAX_TOKENS` 配置，须为正安全整数；Web/模型不能覆盖。额度在 Run 接纳时持久冻结，后续部署配置变化不升级原 Run。仓颉在安排下一轮前检查跨 attempt 累计迭代/可得 usage，达到上限即停止；不是 TS 字符估算。
-- 单次输出由独立必填 `HARNESS_COMPLETION_CAP` 限制，provider `max_tokens` 只取该上限内显式选择的 O，绝不取累计余额。窗口 `HARNESS_MODEL_WINDOW_TOKENS` 可未知，`HARNESS_CONTEXT_RESERVE_TOKENS` 默认0。完整请求 UTF-8 字节精确计量；无可信完整输入 tokenizer 时明确 unavailable，不由字符估算伪造 token。
+- 普通对话单次输出由必填 `HARNESS_COMPLETION_CAP` 限制；compact 摘要使用独立的 `HARNESS_COMPACT_COMPLETION_CAP`，未配置时取普通上限与 4096 中较大值。新 Run 在接纳时冻结摘要上限，旧 Run 继续使用原普通输出上限；摘要仍占用同一 Run 的累计预算并为续跑预留空间。两种上限都不保证 provider 一定支持或一定能完整输出；超限如实失败。窗口 `HARNESS_MODEL_WINDOW_TOKENS` 可未知，`HARNESS_CONTEXT_RESERVE_TOKENS` 默认0。完整请求 UTF-8 字节精确计量；无可信完整输入 tokenizer 时明确 unavailable，不由字符估算伪造 token。
+- 摘要独立上限的环境变量可用于直接启动 API；本地安装和默认 Compose 不透传该项，使用默认值。
+- 已知模型窗口无法同时容纳摘要输出上限、预留空间和非空输入时，不自动暂停发起必然失败的压缩；这不保证其他窗口下的实际摘要请求一定能装入，仍需按实际输入测量。
 - token 上限不是账单硬上限。单次响应返回的输入与输出用量可能让累计值越过阈值；此时停止本轮后续动作，不把超限回答当成功。
 - 批准等待不调用模型/工具；显式恢复沿用累计预算和 `next_call_no`，不是新额度。24/64000 是当前默认，不是实际 R1 已校准的证明；真实 provider/负载校准与计费单独举证。
 - 任次缺 usage 后累计 token 保持 unknown；仍限制独立输出和实际字节，不承诺无法证明的费用/窗口上限。已耗尽累计预算为 `BUDGET_EXCEEDED`；保护集、窗口、输出 length 或完整请求超容量为 `HARNESS_CONTEXT_LIMIT`。流式失败保留已接受 delta 和可得 usage，不执行残缺函数参数。
+
+模型传输失败时，服务端输出带 Run/attempt 标识的结构化诊断：`MODEL_PROTOCOL_REJECTED` 给出固定拒绝原因、可用的 finish reason 和有限的帧结构标记；`MODEL_TRANSPORT_UNAVAILABLE` 区分受控出站故障、provider HTTP 错误及 SDK 故障，不记录错误原文。收到 `length` 且流完整结束时，`MODEL_OUTPUT_LIMIT` 记录请求的单次输出上限和可得的总 usage；总 usage 不是输出 token 数。日志不含提示词、模型正文、工具参数、凭据或供应商地址，Run/attempt 标识仍应按内部运行数据保护。外部错误码和消息不变；缺少记录的历史错误不能据此追溯具体原因。
+
+收到响应头后读取响应体时的受控出站断流也记录为出站故障；只修正内部分类，不更改对外错误。
 
 ## 事件补读与执行恢复
 

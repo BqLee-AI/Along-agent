@@ -32,7 +32,7 @@ import type {
   RunContext,
   StartResult,
 } from '../../src/modules/conversations/contracts.js';
-import { createHarnessModelTransport } from '../../src/modules/conversations/harness-model.js';
+import { createHarnessModelTransport } from '../../src/modules/model-providers/harness-model.js';
 import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
 import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
 import { measureHarnessContext } from '../../src/modules/conversations/harness-context.js';

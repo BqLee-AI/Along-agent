@@ -14,6 +14,14 @@ import { getRunView } from '../../src/modules/conversations/harness-authority.js
 import type { ConversationDeps } from '../../src/modules/conversations/contracts.js';
 import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
 import { startConversationRun } from '../../src/modules/conversations/service.js';
+import { measureHarnessContext } from '../../src/modules/conversations/harness-context.js';
+import {
+  addModel,
+  createProvider,
+  setDefault,
+  setModelContextWindow,
+  updateProvider,
+} from '../../src/modules/model-providers/service.js';
 import { loadTimeContext } from '../../src/modules/time/context.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
@@ -79,6 +87,78 @@ maybe('harness frozen admission context', () => {
     );
     return { ownerId, conversationId, runId, userMessageId, attemptId };
   }
+
+  it('freezes the selected model window and falls back to the global window when unset', async () => {
+    const pool = database.pool;
+    const ownerId = randomUUID();
+    await pool.query('INSERT INTO users(id,auth_email) VALUES($1,$2)', [
+      ownerId,
+      `${ownerId}@context.test`,
+    ]);
+    await admitTestUser(pool, ownerId);
+    const provider = await createProvider(pool, ownerId, 'Window fixture');
+    await updateProvider(pool, ownerId, provider.id, {
+      base_url: 'https://controlled-fixture.invalid/v1',
+    });
+    await addModel(pool, ownerId, provider.id, 'bounded', 150);
+    await addModel(pool, ownerId, provider.id, 'unset');
+    await setDefault(pool, ownerId, { provider_id: provider.id, model_id: 'bounded' });
+    const globalPolicy = createContextPolicy({
+      completionCap: 100,
+      model: 'deployment-model',
+      modelWindowTokens: 300,
+      reserveTokens: 10,
+      inputMeter: 'verified',
+      meterRevision: 'fixture/1',
+    });
+    const deps = dependencies(pool, globalPolicy);
+    const start = (model_id: string) =>
+      startConversationRun(
+        deps,
+        ownerId,
+        randomUUID(),
+        {
+          execution: 'harness',
+          raw_text: 'window',
+          model_selection: { provider_id: provider.id, model_id },
+        },
+        randomUUID(),
+      );
+    const bounded = await start('bounded');
+    const unset = await start('unset');
+    expect(bounded.context?.maxTokens).toBe(8000);
+    expect(bounded.context?.contextPolicy?.model_window_tokens).toBe(150);
+    expect(unset.context?.contextPolicy?.model_window_tokens).toBe(300);
+    await setModelContextWindow(pool, ownerId, provider.id, 'bounded', 200);
+    const changed = await start('bounded');
+    await setModelContextWindow(pool, ownerId, provider.id, 'bounded', null);
+    const cleared = await start('bounded');
+    expect(cleared.context?.contextPolicy?.model_window_tokens).toBe(300);
+    expect(changed.context?.contextPolicy?.model_window_tokens).toBe(200);
+    const frozen = await readRunContextPolicy(pool, ownerId, bounded.runId);
+    expect(frozen).toEqual(bounded.context!.contextPolicy!);
+    const meter = () => ({
+      quality: 'verified' as const,
+      input_tokens: 100,
+      meter_revision: 'fixture/1',
+    });
+    const request = {
+      protocol: 'harness/v6' as const,
+      type: 'measure_context' as const,
+      request_ref: 'window',
+      messages: [{ role: 'user' as const, content: 'window' }],
+      remaining_tokens: 8000,
+      max_output_tokens: 100,
+    };
+    expect(await measureHarnessContext(request, [], frozen!, meter)).toMatchObject({
+      output_ceiling: 40,
+    });
+    expect(
+      await measureHarnessContext(request, [], unset.context!.contextPolicy!, meter),
+    ).toMatchObject({
+      output_ceiling: 100,
+    });
+  });
 
   it('freezes the newest 63 visible predecessors and the complete accepted input', async () => {
     const pool = database.pool;
