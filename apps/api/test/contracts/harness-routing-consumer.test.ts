@@ -34,6 +34,7 @@ beforeAll(async () => {
     },
   });
   expect(fixture.deps.routing.policy().mode).toBe('enforce');
+  // oxlint-disable-next-line require-yield -- Failure-only provider intentionally emits no events.
   fixture.model = async function* () {
     providerCalls++;
     throw new Error('direct L1 must not invoke provider');

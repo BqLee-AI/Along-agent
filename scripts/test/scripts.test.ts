@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { copyFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -37,6 +37,40 @@ describe('governance scripts', () => {
   it('frozen names catch fixture violation', () => {
     const target = join(root, 'scripts', 'fixtures', 'frozen-bad-only');
     expect(run('check-frozen-names.mjs', target).code).toBe(1);
+  });
+
+  it.each([
+    'apps/api/src/probe.ts',
+    'apps/web/src/probe.ts',
+    'packages/contracts/src/probe.ts',
+    'infra/migrations/9999_probe.sql',
+  ])('common CI rejects frozen aliases in %s without selecting tooling', (path) => {
+    const target = mkdtempSync(join(tmpdir(), 'along-common-gates-'));
+    try {
+      for (const script of ['ci/checks.mjs', 'check-frozen-names.mjs']) {
+        const destination = join(target, 'scripts', script);
+        mkdirSync(dirname(destination), { recursive: true });
+        copyFileSync(join(root, 'scripts', script), destination);
+      }
+      mkdirSync(dirname(join(target, path)), { recursive: true });
+      writeFileSync(
+        join(target, path),
+        path.endsWith('.sql')
+          ? "SELECT 'SERVICE_NOT_READY';\n"
+          : 'export const code = "SERVICE_NOT_READY";\n',
+      );
+      const result = spawnSync(node, [join(target, 'scripts/ci/checks.mjs'), 'common'], {
+        cwd: target,
+        encoding: 'utf8',
+      });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        path.replaceAll('/', process.platform === 'win32' ? '\\' : '/'),
+      );
+      expect(result.stderr).toContain('SERVICE_NOT_READY');
+    } finally {
+      rmSync(target, { recursive: true, force: true });
+    }
   });
 
   it('copy scan passes on repo root', () => {

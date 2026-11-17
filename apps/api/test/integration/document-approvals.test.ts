@@ -84,6 +84,7 @@ maybe('document approval PostgreSQL authority and frozen content', () => {
           maxIterations: 24,
           maxTokens: 8000,
           contextPolicy: createContextPolicy({ completionCap: 512, model: 'approval-test-model' }),
+          // oxlint-disable-next-line require-yield -- Failure-only provider intentionally emits no events.
           model: async function* () {
             throw new Error('approval tests never invoke a model');
           },

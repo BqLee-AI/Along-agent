@@ -30,7 +30,7 @@ Spec:（可填 openspec/changes/<name>/proposal.md 或 docs/design 路径 §章�
 
 - [ ] `bun run verify` 通过（含 typecheck、lint、unit 与阻塞式 format:check）
 - [ ] `bun run test:contracts` 通过（API 进程内/HTTP 双跑及契约包）
-- [ ] 相关真实 PostgreSQL 16 测试通过（`bun run test:integration` 全部 9 个 DB 文件 / `bun run test:scheduler` D9 指定集；不适用须说明）
+- [ ] 相关真实 PostgreSQL 16 检查通过（`bash scripts/ci/database.sh`；D9 已包含在 API 集成集，不适用须说明）
 - [ ] `openspec validate <name> --strict` 通过（如有 change）
 
 <!-- 没跑什么 + 原因，未跑项必填 -->
@@ -41,7 +41,7 @@ Spec:（可填 openspec/changes/<name>/proposal.md 或 docs/design 路径 §章�
 
 <!-- CI 链接 / 测试输出 / 变红 PR 链接 -->
 
-<!-- Required checks：checks、integration；按变更范围执行，须全部通过。 -->
+<!-- Required checks：checks、database、integration；按变更范围执行，须全部通过。 -->
 
 ## Reviewer focus
 

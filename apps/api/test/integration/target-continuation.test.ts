@@ -446,6 +446,7 @@ test('unverifiable source asks for the relationship without admitting an effect'
       maxIterations: 8,
       maxTokens: 8000,
       contextPolicy: createContextPolicy({ completionCap: 512, model: 'test' }),
+      // oxlint-disable-next-line require-yield -- Failure-only provider intentionally emits no events.
       model: async function* () {
         throw new Error('must not execute');
       },

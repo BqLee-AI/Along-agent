@@ -38,6 +38,7 @@ suite('model selection admission and historical projection', () => {
         maxIterations: 8,
         maxTokens: 8000,
         contextPolicy: createContextPolicy({ completionCap: 512, model: 'deployment-model' }),
+        // oxlint-disable-next-line require-yield -- Failure-only provider intentionally emits no events.
         model: async function* () {
           throw new Error('deployment transport must never be called');
         },

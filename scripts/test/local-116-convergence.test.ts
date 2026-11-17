@@ -498,7 +498,10 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
     await isolated(async (url) => {
       await historical(url, 'legacy');
       const before = await sql(url, async (client) => {
-        const current = await readFile(new URL('0026_reconcile_0024.sql', migrations), 'utf8');
+        // historical() above installs LF bodies; reconstruct the original migration with the same bytes.
+        const current = (
+          await readFile(new URL('0026_reconcile_0024.sql', migrations), 'utf8')
+        ).replaceAll('\r\n', '\n');
         const original = current
           .replace(
             'replace(p.prosrc, chr(13) || chr(10), chr(10)) = replace($elapsed_body$',

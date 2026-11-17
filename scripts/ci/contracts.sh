@@ -1,15 +1,11 @@
 #!/usr/bin/env bash
-# D8: current production build, private PG16, real native consumers, current execution report.
+# Internal consumer: runtime.sh owns the current-tree image.
 set -euo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-if [[ "$(uname -s)" != Linux || "$(uname -m)" != x86_64 ]]; then
-  echo 'test:contracts requires Linux x64 Docker; on Windows run the root command in WSL.' >&2
-  exit 1
-fi
-command -v docker >/dev/null
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$root"
+image="${1:?runtime.sh must supply its current-tree image}"
 owned="$(mktemp -d "${TMPDIR:-/tmp}/along-contracts.XXXXXX")"
 token="$(basename "$owned")"
-image="along-contracts:$token"
 network="$token-net"
 postgres="$token-pg"
 consumer="$token-consumer"
@@ -25,9 +21,6 @@ cleanup() {
   if docker network inspect "$network" >/dev/null 2>&1; then
     docker network rm "$network" || result=1
   fi
-  if docker image inspect "$image" >/dev/null 2>&1; then
-    docker image rm "$image" || result=1
-  fi
   rmdir "$owned" || result=1
   exit "$result"
 }
@@ -35,8 +28,6 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-echo '== D8 current-tree production native build =='
-docker build --tag "$image" --file "$root/infra/docker/Dockerfile" "$root"
 echo '== D8 private fresh PostgreSQL 16 =='
 docker network create "$network"
 docker run --detach --rm --name "$postgres" --network "$network" \
@@ -62,13 +53,14 @@ echo '== D8 real native consumers and this-run report =='
 docker run --pull never --rm --name "$consumer" --network "$network" \
   --env "DATABASE_URL=postgresql://along:along@$postgres:5432/along" \
   --env BETTER_AUTH_SECRET=ci-only-secret-for-harness-contracts \
-  "$image" sh -c '
+  "$image" bash -c '
     set -eu
     mkdir /tmp/d8-contracts
+    mapfile -t native_tests < ci/native-tests.txt
     bun test --parallel=4 --timeout 30000 --reporter=junit \
       --reporter-outfile /tmp/d8-contracts/report.xml \
       ./apps/api/test/contracts.test.ts ./apps/api/test/contracts ./apps/harness/test/contracts \
       ./apps/api/test/integration/tool-invocations-nontransactional.test.ts \
-      ./packages/contracts/test ./packages/stream-protocol/test
+      ./packages/contracts/test ./packages/stream-protocol/test "${native_tests[@]}"
     bun scripts/check-gates-executable.mjs . /tmp/d8-contracts/report.xml
   '

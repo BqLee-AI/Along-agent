@@ -54,7 +54,7 @@ export async function listTasks(client: PoolClient, filter: TaskListFilter): Pro
   }
   params.push(filter.limit + 1);
   const { rows } = await client.query<TaskRow & { fire_at_cursor: string }>(
-    `SELECT *, to_char(fire_at_utc, 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS fire_at_cursor ` +
+    `SELECT *, to_char(fire_at_utc, 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS fire_at_cursor ` +
       `FROM tasks WHERE ${where.join(' AND ')} ` +
       `ORDER BY fire_at_utc ASC, id ASC LIMIT $${params.length}`,
     params as never[],
@@ -96,7 +96,7 @@ export async function listTaskEvents(
   }
   params.push(limit + 1);
   const { rows } = await client.query<TaskEventRow & { recorded_at_cursor: string }>(
-    `SELECT *, to_char(recorded_at_utc, 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS recorded_at_cursor ` +
+    `SELECT *, to_char(recorded_at_utc, 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS recorded_at_cursor ` +
       `FROM task_events WHERE ${where.join(' AND ')} ` +
       `ORDER BY recorded_at_utc ASC, id ASC LIMIT $${params.length}`,
     params as never[],

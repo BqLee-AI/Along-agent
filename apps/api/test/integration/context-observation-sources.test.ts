@@ -120,7 +120,7 @@ maybe('immutable accepted context sources', () => {
     let offset = 0;
     let reconstructed = '';
     let first: { input: InvocationInput; outcome: ToolOutcome } | undefined;
-    do {
+    for (;;) {
       const current = await f.page(source.invocationId, 'content', offset);
       first ??= current;
       const value = payload(current.outcome);
@@ -141,7 +141,7 @@ maybe('immutable accepted context sources', () => {
       reconstructed += value.content;
       offset = value.end;
       if (!value.has_more) break;
-    } while (true);
+    }
     expect(reconstructed).toBe(text);
     expect(await invokeTool(database.pool, f.ctx, first!.input)).toEqual({
       ...first!.outcome,

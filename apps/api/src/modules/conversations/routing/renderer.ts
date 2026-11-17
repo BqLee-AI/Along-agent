@@ -11,7 +11,7 @@ function dataText(text: string): string {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/([\\`*_{}\[\]()#+!|~])/g, '\\$1')
+    .replace(/([\\`*_{}[\]()#+!|~])/g, '\\$1')
     .replace(/(^|\n)([ \t]*)-(?=\s)/g, '$1$2\\-')
     .replace(/(^|\n)([ \t]*\d+)\.(?=\s)/g, '$1$2\\.');
 }
