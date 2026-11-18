@@ -1,5 +1,5 @@
 import type { PoolClient } from 'pg';
-import { assertOwnedRun } from '../../conversations/history/release-waiting.js';
+import { assertOwnedRun } from '../../conversations/run/ownership.js';
 import { decryptCredential, credentialKey } from '../configuration/crypto.js';
 import { forbidden, notFound, stateConflict } from '../../../platform/errors.js';
 

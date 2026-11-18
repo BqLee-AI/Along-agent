@@ -1,5 +1,4 @@
 import type { PoolClient } from 'pg';
-import { notFound } from '../../../platform/errors.js';
 import type { RunRow } from '../run/repository.js';
 
 /** Release inspection reads frozen facts; it never authorizes a resume. */
@@ -37,16 +36,4 @@ export async function readReleaseWaitingRun(
       )
     ).rows[0] ?? null
   );
-}
-
-export async function assertOwnedRun(
-  client: PoolClient,
-  ownerId: string,
-  runId: string,
-): Promise<void> {
-  const result = await client.query('SELECT 1 FROM agent_runs WHERE id=$1 AND owner_id=$2', [
-    runId,
-    ownerId,
-  ]);
-  if (!result.rowCount) throw notFound('run not found');
 }

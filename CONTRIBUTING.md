@@ -120,9 +120,9 @@
 ### D1 依赖边界与变红证据
 
 - `bun run depcruise` 实际扫描 `apps packages`；`scripts/test/boundaries.test.ts` 使用 `bun:test` 运行真实 depcruise 的正反 fixture，属于 `bun run test:unit`，两者均由 `bun run verify` 执行。
-- API 按执行目录下 `apps/api/src/modules/` 的实际子目录逐模块生成规则，新增模块无需维护名单。禁止直接引用其他模块的 `repository`、`schema`、`schemas` 同名文件/目录或 `-repository`、`-schema`、`-schemas` 后缀实现；包含嵌套路径和 `import type`。自身存储访问和公共服务调用仍合法，不新增公共服务封闭白名单。
-- 保留 conversations→tools/gateway、tasks→notifications/service、tools→approvals/create/presentation 和 approvals/confirm→tasks/cancel；confirm 改为引用 tasks/cancel-repository 仍报 `no-approvals-cross-module-storage`，没有事务存储层通配豁免。
-- Web 不得直接引用 API 源码（含类型），报 `no-web-to-api`；HTTP 客户端不受影响。
+- API 按执行目录下 `apps/api/src/features/` 的实际子目录发现业务所有者。功能跨所有者及 agent→功能的导入（含类型和再导出）只允许目标功能根目录的 `public.ts` 及配置中逐路径声明的窄入口；同一所有者的内部导入不受此限制。保留 confirm→tasks/public→cancel，直接引用 tasks/cancel 或 tasks/cancel-repository 均失败。
+- Conversations 的 Run 所有权检查及 tasks 的通知来源读取是避免 barrel 循环的显式窄入口。仅实际 HTTP 适配器可以从功能层引用 HTTP 实现；对 agent 的适配器依赖按来源和目标路径逐一声明。业务、HTTP 和数据层均不得反向导入 bootstrap。
+- Web 不得加载 API 运行时代码（`no-web-to-api`），类型导入只允许声明的 `dist/client-type.d.ts`（`no-web-private-api-types`）。
 - 共享包依赖范围：time-core 仅自身源码；contracts、stream-protocol 仅自身源码与 zod；scheduler-core 仅自身源码、contracts、time-core；notifier-core 仅自身源码、contracts。未声明的 workspace、应用、外部包和 Node 内置模块均拒绝。
 - `scripts/fixtures/boundaries/` 保留扫描输入；测试复制到只读使用的临时目录并链接已安装的真实 zod/TypeScript，最多两个异步 CLI 同时运行，逐条断言 depcruise 退出码、违规规则名且无未解析依赖。绿例保留 err/JSON 两种真实扫描，清理前等待已排队及运行中的 CLI 结束；红例输出 `[red] exit=1 <规则>: <来源> → <目标>`，D1 evidence 由 `ci/gates.json` 登记。此并发仅用于边界 fixture，不改共享时钟、mock 或数据库用例的并发。
 - D1 绿色仅证明上述静态导入规则，不解析 SQL 表归属、owner 过滤或事务原子性。公共函数中直接 SQL 仍需按模块所有权人工审查及行为验证；受控确认事务包含创建和取消分支，不是跨模块存储导入豁免（design/02 §1–§2，ADR 0009）。

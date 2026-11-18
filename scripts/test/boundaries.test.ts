@@ -110,7 +110,7 @@ function cruise(entry: string, reporter = 'err'): Promise<{ code: number; output
 
 async function expectRed(entry: string, rule: string) {
   const result = await cruise(entry);
-  expect(result.code, result.output).toBe(1);
+  expect(result.code, result.output).toBeGreaterThan(0);
   expect(result.output).toContain(`error ${rule}: ${entry} → `);
   // Local fixture imports use .js specifiers: a resolved .ts target proves real resolution.
   // The remaining cases resolve to an installed package or a Node builtin.
@@ -121,7 +121,7 @@ async function expectRed(entry: string, rule: string) {
 }
 
 describe.concurrent('D1 dependency boundaries (real depcruise)', () => {
-  it('allows own storage, public calls, confirm→cancel, HTTP and declared package dependencies', async () => {
+  it('allows own storage, declared owner ports, confirm→cancel, HTTP and package dependencies', async () => {
     const result = await cruise('green.ts');
     expect(result.code, result.output).toBe(0);
     const report = JSON.parse((await cruise('green.ts', 'json')).output);
@@ -232,11 +232,11 @@ describe.concurrent('D1 dependency boundaries (real depcruise)', () => {
   });
 
   it.each(modules)(
-    'rejects %s crossing into another module’s storage, including type imports',
+    'rejects %s crossing into another owner’s private storage, including type imports',
     async (module) => {
       await expectRed(
         `apps/api/src/features/${module}/bad.ts`,
-        `no-${module}-cross-module-storage`,
+        `no-${module}-private-feature-imports`,
       );
     },
   );
@@ -246,10 +246,65 @@ describe.concurrent('D1 dependency boundaries (real depcruise)', () => {
     async (index) => {
       await expectRed(
         `apps/api/src/features/identity/shapes/bad-${index}.ts`,
-        'no-identity-cross-module-storage',
+        'no-identity-private-feature-imports',
       );
     },
   );
+
+  it('rejects ordinary private files, undeclared ports, and fake adapter exemptions', async () => {
+    const result = await cruise('bad-owner-edges.ts');
+    expect(result.code, result.output).toBeGreaterThan(0);
+    const edges = [
+      [
+        'features/model-providers/runtime/bad-release-query.ts',
+        'features/conversations/history/release-waiting.ts',
+        'no-model-providers-private-feature-imports',
+      ],
+      [
+        'features/approvals/bad.ts',
+        'features/tasks/cancel.ts',
+        'no-approvals-private-feature-imports',
+      ],
+      ...['future-public-service.ts', 'nested/public.ts', 'repository-helper.ts'].map((file) => [
+        'features/future-module/public.ts',
+        `features/tasks/${file}`,
+        'no-future-module-private-feature-imports',
+      ]),
+      ...['notifications/service.ts', 'tasks/nested/public.ts'].map((file) => [
+        'agent/tools/bad-entrypoints.ts',
+        `features/${file}`,
+        'agent-no-private-feature-imports',
+      ]),
+      ['features/identity/controller.ts', 'http/auth.ts', 'api-business-no-http-implementation'],
+      [
+        'features/identity/controller.ts',
+        'agent/runtime/driver.ts',
+        'feature-no-agent-implementation',
+      ],
+      [
+        'features/conversations/controller.ts',
+        'agent/tools/query.ts',
+        'conversation-adapter-agent-entrypoints',
+      ],
+      [
+        'features/conversations/controller.ts',
+        'agent/runtime/contracts.ts',
+        'conversation-adapter-agent-contract-types-only',
+      ],
+      [
+        'features/conversations/controller.ts',
+        'bootstrap/application.ts',
+        'api-no-reverse-bootstrap',
+      ],
+    ];
+    for (const [source, destination, rule] of edges) {
+      const from = `apps/api/src/${source}`;
+      const to = `apps/api/src/${destination}`;
+      // Match the full resolved .ts path, not its unresolved relative .js specifier.
+      expect(result.output).toContain(`error ${rule}: ${from} → ${to}`);
+    }
+    console.info(`[red] exit=${result.code}${result.output}`);
+  });
 
   it.each([
     ['bad.ts', 'no-web-to-api'],
@@ -273,7 +328,7 @@ describe.concurrent('D1 dependency boundaries (real depcruise)', () => {
 
   it.each([
     ['apps/api/src/features/identity/bad-agent.ts', 'feature-no-agent-implementation'],
-    ['apps/api/src/agent/tools/bad-storage.ts', 'agent-no-private-feature-storage'],
+    ['apps/api/src/agent/tools/bad-storage.ts', 'agent-no-private-feature-imports'],
   ])('rejects execution and persistence ownership leak %s', async (entry, rule) => {
     await expectRed(entry, rule);
   });

@@ -1,2 +1,2 @@
-export { value as value0 } from '../approvals/create.js';
-export { value as value1 } from '../approvals/presentation.js';
+export { createApproval, presentApproval } from '../approvals/public.js';
+export { value as toolGateway } from './gateway.js';
