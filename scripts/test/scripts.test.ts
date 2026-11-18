@@ -59,10 +59,11 @@ describe('governance scripts', () => {
           ? "SELECT 'SERVICE_NOT_READY';\n"
           : 'export const code = "SERVICE_NOT_READY";\n',
       );
-      const result = spawnSync(process.execPath, [join(target, 'scripts/ci/checks.mjs'), 'common'], {
-        cwd: target,
-        encoding: 'utf8',
-      });
+      const result = spawnSync(
+        process.execPath,
+        [join(target, 'scripts/ci/checks.mjs'), 'common'],
+        { cwd: target, encoding: 'utf8' },
+      );
       expect(result.status).toBe(1);
       expect(result.stderr).toContain(
         path.replaceAll('/', process.platform === 'win32' ? '\\' : '/'),
