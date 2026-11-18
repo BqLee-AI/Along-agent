@@ -5,16 +5,15 @@ import { createServer as createTlsServer, request as tlsRequest } from 'node:htt
 import { spawnSync } from 'node:child_process';
 import type { AddressInfo } from 'node:net';
 import { once } from 'node:events';
+import { Pool } from 'pg';
 import { handleRequest } from './helpers/http-app.js';
 import type { Actor } from '../src/features/identity/session/actor.js';
 
 const LIMIT = 131072;
-const approval = '/api/v1/approvals/00000000-0000-4000-8000-000000000001/actions/reject';
-const paths = [
-  approval,
-  '/api/v1/conversations/messages',
-  '/api/v1/tasks/00000000-0000-4000-8000-000000000001/actions/cancel',
-];
+const id = '00000000-0000-4000-8000-000000000001';
+const encodedId = `%30${id.slice(1)}`;
+const approval = `/api/v1/approvals/${id}/actions/reject`;
+const paths = [approval, '/api/v1/conversations/messages', `/api/v1/tasks/${id}/actions/cancel`];
 const servers: Server[] = [];
 const actor: Actor = { ownerId: 'owner', sessionId: null, displayName: '', timezoneId: null };
 
@@ -27,9 +26,9 @@ afterEach(async () => {
   }
 });
 
-async function api(identity: Actor | null = actor) {
+async function api(identity: Actor | null = actor, pool: Pool | null = null) {
   const server = createServer((req, res) => {
-    void handleRequest(req, res, { pool: null, resolveActor: async () => identity }).catch(() =>
+    void handleRequest(req, res, { pool, resolveActor: async () => identity }).catch(() =>
       res.destroy(),
     );
   });
@@ -117,19 +116,85 @@ function padded(bytes: number, unicode = false): Buffer {
 }
 
 describe('HTTP request body boundary', () => {
-  it('preserves exact methods, raw path IDs and duplicate query rejection', async () => {
+  it('preserves exact methods and duplicate query rejection', async () => {
     const base = await api();
     expect((await fetch(`${base}/healthz`, { method: 'HEAD' })).status).toBe(404);
-    const encoded = await fetch(
-      `${base}/api/v1/conversations/%300000000-0000-4000-8000-000000000001`,
-    );
-    expect(encoded.status).toBe(404);
-    const id = '00000000-0000-4000-8000-000000000001';
     const duplicate = await fetch(
       `${base}/api/v1/conversations/${id}/runs/${id}/events?after_seq=1&after_seq=2`,
     );
     expect(duplicate.status).toBe(400);
     expect(await duplicate.json()).toMatchObject({ error: { code: 'VALIDATION_ERROR' } });
+  });
+
+  it('requires literal UUIDs in dynamic GET paths', async () => {
+    const base = await api();
+    for (const [path, message] of [
+      [`/api/v1/tasks/${encodedId}`, 'task not found'],
+      [`/api/v1/tasks/${encodedId}/events`, 'task not found'],
+      [`/api/v1/approvals/${encodedId}`, 'approval not found'],
+      [`/api/v1/document-approvals/${encodedId}`, 'document approval not found'],
+      [`/api/v1/conversations/${encodedId}`, 'conversation not found'],
+      [`/api/v1/conversations/${id}/runs/${encodedId}`, 'Run not found'],
+      [
+        `/api/v1/conversations/${id}/runs/${id}/compacts/${encodedId}`,
+        'compact operation not found',
+      ],
+    ]) {
+      const response = await fetch(`${base}${path}`);
+      expect(response.status).toBe(404);
+      expect(await response.json()).toMatchObject({ error: { code: 'NOT_FOUND', message } });
+    }
+    expect((await fetch(`${base}/api/v1/tasks/${id}`)).status).toBe(503);
+  });
+
+  it('validates write IDs after auth, CSRF and JSON parsing but before body schemas', async () => {
+    const encodedApproval = `/api/v1/approvals/${encodedId}/actions/reject`;
+    envelope(await upload(await api(null), encodedApproval, ['{']), 401, 'UNAUTHENTICATED');
+    const csrf = await upload(await api({ ...actor, sessionId: 'session' }), encodedApproval, [
+      '{',
+    ]);
+    envelope(csrf, 403, 'FORBIDDEN');
+    expect(csrf.body.error.details).toEqual({ reason: 'CSRF_MISMATCH' });
+
+    const base = await api();
+    envelope(await upload(base, encodedApproval, ['{']), 400, 'VALIDATION_ERROR');
+    for (const [path, message] of [
+      [encodedApproval, 'approval not found'],
+      [`/api/v1/document-approvals/${encodedId}/actions/reject`, 'document approval not found'],
+      [`/api/v1/tasks/${encodedId}/actions/cancel`, 'task not found'],
+      [`/api/v1/conversations/${id}/runs/${encodedId}/actions/cancel`, 'Run not found'],
+    ]) {
+      const reply = await upload(base, path, ['{}']);
+      envelope(reply, 404, 'NOT_FOUND');
+      expect(reply.body.error).toMatchObject({ message });
+    }
+    envelope(await upload(base, approval, ['{}']), 400, 'VALIDATION_ERROR');
+  });
+
+  it('checks memory availability before validating the literal UUID', async () => {
+    const detail = `/api/v1/memories/${encodedId}`;
+    const action = `${detail}/actions/stop-recall`;
+    const unavailable = await api();
+    const response = await fetch(`${unavailable}${detail}`);
+    expect(response.status).toBe(503);
+    envelope(await upload(unavailable, action, ['{']), 400, 'VALIDATION_ERROR');
+    envelope(await upload(unavailable, action, ['{}']), 503, 'NOT_READY');
+
+    // Configure the real service but disallow database access: these requests fail at the API.
+    const pool = new Pool();
+    await pool.end();
+    const base = await api(actor, pool);
+    const encoded = await fetch(`${base}${detail}`);
+    expect(encoded.status).toBe(404);
+    expect(await encoded.json()).toMatchObject({
+      error: { code: 'NOT_FOUND', message: 'memory not found' },
+    });
+    envelope(await upload(base, action, ['{}']), 404, 'NOT_FOUND');
+    envelope(
+      await upload(base, `/api/v1/memories/${id}/actions/stop-recall`, ['{}']),
+      400,
+      'VALIDATION_ERROR',
+    );
   });
 
   it('rejects unauthenticated uploads without waiting for end across protected routes', async () => {

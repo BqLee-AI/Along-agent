@@ -4,13 +4,12 @@ import type { HttpAccess } from '../../http/access.js';
 import { queryOf } from '../../http/access.js';
 import { okEnvelope } from '../../http/errors.js';
 import { responses } from '../../http/model.js';
-import { isUuid, notFound } from '../../platform/errors.js';
+import { literalUuidAt } from '../../http/request/path.js';
 import { requestCancel, getTaskDetail, getTaskEvents, listTasksForOwner } from './public.js';
 import * as model from './model.js';
 export const taskWriteScopes = ['/api/v1/tasks'] as const;
-function taskId(id: string) {
-  if (!isUuid(id)) throw notFound('task not found');
-  return id;
+function taskId(path: string) {
+  return literalUuidAt(path, 3, 'task not found');
 }
 export function createTaskController(deps: { pool: Pool | null }, access: HttpAccess) {
   return new Elysia({ name: 'tasks', strictPath: true })
@@ -26,15 +25,15 @@ export function createTaskController(deps: { pool: Pool | null }, access: HttpAc
     )
     .get(
       '/api/v1/tasks/:id',
-      async ({ actor, params, requestId }) =>
-        okEnvelope(await getTaskDetail(deps, actor.ownerId, taskId(params.id)), requestId),
+      async ({ actor, path, requestId }) =>
+        okEnvelope(await getTaskDetail(deps, actor.ownerId, taskId(path)), requestId),
       { response: responses(model.TaskDetailSchema) },
     )
     .get(
       '/api/v1/tasks/:id/events',
-      async ({ actor, params, request, requestId }) =>
+      async ({ actor, path, request, requestId }) =>
         okEnvelope(
-          await getTaskEvents(deps, actor.ownerId, taskId(params.id), queryOf(request)),
+          await getTaskEvents(deps, actor.ownerId, taskId(path), queryOf(request)),
           requestId,
         ),
       { response: responses(model.TaskEventsSchema) },
@@ -42,9 +41,13 @@ export function createTaskController(deps: { pool: Pool | null }, access: HttpAc
     .post(
       '/api/v1/tasks/:id/actions/cancel',
       async ({ actor, params, body, requestId }) =>
-        okEnvelope(await requestCancel(deps, actor.ownerId, taskId(params.id), body), requestId),
+        okEnvelope(await requestCancel(deps, actor.ownerId, params.id, body), requestId),
       {
         parse: access.parser(),
+        // Check the ID after reading JSON, but before validating the body schema.
+        transform: ({ path, params }) => {
+          params.id = taskId(path);
+        },
         body: model.CancelBodySchema,
         response: responses(model.CancelResultSchema),
       },

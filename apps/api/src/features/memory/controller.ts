@@ -2,13 +2,13 @@ import { Elysia } from 'elysia';
 import type { HttpAccess } from '../../http/access.js';
 import { okEnvelope } from '../../http/errors.js';
 import { responses } from '../../http/model.js';
-import { isUuid, notFound, notReady, validationError } from '../../platform/errors.js';
+import { literalUuidAt } from '../../http/request/path.js';
+import { notFound, notReady, validationError } from '../../platform/errors.js';
 import type { MemoryService } from './public.js';
 import * as model from './model.js';
 export const memoryWriteScopes = ['/api/v1/memories/'] as const;
-function memoryId(id: string) {
-  if (!isUuid(id)) throw notFound('memory not found');
-  return id;
+function validateMemoryPath({ path, params }: { path: string; params: { id: string } }) {
+  params.id = literalUuidAt(path, 3, 'memory not found');
 }
 export function createMemoryController(service: MemoryService | undefined, access: HttpAccess) {
   return new Elysia({ name: 'memory', strictPath: true })
@@ -42,8 +42,9 @@ export function createMemoryController(service: MemoryService | undefined, acces
     )
     .get(
       '/api/v1/memories/:id',
-      async ({ service, actor, params, requestId }) => {
-        const memory = await service.get(actor.ownerId, memoryId(params.id));
+      async ({ service, actor, path, requestId }) => {
+        const id = literalUuidAt(path, 3, 'memory not found');
+        const memory = await service.get(actor.ownerId, id);
         if (!memory) throw notFound('memory not found');
         return okEnvelope(memory, requestId);
       },
@@ -52,13 +53,14 @@ export function createMemoryController(service: MemoryService | undefined, acces
     .post(
       '/api/v1/memories/:id/actions/correct',
       async ({ service, actor, params, body, requestId }) =>
-        okEnvelope(await service.correct(actor.ownerId, memoryId(params.id), body), requestId),
+        okEnvelope(await service.correct(actor.ownerId, params.id, body), requestId),
       {
         parse: access.parser({
           ready: () => {
             if (!service) throw notReady('memory unavailable');
           },
         }),
+        transform: validateMemoryPath,
         body: model.CorrectionSchema,
         response: responses(model.MemorySchema),
       },
@@ -66,7 +68,7 @@ export function createMemoryController(service: MemoryService | undefined, acces
     .post(
       '/api/v1/memories/:id/actions/stop-recall',
       async ({ service, actor, params, body, requestId }) => {
-        const id = memoryId(params.id);
+        const id = params.id;
         await service.stopRecall(actor.ownerId, id, body.expectedRevision);
         return okEnvelope({ id, status: 'stopped' as const }, requestId);
       },
@@ -76,6 +78,7 @@ export function createMemoryController(service: MemoryService | undefined, acces
             if (!service) throw notReady('memory unavailable');
           },
         }),
+        transform: validateMemoryPath,
         body: model.StopSchema,
         response: responses(model.StoppedSchema),
       },

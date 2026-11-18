@@ -3,7 +3,8 @@ import type { HttpAccess } from '../../http/access.js';
 import { idempotencyKeyOf, queryOf } from '../../http/access.js';
 import { okEnvelope } from '../../http/errors.js';
 import { errorResponses, responses } from '../../http/model.js';
-import { isUuid, notFound, validationError } from '../../platform/errors.js';
+import { literalUuidAt } from '../../http/request/path.js';
+import { validationError } from '../../platform/errors.js';
 import type { ConversationDeps } from '../../agent/runtime/contracts.js';
 import {
   startConversationRun,
@@ -26,9 +27,15 @@ import { streamRun, subscribeRun } from './run-event-response.js';
 import { ActionKeySchema, ConversationEventsQuerySchema } from './schemas.js';
 import * as model from './model.js';
 export const conversationWriteScopes = ['/api/v1/conversations/'] as const;
-function id(value: string, name = 'conversation') {
-  if (!isUuid(value)) throw notFound(name + ' not found');
-  return value;
+function conversationId(path: string) {
+  return literalUuidAt(path, 3, 'conversation not found');
+}
+function validateConversationPath({ path, params }: { path: string; params: { id: string } }) {
+  params.id = conversationId(path);
+}
+function validateRunPath({ path, params }: { path: string; params: { id: string; run: string } }) {
+  params.id = literalUuidAt(path, 3, 'Run not found');
+  params.run = literalUuidAt(path, 5, 'Run not found');
 }
 function actionKey(request: Request) {
   const key = idempotencyKeyOf(request);
@@ -37,12 +44,10 @@ function actionKey(request: Request) {
 }
 export function createConversationController(deps: ConversationDeps, access: HttpAccess) {
   return new Elysia({ name: 'conversations', strictPath: true })
-    .resolve({ as: 'local' }, async ({ request }) => {
-      const actor = await access.requireActor(request);
-      // Elysia decodes path parameters; the API requires literal identifiers.
-      if (new URL(request.url).pathname.includes('%')) throw notFound('conversation not found');
-      return { actor, requestId: access.requestId(request) };
-    })
+    .resolve({ as: 'local' }, async ({ request }) => ({
+      actor: await access.requireActor(request),
+      requestId: access.requestId(request),
+    }))
     .get(
       '/api/v1/conversations',
       async ({ actor, request, requestId }) =>
@@ -65,45 +70,55 @@ export function createConversationController(deps: ConversationDeps, access: Htt
     )
     .get(
       '/api/v1/conversations/:id',
-      async ({ actor, request, params, requestId }) =>
+      async ({ actor, request, path, requestId }) =>
         okEnvelope(
-          await getConversationDetail(deps, actor.ownerId, id(params.id), queryOf(request)),
+          await getConversationDetail(deps, actor.ownerId, conversationId(path), queryOf(request)),
           requestId,
         ),
       { response: responses(model.ConversationDetailSchema) },
     )
     .get(
       '/api/v1/conversations/:id/messages',
-      async ({ actor, request, params, requestId }) =>
+      async ({ actor, request, path, requestId }) =>
         okEnvelope(
-          await getConversationMessages(deps, actor.ownerId, id(params.id), queryOf(request)),
+          await getConversationMessages(
+            deps,
+            actor.ownerId,
+            conversationId(path),
+            queryOf(request),
+          ),
           requestId,
         ),
       { response: responses(model.ConversationMessagePageSchema) },
     )
     .get(
       '/api/v1/conversations/:id/runs',
-      async ({ actor, request, params, requestId }) =>
+      async ({ actor, request, path, requestId }) =>
         okEnvelope(
-          await getConversationRuns(deps, actor.ownerId, id(params.id), queryOf(request)),
+          await getConversationRuns(deps, actor.ownerId, conversationId(path), queryOf(request)),
           requestId,
         ),
       { response: responses(model.ConversationRunPageSchema) },
     )
     .get(
       '/api/v1/conversations/:id/runs/:run',
-      async ({ actor, params, requestId }) =>
+      async ({ actor, path, requestId }) =>
         okEnvelope(
-          await getRunView(deps, actor.ownerId, id(params.id, 'Run'), id(params.run, 'Run')),
+          await getRunView(
+            deps,
+            actor.ownerId,
+            literalUuidAt(path, 3, 'Run not found'),
+            literalUuidAt(path, 5, 'Run not found'),
+          ),
           requestId,
         ),
       { response: responses(model.RunViewSchema) },
     )
     .get(
       '/api/v1/conversations/:id/runs/:run/events',
-      async ({ actor, request, params, requestId }) => {
-        id(params.id, 'Run');
-        id(params.run, 'Run');
+      async ({ actor, request, path, requestId }) => {
+        const id = literalUuidAt(path, 3, 'Run not found');
+        const run = literalUuidAt(path, 5, 'Run not found');
         const parsed = ConversationEventsQuerySchema.safeParse(queryOf(request));
         if (
           !parsed.success ||
@@ -111,27 +126,20 @@ export function createConversationController(deps: ConversationDeps, access: Htt
           new URL(request.url).searchParams.has('limit')
         )
           throw validationError('invalid events query');
-        return subscribeRun(
-          deps,
-          actor,
-          params.id,
-          params.run,
-          requestId,
-          parsed.data.after_seq ?? null,
-        );
+        return subscribeRun(deps, actor, id, run, requestId, parsed.data.after_seq ?? null);
       },
       { response: errorResponses },
     )
     .get(
       '/api/v1/conversations/:id/runs/:run/compacts/:pause',
-      async ({ actor, params, requestId }) =>
+      async ({ actor, path, requestId }) =>
         okEnvelope(
           await getCompactReceipt(
             deps,
             actor.ownerId,
-            id(params.id, 'compact operation'),
-            id(params.run, 'compact operation'),
-            id(params.pause, 'compact operation'),
+            literalUuidAt(path, 3, 'compact operation not found'),
+            literalUuidAt(path, 5, 'compact operation not found'),
+            literalUuidAt(path, 7, 'compact operation not found'),
           ),
           requestId,
         ),
@@ -140,7 +148,7 @@ export function createConversationController(deps: ConversationDeps, access: Htt
     .post(
       '/api/v1/conversations/:id/actions/compact',
       async ({ actor, request, params, requestId }) => {
-        const conversationId = id(params.id);
+        const conversationId = params.id;
         const result = await startIdleCompact(
           deps,
           actor.ownerId,
@@ -163,6 +171,7 @@ export function createConversationController(deps: ConversationDeps, access: Htt
       },
       {
         parse: access.parser(),
+        transform: validateConversationPath,
         body: model.CompactRunBodySchema,
         response: responses(model.IdleCompactResultSchema),
       },
@@ -171,18 +180,12 @@ export function createConversationController(deps: ConversationDeps, access: Htt
       '/api/v1/conversations/:id/runs/:run/actions/cancel',
       async ({ actor, params, body, requestId }) =>
         okEnvelope(
-          await cancelConversationRun(
-            deps,
-            actor.ownerId,
-            id(params.id, 'Run'),
-            id(params.run, 'Run'),
-            requestId,
-            body,
-          ),
+          await cancelConversationRun(deps, actor.ownerId, params.id, params.run, requestId, body),
           requestId,
         ),
       {
         parse: access.parser(),
+        transform: validateRunPath,
         body: model.CancelRunBodySchema,
         response: responses(model.RunViewSchema),
       },
@@ -192,18 +195,16 @@ export function createConversationController(deps: ConversationDeps, access: Htt
       async ({ actor, params, body, requestId }) =>
         streamRun(
           deps,
-          await resumeConversationRun(
-            deps,
-            actor.ownerId,
-            id(params.id, 'Run'),
-            id(params.run, 'Run'),
-            requestId,
-            body,
-          ),
+          await resumeConversationRun(deps, actor.ownerId, params.id, params.run, requestId, body),
           actor,
           requestId,
         ),
-      { parse: access.parser(), body: model.ResumeRunBodySchema, response: errorResponses },
+      {
+        parse: access.parser(),
+        transform: validateRunPath,
+        body: model.ResumeRunBodySchema,
+        response: errorResponses,
+      },
     )
     .post(
       '/api/v1/conversations/:id/runs/:run/actions/pause',
@@ -212,8 +213,8 @@ export function createConversationController(deps: ConversationDeps, access: Htt
           await requestConversationPause(
             deps,
             actor.ownerId,
-            id(params.id, 'Run'),
-            id(params.run, 'Run'),
+            params.id,
+            params.run,
             body,
             idempotencyKeyOf(request),
           ),
@@ -221,6 +222,7 @@ export function createConversationController(deps: ConversationDeps, access: Htt
         ),
       {
         parse: access.parser(),
+        transform: validateRunPath,
         body: model.PauseRunBodySchema,
         response: responses(model.PauseResultSchema),
       },
@@ -233,8 +235,8 @@ export function createConversationController(deps: ConversationDeps, access: Htt
           await continueConversationPause(
             deps,
             actor.ownerId,
-            id(params.id, 'Run'),
-            id(params.run, 'Run'),
+            params.id,
+            params.run,
             requestId,
             body,
             idempotencyKeyOf(request),
@@ -242,13 +244,16 @@ export function createConversationController(deps: ConversationDeps, access: Htt
           actor,
           requestId,
         ),
-      { parse: access.parser(), body: model.ContinueRunBodySchema, response: errorResponses },
+      {
+        parse: access.parser(),
+        transform: validateRunPath,
+        body: model.ContinueRunBodySchema,
+        response: errorResponses,
+      },
     )
     .post(
       '/api/v1/conversations/:id/runs/:run/actions/compact',
       async ({ actor, request, params, requestId }) => {
-        id(params.id, 'Run');
-        id(params.run, 'Run');
         const pending = await requestRuntimeCompactPause(
           deps,
           actor.ownerId,
@@ -264,6 +269,7 @@ export function createConversationController(deps: ConversationDeps, access: Htt
       },
       {
         parse: access.parser(),
+        transform: validateRunPath,
         body: model.CompactRunBodySchema,
         response: responses(model.CompactReceiptSchema),
       },

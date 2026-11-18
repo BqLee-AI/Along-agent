@@ -5,7 +5,8 @@ import type { HttpAccess } from '../../http/access.js';
 import { queryOf } from '../../http/access.js';
 import { okEnvelope } from '../../http/errors.js';
 import { responses } from '../../http/model.js';
-import { forbidden, isUuid, notFound } from '../../platform/errors.js';
+import { literalUuidAt } from '../../http/request/path.js';
+import { forbidden } from '../../platform/errors.js';
 import { WorkspaceDeniedError } from '../workspaces/public.js';
 import { confirmDocumentApproval, rejectDocumentApproval } from '../../agent/operations/public.js';
 import { readRunDocumentEvidence } from '../../agent/tools/query.js';
@@ -19,16 +20,15 @@ import {
 } from './public.js';
 import * as model from './model.js';
 export const approvalWriteScopes = ['/api/v1/approvals', '/api/v1/document-approvals/'] as const;
-function approvalId(id: string, document = false) {
-  if (!isUuid(id)) throw notFound(document ? 'document approval not found' : 'approval not found');
-  return id;
+function approvalId(path: string, document = false) {
+  return literalUuidAt(path, 3, document ? 'document approval not found' : 'approval not found');
 }
 // Keep path validation after JSON parsing and before body schema validation.
-function validateApprovalPath({ params }: { params: { id: string } }) {
-  approvalId(params.id);
+function validateApprovalPath({ path, params }: { path: string; params: { id: string } }) {
+  params.id = approvalId(path);
 }
-function validateDocumentPath({ params }: { params: { id: string } }) {
-  approvalId(params.id, true);
+function validateDocumentPath({ path, params }: { path: string; params: { id: string } }) {
+  params.id = approvalId(path, true);
 }
 async function documentResult<T>(operation: () => Promise<T>): Promise<T> {
   try {
@@ -55,9 +55,9 @@ export function createApprovalController(
     )
     .get(
       '/api/v1/approvals/:id',
-      async ({ actor, params, requestId }) =>
+      async ({ actor, path, requestId }) =>
         okEnvelope(
-          (await getApprovalDetail(deps, actor.ownerId, approvalId(params.id))).detail,
+          (await getApprovalDetail(deps, actor.ownerId, approvalId(path))).detail,
           requestId,
         ),
       { response: responses(model.ApprovalDetailSchema) },
@@ -97,13 +97,13 @@ export function createApprovalController(
     )
     .get(
       '/api/v1/document-approvals/:id',
-      async ({ actor, params, requestId }) =>
+      async ({ actor, path, requestId }) =>
         okEnvelope(
           await documentResult(() =>
             getDocumentApprovalDetail(
               deps.pool,
               actor.ownerId,
-              approvalId(params.id, true),
+              approvalId(path, true),
               readRunDocumentEvidence,
             ),
           ),
