@@ -1,465 +1,108 @@
-import type { IncomingMessage, ServerResponse } from 'node:http';
-import { timingSafeEqual } from 'node:crypto';
-import type { Pool } from 'pg';
-import { createActorResolver, csrfTokenFor, verifyCsrf, type ActorResolver } from './auth.js';
+import { Elysia } from 'elysia';
+import { createAccess, type HttpAccess } from './access.js';
+import { createErrorHandler, failEnvelope, jsonResponse } from './errors.js';
+import { unmatchedError } from './routing/fallback-controller.js';
+import { httpStatusForError } from '@along/contracts';
+import { createHealthController } from './health/controller.js';
 import {
-  csrfMismatch,
-  HttpError,
-  validationError,
-  failEnvelope,
-  notFound,
-  requestIdOf,
-  sendJson,
-  okEnvelope,
-  unauthorized,
-} from './errors.js';
-import { handleApprovalRoute } from '../modules/approvals/routes.js';
-import { handleDocumentApprovalRoute } from '../modules/approvals/document-routes.js';
-import { handleWorkspaceRoute } from '../modules/workspaces/routes.js';
-import { handleConversationRoute } from '../modules/conversations/routes.js';
-import { handleTaskRoute } from '../modules/tasks/routes.js';
-import { handleBriefRoute } from '../modules/brief/routes.js';
-import { handleMemoryRoute } from '../modules/memory/routes.js';
-import { createMemoryService } from '../modules/memory/service.js';
-import { conversationMemorySources } from '../modules/conversations/memory-sources.js';
+  createMeController,
+  createAccountController,
+} from '../features/identity/account/controller.js';
+import { createBriefController } from '../features/brief/controller.js';
+import { createWorkspaceController } from '../features/workspaces/http/controller.js';
 import {
-  handleModelProviderRoute,
-  isModelProviderPath,
-  isModelProviderWritePath,
-} from '../modules/model-providers/routes.js';
-import { loadTimeContext, type TimeContext } from '../modules/time/context.js';
-import type { RoutingRuntime } from '../modules/conversations/routing/index.js';
-import type { RunDriver } from '../modules/conversations/run-driver.js';
-import type { ConversationDeps } from '../modules/conversations/contracts.js';
-import { createAccountService, type AccountService } from '../modules/identity/account-service.js';
-import { handleAccountRoute, isKnownAccountRoute } from '../modules/identity/routes.js';
+  createModelProviderController,
+  modelProviderWriteScopes,
+  modelSelectionWritePath,
+} from '../features/model-providers/http/controller.js';
+import { createApprovalController, approvalWriteScopes } from '../features/approvals/controller.js';
+import { createTaskController, taskWriteScopes } from '../features/tasks/controller.js';
+import { createMemoryController, memoryWriteScopes } from '../features/memory/controller.js';
 import {
-  createInvitedAccountService,
-  type InvitedAccountService,
-} from '../modules/identity/invited-service.js';
-import { notReady } from './errors.js';
+  createConversationController,
+  conversationWriteScopes,
+} from '../features/conversations/controller.js';
+import { loadTimeContext } from '../features/time/public.js';
+import type { AppDeps } from './contracts.js';
+export type { AppDeps } from './contracts.js';
 
-export interface AppDeps {
-  pool: Pool | null;
-  resolveActor?: ActorResolver;
-  tzdbVersion?: string;
-  timeContext?: TimeContext;
-  harness?: ConversationDeps['harness'];
-  routing?: RoutingRuntime;
-  runDriver?: RunDriver;
-  modelTransport?: ConversationDeps['modelTransport'];
-  accountService?: AccountService;
-  invitedAccountService?: InvitedAccountService;
+async function unsupportedMethod(request: Request, hasPool: boolean, access: HttpAccess) {
+  const error = await unmatchedError(request, hasPool, access);
+  const id = access.requestId(request);
+  return jsonResponse(httpStatusForError(error.code), failEnvelope(error, id), id);
 }
 
-interface TzdbOnlyOpts {
-  tzdbVersion: string | undefined;
-}
-
-function isAppDeps(opts: TzdbOnlyOpts | AppDeps): opts is AppDeps {
-  return 'pool' in opts || 'resolveActor' in opts;
-}
-
-const MAX_BODY_BYTES = 131072;
-
-function closeUnreadRequest(req: IncomingMessage, res: ServerResponse): void {
-  if (!req.socket || req.readableEnded) return;
-  req.pause();
-  res.shouldKeepAlive = false;
-  res.setHeader('connection', 'close');
-  // Flush the finite response before destroying an unfinished upload. Do not
-  // resume/drain an attacker-controlled stream or wait for its end.
-  const close = () => req.destroy();
-  req.once('error', () => {});
-  res.once('finish', close);
-  res.once('close', close);
-}
-
-function readBody(req: IncomingMessage): Promise<{ body: unknown } | null> {
-  if (req.destroyed) return Promise.resolve(null);
-  const { promise, resolve, reject } = Promise.withResolvers<{ body: unknown } | null>();
-  const chunks: Buffer[] = [];
-  let bytes = 0;
-  function cleanup() {
-    chunks.length = 0;
-    req.off('data', onData);
-    req.off('end', onEnd);
-    req.off('error', onInterrupted);
-    req.off('close', onInterrupted);
-  }
-  function onData(chunk: Buffer) {
-    bytes += chunk.length;
-    if (bytes > MAX_BODY_BYTES) {
-      req.pause();
-      cleanup();
-      reject(new HttpError(413, 413, 'PAYLOAD_TOO_LARGE', 'request body too large'));
-      return;
-    }
-    chunks.push(chunk);
-  }
-  function onEnd() {
-    try {
-      const body: unknown = JSON.parse(Buffer.concat(chunks, bytes).toString('utf8'));
-      cleanup();
-      resolve({ body });
-    } catch {
-      cleanup();
-      reject(validationError('invalid JSON body'));
-    }
-  }
-  function onInterrupted() {
-    cleanup();
-    resolve(null);
-  }
-  req.on('data', onData);
-  req.once('end', onEnd);
-  req.once('error', onInterrupted);
-  req.once('close', onInterrupted);
-  return promise;
-}
-
-// Async handler with injected deps (pool + actor resolver).
-// Keeps /healthz + /readyz behavior from S0.5; /me and the brief/tasks/
-// approvals/conversation routes are owner-scoped behind the actor resolver.
-async function dispatchRequest(
-  req: IncomingMessage,
-  res: ServerResponse,
-  opts: TzdbOnlyOpts | AppDeps,
-): Promise<void> {
-  const requestId = requestIdOf(req);
-  // All module envelopes and SSE frames reuse this normalized transport id.
-  req.headers['x-request-id'] = requestId;
-  const url = new URL(req.url ?? '/', 'http://localhost');
-  const { pathname } = url;
-  if (isModelProviderPath(pathname)) res.setHeader('Cache-Control', 'no-store');
-  const deps: AppDeps = isAppDeps(opts) ? opts : { pool: null, tzdbVersion: opts.tzdbVersion };
-  const tzdbVersion = deps.tzdbVersion;
-  const timeContext = deps.timeContext ?? loadTimeContext(tzdbVersion);
-  let resolveActor = deps.resolveActor ?? createActorResolver({ pool: deps.pool });
-  let body: unknown;
-  if (req.method !== 'GET' && req.method !== 'POST') closeUnreadRequest(req, res);
-  if (pathname.startsWith('/api/v1/auth/')) {
-    if (!isKnownAccountRoute(req.method, pathname)) throw notFound();
-    if (!deps.pool && !deps.accountService) throw notReady();
-    const service = deps.accountService ?? createAccountService(deps.pool!);
-    const result = await handleAccountRoute(
-      req,
-      res,
-      pathname,
-      {
-        service,
-        invitedService:
-          deps.invitedAccountService ??
-          (deps.pool ? createInvitedAccountService(deps.pool) : undefined),
-        resolveActor,
-        origin: process.env.APP_ORIGIN ?? 'http://localhost:3000',
-        readBody: async () => {
-          const length = req.headers['content-length'];
-          if (typeof length === 'string' && Number(length) > MAX_BODY_BYTES)
-            throw new HttpError(413, 413, 'PAYLOAD_TOO_LARGE', 'request body too large');
-          const parsed = await readBody(req);
-          return parsed?.body;
-        },
-      },
-      requestId,
-    );
-    if (result.cookies?.length) res.setHeader('set-cookie', result.cookies);
-    sendJson(res, result.status, result.body, requestId);
-    return;
-  }
-  const protectedPost =
-    req.method === 'POST' &&
-    (pathname === '/api/v1/approvals' ||
-      pathname.startsWith('/api/v1/approvals/') ||
-      pathname.startsWith('/api/v1/document-approvals/') ||
-      pathname.startsWith('/api/v1/conversations/') ||
-      pathname === '/api/v1/tasks' ||
-      pathname.startsWith('/api/v1/tasks/') ||
-      pathname.startsWith('/api/v1/memories/') ||
-      isModelProviderPath(pathname));
-  if (protectedPost) {
-    const actor = await resolveActor(req);
-    if (!actor) {
-      closeUnreadRequest(req, res);
-      sendJson(res, 401, failEnvelope(unauthorized(), requestId), requestId);
-      return;
-    }
-    // Resolve once; module entry points retain their own authorization guards.
-    resolveActor = async () => actor;
-    const writeRoute =
-      pathname === '/api/v1/conversations/messages' ||
-      /^\/api\/v1\/conversations\/[^/]+\/runs\/[^/]+\/actions\/(?:cancel|resume|pause|continue|compact)$/.test(
-        pathname,
-      ) ||
-      /^\/api\/v1\/conversations\/[^/]+\/actions\/compact$/.test(pathname) ||
-      /^\/api\/v1\/approvals\/[^/]+\/actions\/(?:confirm|reject|revise)$/.test(pathname) ||
-      /^\/api\/v1\/document-approvals\/[^/]+\/actions\/(?:confirm|reject)$/.test(pathname) ||
-      /^\/api\/v1\/tasks\/[^/]+\/actions\/cancel$/.test(pathname) ||
-      /^\/api\/v1\/memories\/[^/]+\/actions\/(?:correct|stop-recall)$/.test(pathname) ||
-      isModelProviderWritePath(pathname);
-    if (!writeRoute) {
-      closeUnreadRequest(req, res);
-      sendJson(res, 404, failEnvelope(notFound(), requestId), requestId);
-      return;
-    }
-    if (!verifyCsrf(req, actor)) {
-      closeUnreadRequest(req, res);
-      sendJson(res, 403, failEnvelope(csrfMismatch(), requestId), requestId);
-      return;
-    }
-    if (isModelProviderPath(pathname)) {
-      const socket = req.socket;
-      const loopback = ['127.0.0.1', '::1', '::ffff:127.0.0.1'];
-      const localConnection =
-        loopback.includes(socket.remoteAddress ?? '') &&
-        loopback.includes(socket.localAddress ?? '');
-      const tls = 'encrypted' in socket && socket.encrypted === true;
-      const expected = process.env.ALONG_LOCAL_MODEL_PROXY_TOKEN;
-      const supplied = req.headers['x-along-local-model-proxy'];
-      const localProxy =
-        typeof expected === 'string' &&
-        /^[0-9a-f]{64}$/.test(expected) &&
-        typeof supplied === 'string' &&
-        /^[0-9a-f]{64}$/.test(supplied) &&
-        timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(supplied, 'hex'));
-      if (!tls && !localConnection && !localProxy) {
-        closeUnreadRequest(req, res);
-        sendJson(
-          res,
-          403,
-          failEnvelope(
-            new HttpError(403, 403, 'FORBIDDEN', 'secure connection required'),
-            requestId,
-          ),
-          requestId,
-        );
-        return;
-      }
-    }
-    try {
-      // Content-Length is only an early rejection hint. Chunked requests and
-      // all accepted lengths still pass through the cumulative byte counter.
-      const length = req.headers['content-length'];
-      if (typeof length === 'string' && Number(length) > MAX_BODY_BYTES) {
-        throw new HttpError(413, 413, 'PAYLOAD_TOO_LARGE', 'request body too large');
-      }
-      const parsed = await readBody(req);
-      if (!parsed) return;
-      body = parsed.body;
-    } catch (err) {
-      if (!(err instanceof HttpError)) throw err;
-      closeUnreadRequest(req, res);
-      sendJson(res, err.httpStatus, failEnvelope(err, requestId), requestId);
-      return;
-    }
-  }
-
-  if (req.method === 'GET' && pathname === '/healthz') {
-    sendJson(res, 200, { status: 'ok' }, requestId);
-    return;
-  }
-
-  if (req.method === 'GET' && pathname === '/readyz') {
-    if (!timeContext.available) {
-      sendJson(
-        res,
-        503,
-        {
-          status: 'not_ready',
-          reason: 'TZDB_UNAVAILABLE',
-          ...(timeContext.missing.length ? { details: { missing: timeContext.missing } } : {}),
-        },
-        requestId,
-      );
-      return;
-    }
-    try {
-      if (!deps.pool) throw new Error('database unavailable');
-      await deps.pool.query('SELECT 1');
-    } catch {
-      sendJson(res, 503, { status: 'not_ready', reason: 'NOT_READY' }, requestId);
-      return;
-    }
-    sendJson(res, 200, { status: 'ok' }, requestId);
-    return;
-  }
-
-  // GET /me: session self-check. Returns the actor snapshot + CSRF token +
-  // confirmed timezone with no-store; 401 envelope (code:401) without one.
-  if (req.method === 'GET' && pathname === '/api/v1/me') {
-    const actor = await resolveActor(req);
-    if (!actor) {
-      sendJson(res, 401, failEnvelope(unauthorized(), requestId), requestId);
-      return;
-    }
-    sendJson(
-      res,
-      200,
-      okEnvelope(
-        {
-          user: { id: actor.ownerId, display_name: actor.displayName },
-          csrf_token: csrfTokenFor(actor),
-          confirmed_timezone: actor.timezoneId,
-        },
-        requestId,
-      ),
-      requestId,
-      { 'cache-control': 'no-store' },
-    );
-    return;
-  }
-
-  if (isModelProviderPath(pathname)) {
-    await handleModelProviderRoute(req, res, url, {
-      pool: deps.pool,
-      resolveActor,
-      body,
-      modelTransport: deps.modelTransport,
-    });
-    return;
-  }
-
-  if (pathname === '/api/v1/workspaces') {
-    if (await handleWorkspaceRoute(req, res, url, { resolveActor })) return;
-  }
-
-  if (pathname.startsWith('/api/v1/document-approvals/')) {
-    if (
-      await handleDocumentApprovalRoute(req, res, url, {
-        pool: deps.pool,
-        resolveActor,
-        body,
+export function createApp(deps: AppDeps) {
+  const access = createAccess(deps);
+  const timeContext = deps.timeContext ?? loadTimeContext(deps.tzdbVersion);
+  const writeScopes = [
+    ...modelProviderWriteScopes,
+    ...approvalWriteScopes,
+    ...taskWriteScopes,
+    ...memoryWriteScopes,
+    ...conversationWriteScopes,
+  ];
+  return (
+    new Elysia({ name: 'along-api', strictPath: true, normalize: false })
+      // Root-only onRequest runs before matching and parsing; it is never exported as a feature plugin.
+      .onRequest(async ({ request, set }) => {
+        set.headers['x-request-id'] = access.requestId(request);
+        set.headers['cache-control'] = 'no-store';
+        const pathname = new URL(request.url).pathname;
+        if (request.method !== 'GET' && request.method !== 'POST')
+          return unsupportedMethod(request, !!deps.pool, access);
+        if (
+          request.method === 'POST' &&
+          (pathname === modelSelectionWritePath ||
+            writeScopes.some((scope) =>
+              scope.endsWith('/')
+                ? pathname.startsWith(scope)
+                : pathname === scope || pathname.startsWith(scope + '/'),
+            ))
+        )
+          await access.admitWrite(request);
       })
-    )
-      return;
-    closeUnreadRequest(req, res);
-    sendJson(res, 404, failEnvelope(notFound(), requestId), requestId);
-    return;
-  }
-
-  if (pathname === '/api/v1/brief') {
-    const handled = await handleBriefRoute(req, res, url, {
-      pool: deps.pool,
-      resolveActor,
-      tzdbVersion,
-      timeContext,
-    });
-    if (handled) return;
-  }
-
-  // Approvals read routes (PR1) + confirm/reject (PR2).
-  if (pathname === '/api/v1/approvals' || pathname.startsWith('/api/v1/approvals/')) {
-    if (req.method === 'GET' || req.method === 'POST') {
-      const handled = await handleApprovalRoute(req, res, url, {
-        pool: deps.pool,
-        resolveActor,
-        body,
-        timeContext,
-      });
-      if (handled) return;
-    } else {
-      const actor = await resolveActor(req);
-      if (!actor) {
-        sendJson(res, 401, failEnvelope(unauthorized(), requestId), requestId);
-        return;
-      }
-    }
-    sendJson(res, 404, failEnvelope(notFound('not found'), requestId), requestId);
-    return;
-  }
-
-  if (pathname === '/api/v1/conversations' || pathname.startsWith('/api/v1/conversations/')) {
-    if (req.method === 'GET' || req.method === 'POST') {
-      const handled = await handleConversationRoute(req, res, url, {
-        pool: deps.pool,
-        resolveActor,
-        body,
-        timeContext,
-        harness: deps.harness,
-        routing: deps.routing,
-        runDriver: deps.runDriver,
-        modelTransport: deps.modelTransport,
-      });
-      if (handled) return;
-    }
-    sendJson(res, 404, failEnvelope(notFound('not found'), requestId), requestId);
-    return;
-  }
-
-  if (pathname === '/api/v1/memories' || pathname.startsWith('/api/v1/memories/')) {
-    if (
-      await handleMemoryRoute(req, res, url, {
-        service: deps.pool
-          ? createMemoryService({ pool: deps.pool, sources: conversationMemorySources })
-          : null,
-        resolveActor,
-        body,
-      })
-    )
-      return;
-    sendJson(res, 404, failEnvelope(notFound('not found'), requestId), requestId);
-    return;
-  }
-
-  if (pathname === '/api/v1/tasks' || pathname.startsWith('/api/v1/tasks/')) {
-    if (req.method === 'GET' || req.method === 'POST') {
-      const handled = await handleTaskRoute(req, res, url, {
-        pool: deps.pool,
-        resolveActor,
-        body,
-      });
-      if (handled) return;
-    }
-    sendJson(res, 404, failEnvelope(notFound('not found'), requestId), requestId);
-    return;
-  }
-
-  closeUnreadRequest(req, res);
-
-  sendJson(
-    res,
-    404,
-    {
-      code: 404,
-      data: null,
-      msg: 'not found',
-      error: { code: 'NOT_FOUND', message: 'not found', request_id: requestId },
-      request_id: requestId,
-    },
-    requestId,
+      .onError({ as: 'global' }, createErrorHandler(!!deps.pool, access))
+      .use(createHealthController(deps.pool, timeContext))
+      .use(createMeController(access))
+      .use(
+        createBriefController(
+          { pool: deps.pool, tzdbVersion: deps.tzdbVersion, timeContext },
+          access,
+        ),
+      )
+      .use(createWorkspaceController(access))
+      .use(
+        createModelProviderController(
+          { pool: deps.pool, modelTransport: deps.modelTransport },
+          access,
+        ),
+      )
+      .use(
+        createAccountController(
+          {
+            accountService: deps.accountService,
+            invitedAccountService: deps.invitedAccountService,
+          },
+          access,
+        ),
+      )
+      .use(createApprovalController({ pool: deps.pool, timeContext }, access))
+      .use(createTaskController({ pool: deps.pool }, access))
+      .use(createMemoryController(deps.memoryService, access))
+      .use(
+        createConversationController(
+          {
+            pool: deps.pool,
+            timeContext,
+            harness: deps.harness,
+            routing: deps.routing,
+            runDriver: deps.runDriver,
+            modelTransport: deps.modelTransport,
+          },
+          access,
+        ),
+      )
   );
 }
-
-/** Catch dependency errors at the outer boundary, including pre-body gates. */
-export async function handleRequest(
-  req: IncomingMessage,
-  res: ServerResponse,
-  opts: TzdbOnlyOpts | AppDeps,
-): Promise<void> {
-  try {
-    await dispatchRequest(req, res, opts);
-  } catch (error) {
-    if (res.headersSent || res.destroyed) return;
-    const failure = error instanceof HttpError ? error : notReady();
-    closeUnreadRequest(req, res);
-    const requestId = requestIdOf(req);
-    const details = failure.details;
-    const retryAfter =
-      failure.httpStatus === 429 &&
-      details !== null &&
-      typeof details === 'object' &&
-      'retry_after_seconds' in details &&
-      typeof details.retry_after_seconds === 'number' &&
-      Number.isFinite(details.retry_after_seconds) &&
-      details.retry_after_seconds > 0
-        ? String(Math.ceil(details.retry_after_seconds))
-        : null;
-    sendJson(
-      res,
-      failure.httpStatus,
-      failEnvelope(failure, requestId),
-      requestId,
-      retryAfter ? { 'retry-after': retryAfter } : undefined,
-    );
-  }
-}
+export type App = ReturnType<typeof createApp>;

@@ -1,9 +1,9 @@
 import { expect } from 'bun:test';
 import type { Pool } from 'pg';
-import { getTaskDetail } from '../../src/modules/tasks/service.js';
-import { runClaimPhase } from '../../src/modules/tasks/scheduler/claim.js';
-import { runSendPhase } from '../../src/modules/tasks/scheduler/send.js';
-import type { InAppProvider } from '../../src/modules/notifications/service.js';
+import { getTaskDetail } from '../../src/features/tasks/service.js';
+import { runClaimPhase } from '../../src/features/tasks/scheduler/claim.js';
+import { runSendPhase } from '../../src/features/tasks/scheduler/send.js';
+import type { InAppProvider } from '../../src/features/notifications/service.js';
 
 // Drive and assert only the requested task: phase summaries can include other
 // tasks created earlier in the same file's isolated fixture.

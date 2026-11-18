@@ -1,3 +1,7 @@
+import {
+  listReminderClarifications,
+  readReminderTimeErrors,
+} from '../../src/agent/tools/reminders/reminder-source.js';
 import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
@@ -12,18 +16,16 @@ import {
   type HarnessModelReply,
 } from '@along/contracts';
 import { ThreadEventSchema, type ThreadEvent } from '@along/stream-protocol';
-import { handleRequest } from '../../src/http/app.js';
-import {
-  startConversationRun,
-  executeRun,
-  getRunView,
-} from '../../src/modules/conversations/service.js';
-import { acceptReminderDate } from '../../src/modules/conversations/reminder-date.js';
-import type { ConversationDeps } from '../../src/modules/conversations/contracts.js';
-import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import { createHarnessModelTransport } from '../../src/modules/model-providers/harness-model.js';
-import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
+import { handleRequest } from '../helpers/http-app.js';
+import { executeRun } from '../../src/agent/operations/execute.js';
+import { getRunView } from '../../src/agent/operations/run.js';
+import { startConversationRun } from '../../src/agent/operations/start.js';
+import { acceptReminderDate } from '../../src/features/conversations/lifecycle/reminder-date.js';
+import type { ConversationDeps } from '../../src/agent/runtime/contracts.js';
+import { createContextPolicy } from '../../src/features/conversations/public.js';
+import { createLocalFixtureModelTransport } from '../helpers/local-fixture-model.js';
+import type { HarnessServices } from '../../src/agent/runtime/contracts.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
 import {
   createIntegrationDatabase,
   seedAdmittedSession as seedSession,
@@ -170,7 +172,7 @@ beforeAll(async () => {
       completionCap: 1024,
       model: 'direct-controlled-provider',
     }),
-    model: createHarnessModelTransport({
+    model: createLocalFixtureModelTransport({
       baseUrl: `${modelBase}/v1`,
       model: 'direct-controlled-provider',
     }),
@@ -399,16 +401,20 @@ for (const mode of ['local', 'http'] as const) {
         { text: `${original}，改成别的事项`, confirmedTimezone: 'America/New_York' },
         { text: original, confirmedTimezone: 'Asia/Shanghai' },
       ]) {
-        const source = await acceptReminderDate(sourceClient, {
-          ownerId: session.userId,
-          conversationId: first.conversation_id,
-          inputMessageId: randomUUID(),
-          receivedAtUtc: '2026-11-03T03:00:00Z',
-          foldChoice: 'second',
-          clarificationOfRunId: first.run_id,
-          directCreation: true,
-          ...changed,
-        });
+        const source = await acceptReminderDate(
+          sourceClient,
+          {
+            ownerId: session.userId,
+            conversationId: first.conversation_id,
+            inputMessageId: randomUUID(),
+            receivedAtUtc: '2026-11-03T03:00:00Z',
+            foldChoice: 'second',
+            clarificationOfRunId: first.run_id,
+            directCreation: true,
+            ...changed,
+          },
+          { listReminderClarifications, readReminderTimeErrors },
+        );
         expect(source.source.kind).toBe('unresolved');
       }
     } finally {

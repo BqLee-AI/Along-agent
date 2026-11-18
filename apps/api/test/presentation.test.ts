@@ -5,7 +5,7 @@ import {
   renderEchoV1Second,
   validateSeenContent,
   type PresentationSnapshot,
-} from '../src/modules/approvals/presentation.js';
+} from '../src/features/approvals/reminder/presentation.js';
 
 const SNAPSHOT: PresentationSnapshot = {
   originalText: '明天 9:20 喝水',

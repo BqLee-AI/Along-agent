@@ -12,16 +12,16 @@ import {
   type HarnessRequest,
   type RunView,
 } from '@along/contracts';
-import type { ToolOutcome } from '../../src/modules/tools/contracts.js';
-import { cancelConversationRun } from '../../src/modules/conversations/service.js';
-import { runNativeHarness } from '../../src/modules/conversations/harness-process.js';
-import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import { measureHarnessContext } from '../../src/modules/conversations/harness-context.js';
+import type { ToolOutcome } from '../../src/agent/tools/contracts.js';
+import { cancelConversationRun } from '../../src/agent/operations/run.js';
+import { runNativeHarness } from '../../src/agent/harness/harness-process.js';
+import { createContextPolicy } from '../../src/features/conversations/public.js';
+import { measureSdkContext } from '../../src/features/model-providers/public.js';
 import {
   digestInvocationArgs,
   executeNonTransactionalInvocation,
   reserveInvocation,
-} from '../../src/modules/tools/invocations.js';
+} from '../../src/agent/tools/invocations/invocations.js';
 import { createIntegrationDatabase, type IntegrationDatabase } from '../integration/setup.js';
 import { appendFileEffect } from '../integration/tool-invocations-file-effect.js';
 import {
@@ -109,9 +109,6 @@ test('D8.unknown-core-native', async () => {
     services: {
       binaryPath,
       libraryPath: process.env.HARNESS_LIBRARY_PATH,
-      maxIterations: 4,
-      maxTokens: 100,
-      contextPolicy,
     },
     start,
     signal: new AbortController().signal,
@@ -119,7 +116,7 @@ test('D8.unknown-core-native', async () => {
       requests.push(request);
       switch (request.type) {
         case 'measure_context':
-          return measureHarnessContext(request, start.tools, contextPolicy);
+          return measureSdkContext(request, start.tools, contextPolicy);
         case 'model':
           modelCalls++;
           pendingModel = HarnessModelReplySchema.parse({
@@ -295,9 +292,6 @@ test('D8.cancelled-core-native', async () => {
     services: {
       binaryPath,
       libraryPath: process.env.HARNESS_LIBRARY_PATH,
-      maxIterations: 4,
-      maxTokens: 100,
-      contextPolicy,
     },
     start: HarnessStartSchema.parse({
       protocol: HARNESS_PROTOCOL_VERSION,
@@ -320,7 +314,7 @@ test('D8.cancelled-core-native', async () => {
       requests.push(request);
       switch (request.type) {
         case 'measure_context':
-          return measureHarnessContext(
+          return measureSdkContext(
             request,
             [
               {
@@ -561,9 +555,6 @@ test('native terminates boundedly when valid bootstrap observations cannot fit s
     services: {
       binaryPath,
       libraryPath: process.env.HARNESS_LIBRARY_PATH,
-      maxIterations: 12,
-      maxTokens: 1000,
-      contextPolicy,
     },
     start,
     signal: new AbortController().signal,

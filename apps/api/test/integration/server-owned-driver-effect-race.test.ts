@@ -1,3 +1,4 @@
+import { expectApplicationRejection } from '../helpers/application-error.js';
 import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
@@ -9,19 +10,16 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Pool } from 'pg';
 import { withTransaction } from '../../src/db/transaction.js';
-import { confirmDocumentApproval } from '../../src/modules/approvals/document-actions.js';
-import { readDocumentApprovalReceipt } from '../../src/modules/approvals/decision.js';
-import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import { createHarnessModelTransport } from '../../src/modules/model-providers/harness-model.js';
-import { RunDriver } from '../../src/modules/conversations/run-driver.js';
-import type { RunOwnership } from '../../src/modules/conversations/run-ownership.js';
-import {
-  cancelConversationRun,
-  resumeConversationRun,
-  startConversationRun,
-} from '../../src/modules/conversations/service.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
-import { configureWorkspaceRegistry } from '../../src/modules/workspaces/service.js';
+import { confirmDocumentApproval } from '../../src/agent/operations/document-decision.js';
+import { readDocumentApprovalReceipt } from '../../src/features/approvals/decision.js';
+import { createContextPolicy } from '../../src/features/conversations/public.js';
+import { createLocalFixtureModelTransport } from '../helpers/local-fixture-model.js';
+import { RunDriver } from '../../src/agent/runtime/run-driver.js';
+import type { RunOwnership } from '../../src/agent/runtime/run-ownership.js';
+import { cancelConversationRun, resumeConversationRun } from '../../src/agent/operations/run.js';
+import { startConversationRun } from '../../src/agent/operations/start.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
+import { configureWorkspaceRegistry } from '../../src/features/workspaces/public.js';
 import { listen, sendModelSse } from '../helpers/harness-consumer.js';
 import {
   createIntegrationDatabase,
@@ -52,7 +50,7 @@ maybe('server-owned driver retains an in-flight workspace write', () => {
   let database: IntegrationDatabase;
   let root: string;
   beforeAll(async () => {
-    await access(new URL('../../dist/modules/workspaces/mcp-server.js', import.meta.url));
+    await access(new URL('../../dist/features/workspaces/mcp/mcp-server.js', import.meta.url));
     database = await createIntegrationDatabase();
     root = await mkdtemp(join(tmpdir(), 'along-driver-write-'));
   });
@@ -149,7 +147,7 @@ maybe('server-owned driver retains an in-flight workspace write', () => {
             completionCap: 1024,
             model: 'fixture-transport-only',
           }),
-          model: createHarnessModelTransport({
+          model: createLocalFixtureModelTransport({
             baseUrl: `${base}/v1`,
             model: 'fixture-transport-only',
           }),
@@ -213,7 +211,7 @@ maybe('server-owned driver retains an in-flight workspace write', () => {
           idempotency_key: randomUUID(),
         };
         try {
-          await expect(
+          await expectApplicationRejection(
             resumeConversationRun(
               deps,
               actor.userId,
@@ -222,7 +220,8 @@ maybe('server-owned driver retains an in-flight workspace write', () => {
               randomUUID(),
               resumeRequest,
             ),
-          ).rejects.toMatchObject({ httpStatus: 409 });
+            { status: 409 },
+          );
           expect(
             (
               await database.pool.query(

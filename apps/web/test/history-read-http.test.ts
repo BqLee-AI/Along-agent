@@ -10,6 +10,7 @@ import {
 } from '../src/features/conversations/model/conversation-run';
 import { readHistoryCollectionPage } from '../src/shared/http/page';
 
+import { createBrowserApi } from '../src/shared/http/eden';
 const cid = '11111111-1111-4111-8111-111111111111';
 const rid = '22222222-2222-4222-8222-222222222222';
 const messageId = '33333333-3333-4333-8333-333333333333';
@@ -20,6 +21,12 @@ describe('actual HTTP readonly history consumers', () => {
   let server: Server;
   let base: string;
   const requests: { method: string | undefined; url: string }[] = [];
+  function client(path: string) {
+    return createBrowserApi((input, init) => {
+      const query = new URL(String(input), base).search;
+      return fetch(`${base}/${path}${query}`, init);
+    });
+  }
   const deltas = Array.from({ length: 200 }, (_, index) => ({
     protocol_version: 'v1',
     seq: (index + 1) * 2,
@@ -102,11 +109,13 @@ describe('actual HTTP readonly history consumers', () => {
 
   it('reads every message page through strict shared DTOs without trimming original whitespace or timestamp microseconds', async () => {
     const first = await readHistoryCollectionPage(
-      `${base}/messages`,
+      client('messages').api.v1.conversations({ id: cid }).messages.get(),
       ConversationMessagePageSchema,
     );
     const second = await readHistoryCollectionPage(
-      `${base}/messages?cursor=${first.next_cursor}`,
+      client('messages')
+        .api.v1.conversations({ id: cid })
+        .messages.get({ query: { cursor: first.next_cursor! } }),
       ConversationMessagePageSchema,
     );
     expect(first.items[0]?.content).toBe(raw);
@@ -120,13 +129,14 @@ describe('actual HTTP readonly history consumers', () => {
   });
 
   it('reads the empty final event page after an exactly-full page instead of treating next_after_seq as has_more', async () => {
-    const first = await readHistoryEventPage(`${base}/events?after_seq=0`, cid, rid, 0);
+    const first = await readHistoryEventPage(cid, rid, 0, undefined, client('events'));
     expect(first.nextCursor).toBe('400');
     const last = await readHistoryEventPage(
-      `${base}/events?after_seq=${first.nextCursor}`,
       cid,
       rid,
       Number(first.nextCursor),
+      undefined,
+      client('events'),
     );
     expect(last.items).toEqual([]);
     expect(last.nextCursor).toBeNull();
@@ -149,24 +159,30 @@ describe('actual HTTP readonly history consumers', () => {
     expect(next.get(rid)).toBe(previous.get(rid));
     expect(next.get(messageId)?.text).toBe('另一次运行。');
     expect(requests.filter((request) => request.url.startsWith('/events'))).toEqual([
-      { method: 'GET', url: '/events?after_seq=0' },
-      { method: 'GET', url: '/events?after_seq=400' },
+      { method: 'GET', url: `/events?run_id=${rid}&after_seq=0&limit=200` },
+      { method: 'GET', url: `/events?run_id=${rid}&after_seq=400&limit=200` },
     ]);
   });
 
   it('rejects internal message roles and mismatched Run events rather than rendering or silently dropping them', async () => {
     await expect(
-      readHistoryCollectionPage(`${base}/invalid-messages`, ConversationMessagePageSchema),
+      readHistoryCollectionPage(
+        client('invalid-messages').api.v1.conversations({ id: cid }).messages.get(),
+        ConversationMessagePageSchema,
+      ),
     ).rejects.toThrow();
-    await expect(readHistoryEventPage(`${base}/mismatch-events`, cid, rid, 0)).rejects.toThrow(
-      '不匹配',
-    );
+    await expect(
+      readHistoryEventPage(cid, rid, 0, undefined, client('mismatch-events')),
+    ).rejects.toThrow('不匹配');
   });
 
   it('retains actual dependency failure identity and performs no action POST on a read retry', async () => {
     for (let retry = 0; retry < 2; retry++) {
       await expect(
-        readHistoryCollectionPage(`${base}/unavailable`, ConversationMessagePageSchema),
+        readHistoryCollectionPage(
+          client('unavailable').api.v1.conversations({ id: cid }).messages.get(),
+          ConversationMessagePageSchema,
+        ),
       ).rejects.toMatchObject({
         status: 503,
         code: 'NOT_READY',

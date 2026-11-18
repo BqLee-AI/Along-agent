@@ -6,11 +6,11 @@ import { createServer, type Server } from 'node:http';
 import { ThreadEventSchema } from '@along/stream-protocol';
 import { RunViewSchema } from '@along/contracts';
 import { z } from 'zod';
-import { startConversationRun } from '../../src/modules/conversations/service.js';
-import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
-import { handleRequest } from '../../src/http/app.js';
+import { startConversationRun } from '../../src/agent/operations/start.js';
+import { createContextPolicy } from '../../src/features/conversations/public.js';
+import type { HarnessServices } from '../../src/agent/runtime/contracts.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
+import { handleRequest } from '../helpers/http-app.js';
 import { seedAdmittedSession as seedSession } from './setup.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 

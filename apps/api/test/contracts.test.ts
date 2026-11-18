@@ -2,10 +2,10 @@ import { afterAll, describe, expect, it } from 'bun:test';
 import { AddressInfo } from 'node:net';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { HealthSchema } from '@along/contracts';
-import { handleRequest } from '../src/http/app.js';
+import { handleRequest } from './helpers/http-app.js';
 import { serve } from '../src/http/server.js';
 
-const server = serve({ port: 0, tzdbVersion: '2024a' });
+const server = serve({ port: 0, deps: { pool: null, tzdbVersion: '2024a' } });
 
 afterAll(() => {
   server.close();
@@ -32,7 +32,7 @@ async function invokeInProcess(): Promise<{ status: number; body: unknown }> {
       resolve({ status, body: JSON.parse(payload) });
     },
   } as unknown as ServerResponse;
-  await handleRequest(req, res, { tzdbVersion: '2024a' });
+  await handleRequest(req, res, { pool: null, tzdbVersion: '2024a' });
   return promise;
 }
 

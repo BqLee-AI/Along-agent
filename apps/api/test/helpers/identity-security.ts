@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import {
   parseIdentityKeyring,
   type IdentityKeyring,
-} from '../../src/modules/identity/email-security.js';
+} from '../../src/features/identity/security/email-security.js';
 
 export function identityKeyfileFixture() {
   return {

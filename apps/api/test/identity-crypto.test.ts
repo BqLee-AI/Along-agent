@@ -7,7 +7,7 @@ import {
   signSessionCookieValue,
   verifyCsrfToken,
   verifySignedCookieValue,
-} from '../src/modules/identity/crypto.js';
+} from '../src/features/identity/session/crypto.js';
 
 const SECRET = 'test-secret-for-identity-unit';
 

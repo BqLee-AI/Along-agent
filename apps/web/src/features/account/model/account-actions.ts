@@ -1,13 +1,74 @@
 import { z } from 'zod';
+import * as auth from '@along/contracts';
 import { EnvelopeSchema } from '@along/contracts';
+import { createBrowserApi, writeOptions } from '@/shared/http/eden';
 import { clearAppRetryState, protectedLoginHref } from '@/shared/session/navigation';
 
 export type AccountRequest = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
-export type ActionState =
+export type AccountActionPath =
+  | 'contact/request'
+  | 'contact/verify'
+  | 'password/change'
+  | 'password/forgot'
+  | 'password/reset'
+  | 'invitations'
+  | 'invitations/accept'
+  | 'sessions/revoke'
+  | 'deletion-request'
+  | { kind: 'invitation-resend' | 'invitation-revoke' | 'user-disable'; id: string };
+export type AccountCollection = 'invitations' | 'sessions' | 'users';
+
+function accountActionRequest(
+  path: AccountActionPath,
+  body: unknown,
+  csrf: string | null,
+  request: AccountRequest,
+) {
+  const api = createBrowserApi(request).api.v1.auth;
+  const options = writeOptions(csrf);
+  if (typeof path !== 'string') {
+    switch (path.kind) {
+      case 'invitation-resend':
+        return api
+          .invitations({ id: encodeURIComponent(path.id) })
+          .resend.post(auth.authInvitationResendSchema.parse(body), options);
+      case 'invitation-revoke':
+        return api
+          .invitations({ id: encodeURIComponent(path.id) })
+          .revoke.post(auth.authInvitationRevokeSchema.parse(body), options);
+      case 'user-disable':
+        return api
+          .users({ id: encodeURIComponent(path.id) })
+          .disable.post(auth.authDisableUserSchema.parse(body), options);
+    }
+  }
+  switch (path) {
+    case 'contact/request':
+      return api.contact.request.post(auth.authContactRequestSchema.parse(body), options);
+    case 'contact/verify':
+      return api.contact.verify.post(auth.authContactVerifySchema.parse(body), options);
+    case 'password/change':
+      return api.password.change.post(auth.authPasswordChangeSchema.parse(body), options);
+    case 'password/forgot':
+      return api.password.forgot.post(auth.authPasswordForgotSchema.parse(body), options);
+    case 'password/reset':
+      return api.password.reset.post(auth.authPasswordResetSchema.parse(body), options);
+    case 'invitations':
+      return api.invitations.post(auth.authInvitationCreateSchema.parse(body), options);
+    case 'invitations/accept':
+      return api.invitations.accept.post(auth.authInvitationAcceptSchema.parse(body), options);
+    case 'sessions/revoke':
+      return api.sessions.revoke.post(auth.authSessionsRevokeSchema.parse(body), options);
+    case 'deletion-request':
+      return api['deletion-request'].post(auth.authDeletionRequestSchema.parse(body), options);
+  }
+}
+
+export type ActionState<T = unknown> =
   | { kind: 'idle' }
   | { kind: 'submitting' }
-  | { kind: 'success'; data: unknown }
+  | { kind: 'success'; data: T }
   | {
       kind: 'failure';
       status: number | null;
@@ -28,24 +89,16 @@ export function takeFragmentToken(
 }
 
 /** One explicit submission. Failures never navigate or replay an account write. */
-export async function submitAccountAction(
-  path: string,
+export async function submitAccountAction<T>(
+  path: AccountActionPath,
   body: unknown,
   csrfToken: string | null,
-  schema: z.ZodType,
+  schema: z.ZodType<T>,
   request: AccountRequest = fetch,
-): Promise<ActionState> {
-  let response: Response;
+): Promise<ActionState<T>> {
+  let result;
   try {
-    response = await request(`/api/v1/auth/${path}`, {
-      method: 'POST',
-      cache: 'no-store',
-      headers: {
-        'content-type': 'application/json',
-        ...(csrfToken !== null ? { 'x-csrf-token': csrfToken } : {}),
-      },
-      body: JSON.stringify(body),
-    });
+    result = await accountActionRequest(path, body, csrfToken, request);
   } catch {
     return {
       kind: 'failure',
@@ -55,7 +108,8 @@ export async function submitAccountAction(
       currentPassword: false,
     };
   }
-  const envelope = EnvelopeSchema.safeParse(await response.json().catch(() => null));
+  const { response } = result;
+  const envelope = EnvelopeSchema.safeParse(result.error ? result.error.value : result.data);
   const data =
     envelope.success && envelope.data.code === 0 ? schema.safeParse(envelope.data.data) : null;
   if (response.ok && data?.success) return { kind: 'success', data: data.data };
@@ -81,17 +135,26 @@ export async function submitAccountAction(
 
 /** Read-only protected pagination; only a real GET 401 is a re-login boundary. */
 export async function readAccountCollection<T>(
-  path: string,
+  path: AccountCollection,
   schema: z.ZodType<T>,
   request: AccountRequest = fetch,
+  cursor: string | null = null,
 ): Promise<T> {
-  const response = await request(`/api/v1/auth/${path}`, { cache: 'no-store' });
+  const api = createBrowserApi(request).api.v1.auth;
+  const options = { query: { ...(cursor !== null ? { cursor } : {}) } };
+  const result =
+    path === 'invitations'
+      ? await api.invitations.get(options)
+      : path === 'sessions'
+        ? await api.sessions.get(options)
+        : await api.users.get(options);
+  const { response } = result;
   const login = protectedLoginHref(response.status, '/account');
   if (login && typeof window !== 'undefined') {
     clearAppRetryState();
     window.location.replace(login);
   }
-  const envelope = EnvelopeSchema.safeParse(await response.json().catch(() => null));
+  const envelope = EnvelopeSchema.safeParse(result.error ? result.error.value : result.data);
   if (!response.ok || !envelope.success || envelope.data.code !== 0) {
     throw new Error(
       envelope.success

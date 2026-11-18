@@ -6,8 +6,8 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import type { Pool } from 'pg';
-import { loadTimeContext } from '../../src/modules/time/context.js';
-import type { ToolContext } from '../../src/modules/tools/contracts.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
+import type { ToolContext } from '../../src/agent/tools/contracts.js';
 import type { IntegrationDatabase } from './setup.js';
 import type { WorkspaceGrant } from '@along/contracts';
 

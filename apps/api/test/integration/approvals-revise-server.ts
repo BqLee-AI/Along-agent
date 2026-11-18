@@ -3,8 +3,8 @@
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { Pool } from 'pg';
-import { handleRequest } from '../../src/http/app.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
+import { handleRequest } from '../helpers/http-app.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const timeContext = loadTimeContext('fixture-v1');

@@ -1,6 +1,7 @@
 import { ApprovalDetailSchema } from '@along/contracts';
 import type { ApprovalDetail, RunView } from '@along/contracts';
 import { readEnvelope } from '@/shared/http/client';
+import { api } from '@/shared/http/eden';
 import { postReminderDecision, reminderActionBody } from '@/features/approvals/model/approval';
 
 export function inlineReminderWaiting(run: RunView | null, approvalId?: string): boolean {
@@ -16,10 +17,9 @@ export function inlineReminderWaiting(run: RunView | null, approvalId?: string):
 export async function readInlineReminder(initial: ApprovalDetail, signal: AbortSignal) {
   const next = ApprovalDetailSchema.parse(
     await readEnvelope(
-      await fetch(`/api/v1/approvals/${encodeURIComponent(initial.approval_id)}`, {
-        cache: 'no-store',
-        signal,
-      }),
+      await api.api.v1
+        .approvals({ id: encodeURIComponent(initial.approval_id) })
+        .get({ fetch: { signal } }),
     ),
   );
   if (

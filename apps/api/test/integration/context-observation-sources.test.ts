@@ -6,25 +6,25 @@ import { join } from 'node:path';
 import {
   configureWorkspaceRegistry,
   getWorkspaceGrant,
-} from '../../src/modules/workspaces/service.js';
-import { invokeTool, reserveToolInvocation } from '../../src/modules/tools/gateway.js';
+} from '../../src/features/workspaces/public.js';
+import { invokeTool, reserveToolInvocation } from '../../src/agent/tools/gateway.js';
 import {
   executeNonTransactionalInvocation,
   executeReadOnlyInvocation,
   reserveInvocation,
   ToolExecutionError,
-} from '../../src/modules/tools/invocations.js';
+} from '../../src/agent/tools/invocations/invocations.js';
 import {
   readRunContextObservations,
   readRunContextSource,
-  readRunDocumentEvidence,
-} from '../../src/modules/tools/query.js';
+} from '../../src/agent/tools/invocations/context-query.js';
+import { readRunDocumentEvidence } from '../../src/agent/tools/query.js';
 import type {
   InvocationInput,
   ToolContext,
   ToolOutcome,
   ToolPayload,
-} from '../../src/modules/tools/contracts.js';
+} from '../../src/agent/tools/contracts.js';
 import { seedContext } from './tool-invocations-probe.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 

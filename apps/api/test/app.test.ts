@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { handleRequest } from '../src/http/app.js';
+import { Readable } from 'node:stream';
+import { handleRequest } from './helpers/http-app.js';
 import type { Pool } from 'pg';
-import { createTimeContext } from '../src/modules/time/context.js';
+import { createTimeContext } from '../src/features/time/context.js';
 
 interface FakeResponse extends ServerResponse {
   status: number;
@@ -11,7 +12,7 @@ interface FakeResponse extends ServerResponse {
 }
 
 function fakePair(method: string, url: string, headers: Record<string, string> = {}) {
-  const req = { method, url, headers } as unknown as IncomingMessage;
+  const req = Object.assign(Readable.from([]), { method, url, headers }) as IncomingMessage;
   const res = {
     status: 0,
     resHeaders: {} as Record<string, string>,
@@ -84,6 +85,41 @@ describe('app', () => {
     }
   });
 
+  it('preserves feature-specific authentication and errors on route misses', async () => {
+    const actor = {
+      ownerId: '22222222-2222-4222-8222-222222222222',
+      sessionId: null,
+      displayName: '',
+      timezoneId: null,
+    };
+    for (const [method, path, authenticated, status, message] of [
+      ['GET', '/api/v1/approvals/no/such/path', false, 401, null],
+      ['PUT', '/api/v1/approvals/no/such/path', false, 401, null],
+      ['PUT', '/api/v1/tasks/no/such/path', false, 404, 'not found'],
+      ['GET', '/api/v1/conversations/no/runs/no/actions/pause', false, 401, null],
+      ['GET', '/api/v1/conversations/no/runs/no/actions/pause', true, 404, 'Run not found'],
+      [
+        'GET',
+        '/api/v1/document-approvals/%61/actions/confirm',
+        true,
+        404,
+        'document approval not found',
+      ],
+      ['GET', '/api/v1/memories/no/actions/correct', true, 503, 'memory unavailable'],
+      ['PUT', '/api/v1/workspaces', true, 404, 'route not found'],
+      ['GET', '/api/v1/%6de', false, 404, 'not found'],
+    ] as const) {
+      const { req, res, body } = fakePair(method, path);
+      await handleRequest(req, res, {
+        pool: null,
+        resolveActor: async () => (authenticated ? actor : null),
+      });
+      expect(res.status).toBe(status);
+      expect(res.resHeaders['cache-control']).toBe('no-store');
+      if (message) expect(body().msg).toBe(message);
+    }
+  });
+
   it('resolver failures before business write guards are503 rather than uncaught or401', async () => {
     const { req, res, body } = fakePair('POST', '/api/v1/conversations/messages');
     await handleRequest(req, res, {
@@ -99,14 +135,14 @@ describe('app', () => {
 
   it('GET /healthz returns 200 without env/DB', async () => {
     const { req, res, body } = fakePair('GET', '/healthz');
-    await handleRequest(req, res, { tzdbVersion: undefined });
+    await handleRequest(req, res, { pool: null });
     expect(res.status).toBe(200);
     expect(body()).toEqual({ status: 'ok' });
   });
 
   it('GET /readyz without TZDB_VERSION returns typed 503', async () => {
     const { req, res, body } = fakePair('GET', '/readyz');
-    await handleRequest(req, res, { tzdbVersion: undefined });
+    await handleRequest(req, res, { pool: null });
     expect(res.status).toBe(503);
     expect(body()).toEqual({
       status: 'not_ready',
@@ -125,7 +161,7 @@ describe('app', () => {
 
   it('GET /readyz rejects an arbitrary nonempty version', async () => {
     const { req, res, body } = fakePair('GET', '/readyz');
-    await handleRequest(req, res, { tzdbVersion: '2024a' });
+    await handleRequest(req, res, { pool: null, tzdbVersion: '2024a' });
     expect(res.status).toBe(503);
     expect(body()).toEqual({ status: 'not_ready', reason: 'TZDB_UNAVAILABLE' });
   });
@@ -160,7 +196,7 @@ describe('app', () => {
   it('guarded routes return 401 UNAUTHENTICATED envelope', async () => {
     for (const path of ['/api/v1/me', '/api/v1/brief']) {
       const { req, res, body } = fakePair('GET', path);
-      await handleRequest(req, res, { tzdbVersion: '2024a' });
+      await handleRequest(req, res, { pool: null, tzdbVersion: '2024a' });
       expect(res.status).toBe(401);
       const payload = body();
       expect(payload.code).toBe(401);
@@ -170,13 +206,13 @@ describe('app', () => {
 
   it('unknown paths return 404', async () => {
     const { req, res } = fakePair('GET', '/nope');
-    await handleRequest(req, res, { tzdbVersion: '2024a' });
+    await handleRequest(req, res, { pool: null, tzdbVersion: '2024a' });
     expect(res.status).toBe(404);
   });
 
   it('propagates incoming request id', async () => {
     const { req, res, body } = fakePair('GET', '/healthz', { 'x-request-id': 'r-1' });
-    await handleRequest(req, res, { tzdbVersion: undefined });
+    await handleRequest(req, res, { pool: null });
     expect(res.resHeaders['x-request-id']).toBe('r-1');
     expect(body()).toEqual({ status: 'ok' });
   });
@@ -193,7 +229,7 @@ describe('app', () => {
   it('read routes without actor return 401', async () => {
     for (const path of ['/api/v1/approvals', '/api/v1/tasks']) {
       const { req, res, body } = fakePair('GET', path);
-      await handleRequest(req, res, { tzdbVersion: '2024a' });
+      await handleRequest(req, res, { pool: null, tzdbVersion: '2024a' });
       expect(res.status).toBe(401);
       expect(errorCode(body())).toBe('UNAUTHENTICATED');
     }
@@ -205,7 +241,7 @@ describe('app', () => {
     try {
       for (const path of ['/api/v1/approvals', '/api/v1/tasks']) {
         const { req, res, body } = fakePair('GET', path);
-        await handleRequest(req, res, { tzdbVersion: '2024a' });
+        await handleRequest(req, res, { pool: null, tzdbVersion: '2024a' });
         expect(res.status).toBe(503);
         expect(errorCode(body())).toBe('NOT_READY');
       }

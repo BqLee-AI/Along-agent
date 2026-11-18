@@ -1,3 +1,4 @@
+import { expectApplicationRejection } from '../helpers/application-error.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -9,37 +10,37 @@ import { withTransaction } from '../../src/db/transaction.js';
 import {
   confirmDocumentApproval,
   rejectDocumentApproval,
-} from '../../src/modules/approvals/document-actions.js';
+} from '../../src/agent/operations/document-decision.js';
 import {
   bindDocumentApprovalApply,
   createDocumentApproval,
   DocumentProposalOperationError,
   validateDocumentApprovalApply,
   validateDocumentApprovalsDone,
-} from '../../src/modules/approvals/document-service.js';
-import { hasRejectedDocumentApproval } from '../../src/modules/approvals/document-query.js';
+} from '../../src/features/approvals/document/document-service.js';
+import { hasRejectedDocumentApproval } from '../../src/features/approvals/document/document-query.js';
 import {
   readDocumentApprovalDecision,
   readDocumentApprovalReceipt,
-} from '../../src/modules/approvals/decision.js';
-import type { CreateDocumentApprovalInput } from '../../src/modules/approvals/document-evidence.js';
+} from '../../src/features/approvals/decision.js';
+import type { CreateDocumentApprovalInput } from '../../src/features/approvals/document/document-evidence.js';
 import {
   configureWorkspaceRegistry,
   getWorkspaceGrant,
-  readWorkspaceFile,
-} from '../../src/modules/workspaces/service.js';
+} from '../../src/features/workspaces/public.js';
+import { readWorkspaceFile } from '../../src/features/workspaces/read/files.js';
 import {
   executeLocalInvocation,
   executeNonTransactionalInvocation,
   executeReadOnlyInvocation,
   reserveInvocation,
-} from '../../src/modules/tools/invocations.js';
-import { readRunDocumentEvidence } from '../../src/modules/tools/query.js';
+} from '../../src/agent/tools/invocations/invocations.js';
+import { readRunDocumentEvidence } from '../../src/agent/tools/query.js';
 import { seedAdmittedSession as seedSession } from './setup.js';
-import { startConversationRun } from '../../src/modules/conversations/service.js';
-import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
+import { startConversationRun } from '../../src/agent/operations/start.js';
+import { createContextPolicy } from '../../src/features/conversations/public.js';
+import type { HarnessServices } from '../../src/agent/runtime/contracts.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 
@@ -215,17 +216,19 @@ maybe('document approval PostgreSQL authority and frozen content', () => {
         readDocumentApprovalReceipt(client, f.ctx.ownerId, receipt.approval_id),
       ),
     ).toEqual(receipt);
-    await expect(
+    await expectApplicationRejection(
       confirmDocumentApproval({ pool }, f.ctx.ownerId, receipt.approval_id, {
         ...body,
         seen_content: body.seen_content + ' ',
       }),
-    ).rejects.toMatchObject({ httpStatus: 409 });
-    await expect(
+      { status: 409 },
+    );
+    await expectApplicationRejection(
       rejectDocumentApproval({ pool }, f.ctx.ownerId, receipt.approval_id, {
         idempotency_key: randomUUID(),
       }),
-    ).rejects.toMatchObject({ httpStatus: 409 });
+      { status: 409 },
+    );
   });
   it('freezes and confirms a full-content proposal against the accepted read without changing the file', async () => {
     const f = await fresh('\uFEFFold\r\n内容\n');
@@ -411,9 +414,10 @@ maybe('document approval PostgreSQL authority and frozen content', () => {
       f.propose({ baseRead: { ...f.input.baseRead, run_id: randomUUID() } }),
     ).rejects.toThrow();
     const receipt = await f.propose();
-    await expect(
+    await expectApplicationRejection(
       confirmDocumentApproval({ pool }, randomUUID(), receipt.approval_id, confirmBody(receipt)),
-    ).rejects.toMatchObject({ httpStatus: 403 });
+      { status: 403 },
+    );
     await expect(
       confirmDocumentApproval({ pool }, f.ctx.ownerId, receipt.approval_id, {
         ...confirmBody(receipt),
@@ -601,15 +605,17 @@ maybe('document approval PostgreSQL authority and frozen content', () => {
       ),
     ).rejects.toThrow();
     await expect(f.propose({ baseRead, evidence })).rejects.toThrow();
-    await expect(
+    await expectApplicationRejection(
       withTransaction(pool, (client) => validateDocumentApprovalsDone(client, f.ctx, evidence)),
-    ).rejects.toMatchObject({ httpStatus: 409 });
+      { status: 409 },
+    );
     await rejectDocumentApproval({ pool }, f.ctx.ownerId, successor.approval_id, {
       idempotency_key: randomUUID(),
     });
-    await expect(
+    await expectApplicationRejection(
       withTransaction(pool, (client) => validateDocumentApprovalsDone(client, f.ctx, evidence)),
-    ).rejects.toMatchObject({ httpStatus: 409 });
+      { status: 409 },
+    );
     await expect(
       pool.query('UPDATE document_approvals SET replaces_approval_id=NULL WHERE id=$1', [
         successor.approval_id,
@@ -652,14 +658,15 @@ maybe('document approval PostgreSQL authority and frozen content', () => {
     const baseRead = evidence.reads.find((read) => read.invocation_id === reserved.invocationId);
     if (!baseRead) throw new Error('other target read missing');
     const second = await f.propose({ relativePath: 'other.txt', baseRead, evidence });
-    await expect(
+    await expectApplicationRejection(
       confirmDocumentApproval(
         { pool },
         f.ctx.ownerId,
         second.approval_id,
         confirmBody(second, key),
       ),
-    ).rejects.toMatchObject({ httpStatus: 409 });
+      { status: 409 },
+    );
     expect(
       (await pool.query('SELECT state FROM document_approvals WHERE id=$1', [second.approval_id]))
         .rows[0]?.state,
@@ -755,7 +762,7 @@ maybe('document approval PostgreSQL authority and frozen content', () => {
       await cancelling.query('ROLLBACK');
       cancelling.release();
     }
-    await expect(attempted).rejects.toMatchObject({ httpStatus: 409 });
+    await expectApplicationRejection(attempted, { status: 409 });
     expect(
       (await pool.query('SELECT state FROM document_approvals WHERE id=$1', [pending.approval_id]))
         .rows[0]?.state,

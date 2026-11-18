@@ -1,8 +1,8 @@
 const { readdirSync } = module.require('node:fs');
 const { resolve } = module.require('node:path');
 
-// Discover modules in the scanned tree, including new modules and isolated fixture trees.
-const modules = readdirSync('apps/api/src/modules', { withFileTypes: true })
+// Discover feature owners in both the application and isolated boundary fixtures.
+const modules = readdirSync('apps/api/src/features', { withFileTypes: true })
   .filter((entry) => entry.isDirectory())
   .map((entry) => entry.name)
   .sort();
@@ -30,18 +30,60 @@ module.exports = {
         name: `no-${module}-cross-module-storage`,
         comment: 'D1: storage implementations belong to their module; public calls remain allowed.',
         severity: 'error',
-        from: { path: `^apps/api/src/modules/${modulePath}/` },
+        from: { path: `^apps/api/src/features/${modulePath}/` },
         to: {
-          path: `^apps/api/src/modules/(?!${modulePath}/)[^/]+(?=/).*(?:/|-)(?:repository|schemas?)(?:\\.[^/]+|/|$)`,
+          path: `^apps/api/src/features/(?!${modulePath}/)[^/]+(?=/).*(?:/|-)(?:repository|schemas?)(?:\\.[^/]+|/|$)`,
         },
       };
     }),
     {
+      name: 'api-business-no-http-implementation',
+      comment: 'Business code must not depend on HTTP adapters, controllers or Elysia.',
+      severity: 'error',
+      from: {
+        path: '^apps/api/src/(features|agent|platform|worker)/',
+        pathNot: '/(controller|run-event-response)\\.[^/]+$',
+      },
+      to: {
+        path: '(^apps/api/src/http/|^apps/api/src/features/.+/(controller|routes|native-routes|document-routes)\\.|node_modules/(elysia|@elysia)/)',
+      },
+    },
+    {
       name: 'no-web-to-api',
-      comment: 'D1: Web accesses the API over HTTP, never through source imports.',
+      comment: 'Web must not load API runtime code; only the declared client type is supported.',
       severity: 'error',
       from: { path: '^apps/web/' },
-      to: { path: '^apps/api/' },
+      to: { path: '^apps/api/', dependencyTypesNot: ['type-only'] },
+    },
+    {
+      name: 'no-web-private-api-types',
+      severity: 'error',
+      from: { path: '^apps/web/' },
+      to: {
+        path: '^apps/api/',
+        pathNot: '^apps/api/dist/client-type\\.d\\.ts$',
+        dependencyTypes: ['type-only'],
+      },
+    },
+    {
+      name: 'feature-no-agent-implementation',
+      comment: 'Persistent facts and domain rules do not depend on process execution.',
+      severity: 'error',
+      from: {
+        path: '^apps/api/src/features/',
+        pathNot: '/(controller|run-event-response)\\.[^/]+$',
+      },
+      to: { path: '^apps/api/src/agent/' },
+    },
+    {
+      name: 'agent-no-private-feature-storage',
+      comment:
+        'Agent operations use domain entry points, never another owner’s SQL implementation.',
+      severity: 'error',
+      from: { path: '^apps/api/src/agent/' },
+      to: {
+        path: '^apps/api/src/features/[^/]+(?=/).*(?:/|-)(?:repository|schemas?)(?:\\.[^/]+|/|$)',
+      },
     },
     {
       name: 'web-feature-model-no-presentation',

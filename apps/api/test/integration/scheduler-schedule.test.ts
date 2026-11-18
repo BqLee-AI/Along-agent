@@ -7,15 +7,15 @@
 import { beforeAll, afterAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
-import { confirmApproval } from '../../src/modules/approvals/confirm.js';
-import { getApprovalDetail } from '../../src/modules/approvals/service.js';
-import { getTaskDetail } from '../../src/modules/tasks/service.js';
-import { runSchedulePhase } from '../../src/modules/tasks/scheduler/schedule.js';
-import { runSendPhase } from '../../src/modules/tasks/scheduler/send.js';
+import { confirmApproval } from '../../src/features/approvals/reminder/confirm.js';
+import { getApprovalDetail } from '../../src/features/approvals/reminder/service.js';
+import { getTaskDetail } from '../../src/features/tasks/service.js';
+import { runSchedulePhase } from '../../src/features/tasks/scheduler/schedule.js';
+import { runSendPhase } from '../../src/features/tasks/scheduler/send.js';
 import {
   createLocalInAppProvider,
   type InAppProvider,
-} from '../../src/modules/notifications/service.js';
+} from '../../src/features/notifications/service.js';
 import {
   createIntegrationDatabase,
   databaseUrl,

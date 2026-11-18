@@ -1,7 +1,8 @@
+import { httpStatusForError } from '@along/contracts';
 import { Pool } from 'pg';
-import { parseIdentityKeyring } from '../../src/modules/identity/email-security.js';
-import { consumeIdentityQuota } from '../../src/modules/identity/rate-limit.js';
-import { HttpError } from '../../src/http/errors.js';
+import { parseIdentityKeyring } from '../../src/features/identity/security/email-security.js';
+import { consumeIdentityQuota } from '../../src/features/identity/security/rate-limit.js';
+import { ApplicationError } from '../../src/platform/errors.js';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 2 });
 try {
@@ -15,7 +16,7 @@ try {
         });
         return 200;
       } catch (error) {
-        return error instanceof HttpError ? error.httpStatus : 500;
+        return error instanceof ApplicationError ? httpStatusForError(error.code) : 500;
       }
     }),
   );

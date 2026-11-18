@@ -4,10 +4,9 @@ import {
   createProvider,
   setDefault,
   updateProvider,
-} from '../../src/modules/model-providers/service.js';
-import type { ConversationDeps } from '../../src/modules/conversations/contracts.js';
-import { measureHarnessContext } from '../../src/modules/conversations/harness-context.js';
-import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
+} from '../../src/features/model-providers/public.js';
+import type { ConversationDeps, HarnessServices } from '../../src/agent/runtime/contracts.js';
+import { measureSdkContext } from '../../src/features/model-providers/public.js';
 
 /** Controlled legacy transport seam; not SDK, outbound-policy or provider acceptance coverage. */
 export function controlledModelDeps<T extends ConversationDeps>(deps: T): T {
@@ -15,7 +14,7 @@ export function controlledModelDeps<T extends ConversationDeps>(deps: T): T {
     const harness = deps.harness as HarnessServices;
     return {
       model: harness.model,
-      measure: harness.measure ?? measureHarnessContext,
+      measure: harness.measure ?? measureSdkContext,
     };
   };
   return deps;

@@ -1,3 +1,4 @@
+import { expectApplicationRejection } from '../helpers/application-error.js';
 import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
@@ -21,28 +22,23 @@ import {
   THREAD_PROTOCOL_VERSION,
   type ThreadEvent,
 } from '@along/stream-protocol';
-import { handleRequest } from '../../src/http/app.js';
-import {
-  cancelConversationRun,
-  executeRun,
-  getConversationDetail,
-  getRunView,
-  startConversationRun,
-} from '../../src/modules/conversations/service.js';
-import type { ConversationDeps, RunContext } from '../../src/modules/conversations/contracts.js';
-import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import { createHarnessModelTransport } from '../../src/modules/model-providers/harness-model.js';
-import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
+import { handleRequest } from '../helpers/http-app.js';
+import { executeRun } from '../../src/agent/operations/execute.js';
+import { getConversationDetail } from '../../src/features/conversations/lifecycle/service.js';
+import { cancelConversationRun, getRunView } from '../../src/agent/operations/run.js';
+import { startConversationRun } from '../../src/agent/operations/start.js';
+import type { ConversationDeps, RunContext } from '../../src/agent/runtime/contracts.js';
+import { createContextPolicy } from '../../src/features/conversations/public.js';
+import { createLocalFixtureModelTransport } from '../helpers/local-fixture-model.js';
+import type { HarnessServices } from '../../src/agent/runtime/contracts.js';
 import { seedAdmittedSession as seedSession } from '../integration/setup.js';
-import type { SeededSession } from '../../src/modules/identity/seed.js';
-import { interruptedGoalResult } from '../../src/modules/conversations/goal-result.js';
-import type { ToolContext } from '../../src/modules/tools/contracts.js';
-import {
-  readInvocationSnapshots,
-  readRunInvocationStates,
-} from '../../src/modules/tools/invocations.js';
-import { readRunTimezoneSettings } from '../../src/modules/tools/query.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
+import type { SeededSession } from '../../src/features/identity/session/seed.js';
+import { interruptedGoalResult } from '../../src/agent/operations/goal-result.js';
+import type { ToolContext } from '../../src/agent/tools/contracts.js';
+import { readInvocationSnapshots } from '../../src/agent/tools/invocations/invocations.js';
+import { readRunInvocationStates } from '../../src/agent/tools/invocations/run-state.js';
+import { readRunTimezoneSettings } from '../../src/agent/tools/query.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
 import { createIntegrationDatabase, type IntegrationDatabase } from '../integration/setup.js';
 import {
   findModelObservation,
@@ -349,7 +345,7 @@ beforeAll(async () => {
       completionCap: 1024,
       model: 'timezone-controlled-provider',
     }),
-    model: createHarnessModelTransport({
+    model: createLocalFixtureModelTransport({
       baseUrl: `${modelBase}/v1`,
       model: 'timezone-controlled-provider',
     }),
@@ -984,30 +980,32 @@ for (const mode of ['local', 'http'] as const) {
           { ...context, conversationId: randomUUID() },
           { ...context, runId: randomUUID() },
         ]) {
-          await expect(readRunTimezoneSettings(client, binding)).rejects.toMatchObject({
-            httpStatus: 403,
+          await expectApplicationRejection(readRunTimezoneSettings(client, binding), {
+            status: 403,
           });
-          await expect(readRunInvocationStates(client, binding)).rejects.toMatchObject({
-            httpStatus: 403,
+          await expectApplicationRejection(readRunInvocationStates(client, binding), {
+            status: 403,
           });
-          await expect(
+          await expectApplicationRejection(
             readInvocationSnapshots(client, binding, [receipts[0]!.invocation_id]),
-          ).rejects.toMatchObject({ httpStatus: 403 });
+            { status: 403 },
+          );
         }
         for (const binding of [
           { ...context, ownerId: other.session.userId },
           { ...context, conversationId: randomUUID() },
           { ...context, runId: randomUUID() },
         ])
-          await expect(interruptedGoalResult(client, binding, 'failed')).rejects.toMatchObject({
-            httpStatus: 403,
+          await expectApplicationRejection(interruptedGoalResult(client, binding, 'failed'), {
+            status: 403,
           });
       } finally {
         client.release();
       }
-      await expect(
+      await expectApplicationRejection(
         getRunView(deps, who.session.userId, run.conversation_id, run.id),
-      ).rejects.toMatchObject({ httpStatus: 403 });
+        { status: 403 },
+      );
       for (const path of [
         `/api/v1/conversations/${run.conversation_id}/runs/${run.id}`,
         `/api/v1/conversations/${run.conversation_id}`,

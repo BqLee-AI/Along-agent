@@ -3,7 +3,7 @@ import {
   cancellationScopeIncludes,
   readShownCancellationCandidates,
   renderCancellationClarification,
-} from '../src/modules/tools/reminder-cancel-scope.js';
+} from '../src/agent/tools/reminders/reminder-cancel-scope.js';
 
 const candidates = [
   { id: 'first', wall_time: '2027-11-04 09:20', timezone_id: 'Asia/Shanghai' },

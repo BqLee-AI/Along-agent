@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { createServer, request, type Server } from 'node:http';
+import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http';
+import { createServer as createTlsServer, request as tlsRequest } from 'node:https';
+import { spawnSync } from 'node:child_process';
 import type { AddressInfo } from 'node:net';
 import { once } from 'node:events';
-import { handleRequest } from '../src/http/app.js';
-import type { Actor } from '../src/http/auth.js';
+import { handleRequest } from './helpers/http-app.js';
+import type { Actor } from '../src/features/identity/session/actor.js';
 
 const LIMIT = 131072;
 const approval = '/api/v1/approvals/00000000-0000-4000-8000-000000000001/actions/reject';
@@ -114,6 +117,21 @@ function padded(bytes: number, unicode = false): Buffer {
 }
 
 describe('HTTP request body boundary', () => {
+  it('preserves exact methods, raw path IDs and duplicate query rejection', async () => {
+    const base = await api();
+    expect((await fetch(`${base}/healthz`, { method: 'HEAD' })).status).toBe(404);
+    const encoded = await fetch(
+      `${base}/api/v1/conversations/%300000000-0000-4000-8000-000000000001`,
+    );
+    expect(encoded.status).toBe(404);
+    const id = '00000000-0000-4000-8000-000000000001';
+    const duplicate = await fetch(
+      `${base}/api/v1/conversations/${id}/runs/${id}/events?after_seq=1&after_seq=2`,
+    );
+    expect(duplicate.status).toBe(400);
+    expect(await duplicate.json()).toMatchObject({ error: { code: 'VALIDATION_ERROR' } });
+  });
+
   it('rejects unauthenticated uploads without waiting for end across protected routes', async () => {
     const base = await api(null);
     for (const path of paths) {
@@ -194,7 +212,7 @@ describe('HTTP request body boundary', () => {
       envelope(await upload(base, approval, [text]), 400, 'VALIDATION_ERROR');
   });
 
-  it('answers unknown routes without draining an unfinished upload', async () => {
+  it('answers unknown routes promptly and closes an unfinished upload', async () => {
     const reply = await upload(await api(), '/missing', ['{'], false);
     envelope(reply, 404, 'NOT_FOUND');
     await closes(reply);
@@ -220,4 +238,208 @@ describe('HTTP request body boundary', () => {
     expect(health.status).toBe(200);
     expect(await health.json()).toEqual({ status: 'ok' });
   });
+});
+
+// Exercise the production handler over actual sockets, not a synthetic response.
+// The certificate and its disposable key exist only in memory for this test process.
+describe('unfinished uploads over HTTP and TLS', () => {
+  const cases = [
+    {
+      name: 'unauthenticated',
+      identity: null,
+      path: approval,
+      status: 401,
+      code: 'UNAUTHENTICATED',
+    },
+    {
+      name: 'CSRF',
+      identity: { ...actor, sessionId: 'session' },
+      path: approval,
+      status: 403,
+      code: 'FORBIDDEN',
+    },
+    { name: 'unknown path', identity: actor, path: '/missing', status: 404, code: 'NOT_FOUND' },
+    {
+      name: 'declared oversized',
+      identity: actor,
+      path: approval,
+      status: 413,
+      code: 'PAYLOAD_TOO_LARGE',
+      declared: true,
+    },
+    {
+      name: 'chunked oversized',
+      identity: actor,
+      path: approval,
+      status: 413,
+      code: 'PAYLOAD_TOO_LARGE',
+    },
+  ];
+  let tlsMaterial: { key: string; cert: string } | undefined;
+
+  function certificate() {
+    if (tlsMaterial) return tlsMaterial;
+    const result = spawnSync(
+      'openssl',
+      [
+        'req',
+        '-x509',
+        '-newkey',
+        'rsa:2048',
+        '-nodes',
+        '-keyout',
+        '-',
+        '-out',
+        '-',
+        '-days',
+        '1',
+        '-subj',
+        '/CN=localhost',
+      ],
+      { encoding: 'utf8', windowsHide: true },
+    );
+    if (result.error || result.status !== 0) throw result.error ?? new Error(result.stderr);
+    const key = result.stdout.match(
+      /-----BEGIN PRIVATE KEY-----[\s\S]*?-----END PRIVATE KEY-----/,
+    )?.[0];
+    const cert = result.stdout.match(
+      /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/,
+    )?.[0];
+    if (!key || !cert) throw new Error('openssl did not generate test TLS material');
+    return (tlsMaterial = { key, cert });
+  }
+
+  for (const tls of [false, true]) {
+    for (const mode of ['slow', 'continuous'] as const) {
+      for (const scenario of cases) {
+        it(`${tls ? 'TLS' : 'HTTP'} ${mode} ${scenario.name} returns a complete error and closes`, async () => {
+          const observation = Promise.withResolvers<number>();
+          const onRequest = (req: IncomingMessage, res: ServerResponse) => {
+            let maxBuffered = req.readableLength;
+            // Real-time sampling does not consume or resume the request stream.
+            const sample = setInterval(() => {
+              maxBuffered = Math.max(maxBuffered, req.readableLength);
+            }, 1);
+            req.socket.once('close', () => {
+              clearInterval(sample);
+              observation.resolve(Math.max(maxBuffered, req.readableLength));
+            });
+            void handleRequest(req, res, {
+              pool: null,
+              resolveActor: async () => scenario.identity,
+            }).catch(() => res.destroy());
+          };
+          const server = tls ? createTlsServer(certificate(), onRequest) : createServer(onRequest);
+          servers.push(server);
+          const listening = once(server, 'listening');
+          server.listen(0, '127.0.0.1');
+          await listening;
+          const port = (server.address() as AddressInfo).port;
+          const started = performance.now();
+          const response = Promise.withResolvers<Reply>();
+          const closed = Promise.withResolvers<void>();
+          const req = (tls ? tlsRequest : request)({
+            hostname: '127.0.0.1',
+            port,
+            path: scenario.path,
+            method: 'POST',
+            ...(tls ? { rejectUnauthorized: false } : {}),
+            headers: {
+              'content-type': 'application/json',
+              'x-request-id': 'socket-upload-test',
+              ...(scenario.declared ? { 'content-length': String(8 * 1024 * 1024) } : {}),
+            },
+          });
+          let sent = 0;
+          let receivedStatus: number | undefined;
+          let receivedHeaders: IncomingHttpHeaders | undefined;
+          let receivedBody = '';
+          let responseEnded = false;
+          const failed = (error: Error) => {
+            if (!responseEnded) {
+              console.info(
+                `[upload incomplete] ${tls ? 'TLS' : 'HTTP'} ${mode} ${scenario.name}: status=${receivedStatus ?? 'none'} headers=${JSON.stringify(receivedHeaders ?? null)} body=${JSON.stringify(receivedBody)} sent=${sent} elapsed=${Math.round(performance.now() - started)}ms error=${error.message}`,
+              );
+              response.reject(error);
+            }
+          };
+          const chunk = Buffer.alloc(8192, 120);
+          // Real sockets and a live producer need wall-clock pacing and a real deadline.
+          const deadline = setTimeout(
+            () => req.destroy(new Error('upload rejection exceeded 2 seconds')),
+            2000,
+          );
+          const timer = setInterval(
+            () => {
+              if (sent >= 4 * 1024 * 1024) {
+                req.destroy(new Error('upload exceeded 4 MiB before connection closed'));
+                return;
+              }
+              if (!req.destroyed) {
+                req.write(chunk);
+                sent += chunk.length;
+              }
+            },
+            mode === 'slow' ? 10 : 1,
+          );
+          req.once('close', () => {
+            clearInterval(timer);
+            closed.resolve();
+          });
+          req.once('error', failed);
+          req.once('response', (res) => {
+            if (mode === 'continuous') {
+              // Real socket buffering and close timing cannot be driven by fake time.
+              res.pause();
+              setTimeout(() => res.resume(), 100);
+            }
+            receivedStatus = res.statusCode;
+            receivedHeaders = res.headers;
+            res.setEncoding('utf8');
+            res.on('data', (part: string) => {
+              receivedBody += part;
+              if (receivedBody.length > 65536)
+                req.destroy(new Error('error response exceeded 64 KiB'));
+            });
+            res.once('error', failed);
+            res.once('end', () => {
+              responseEnded = true;
+              try {
+                response.resolve({
+                  status: res.statusCode!,
+                  headers: res.headers,
+                  body: JSON.parse(receivedBody),
+                  closed: closed.promise,
+                });
+              } catch (error) {
+                response.reject(error);
+              }
+            });
+          });
+          try {
+            req.flushHeaders();
+            req.write(chunk);
+            sent += chunk.length;
+            const reply = await response.promise;
+            envelope(reply, scenario.status, scenario.code, 'socket-upload-test');
+            if (scenario.name === 'CSRF')
+              expect(reply.body.error.details).toEqual({ reason: 'CSRF_MISMATCH' });
+            await closes(reply);
+            const maxBuffered = await observation.promise;
+            expect(performance.now() - started).toBeLessThan(2000);
+            expect(maxBuffered).toBeLessThan(2 * 1024 * 1024);
+            // The peer cannot receive more payload than the producer offered.
+            expect(sent).toBeLessThan(4 * 1024 * 1024);
+            console.info(
+              `[upload socket] ${tls ? 'TLS' : 'HTTP'} ${mode} ${scenario.name}: sent=${sent} max-sampled-buffer=${maxBuffered} elapsed=${Math.round(performance.now() - started)}ms`,
+            );
+          } finally {
+            clearTimeout(deadline);
+            clearInterval(timer);
+            req.destroy();
+          }
+        }, 10000);
+      }
+    }
+  }
 });

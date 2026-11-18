@@ -1,13 +1,14 @@
+import { expectApplicationRejection } from '../helpers/application-error.js';
 // Issue #10: GET /brief deterministic projection.
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Pool } from 'pg';
-import { handleRequest } from '../../src/http/app.js';
-import { getBrief } from '../../src/modules/brief/service.js';
-import { readToolBriefCards } from '../../src/modules/brief/tool-query.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
-import { BriefResponseSchema } from '../../src/modules/brief/schemas.js';
+import { handleRequest } from '../helpers/http-app.js';
+import { getBrief } from '../../src/features/brief/service.js';
+import { readToolBriefCards } from '../../src/features/brief/tool-query.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
+import { BriefResponseSchema } from '../../src/features/brief/schemas.js';
 import {
   createIntegrationDatabase,
   databaseUrl,
@@ -207,18 +208,22 @@ maybe('brief', () => {
 
   it('rejects invalid dates, invalid timezone, and non-ready DB', async () => {
     const deps = { pool, tzdbVersion: 'fixture-v1', timeContext, now: () => NOW };
-    await expect(
+    await expectApplicationRejection(
       getBrief(deps, randomUUID(), 'Asia/Shanghai', { date: '2026-02-30' }, 'req'),
-    ).rejects.toMatchObject({ httpStatus: 400 });
-    await expect(
+      { status: 400 },
+    );
+    await expectApplicationRejection(
       getBrief(deps, randomUUID(), 'Not/AZone', { date: '2026-10-19' }, 'req'),
-    ).rejects.toMatchObject({ httpStatus: 400 });
-    await expect(
+      { status: 400 },
+    );
+    await expectApplicationRejection(
       getBrief({ pool: null, tzdbVersion: 'fixture-v1' }, randomUUID(), 'Asia/Shanghai', {}, 'req'),
-    ).rejects.toMatchObject({ httpStatus: 503 });
-    await expect(
+      { status: 503 },
+    );
+    await expectApplicationRejection(
       getBrief({ pool, tzdbVersion: undefined }, randomUUID(), 'Asia/Shanghai', {}, 'req'),
-    ).rejects.toMatchObject({ httpStatus: 503 });
+      { status: 503 },
+    );
   });
 
   it('uses UTC without a preference and includes cross-zone tasks at the half-open boundaries', async () => {

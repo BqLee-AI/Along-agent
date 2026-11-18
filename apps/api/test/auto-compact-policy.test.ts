@@ -4,7 +4,7 @@ import {
   AutoCompactPolicySchema,
   shouldAutoCompact,
   createAutoCompactPolicy,
-} from '../src/modules/conversations/auto-compact-policy.js';
+} from '../src/features/conversations/compact/auto-compact-policy.js';
 
 const policy = {
   evidenceId: 'experiment-123',

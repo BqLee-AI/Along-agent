@@ -202,6 +202,28 @@ describe('strict local configuration', () => {
     );
   });
 
+  it('accepts credential-free execution limits in a new or adopted installation', () => {
+    const harnessLimits = {
+      maxIterations: 12,
+      maxTokens: 16000,
+      modelWindowTokens: 32768,
+      reserveTokens: 256,
+    };
+    const fresh = createConfig({ mode: 'new', tzdbVersion: '2025b', harnessLimits });
+    for (const config of [fresh, createConfig({ ...fresh, mode: 'adopt' })]) {
+      expect(config.model).toBeNull();
+      expect(installationEnvironment(config)).toMatchObject({
+        HARNESS_MAX_ITERATIONS: '12',
+        HARNESS_MAX_TOKENS: '16000',
+        HARNESS_MODEL_WINDOW_TOKENS: '32768',
+        HARNESS_CONTEXT_RESERVE_TOKENS: '256',
+      });
+    }
+    expect(() =>
+      validateConfig({ ...fresh, harnessLimits: { ...harnessLimits, maxTokens: 0 } }),
+    ).toThrow('CONFIG_INVALID');
+  });
+
   it('new installations fix independent identities and credentials once, then round-trip unchanged', async () => {
     const { directory, file } = await location();
     const config = fixture();

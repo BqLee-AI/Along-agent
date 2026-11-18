@@ -1,15 +1,15 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
-import { HttpError } from '../../src/http/errors.js';
-import { measureHarnessContext } from '../../src/modules/conversations/harness-context.js';
-import { cancelConversationRun } from '../../src/modules/conversations/harness-authority.js';
-import { executeCompact } from '../../src/modules/conversations/compact-runtime.js';
-import type { CompactModelTransport } from '../../src/modules/conversations/compact-model.js';
-import type { CompactBinding } from '../../src/modules/conversations/compact-store.js';
-import { conversationMemorySources } from '../../src/modules/conversations/memory-sources.js';
-import { freezeR3Context } from '../../src/modules/conversations/r3-context.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
+import { ApplicationError } from '../../src/platform/errors.js';
+import { measureSdkContext } from '../../src/features/model-providers/public.js';
+import { cancelConversationRun } from '../../src/agent/operations/run.js';
+import { executeCompact } from '../../src/agent/operations/compact-execution.js';
+import type { CompactModelTransport } from '../../src/agent/operations/compact-model.js';
+import type { CompactBinding } from '../../src/features/conversations/compact/compact-eligibility.js';
+import { conversationMemorySources } from '../../src/features/conversations/history/memory-sources.js';
+import { freezeR3Context } from '../../src/features/conversations/compact/r3-context.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
 import {
   admitTestUser,
   createIntegrationDatabase,
@@ -157,7 +157,7 @@ interface Fixture {
   ) {
     let calls = 0;
     const transport: CompactModelTransport = {
-      measure: measureHarnessContext,
+      measure: measureSdkContext,
       async *model() {
         calls++;
         await beforeReply?.();
@@ -289,7 +289,7 @@ interface Fixture {
           usage_recorded: true,
           usage_tokens: usage === null ? null : String(usage),
         });
-        throw new HttpError(409, 409, code, 'continuation rejected by controlled validator');
+        throw new ApplicationError(409, code, 'continuation rejected by controlled validator');
       };
       expect(await executeCompact(input)).toEqual({ status: 'failed', code });
       expect(

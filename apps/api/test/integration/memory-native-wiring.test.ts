@@ -4,10 +4,10 @@ import { once } from 'node:events';
 import { createServer, type Server } from 'node:http';
 import { z } from 'zod';
 import type { HarnessRequest } from '@along/contracts';
-import { handleRequest } from '../../src/http/app.js';
-import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import { measureHarnessContext } from '../../src/modules/conversations/harness-context.js';
-import { createHarnessModelTransport } from '../../src/modules/model-providers/harness-model.js';
+import { handleRequest } from '../helpers/http-app.js';
+import { createContextPolicy } from '../../src/features/conversations/public.js';
+import { measureSdkContext } from '../../src/features/model-providers/public.js';
+import { createLocalFixtureModelTransport } from '../helpers/local-fixture-model.js';
 import { configureTestModel } from '../helpers/model-selection.js';
 import {
   findModelObservation,
@@ -83,7 +83,7 @@ maybe('cross-session memory through native harness', () => {
       });
     });
     const modelBase = await listen(provider);
-    const model = createHarnessModelTransport({
+    const model = createLocalFixtureModelTransport({
       baseUrl: `${modelBase}/v1`,
       model: 'fixture-transport-only',
     });
@@ -101,7 +101,7 @@ maybe('cross-session memory through native harness', () => {
             model: 'fixture-transport-only',
           }),
         },
-        modelTransport: async () => ({ model, measure: measureHarnessContext }),
+        modelTransport: async () => ({ model, measure: measureSdkContext }),
       });
     });
     base = await listen(api);

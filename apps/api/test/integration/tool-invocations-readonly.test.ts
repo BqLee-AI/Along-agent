@@ -3,8 +3,8 @@ import { randomUUID } from 'node:crypto';
 import {
   executeReadOnlyInvocation,
   reserveInvocation,
-} from '../../src/modules/tools/invocations.js';
-import type { ToolContext, ToolResult } from '../../src/modules/tools/contracts.js';
+} from '../../src/agent/tools/invocations/invocations.js';
+import type { ToolContext, ToolResult } from '../../src/agent/tools/contracts.js';
 import { seedContext } from './tool-invocations-probe.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 

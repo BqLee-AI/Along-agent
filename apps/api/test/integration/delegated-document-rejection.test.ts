@@ -1,3 +1,4 @@
+import { expectApplicationRejection } from '../helpers/application-error.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -5,20 +6,18 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { HARNESS_R3_PROTOCOL_VERSION, DocumentApprovalReceiptSchema } from '@along/contracts';
-import { rejectDocumentApproval } from '../../src/modules/approvals/document-actions.js';
-import {
-  createHarnessSession,
-  resumeConversationRun,
-} from '../../src/modules/conversations/harness-authority.js';
-import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import { startConversationRun } from '../../src/modules/conversations/service.js';
-import { executeReadOnlyInvocation } from '../../src/modules/tools/invocations.js';
+import { rejectDocumentApproval } from '../../src/agent/operations/document-decision.js';
+import { resumeConversationRun } from '../../src/agent/operations/run.js';
+import { createHarnessSession } from '../../src/agent/runtime/attempt-session.js';
+import { createContextPolicy } from '../../src/features/conversations/public.js';
+import { startConversationRun } from '../../src/agent/operations/start.js';
+import { executeReadOnlyInvocation } from '../../src/agent/tools/invocations/invocations.js';
 import {
   configureWorkspaceRegistry,
   getWorkspaceGrant,
-  readWorkspaceFile,
-} from '../../src/modules/workspaces/service.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
+} from '../../src/features/workspaces/public.js';
+import { readWorkspaceFile } from '../../src/features/workspaces/read/files.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
 import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import {
   createIntegrationDatabase,
@@ -216,7 +215,7 @@ maybe('delegated document rejection', () => {
       ).rows[0].n,
     ).toBe(1);
     expect(await readFile(join(f.root, 'brief.txt'), 'utf8')).toBe('Original brief.\n');
-    await expect(
+    await expectApplicationRejection(
       resumeConversationRun(
         f.deps,
         f.actor.userId,
@@ -225,7 +224,8 @@ maybe('delegated document rejection', () => {
         randomUUID(),
         { checkpoint_id: f.checkpoint.checkpoint_ref, idempotency_key: randomUUID() },
       ),
-    ).rejects.toMatchObject({ httpStatus: 409 });
+      { status: 409 },
+    );
     await f.session.close();
   });
 

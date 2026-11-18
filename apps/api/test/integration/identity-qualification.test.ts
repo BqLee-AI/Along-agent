@@ -1,3 +1,4 @@
+import { expectApplicationRejection } from '../helpers/application-error.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
@@ -5,22 +6,25 @@ import { channel } from 'node:diagnostics_channel';
 import type { Pool, PoolClient } from 'pg';
 import { sendKeyFor } from '@along/scheduler-core';
 import { createActorResolver } from '../../src/http/auth.js';
-import { hashSessionToken, signSessionCookieValue } from '../../src/modules/identity/crypto.js';
-import { isActiveOwner } from '../../src/modules/identity/preferences.js';
-import { getConversationList } from '../../src/modules/conversations/history-service.js';
-import { startConversationRun } from '../../src/modules/conversations/service.js';
-import type { ConversationDeps } from '../../src/modules/conversations/contracts.js';
-import { getApprovalDetail } from '../../src/modules/approvals/service.js';
-import { confirmApproval } from '../../src/modules/approvals/confirm.js';
-import { runSchedulePhase } from '../../src/modules/tasks/scheduler/schedule.js';
-import { runClaimPhase } from '../../src/modules/tasks/scheduler/claim.js';
-import { runSendPhase } from '../../src/modules/tasks/scheduler/send.js';
-import { runAckPhase } from '../../src/modules/tasks/scheduler/ack.js';
+import {
+  hashSessionToken,
+  signSessionCookieValue,
+} from '../../src/features/identity/session/crypto.js';
+import { isActiveOwner } from '../../src/features/identity/profile/preferences.js';
+import { getConversationList } from '../../src/features/conversations/history/history-service.js';
+import { startConversationRun } from '../../src/agent/operations/public.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
+import { getApprovalDetail } from '../../src/features/approvals/reminder/service.js';
+import { confirmApproval } from '../../src/features/approvals/reminder/confirm.js';
+import { runSchedulePhase } from '../../src/features/tasks/scheduler/schedule.js';
+import { runClaimPhase } from '../../src/features/tasks/scheduler/claim.js';
+import { runSendPhase } from '../../src/features/tasks/scheduler/send.js';
+import { runAckPhase } from '../../src/features/tasks/scheduler/ack.js';
 import {
   createLocalInAppProvider,
   type InAppNotice,
   type InAppProvider,
-} from '../../src/modules/notifications/service.js';
+} from '../../src/features/notifications/service.js';
 import {
   createIntegrationDatabase,
   databaseUrl,
@@ -154,16 +158,17 @@ suite('invited account qualification and independent delivery locking', () => {
     await disable(id);
     expect(await resolver(request('/api/v1/me'))).toBeNull();
     expect(await resolver(request('/api/v1/auth/claim'), { allowLegacyClaim: true })).toBeNull();
-    await expect(getConversationList({ pool }, id, {})).rejects.toMatchObject({ httpStatus: 403 });
-    await expect(
+    await expectApplicationRejection(getConversationList({ pool }, id, {}), { status: 403 });
+    await expectApplicationRejection(
       startConversationRun(
-        { pool } as ConversationDeps,
+        { pool, timeContext: loadTimeContext('fixture-v1') },
         id,
         randomUUID(),
         { raw_text: 'hello' },
         null,
       ),
-    ).rejects.toMatchObject({ httpStatus: 403 });
+      { status: 403 },
+    );
   });
 
   it('independent new intake rejects an earlier disable without a notification', async () => {

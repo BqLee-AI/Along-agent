@@ -1,23 +1,24 @@
+import { expectApplicationRejection } from '../helpers/application-error.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { Pool, type PoolClient } from 'pg';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { sendKeyFor } from '@along/scheduler-core';
-import { handleRequest } from '../../src/http/app.js';
+import { handleRequest } from '../helpers/http-app.js';
 import type { ActorResolver } from '../../src/http/auth.js';
-import { TaskDetailSchema } from '../../src/modules/tasks/schemas.js';
+import { TaskDetailSchema } from '../../src/features/tasks/schemas.js';
 import {
   createLocalInAppProvider,
   deliverInApp,
   getTaskNotifications,
   type InAppProvider,
-} from '../../src/modules/notifications/service.js';
+} from '../../src/features/notifications/service.js';
 import {
   getTaskDetail,
   getTaskEvents,
   listTasksForOwner,
-} from '../../src/modules/tasks/service.js';
+} from '../../src/features/tasks/service.js';
 import {
   admitTestUser,
   createIntegrationDatabase,
@@ -108,11 +109,11 @@ maybe('tasks read routes', () => {
   it('cross-owner reads are forbidden, missing rows are 404', async () => {
     const owner = randomUUID();
     const taskId = await seedTask(pool, owner);
-    await expect(getTaskDetail({ pool }, randomUUID(), taskId)).rejects.toMatchObject({
-      httpStatus: 403,
+    await expectApplicationRejection(getTaskDetail({ pool }, randomUUID(), taskId), {
+      status: 403,
     });
-    await expect(getTaskDetail({ pool }, owner, randomUUID())).rejects.toMatchObject({
-      httpStatus: 404,
+    await expectApplicationRejection(getTaskDetail({ pool }, owner, randomUUID()), {
+      status: 404,
     });
   });
 
@@ -142,8 +143,8 @@ maybe('tasks read routes', () => {
       'notification read unavailable',
     );
     // The notification dependency is not consulted before task authorization.
-    await expect(getTaskDetail({ pool: faultPool }, randomUUID(), taskId)).rejects.toMatchObject({
-      httpStatus: 403,
+    await expectApplicationRejection(getTaskDetail({ pool: faultPool }, randomUUID(), taskId), {
+      status: 403,
     });
     let status = 0;
     let payload = '';

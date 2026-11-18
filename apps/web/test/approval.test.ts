@@ -3,10 +3,10 @@ import { ApprovalDetailSchema } from '@along/contracts';
 import {
   ApprovalPageSchema,
   approvalFilter,
-  approvalListPath,
   reminderActionBody,
 } from '../src/features/approvals/model/approval';
 import { historyPageReducer, initialHistoryPage } from '../src/shared/http/page';
+import { createBrowserApi } from '../src/shared/http/eden';
 
 const id = '11111111-1111-4111-8111-111111111111';
 const key = '22222222-2222-4222-8222-222222222222';
@@ -59,7 +59,7 @@ describe('reminder approval request and pagination behavior', () => {
     });
   });
 
-  it('uses the server status scope and preserves opaque cursors verbatim', () => {
+  it('uses the server status scope and preserves opaque cursors verbatim', async () => {
     for (const status of [
       'pending',
       'consumed',
@@ -68,13 +68,23 @@ describe('reminder approval request and pagination behavior', () => {
       'superseded',
       'all',
     ] as const) {
-      const url = new URL(
-        approvalListPath(status, 'tail+/=opaque&status=other'),
-        'http://approval.test',
-      );
-      expect(url.searchParams.get('status')).toBe(status);
-      expect(url.searchParams.get('cursor')).toBe('tail+/=opaque&status=other');
-      expect(url.searchParams.get('limit')).toBe('50');
+      let url: URL | undefined;
+      const api = createBrowserApi(async (input) => {
+        url = new URL(String(input), 'http://approval.test');
+        return Response.json({
+          code: 0,
+          data: { items: [], next_cursor: null },
+          msg: 'ok',
+          error: null,
+          request_id: 'approval-query',
+        });
+      });
+      await api.api.v1.approvals.get({
+        query: { status, limit: '50', cursor: 'tail+/=opaque&status=other' },
+      });
+      expect(url!.searchParams.get('status')).toBe(status);
+      expect(url!.searchParams.get('cursor')).toBe('tail+/=opaque&status=other');
+      expect(url!.searchParams.get('limit')).toBe('50');
     }
     expect(approvalFilter('unknown')).toBe('pending');
     expect(approvalFilter(['all'])).toBe('pending');

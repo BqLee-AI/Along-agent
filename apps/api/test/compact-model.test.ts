@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { measureHarnessContext } from '../src/modules/conversations/harness-context.js';
-import { createUserConfiguredHarnessModelTransport } from '../src/modules/model-providers/harness-model.js';
+import { measureSdkContext } from '../src/features/model-providers/public.js';
+import { createConfiguredSdkStep } from '../src/features/model-providers/public.js';
 import {
   requestCompactModel as requestWithReservation,
   type CompactModelInput,
   type CompactModelTransport,
-} from '../src/modules/conversations/compact-model.js';
+} from '../src/agent/operations/compact-model.js';
 
 const input: CompactModelInput = {
   messages: [
@@ -48,7 +48,7 @@ function transport(
   options: { usage?: number | null; tools?: boolean } = {},
 ): CompactModelTransport {
   return {
-    measure: (request, tools, policy) => measureHarnessContext(request, tools, policy),
+    measure: (request, tools, policy) => measureSdkContext(request, tools, policy),
     async *model() {
       yield {
         type: 'complete',
@@ -69,7 +69,7 @@ function transport(
 describe('isolated compact model', () => {
   test('uses the guarded real model transport without tools or ordinary conversation messages', async () => {
     const bodies: Record<string, unknown>[] = [];
-    const model = createUserConfiguredHarnessModelTransport(
+    const model = createConfiguredSdkStep(
       { baseUrl: 'https://provider.example/v1', model: 'frozen-model' },
       async (_url, init) => {
         bodies.push(JSON.parse(String(init?.body)));
@@ -90,7 +90,7 @@ describe('isolated compact model', () => {
     );
     const result = await requestCompactModel(
       input,
-      { model, measure: measureHarnessContext },
+      { model, measure: measureSdkContext },
       signal(),
       eligible,
     );

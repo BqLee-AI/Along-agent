@@ -8,21 +8,21 @@ import {
   digestContextPolicy,
   ensureRunContextPolicy,
   readRunContextPolicy,
-} from '../../src/modules/conversations/context-policy.js';
-import { readHarnessMessages } from '../../src/modules/conversations/repository.js';
-import { getRunView } from '../../src/modules/conversations/harness-authority.js';
-import type { ConversationDeps } from '../../src/modules/conversations/contracts.js';
-import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
-import { startConversationRun } from '../../src/modules/conversations/service.js';
-import { measureHarnessContext } from '../../src/modules/conversations/harness-context.js';
+} from '../../src/features/conversations/public.js';
+import { readHarnessMessages } from '../../src/features/conversations/run/repository.js';
+import { getRunView } from '../../src/agent/operations/run.js';
+import type { ConversationDeps } from '../../src/agent/runtime/contracts.js';
+import type { HarnessServices } from '../../src/agent/runtime/contracts.js';
+import { startConversationRun } from '../../src/agent/operations/start.js';
+import { measureSdkContext } from '../../src/features/model-providers/public.js';
 import {
   addModel,
   createProvider,
   setDefault,
   setModelContextWindow,
   updateProvider,
-} from '../../src/modules/model-providers/service.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
+} from '../../src/features/model-providers/configuration/service.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 
@@ -150,11 +150,11 @@ maybe('harness frozen admission context', () => {
       remaining_tokens: 8000,
       max_output_tokens: 100,
     };
-    expect(await measureHarnessContext(request, [], frozen!, meter)).toMatchObject({
+    expect(await measureSdkContext(request, [], frozen!, meter)).toMatchObject({
       output_ceiling: 40,
     });
     expect(
-      await measureHarnessContext(request, [], unset.context!.contextPolicy!, meter),
+      await measureSdkContext(request, [], unset.context!.contextPolicy!, meter),
     ).toMatchObject({
       output_ceiling: 100,
     });

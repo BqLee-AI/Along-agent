@@ -1,7 +1,12 @@
+import {
+  applicationErrorEvidence,
+  expectApplicationRejection,
+} from '../helpers/application-error.js';
+import { httpStatusForError } from '@along/contracts';
 import { describe, expect, it } from 'bun:test';
 import { fileURLToPath } from 'node:url';
-import { HttpError } from '../../src/http/errors.js';
-import { consumeIdentityQuota } from '../../src/modules/identity/rate-limit.js';
+import { ApplicationError } from '../../src/platform/errors.js';
+import { consumeIdentityQuota } from '../../src/features/identity/security/rate-limit.js';
 import { identityKeyfileFixture, identityKeysFixture } from '../helpers/identity-security.js';
 import { createIntegrationDatabase, databaseUrl } from './setup.js';
 
@@ -66,9 +71,9 @@ integration('identity persistent atomic quota (real isolated PG)', () => {
       } catch (error) {
         caught = error;
       }
-      expect(caught).toBeInstanceOf(HttpError);
-      const error = caught as HttpError;
-      expect(error.httpStatus).toBe(429);
+      expect(caught).toBeInstanceOf(ApplicationError);
+      const error = caught as ApplicationError;
+      expect(httpStatusForError(error.code)).toBe(429);
       expect(error.errorCode).toBe('RATE_LIMITED');
       const details = error.details as { retry_after_seconds: number };
       expect(Number.isInteger(details.retry_after_seconds)).toBe(true);
@@ -163,9 +168,10 @@ integration('identity persistent atomic quota (real isolated PG)', () => {
           })),
         );
         for (let i = test.limit; i < test.limit + 5; i++)
-          await expect(
+          await expectApplicationRejection(
             consumeIdentityQuota(db.pool, keys, test.action, test.subjects(i)),
-          ).rejects.toMatchObject({ httpStatus: 429, errorCode: 'RATE_LIMITED' });
+            { status: 429, errorCode: 'RATE_LIMITED' },
+          );
 
         const after = (
           await db.pool.query(
@@ -211,7 +217,10 @@ integration('identity persistent atomic quota (real isolated PG)', () => {
       expect(rejected).toHaveLength(6);
       for (const result of rejected)
         if (result.status === 'rejected')
-          expect(result.reason).toMatchObject({ httpStatus: 429, errorCode: 'RATE_LIMITED' });
+          expect(applicationErrorEvidence(result.reason)).toMatchObject({
+            status: 429,
+            errorCode: 'RATE_LIMITED',
+          });
       const rows = (
         await db.pool.query(
           `SELECT dimension,count(*)::int AS rows,sum(count)::int AS charges
@@ -237,19 +246,21 @@ integration('identity persistent atomic quota (real isolated PG)', () => {
           actor: 'admin',
           address: 'target@example.com',
         });
-      await expect(
+      await expectApplicationRejection(
         consumeIdentityQuota(db.pool, keys, 'invite_resend', {
           ip: '127.0.0.9',
           actor: 'admin',
           address: 'target@example.com',
         }),
-      ).rejects.toMatchObject({ httpStatus: 429 });
-      await expect(
+        { status: 429 },
+      );
+      await expectApplicationRejection(
         consumeIdentityQuota(db.pool, keys, 'contact_verify', {
           ip: '127.0.0.9',
           token: 'invalid-format',
         }),
-      ).rejects.toMatchObject({ httpStatus: 503 });
+        { status: 503 },
+      );
     } finally {
       await db.close();
     }
@@ -261,12 +272,13 @@ integration('identity persistent atomic quota (real isolated PG)', () => {
       await db.pool.query(
         `CREATE FUNCTION identity_quota_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.dimension='address' THEN RAISE EXCEPTION 'isolated fault'; END IF; RETURN NEW; END $$; CREATE TRIGGER identity_quota_fault BEFORE INSERT OR UPDATE ON identity_rate_limits FOR EACH ROW EXECUTE FUNCTION identity_quota_fail()`,
       );
-      await expect(
+      await expectApplicationRejection(
         consumeIdentityQuota(db.pool, keys, 'forgot', {
           ip: '127.0.0.10',
           address: 'absent@example.com',
         }),
-      ).rejects.toMatchObject({ httpStatus: 503 });
+        { status: 503 },
+      );
       expect(
         (await db.pool.query('SELECT count(*)::int AS n FROM identity_rate_limits')).rows[0].n,
       ).toBe(0);

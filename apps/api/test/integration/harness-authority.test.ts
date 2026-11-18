@@ -1,3 +1,4 @@
+import { expectApplicationRejection } from '../helpers/application-error.js';
 import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import { afterAll, beforeAll, describe, expect, it, spyOn } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
@@ -18,46 +19,49 @@ import {
 } from '@along/contracts';
 import type { ThreadEvent } from '@along/stream-protocol';
 import { withTransaction } from '../../src/db/transaction.js';
-import { HttpError } from '../../src/http/errors.js';
-import { startConversationRun } from '../../src/modules/conversations/service.js';
-import { getConversationRuns } from '../../src/modules/conversations/history-service.js';
+import { ApplicationError } from '../../src/platform/errors.js';
+import { startConversationRun } from '../../src/agent/operations/start.js';
+import { getConversationRuns } from '../../src/features/conversations/history/history-service.js';
 import {
   createContextPolicy,
   readRunContextPolicy,
-} from '../../src/modules/conversations/context-policy.js';
+} from '../../src/features/conversations/public.js';
 import type {
   ConversationDeps,
   RunContext,
   StartResult,
-} from '../../src/modules/conversations/contracts.js';
-import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
+} from '../../src/agent/runtime/contracts.js';
+import type { HarnessServices } from '../../src/agent/runtime/contracts.js';
 import {
-  createHarnessSession as createAuthoritySession,
   cancelConversationRun,
   getRunView,
   inspectReleaseWaiting,
   resumeConversationRun,
-} from '../../src/modules/conversations/harness-authority.js';
-import { stopReleaseWaiting } from '../../src/modules/conversations/release-stop.js';
-import type { HarnessSession } from '../../src/modules/conversations/harness-authority.js';
+} from '../../src/agent/operations/run.js';
+import { stopReleaseWaiting } from '../../src/agent/operations/release-stop.js';
+import {
+  createHarnessSession as createAuthoritySession,
+  type HarnessSession,
+} from '../../src/agent/runtime/attempt-session.js';
 import {
   listRunEvents,
   listConversationEvents,
   lockRun,
-} from '../../src/modules/conversations/repository.js';
-import { confirmApproval, rejectApproval } from '../../src/modules/approvals/confirm.js';
-import { reviseApproval } from '../../src/modules/approvals/revise.js';
-import { getApprovalDetail } from '../../src/modules/approvals/service.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
-import { confirmDocumentApproval } from '../../src/modules/approvals/document-actions.js';
-import { readDocumentApprovalDetail } from '../../src/modules/approvals/document-service.js';
+} from '../../src/features/conversations/run/repository.js';
+import { confirmApproval, rejectApproval } from '../../src/features/approvals/reminder/confirm.js';
+import { reviseApproval } from '../../src/features/approvals/reminder/revise.js';
+import { getApprovalDetail } from '../../src/features/approvals/reminder/service.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
+import { confirmDocumentApproval } from '../../src/agent/operations/document-decision.js';
+import { readDocumentApprovalDetail } from '../../src/features/approvals/document/document-service.js';
+import { readRunDocumentEvidence } from '../../src/agent/tools/query.js';
 import { seedAdmittedSession as seedSession } from './setup.js';
 import {
   deleteProvider,
-  isRunSelectionUsable,
   updateProvider,
-} from '../../src/modules/model-providers/service.js';
-import type { SeededSession } from '../../src/modules/identity/seed.js';
+} from '../../src/features/model-providers/configuration/service.js';
+import { isRunSelectionUsable } from '../../src/features/model-providers/runtime/run-binding.js';
+import type { SeededSession } from '../../src/features/identity/session/seed.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 import {
   executeLocalInvocation,
@@ -65,24 +69,25 @@ import {
   reserveInvocation,
   ToolExecutionError,
   executeReadOnlyInvocation,
-} from '../../src/modules/tools/invocations.js';
-import * as gateway from '../../src/modules/tools/gateway.js';
-import { appendEvent, readSnapshot } from '../../src/modules/conversations/run-state.js';
+} from '../../src/agent/tools/invocations/invocations.js';
+import * as gateway from '../../src/agent/tools/gateway.js';
+import { appendEvent } from '../../src/features/conversations/run/run-state.js';
+import { readSnapshot } from '../../src/agent/runtime/run-snapshot.js';
 import {
   configureWorkspaceRegistry,
   getWorkspaceGrant,
-  readWorkspaceFile,
-} from '../../src/modules/workspaces/service.js';
+} from '../../src/features/workspaces/public.js';
+import { readWorkspaceFile } from '../../src/features/workspaces/read/files.js';
 import {
   assertToolRunBinding,
   lockToolEffectAcceptanceBinding,
   lockToolRunBinding,
-} from '../../src/modules/conversations/tool-binding.js';
+} from '../../src/features/conversations/run/tool-binding.js';
 import {
   BUSINESS_TOOL_IDS,
   HARNESS_BASE_TOOL_IDS,
   TOOL_IDS,
-} from '../../src/modules/tools/contracts.js';
+} from '../../src/agent/tools/contracts.js';
 
 const maybe = databaseUrl ? describe : describe.skip;
 const idReply = z.object({ invocation_id: z.string().uuid() });
@@ -608,7 +613,7 @@ maybe('harness durable authority against PostgreSQL', () => {
         async () => true,
         new AbortController().signal,
       ),
-    ).rejects.toBeInstanceOf(HttpError);
+    ).rejects.toBeInstanceOf(ApplicationError);
     const reserved = idReply.parse(
       await other.frame(
         request('reserve', { call_key: 'harness/1', tool_id: 'list_tasks', args: {} }),
@@ -622,12 +627,12 @@ maybe('harness durable authority against PostgreSQL', () => {
           args: {},
         }),
       ),
-    ).rejects.toBeInstanceOf(HttpError);
+    ).rejects.toBeInstanceOf(ApplicationError);
     await expect(
       first.frame(
         request('reserve', { call_key: 'harness/1', tool_id: 'arbitrary_effect', args: {} }),
       ),
-    ).rejects.toBeInstanceOf(HttpError);
+    ).rejects.toBeInstanceOf(ApplicationError);
     expect(
       (
         await database.pool.query('SELECT count(*)::int n FROM approvals WHERE owner_id=$1', [
@@ -640,7 +645,7 @@ maybe('harness durable authority against PostgreSQL', () => {
     ]);
     await expect(
       first.frame(request('answer', { delta: 'not authorized' })),
-    ).rejects.toBeInstanceOf(HttpError);
+    ).rejects.toBeInstanceOf(ApplicationError);
     expect(await listRunEvents(database.pool, first.actor.userId, first.context.runId)).toEqual([]);
   });
 
@@ -754,7 +759,7 @@ maybe('harness durable authority against PostgreSQL', () => {
     );
     await expect(
       fixture.frame(request('finish', { outcome: 'done', usage: { iterations: 1, tokens: null } })),
-    ).rejects.toBeInstanceOf(HttpError);
+    ).rejects.toBeInstanceOf(ApplicationError);
     const pending = await fresh();
     await invoke(pending, 'propose_task', {
       raw_time_text: pending.context.inputText,
@@ -829,7 +834,7 @@ maybe('harness durable authority against PostgreSQL', () => {
       },
     ])
       await expect(fixture.frame(request('snapshot', { context: bad }))).rejects.toBeInstanceOf(
-        HttpError,
+        ApplicationError,
       );
     await acceptModelAnswer(fixture, 'read result accepted');
     expect(
@@ -995,7 +1000,7 @@ maybe('harness durable authority against PostgreSQL', () => {
     });
     await expect(
       getRunView(deps, randomUUID(), fixture.context.conversationId, fixture.context.runId),
-    ).rejects.toBeInstanceOf(HttpError);
+    ).rejects.toBeInstanceOf(ApplicationError);
     await expect(
       resumeConversationRun(
         deps,
@@ -1005,7 +1010,7 @@ maybe('harness durable authority against PostgreSQL', () => {
         randomUUID(),
         { checkpoint_id: randomUUID(), idempotency_key: randomUUID() },
       ),
-    ).rejects.toBeInstanceOf(HttpError);
+    ).rejects.toBeInstanceOf(ApplicationError);
     const attempts = await database.pool.query(
       'SELECT count(*)::int n FROM run_attempts WHERE run_id=$1',
       [fixture.context.runId],
@@ -1165,10 +1170,10 @@ maybe('harness durable authority against PostgreSQL', () => {
         errorCode: 'STATE_CONFLICT',
         details: { status: 'running' },
       });
-      await expect(resume(fixture, randomUUID())).rejects.toBeInstanceOf(HttpError);
+      await expect(resume(fixture, randomUUID())).rejects.toBeInstanceOf(ApplicationError);
       await expect(
         createHarnessSession(deps, fixture.context, async () => true, new AbortController().signal),
-      ).rejects.toBeInstanceOf(HttpError);
+      ).rejects.toBeInstanceOf(ApplicationError);
       await expect(
         session.handleRequest(
           request('invoke', {
@@ -1177,7 +1182,7 @@ maybe('harness durable authority against PostgreSQL', () => {
             args: {},
           }),
         ),
-      ).rejects.toBeInstanceOf(HttpError);
+      ).rejects.toBeInstanceOf(ApplicationError);
       if (status !== 'consumed')
         await expect(
           session.handleRequest(
@@ -1187,7 +1192,7 @@ maybe('harness durable authority against PostgreSQL', () => {
               args: {},
             }),
           ),
-        ).rejects.toBeInstanceOf(HttpError);
+        ).rejects.toBeInstanceOf(ApplicationError);
       if (status === 'consumed') {
         await acceptModelAnswer(
           { session, context: resumedContext, frame: (frame) => session.handleRequest(frame) },
@@ -1352,7 +1357,7 @@ maybe('harness durable authority against PostgreSQL', () => {
       await blocker.query('SELECT pg_advisory_unlock(46,$1)', [key]);
       expect((await cancelling).status).toBe('cancelled');
       releaseResponse.resolve();
-      expect(await rejected).toBeInstanceOf(HttpError);
+      expect(await rejected).toBeInstanceOf(ApplicationError);
       const facts = await database.pool.query(
         `SELECT i.state,i.outcome_kind,a.state AS approval_state
         FROM tool_invocations i JOIN approvals a ON a.id=i.approval_id WHERE i.invocation_id=$1`,
@@ -1692,12 +1697,12 @@ maybe('harness durable authority against PostgreSQL', () => {
             },
           }),
         ),
-      ).rejects.toBeInstanceOf(HttpError);
+      ).rejects.toBeInstanceOf(ApplicationError);
       await expect(
         fixture.frame(
           request('finish', { outcome: 'done', usage: { iterations: 0, tokens: null } }),
         ),
-      ).rejects.toBeInstanceOf(HttpError);
+      ).rejects.toBeInstanceOf(ApplicationError);
       expect(
         (await listRunEvents(database.pool, fixture.actor.userId, fixture.context.runId)).map(
           (event) => event.type,
@@ -1816,7 +1821,7 @@ maybe('harness durable authority against PostgreSQL', () => {
     } finally {
       release.resolve();
     }
-    await expect(response).rejects.toBeInstanceOf(HttpError);
+    await expect(response).rejects.toBeInstanceOf(ApplicationError);
     expect(
       (await listRunEvents(database.pool, fixture.actor.userId, fixture.context.runId)).map(
         (event) => event.type,
@@ -1892,10 +1897,11 @@ maybe('harness durable authority against PostgreSQL', () => {
         });
         expect(JSON.stringify(view)).not.toContain(f.root);
         expect(JSON.stringify(view)).not.toContain('registration_digest');
-        await expect(
+        await expectApplicationRejection(
           createHarnessSession(deps, f.context, async () => true, new AbortController().signal),
-        ).rejects.toMatchObject({ httpStatus: 409 });
-        await expect(
+          { status: 409 },
+        );
+        await expectApplicationRejection(
           f.session.handleRequest(
             request('reserve', {
               call_key: 'harness/3',
@@ -1903,8 +1909,9 @@ maybe('harness durable authority against PostgreSQL', () => {
               args: { path: 'brief.txt' },
             }),
           ),
-        ).rejects.toMatchObject({ httpStatus: 409 });
-        await expect(
+          { status: 409 },
+        );
+        await expectApplicationRejection(
           resumeConversationRun(
             deps,
             f.actor.userId,
@@ -1913,7 +1920,8 @@ maybe('harness durable authority against PostgreSQL', () => {
             randomUUID(),
             { checkpoint_id: f.checkpoint.checkpoint_ref, idempotency_key: randomUUID() },
           ),
-        ).rejects.toMatchObject({ httpStatus: 403 });
+          { status: 403 },
+        );
         expect(
           (
             await database.pool.query('SELECT count(*)::int n FROM run_attempts WHERE run_id=$1', [
@@ -1980,7 +1988,7 @@ maybe('harness durable authority against PostgreSQL', () => {
         ).toBe(1);
         const events = await listRunEvents(database.pool, f.actor.userId, f.context.runId);
         expect(events.filter((event) => event.type === 'thread.cancelled')).toHaveLength(1);
-        await expect(
+        await expectApplicationRejection(
           resumeConversationRun(
             deps,
             f.actor.userId,
@@ -1989,7 +1997,8 @@ maybe('harness durable authority against PostgreSQL', () => {
             randomUUID(),
             { checkpoint_id: f.checkpoint.checkpoint_ref, idempotency_key: randomUUID() },
           ),
-        ).rejects.toMatchObject({ httpStatus: 409 });
+          { status: 409 },
+        );
       } finally {
         await configureWorkspaceRegistry([]);
         await rm(f.root, { recursive: true, force: true });
@@ -2002,22 +2011,34 @@ maybe('harness durable authority against PostgreSQL', () => {
         const client = await database.pool.connect();
         try {
           expect(
-            await readDocumentApprovalDetail(client, f.actor.userId, f.receipt.approval_id),
+            await readDocumentApprovalDetail(
+              client,
+              f.actor.userId,
+              f.receipt.approval_id,
+              readRunDocumentEvidence,
+            ),
           ).toMatchObject({ ...f.receipt, state: 'pending', effect: { status: 'not_started' } });
           const outsider = await seedSession(database.pool, {});
-          await expect(
-            readDocumentApprovalDetail(client, outsider.userId, f.receipt.approval_id),
-          ).rejects.toMatchObject({ httpStatus: 403 });
+          await expectApplicationRejection(
+            readDocumentApprovalDetail(
+              client,
+              outsider.userId,
+              f.receipt.approval_id,
+              readRunDocumentEvidence,
+            ),
+            { status: 403 },
+          );
         } finally {
           client.release();
         }
-        await expect(
+        await expectApplicationRejection(
           confirmDocumentApproval(deps, f.actor.userId, f.receipt.approval_id, {
             presentation_hash: f.receipt.presentation_hash,
             seen_content: f.receipt.preview.body,
             idempotency_key: randomUUID(),
           }),
-        ).rejects.toMatchObject({ httpStatus: 403 });
+          { status: 403 },
+        );
         expect(
           (
             await database.pool.query(
@@ -2133,18 +2154,21 @@ maybe('harness durable authority against PostgreSQL', () => {
       try {
         await assertToolRunBinding(client, { ...context, workspaceGrant: first });
         await assertToolRunBinding(client, { ...context, workspaceGrant: second });
-        await expect(
+        await expectApplicationRejection(
           assertToolRunBinding(client, { ...context, workspaceGrant: later }),
-        ).rejects.toMatchObject({ httpStatus: 403 });
-        await expect(
+          { status: 403 },
+        );
+        await expectApplicationRejection(
           assertToolRunBinding(client, { ...context, workspaceGrants: [first] }),
-        ).rejects.toMatchObject({ httpStatus: 403 });
-        await expect(
+          { status: 403 },
+        );
+        await expectApplicationRejection(
           assertToolRunBinding(client, {
             ...context,
             workspaceGrant: { ...first, registration_digest: second.registration_digest },
           }),
-        ).rejects.toMatchObject({ httpStatus: 403 });
+          { status: 403 },
+        );
         await configureWorkspaceRegistry(registrations.slice(1));
         await expect(
           assertToolRunBinding(client, { ...context, workspaceGrant: first }),
@@ -2194,9 +2218,9 @@ maybe('harness durable authority against PostgreSQL', () => {
             },
             null,
           ),
-        ).rejects.toBeInstanceOf(HttpError);
+        ).rejects.toBeInstanceOf(ApplicationError);
       }
-      await expect(
+      await expectApplicationRejection(
         startConversationRun(
           deps,
           outsider.userId,
@@ -2208,7 +2232,8 @@ maybe('harness durable authority against PostgreSQL', () => {
           },
           null,
         ),
-      ).rejects.toMatchObject({ httpStatus: 403 });
+        { status: 403 },
+      );
       expect(
         (
           await database.pool.query('SELECT count(*)::int n FROM agent_runs WHERE owner_id=$1', [
@@ -2253,15 +2278,17 @@ maybe('harness durable authority against PostgreSQL', () => {
       expect(JSON.stringify({ start: session.start, view })).not.toContain('registration_digest');
       const client = await database.pool.connect();
       try {
-        await expect(
+        await expectApplicationRejection(
           assertToolRunBinding(client, {
             ...context,
             workspaceGrant: getWorkspaceGrant(actor.userId, 'second'),
           }),
-        ).rejects.toMatchObject({ httpStatus: 403 });
-        await expect(
+          { status: 403 },
+        );
+        await expectApplicationRejection(
           assertToolRunBinding(client, { ...context, workspaceGrant: null }),
-        ).rejects.toMatchObject({ httpStatus: 403 });
+          { status: 403 },
+        );
       } finally {
         client.release();
       }
@@ -2277,7 +2304,7 @@ maybe('harness durable authority against PostgreSQL', () => {
           .update(JSON.stringify([null, body.raw_text, null, 'none', 'first']))
           .digest('hex'),
       );
-      await expect(
+      await expectApplicationRejection(
         startConversationRun(
           deps,
           actor.userId,
@@ -2285,7 +2312,8 @@ maybe('harness durable authority against PostgreSQL', () => {
           { ...body, workspace_id: 'second' },
           null,
         ),
-      ).rejects.toMatchObject({ httpStatus: 409 });
+        { status: 409 },
+      );
       const legacyKey = randomUUID();
       const legacy = await startConversationRun(
         deps,
@@ -2320,20 +2348,21 @@ maybe('harness durable authority against PostgreSQL', () => {
       const acceptance = await database.pool.connect();
       await acceptance.query('BEGIN');
       try {
-        await expect(lockToolRunBinding(acceptance, context)).rejects.toMatchObject({
-          httpStatus: 403,
+        await expectApplicationRejection(lockToolRunBinding(acceptance, context), {
+          status: 403,
         });
         await expect(lockToolEffectAcceptanceBinding(acceptance, context)).resolves.toEqual({
           canExecute: false,
         });
-        await expect(
+        await expectApplicationRejection(
           lockToolEffectAcceptanceBinding(acceptance, { ...context, workspaceGrant: null }),
-        ).rejects.toMatchObject({ httpStatus: 403 });
+          { status: 403 },
+        );
       } finally {
         await acceptance.query('ROLLBACK');
         acceptance.release();
       }
-      await expect(
+      await expectApplicationRejection(
         session.handleRequest(
           request('model', {
             messages: [{ role: 'user', content: 'Read now.' }],
@@ -2341,7 +2370,8 @@ maybe('harness durable authority against PostgreSQL', () => {
             max_output_tokens: 512,
           }),
         ),
-      ).rejects.toMatchObject({ httpStatus: 403 });
+        { status: 403 },
+      );
       expect(
         (
           await database.pool.query(
@@ -2386,7 +2416,7 @@ maybe('harness durable authority against PostgreSQL', () => {
       async () => true,
       new AbortController().signal,
     );
-    await expect(
+    await expectApplicationRejection(
       session.handleRequest(
         request('model', {
           messages: [{ role: 'user', content: 'x'.repeat(1024 * 1024) }],
@@ -2394,7 +2424,8 @@ maybe('harness durable authority against PostgreSQL', () => {
           max_output_tokens: 512,
         }),
       ),
-    ).rejects.toMatchObject({ errorCode: 'HARNESS_CONTEXT_LIMIT', httpStatus: 422 });
+      { errorCode: 'HARNESS_CONTEXT_LIMIT', status: 422 },
+    );
     expect(modelCalls).toBe(0);
     expect(
       (

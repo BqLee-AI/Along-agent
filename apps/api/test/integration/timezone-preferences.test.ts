@@ -1,11 +1,12 @@
+import { expectApplicationRejection } from '../helpers/application-error.js';
 import { admitTestUser } from './setup.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
-import { invokeTool, reserveToolInvocation } from '../../src/modules/tools/gateway.js';
-import type { ToolContext } from '../../src/modules/tools/contracts.js';
-import * as toolQuery from '../../src/modules/tools/query.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
+import { invokeTool, reserveToolInvocation } from '../../src/agent/tools/gateway.js';
+import type { ToolContext } from '../../src/agent/tools/contracts.js';
+import * as toolQuery from '../../src/agent/tools/query.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 
 const maybe = databaseUrl ? describe : describe.skip;
@@ -209,9 +210,10 @@ maybe('delegation personal timezone transactions', () => {
           alias_version: 'ALIAS_TABLE_V1',
         },
       ]);
-      await expect(
+      await expectApplicationRejection(
         toolQuery.readRunTimezoneSettings(client, { ...ctx, ownerId: randomUUID() }),
-      ).rejects.toMatchObject({ httpStatus: 403 });
+        { status: 403 },
+      );
     } finally {
       client.release();
     }
@@ -269,10 +271,10 @@ maybe('delegation personal timezone transactions', () => {
     expect(await invokeTool(pool, legacy, input)).toMatchObject({ status: 'denied' });
     expect(await timezone(legacy)).toBe('Asia/Shanghai');
     const spoofed = { ...legacy, authorizationRevision: 'delegation/1' as const };
-    await expect(reserve(spoofed, 'spoof/1', { timezone_id: null })).rejects.toMatchObject({
-      httpStatus: 403,
+    await expectApplicationRejection(reserve(spoofed, 'spoof/1', { timezone_id: null }), {
+      status: 403,
     });
-    await expect(invokeTool(pool, spoofed, input)).rejects.toMatchObject({ httpStatus: 403 });
+    await expectApplicationRejection(invokeTool(pool, spoofed, input), { status: 403 });
     expect(await timezone(legacy)).toBe('Asia/Shanghai');
   });
 
@@ -280,7 +282,7 @@ maybe('delegation personal timezone transactions', () => {
     const ctx = await fresh();
     const input = await reserve(ctx, 'timezone/1', { timezone_id: null });
     const downgraded = { ...ctx, authorizationRevision: undefined };
-    await expect(invokeTool(pool, downgraded, input)).rejects.toMatchObject({ httpStatus: 403 });
+    await expectApplicationRejection(invokeTool(pool, downgraded, input), { status: 403 });
     await pool.query("UPDATE users SET status='disabled' WHERE id=$1", [ctx.ownerId]);
     expect(await invokeTool(pool, ctx, input)).toMatchObject({ status: 'denied' });
     expect(await timezone(ctx)).toBe('Asia/Shanghai');

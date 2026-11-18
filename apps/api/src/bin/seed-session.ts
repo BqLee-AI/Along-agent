@@ -1,5 +1,5 @@
 import { createPool } from '../db/pool.js';
-import { seedSession } from '../modules/identity/seed.js';
+import { seedSession } from '../features/identity/public.js';
 
 // CLI: bun run --filter @along/api seed:session
 // Requires DATABASE_URL + BETTER_AUTH_SECRET. Prints the session cookie

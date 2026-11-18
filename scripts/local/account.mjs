@@ -56,7 +56,7 @@ export function createAccountTerminalIO() {
 }
 
 const registryProgram = `
-import {configureWorkspaceRegistry,listWorkspaces,getWorkspaceGrant} from './apps/api/dist/modules/workspaces/service.js';
+import {configureWorkspaceRegistry,listWorkspaces,getWorkspaceGrant} from './apps/api/dist/features/workspaces/public.js';
 const input=JSON.parse(await Bun.stdin.text());
 const report=await configureWorkspaceRegistry(input);
 const owners=Array.isArray(input)?[...new Set(input.map(v=>v?.owner_id).filter(v=>typeof v==='string'))]:[];
@@ -97,10 +97,8 @@ async function prepare(file, config) {
 }
 
 async function openIdentity(config, context, workspaceStatus) {
-  const { createAccountService } = await import(
-    pathToFileURL(
-      path.join(context.artifact.source, 'apps/api/src/modules/identity/account-service.ts'),
-    ).href
+  const { createConfiguredAccountService } = await import(
+    pathToFileURL(path.join(context.artifact.source, 'apps/api/src/bootstrap/identity.ts')).href
   );
   const pool = new pg.Pool({
     host: '127.0.0.1',
@@ -118,7 +116,7 @@ async function openIdentity(config, context, workspaceStatus) {
   });
   pool.on('error', () => {});
   return {
-    service: createAccountService(pool, {
+    service: createConfiguredAccountService(pool, {
       secret: config.authSecret,
       origin: config.origin,
       workspaceStatus,

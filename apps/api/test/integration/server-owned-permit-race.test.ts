@@ -3,12 +3,12 @@ import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { RunOwnership } from '../../src/modules/conversations/run-ownership.js';
-import { cancelConversationRun } from '../../src/modules/conversations/service.js';
+import { RunOwnership } from '../../src/agent/runtime/run-ownership.js';
+import { cancelConversationRun } from '../../src/agent/operations/run.js';
 import {
   executeNonTransactionalInvocation,
   reserveInvocation,
-} from '../../src/modules/tools/invocations.js';
+} from '../../src/agent/tools/invocations/invocations.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 import { appendFileEffect } from './tool-invocations-file-effect.js';
 import { args, fileLines, seedContext, toolId } from './tool-invocations-probe.js';

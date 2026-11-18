@@ -1,12 +1,9 @@
 import { describe, expect, it } from 'bun:test';
-import {
-  createRoutingRuntime,
-  normalizeEncodingText,
-} from '../src/modules/conversations/routing/index.js';
-import { collectFacts, isGregorianDate } from '../src/modules/conversations/routing/facts.js';
-import { selectIntent, scoreVector } from '../src/modules/conversations/routing/scorer.js';
+import { createRoutingRuntime, normalizeEncodingText } from '../src/agent/routing/index.js';
+import { collectFacts, isGregorianDate } from '../src/agent/routing/facts.js';
+import { selectIntent, scoreVector } from '../src/agent/routing/scorer.js';
 import type { RoutingPolicy } from '@along/contracts';
-import { REVISIONS } from '../src/modules/conversations/routing/types.js';
+import { REVISIONS } from '../src/agent/routing/types.js';
 const messageId = '00000000-0000-4000-8000-000000000001';
 const intents = ['task_list_bounded', 'prefs_timezone_read', 'brief_cards_read'] as const;
 const policy: RoutingPolicy = {

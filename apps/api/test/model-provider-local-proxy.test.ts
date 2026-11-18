@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { once } from 'node:events';
-import { handleRequest } from '../src/http/app.js';
+import { handleRequest } from './helpers/http-app.js';
 
 const servers: Server[] = [];
 const previous = process.env.ALONG_LOCAL_MODEL_PROXY_TOKEN;

@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 import type { GoalResult } from '@along/contracts';
-import type { RunGoalDocumentEvidence } from '../src/modules/tools/query.js';
-import { validateGoalDocuments } from '../src/modules/conversations/goal-result.js';
+import type { RunGoalDocumentEvidence } from '../src/agent/tools/query.js';
+import { validateGoalDocuments } from '../src/agent/operations/goal-result.js';
 import {
   decodeWorkspaceContent,
   hydrateWorkspaceReadResult,
-} from '../src/modules/tools/accepted-result.js';
-import { hashBytes } from '../src/modules/workspaces/service.js';
+} from '../src/agent/tools/invocations/accepted-result.js';
+import { hashBytes } from '../src/features/workspaces/public.js';
 
 const apply = '00000000-0000-4000-8000-000000000001';
 const read = '00000000-0000-4000-8000-000000000002';

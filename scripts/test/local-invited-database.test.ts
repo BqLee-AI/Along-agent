@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pg from 'pg';
 import { DeploymentDatabase } from '../local/database.mjs';
-import { createAuth } from '../../apps/api/src/modules/identity/better-auth.js';
+import { createAuth } from '../../apps/api/src/features/identity/session/better-auth.js';
 
 const connectionString = process.env.DATABASE_URL;
 const databaseTests = connectionString ? describe : describe.skip;

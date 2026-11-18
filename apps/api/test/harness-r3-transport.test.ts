@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import type { HarnessR3ContextStart } from '@along/contracts';
-import { runNativeHarness } from '../src/modules/conversations/harness-process.js';
+import { runNativeHarness } from '../src/agent/harness/harness-process.js';
 
 test('a physically oversized v8 start reports context capacity before spawning', async () => {
   const start = {
@@ -12,9 +12,6 @@ test('a physically oversized v8 start reports context capacity before spawning',
       start,
       services: {
         binaryPath: 'unused',
-        maxIterations: 1,
-        maxTokens: 1,
-        contextPolicy: {} as never,
       },
       signal: new AbortController().signal,
       handleRequest: async () => ({}),

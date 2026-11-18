@@ -6,18 +6,18 @@ import {
   cancellationAllowed,
   cancelReceipt,
   checked,
-  cursorPath,
   readNextPage,
   readReminder,
   TaskEventsPageSchema,
   TaskListPageSchema,
-  taskEventsPath,
+  taskEventsRequest,
   taskFilter,
-  taskListPath,
+  taskListRequest,
 } from '../src/features/reminders/model/data';
 import type { PageSnapshot } from '../src/features/reminders/model/data';
 import { TaskDetailSchema } from '../src/features/reminders/model/types';
 import type { TaskEventItem, TaskListItem } from '../src/features/reminders/model/types';
+import { createBrowserApi } from '../src/shared/http/eden';
 
 const taskId = '11111111-1111-4111-8111-111111111111';
 const otherId = '22222222-2222-4222-8222-222222222222';
@@ -76,6 +76,12 @@ it('preserves elapsed basis and accepts legacy task records without inventing on
 describe('bounded reminder GET consumers', () => {
   let server: Server;
   let base: string;
+  function client(path?: string) {
+    return createBrowserApi((input, init) => {
+      const url = new URL(String(input), base);
+      return fetch(`${base}${path ?? url.pathname}${url.search}`, init);
+    });
+  }
   const requests: {
     method: string | undefined;
     path: string;
@@ -158,7 +164,7 @@ describe('bounded reminder GET consumers', () => {
   });
 
   it('reaches task 51 while a failed next page retains all accepted rows and its exact cursor', async () => {
-    const path = `${base}${taskListPath('all')}`;
+    const path = taskListRequest('all', client());
     const first = await readNextPage<TaskListItem>(
       path,
       { page: null, error: null },
@@ -194,7 +200,7 @@ describe('bounded reminder GET consumers', () => {
   });
 
   it('reads only the selected task ledger, retries its unchanged cursor after 403, and deduplicates overlap', async () => {
-    const path = `${base}${taskEventsPath(taskId)}`;
+    const path = taskEventsRequest(taskId, client());
     const first = await readNextPage<TaskEventItem>(
       path,
       { page: null, error: null },
@@ -232,7 +238,7 @@ describe('bounded reminder GET consumers', () => {
       error: null,
     };
     const failed = await readNextPage(
-      `${base}/invalid?limit=50`,
+      taskEventsRequest(taskId, client('/invalid')),
       current,
       TaskEventsPageSchema,
       (item) => item.event_id,
@@ -241,7 +247,7 @@ describe('bounded reminder GET consumers', () => {
     expect(failed.error).toMatchObject({ code: 'INVALID_RESPONSE' });
     expect(current.page?.next_cursor).toBe(eventCursor);
     const empty = await readNextPage<TaskEventItem>(
-      `${base}/empty`,
+      taskEventsRequest(taskId, client('/empty')),
       { page: null, error: null },
       TaskEventsPageSchema,
       (item) => item.event_id,
@@ -250,14 +256,20 @@ describe('bounded reminder GET consumers', () => {
   });
 
   it('preserves 401/404 identity rather than manufacturing empty records, and every read stays GET-only', async () => {
-    const unauthorized = await readReminder(`${base}/unauthorized`, TaskListPageSchema);
+    const unauthorized = await readReminder(
+      () => client('/unauthorized').api.v1.tasks.get(),
+      TaskListPageSchema,
+    );
     expect(unauthorized).toMatchObject({
       ok: false,
       status: 401,
       code: 'UNAUTHORIZED',
       requestId: 'reminder-failure',
     });
-    const missing = await readReminder(`${base}/missing`, TaskListPageSchema);
+    const missing = await readReminder(
+      () => client('/missing').api.v1.tasks.get(),
+      TaskListPageSchema,
+    );
     expect(missing).toMatchObject({ ok: false, status: 404, code: 'NOT_FOUND' });
     expect(requests.every((request) => request.method === 'GET')).toBe(true);
   });
@@ -304,13 +316,23 @@ describe('reminder state and presentation boundaries', () => {
       expect(list.data.items[0]).not.toHaveProperty('title');
       expect(list.data.items[0]?.fire_at_local).toBe(frozenLocal);
     }
-    expect(
-      new URL(
-        cursorPath(`http://reminders.test${taskEventsPath(taskId)}`, eventCursor),
-      ).searchParams.get('cursor'),
-    ).toBe(eventCursor);
-    expect(
-      new URL(`http://reminders.test${taskListPath('scheduled')}`).searchParams.get('status'),
-    ).toBe('scheduled');
+    const seen: URL[] = [];
+    const api = createBrowserApi(async (input) => {
+      seen.push(new URL(String(input), 'http://reminders.test'));
+      return Response.json({
+        code: 0,
+        data: { items: [], next_cursor: null },
+        msg: 'ok',
+        error: null,
+        request_id: 'query',
+      });
+    });
+    return Promise.all([
+      taskEventsRequest(taskId, api)(eventCursor),
+      taskListRequest('scheduled', api)(null),
+    ]).then(() => {
+      expect(seen[0]?.searchParams.get('cursor')).toBe(eventCursor);
+      expect(seen[1]?.searchParams.get('status')).toBe('scheduled');
+    });
   });
 });

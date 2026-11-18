@@ -1,6 +1,6 @@
 import { createPool } from '../db/pool.js';
-import { isUuid } from '../http/errors.js';
-import { importLegacyProvider } from '../modules/model-providers/service.js';
+import { isUuid } from '../platform/errors.js';
+import { importLegacyProvider } from '../features/model-providers/public.js';
 
 // Administrator supplies the target user as argv[2], and JSON {name,base_url,
 // api_key,model_id} via a protected stdin. No deployed model config is read.

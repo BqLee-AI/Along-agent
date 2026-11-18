@@ -1,6 +1,6 @@
 import type { RoutingIntent } from '@along/contracts';
-import { ROUTING_INTENTS } from '../../apps/api/src/modules/conversations/routing/types.js';
-import type { EnabledRoutingPolicy } from '../../apps/api/src/modules/conversations/routing/types.js';
+import { ROUTING_INTENTS } from '../../apps/api/src/agent/routing/types.js';
+import type { EnabledRoutingPolicy } from '../../apps/api/src/agent/routing/types.js';
 import { candidateCorrect, rowDecision } from './evaluation.js';
 import type { ScoredRecord } from './evaluation.js';
 

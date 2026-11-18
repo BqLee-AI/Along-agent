@@ -7,25 +7,13 @@ import type {
   RoutingIntent,
   RoutingSource,
 } from '@along/contracts';
-import { canonicalJson } from '../../apps/api/src/modules/conversations/routing/bundle.js';
-import { collectFacts } from '../../apps/api/src/modules/conversations/routing/facts.js';
-import type {
-  EnabledRoutingPolicy,
-  RoutingInput,
-} from '../../apps/api/src/modules/conversations/routing/types.js';
-import type {
-  RoutingScores,
-  ScoringMatrix,
-} from '../../apps/api/src/modules/conversations/routing/scorer.js';
-import {
-  scoreVector,
-  selectIntent,
-} from '../../apps/api/src/modules/conversations/routing/scorer.js';
-import { normalizeEncodingText } from '../../apps/api/src/modules/conversations/routing/facts.js';
-import {
-  EncoderRefusal,
-  requestEncoding,
-} from '../../apps/api/src/modules/conversations/routing/encoder.js';
+import { canonicalJson } from '../../apps/api/src/agent/routing/bundle.js';
+import { collectFacts } from '../../apps/api/src/agent/routing/facts.js';
+import type { EnabledRoutingPolicy, RoutingInput } from '../../apps/api/src/agent/routing/types.js';
+import type { RoutingScores, ScoringMatrix } from '../../apps/api/src/agent/routing/scorer.js';
+import { scoreVector, selectIntent } from '../../apps/api/src/agent/routing/scorer.js';
+import { normalizeEncodingText } from '../../apps/api/src/agent/routing/facts.js';
+import { EncoderRefusal, requestEncoding } from '../../apps/api/src/platform/encoder.js';
 
 const message = z.object({ role: z.enum(['user', 'assistant']), content: z.string() });
 export const DatasetRecordSchema = z

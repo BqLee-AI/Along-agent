@@ -5,22 +5,20 @@ import { createServer, type Server } from 'node:http';
 import { setTimeout as delay } from 'node:timers/promises';
 import { HARNESS_PROTOCOL_VERSION, HARNESS_R3_PROTOCOL_VERSION } from '@along/contracts';
 import { z } from 'zod';
-import { handleRequest } from '../../src/http/app.js';
-import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import { createHarnessModelTransport } from '../../src/modules/model-providers/harness-model.js';
-import {
-  continueConversationPause,
-  createHarnessSession,
-  resumeConversationRun,
-} from '../../src/modules/conversations/harness-authority.js';
-import { createRunDriver } from '../../src/modules/conversations/run-driver.js';
-import { startConversationRun } from '../../src/modules/conversations/service.js';
+import { handleRequest } from '../helpers/http-app.js';
+import { createContextPolicy } from '../../src/features/conversations/public.js';
+import { createLocalFixtureModelTransport } from '../helpers/local-fixture-model.js';
+import { resumeConversationRun } from '../../src/agent/operations/run.js';
+import { createHarnessSession } from '../../src/agent/runtime/attempt-session.js';
+import { continueConversationPause } from '../../src/agent/operations/pause.js';
+import { createRunDriver } from '../../src/agent/runtime/run-driver.js';
+import { startConversationRun } from '../../src/agent/operations/start.js';
 import {
   executeNonTransactionalInvocation,
   reserveInvocation,
-} from '../../src/modules/tools/invocations.js';
-import { rejectApproval } from '../../src/modules/approvals/confirm.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
+} from '../../src/agent/tools/invocations/invocations.js';
+import { rejectApproval } from '../../src/features/approvals/reminder/confirm.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
 import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import { listen, sendModelSse } from '../helpers/harness-consumer.js';
 import {
@@ -86,7 +84,7 @@ maybe('user pause and continue over HTTP', () => {
       })();
     });
     const modelBase = await listen(modelServer);
-    const transport = createHarnessModelTransport({
+    const transport = createLocalFixtureModelTransport({
       baseUrl: `${modelBase}/v1`,
       model: 'fixture-transport-only',
     });

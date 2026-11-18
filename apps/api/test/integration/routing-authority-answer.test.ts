@@ -2,14 +2,14 @@ import { configureTestModel, controlledModelDeps } from '../helpers/model-select
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { HARNESS_R3_PROTOCOL_VERSION } from '@along/contracts';
-import type { ConversationDeps } from '../../src/modules/conversations/contracts.js';
-import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
-import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import { createHarnessSession } from '../../src/modules/conversations/harness-authority.js';
-import { startConversationRun } from '../../src/modules/conversations/service.js';
-import { listRunEvents } from '../../src/modules/conversations/repository.js';
+import type { ConversationDeps } from '../../src/agent/runtime/contracts.js';
+import type { HarnessServices } from '../../src/agent/runtime/contracts.js';
+import { createContextPolicy } from '../../src/features/conversations/public.js';
+import { createHarnessSession } from '../../src/agent/runtime/attempt-session.js';
+import { startConversationRun } from '../../src/agent/operations/start.js';
+import { listRunEvents } from '../../src/features/conversations/run/repository.js';
 import { seedAdmittedSession as seedSession } from './setup.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 
 const maybe = databaseUrl ? describe : describe.skip;

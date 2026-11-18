@@ -5,6 +5,8 @@ import { ThreadEventSchema } from '@along/stream-protocol';
 import type { ThreadEvent } from '@along/stream-protocol';
 import { z } from 'zod';
 import { ApiReadError, readEnvelope } from '@/shared/http/client';
+import { api, createBrowserApi, writeOptions } from '@/shared/http/eden';
+import type { ApiClient } from '@/shared/http/eden';
 
 export const ConversationEventsSchema = z
   .object({
@@ -97,23 +99,16 @@ export async function postCompact(
   signal: AbortSignal,
   fetchAction: typeof fetch = fetch,
 ) {
-  const base = request.runId
-    ? runPath(request.conversationId, request.runId)
-    : `/api/v1/conversations/${encodeURIComponent(request.conversationId)}`;
-  const receipt = CompactReceiptSchema.parse(
-    await readEnvelope(
-      await fetchAction(`${base}/actions/compact`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'Idempotency-Key': request.key,
-          ...(csrf !== null ? { 'x-csrf-token': csrf } : {}),
-        },
-        body: '{}',
-        signal,
-      }),
-    ),
-  );
+  const endpoint = createBrowserApi(fetchAction).api.v1.conversations({
+    id: encodeURIComponent(request.conversationId),
+  });
+  const options = writeOptions(csrf, signal, request.key);
+  const response = request.runId
+    ? await endpoint
+        .runs({ run: encodeURIComponent(request.runId) })
+        .actions.compact.post({}, options)
+    : await endpoint.actions.compact.post({}, options);
+  const receipt = CompactReceiptSchema.parse(await readEnvelope(response));
   if (request.runId && receipt.run_id !== request.runId)
     throw new Error('压缩回执与原运行不匹配。');
   return receipt;
@@ -128,10 +123,11 @@ export async function readCompact(
 ) {
   const receipt = CompactReceiptSchema.parse(
     await readEnvelope(
-      await fetchAction(
-        `${runPath(conversationId, runId)}/compacts/${encodeURIComponent(pauseId)}`,
-        { method: 'GET', cache: 'no-store', signal },
-      ),
+      await createBrowserApi(fetchAction)
+        .api.v1.conversations({ id: encodeURIComponent(conversationId) })
+        .runs({ run: encodeURIComponent(runId) })
+        .compacts({ pause: encodeURIComponent(pauseId) })
+        .get({ fetch: { signal } }),
     ),
   );
   if (receipt.run_id !== runId || receipt.pause_id !== pauseId)
@@ -161,7 +157,10 @@ export async function readRun(
   runId: string,
   signal?: AbortSignal,
 ): Promise<RunView> {
-  const response = await fetch(runPath(conversationId, runId), { cache: 'no-store', signal });
+  const response = await api.api.v1
+    .conversations({ id: encodeURIComponent(conversationId) })
+    .runs({ run: encodeURIComponent(runId) })
+    .get({ fetch: { signal } });
   return RunViewSchema.parse(await readEnvelope(response));
 }
 
@@ -173,16 +172,10 @@ export async function requestUserPause(
   signal: AbortSignal,
   fetchAction: typeof fetch = fetch,
 ) {
-  const response = await fetchAction(`${runPath(conversationId, runId)}/actions/pause`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'Idempotency-Key': key,
-      ...(csrf !== null ? { 'x-csrf-token': csrf } : {}),
-    },
-    body: JSON.stringify({ reason: 'user', purpose: 'none' }),
-    signal,
-  });
+  const response = await createBrowserApi(fetchAction)
+    .api.v1.conversations({ id: encodeURIComponent(conversationId) })
+    .runs({ run: encodeURIComponent(runId) })
+    .actions.pause.post({ reason: 'user', purpose: 'none' }, writeOptions(csrf, signal, key));
   return z
     .object({ status: z.enum(['pending', 'paused']), pause_id: z.string().uuid() })
     .strict()
@@ -219,13 +212,18 @@ export function userPauseCanContinue(run: RunView | null): boolean {
 }
 
 export async function readHistoryEventPage(
-  url: string,
   conversationId: string,
   runId: string,
   afterSeq: number,
   signal?: AbortSignal,
+  client: ApiClient = api,
 ): Promise<{ items: ThreadEvent[]; nextCursor: string | null }> {
-  const response = await fetch(url, { method: 'GET', cache: 'no-store', signal });
+  const response = await client.api.v1
+    .conversations({ id: encodeURIComponent(conversationId) })
+    .get({
+      query: { run_id: runId, after_seq: String(afterSeq), limit: '200' },
+      fetch: { signal },
+    });
   const page = ConversationEventsSchema.parse(await readEnvelope(response));
   if (
     page.conversation_id !== conversationId ||

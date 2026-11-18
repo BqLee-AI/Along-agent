@@ -1,10 +1,12 @@
+import { httpStatusForError } from '@along/contracts';
+import { ApplicationError } from '../../src/platform/errors.js';
 import { beforeAll, afterAll, describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { Pool } from 'pg';
 import { ProviderViewSchema } from '@along/contracts';
-import { handleRequest } from '../../src/http/app.js';
+import { handleRequest } from '../helpers/http-app.js';
 import { csrfTokenFor } from '../../src/http/auth.js';
 import {
   createProvider,
@@ -17,11 +19,13 @@ import {
   listProviders,
   deleteProvider,
   syncModels,
+} from '../../src/features/model-providers/configuration/service.js';
+import {
   resolveSelection,
   bindRunSelection,
   resolveRunSelection,
   getRunSelections,
-} from '../../src/modules/model-providers/service.js';
+} from '../../src/features/model-providers/runtime/run-binding.js';
 
 const schema = `provider_test_${randomUUID().replaceAll('-', '')}`;
 const url = process.env.MODEL_PROVIDER_TEST_DATABASE_URL ?? process.env.DATABASE_URL;
@@ -419,7 +423,8 @@ suite('provider settings', () => {
       await syncModels(pool, owner, provider.id, request);
       throw new Error('expected conflict');
     } catch (error) {
-      expect((error as { httpStatus: number }).httpStatus).toBe(409);
+      if (!(error instanceof ApplicationError)) throw error;
+      expect(httpStatusForError(error.code)).toBe(409);
     }
   });
   test('sync merges unique models and retains manual models on failure', async () => {

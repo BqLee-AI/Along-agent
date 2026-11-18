@@ -2,9 +2,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { createServer, type Server } from 'node:http';
-import { handleRequest } from '../../src/http/app.js';
-import { conversationMemorySources } from '../../src/modules/conversations/memory-sources.js';
-import { createMemoryService } from '../../src/modules/memory/service.js';
+import { handleRequest } from '../helpers/http-app.js';
+import { conversationMemorySources } from '../../src/features/conversations/public.js';
+import { createMemoryService, type MemoryService } from '../../src/features/memory/public.js';
 import { listen } from '../helpers/harness-consumer.js';
 import {
   createIntegrationDatabase,
@@ -18,10 +18,19 @@ maybe('memory HTTP management', () => {
   let database: IntegrationDatabase;
   let server: Server;
   let base: string;
+  let memoryService: MemoryService;
   beforeAll(async () => {
     database = await createIntegrationDatabase();
+    memoryService = createMemoryService({
+      pool: database.pool,
+      sources: conversationMemorySources,
+    });
     server = createServer((req, res) => {
-      void handleRequest(req, res, { pool: database.pool, tzdbVersion: 'fixture-v1' });
+      void handleRequest(req, res, {
+        pool: database.pool,
+        tzdbVersion: 'fixture-v1',
+        memoryService,
+      });
     });
     base = await listen(server);
   });
@@ -47,10 +56,7 @@ maybe('memory HTTP management', () => {
       "INSERT INTO messages(id,owner_id,conversation_id,role,content) VALUES($1,$2,$3,'user','please remember tea')",
       [messageId, owner.userId, conversationId],
     );
-    const memory = await createMemoryService({
-      pool: database.pool,
-      sources: conversationMemorySources,
-    }).remember(owner.userId, {
+    const memory = await memoryService.remember(owner.userId, {
       conversationId,
       messageIds: [messageId],
       content: 'tea',

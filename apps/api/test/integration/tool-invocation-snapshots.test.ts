@@ -2,16 +2,16 @@ import { admitTestUser } from './setup.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
-import { startConversationRun } from '../../src/modules/conversations/service.js';
-import { invokeTool, reserveToolInvocation } from '../../src/modules/tools/gateway.js';
+import { startConversationRun } from '../../src/agent/operations/start.js';
+import { invokeTool, reserveToolInvocation } from '../../src/agent/tools/gateway.js';
 import {
   executeNonTransactionalInvocation,
   readInvocationSnapshots,
-  readRunInvocationStates,
   reserveInvocation,
-} from '../../src/modules/tools/invocations.js';
-import type { ToolContext, ToolOutcome, ToolResult } from '../../src/modules/tools/contracts.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
+} from '../../src/agent/tools/invocations/invocations.js';
+import { readRunInvocationStates } from '../../src/agent/tools/invocations/run-state.js';
+import type { ToolContext, ToolOutcome, ToolResult } from '../../src/agent/tools/contracts.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 
 const maybe = databaseUrl ? describe : describe.skip;

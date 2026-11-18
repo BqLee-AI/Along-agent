@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { ALIAS_TABLE_V1, FIXTURE_V1 } from '@along/time-core';
-import { createTimeContext, loadTimeContext } from '../src/modules/time/context.js';
-import { normalizeTime, type NormalizeTimeInput } from '../src/modules/time/normalize.js';
+import { createTimeContext, loadTimeContext } from '../src/features/time/context.js';
+import { normalizeTime, type NormalizeTimeInput } from '../src/features/time/normalize.js';
 
 const context = loadTimeContext('fixture-v1');
 const input: NormalizeTimeInput = {

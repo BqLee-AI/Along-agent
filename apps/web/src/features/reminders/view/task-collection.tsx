@@ -6,7 +6,7 @@ import { Button } from '@lorelum/lumen-ui/components/button';
 import { Badge } from '@lorelum/lumen-ui/components/badge';
 import { EmptyState } from '@/shared/ui/page';
 import type { TaskListItem } from '../model/types';
-import { TaskListPageSchema, taskListPath } from '../model/data';
+import { TaskListPageSchema, taskListRequest } from '../model/data';
 import type { PageSnapshot, TaskFilter } from '../model/data';
 import { PageControls, ResourceError, TaskState } from './resource-ui';
 import { ElapsedBasis } from './elapsed-basis';
@@ -27,7 +27,7 @@ export function TaskCollection({
   returnTo: string;
 }) {
   const { page, error, busy, load } = useReminderPages(
-    taskListPath(status),
+    taskListRequest(status),
     initial,
     TaskListPageSchema,
     taskIdentity,

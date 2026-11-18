@@ -22,6 +22,7 @@ import { MeSchema } from '@/shared/session/identity';
 import type { Me } from '@/shared/session/identity';
 import type { ModelSelection, ProviderView } from '@along/contracts';
 import { ApiReadError, readEnvelope } from '@/shared/http/client';
+import { api, writeOptions } from '@/shared/http/eden';
 import { readHistoryCollectionPage } from '@/shared/http/page';
 import {
   collectRunTranscripts,
@@ -256,9 +257,7 @@ export function useConversationTask({
 
   async function loadMe(signal?: AbortSignal) {
     if (meRef.current) return meRef.current;
-    const me = MeSchema.parse(
-      await readEnvelope(await fetch('/api/v1/me', { cache: 'no-store', signal })),
-    );
+    const me = MeSchema.parse(await readEnvelope(await api.api.v1.me.get({ fetch: { signal } })));
     if (mounted.current && !signal?.aborted) meRef.current = me;
     return me;
   }
@@ -344,12 +343,15 @@ export function useConversationTask({
       const history: ConversationRunHistoryItem[] = [];
       let next: string | null = null;
       do {
-        const query = new URLSearchParams({ limit: '50' });
-        if (next !== null) query.set('cursor', next);
+        const query: { limit: string; cursor?: string } = {
+          limit: '50',
+          ...(next !== null ? { cursor: next } : {}),
+        };
         const page = await readHistoryCollectionPage(
-          `/api/v1/conversations/${encodeURIComponent(cid)}/runs?${query}`,
+          api.api.v1
+            .conversations({ id: encodeURIComponent(cid) })
+            .runs.get({ query, fetch: { signal: request.signal } }),
           ConversationRunPageSchema,
-          request.signal,
         );
         if (!valid()) return;
         if (page.items.some((item) => item.conversation_id !== cid))
@@ -368,18 +370,7 @@ export function useConversationTask({
       for (const item of history) {
         let after = cursors.current.get(item.run_id) ?? 0;
         for (;;) {
-          const query = new URLSearchParams({
-            run_id: item.run_id,
-            after_seq: String(after),
-            limit: '200',
-          });
-          const page = await readHistoryEventPage(
-            `/api/v1/conversations/${encodeURIComponent(cid)}?${query}`,
-            cid,
-            item.run_id,
-            after,
-            request.signal,
-          );
+          const page = await readHistoryEventPage(cid, item.run_id, after, request.signal);
           if (!valid()) return;
           for (const event of page.items) acceptEvent(event);
           if (page.nextCursor === null) break;
@@ -402,10 +393,9 @@ export function useConversationTask({
           if (approval.kind !== 'document') continue;
           const detail = DocumentApprovalDetailSchema.parse(
             await readEnvelope(
-              await fetch(`/api/v1/document-approvals/${encodeURIComponent(approval.approvalId)}`, {
-                cache: 'no-store',
-                signal: request.signal,
-              }),
+              await api.api.v1['document-approvals']({
+                id: encodeURIComponent(approval.approvalId),
+              }).get({ fetch: { signal: request.signal } }),
             ),
           );
           if (!valid()) return;
@@ -474,12 +464,15 @@ export function useConversationTask({
         const archive: MessageHistoryItem[] = [];
         next = null;
         do {
-          const query = new URLSearchParams({ limit: '50' });
-          if (next !== null) query.set('cursor', next);
+          const query: { limit: string; cursor?: string } = {
+            limit: '50',
+            ...(next !== null ? { cursor: next } : {}),
+          };
           const page = await readHistoryCollectionPage(
-            `/api/v1/conversations/${encodeURIComponent(cid)}/messages?${query}`,
+            api.api.v1
+              .conversations({ id: encodeURIComponent(cid) })
+              .messages.get({ query, fetch: { signal: request.signal } }),
             ConversationMessagePageSchema,
-            request.signal,
           );
           if (!valid()) return;
           archive.push(...page.items);
@@ -1124,15 +1117,13 @@ export function useConversationTask({
       sessionStorage.setItem(storageKey, key);
       const cancelled = RunViewSchema.parse(
         await readEnvelope(
-          await fetch(`${runPath(target.conversationId, target.runId)}/actions/cancel`, {
-            method: 'POST',
-            headers: {
-              'content-type': 'application/json',
-              ...(me.csrf_token !== null ? { 'x-csrf-token': me.csrf_token } : {}),
-            },
-            body: JSON.stringify({ idempotency_key: key, reason: 'user_requested' }),
-            signal: request.signal,
-          }),
+          await api.api.v1
+            .conversations({ id: encodeURIComponent(target.conversationId) })
+            .runs({ run: encodeURIComponent(target.runId) })
+            .actions.cancel.post(
+              { idempotency_key: key, reason: 'user_requested' },
+              writeOptions(me.csrf_token, request.signal),
+            ),
         ),
       );
       if (!mounted.current || request.signal.aborted || version !== selectionVersion.current)

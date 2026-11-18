@@ -4,7 +4,7 @@ import { createServer, type Server } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { ThreadEventSchema, type ThreadEvent } from '@along/stream-protocol';
-import { handleRequest } from '../../src/http/app.js';
+import { handleRequest } from '../helpers/http-app.js';
 import { seedAdmittedSession as seedSession } from './setup.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 

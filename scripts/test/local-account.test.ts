@@ -8,7 +8,7 @@ import { maintainAccount } from '../local/account.mjs';
 import {
   configureWorkspaceRegistry,
   getWorkspaceGrant,
-} from '../../apps/api/src/modules/workspaces/service.js';
+} from '../../apps/api/src/features/workspaces/public.js';
 
 const file = path.join(tmpdir(), 'along-account-fixture', 'local.json');
 const registryFile = path.join(path.dirname(file), 'workspace-registry.json');

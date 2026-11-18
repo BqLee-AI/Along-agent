@@ -61,8 +61,18 @@ const fakeDnsModelOrigin = z.string().refine((value) => {
     return false;
   }
 });
-const modelSchema = z
+const harnessLimitsSchema = z
   .object({
+    maxIterations: z.number().int().positive().safe(),
+    maxTokens: z.number().int().positive().safe(),
+    modelWindowTokens: z.number().int().positive().safe().nullable().optional(),
+    reserveTokens: z.number().int().nonnegative().safe().optional(),
+  })
+  .strict();
+
+// Old installation files remain readable without rewriting credential fields.
+const modelSchema = harnessLimitsSchema
+  .extend({
     baseUrl: z
       .string()
       .url()
@@ -70,11 +80,7 @@ const modelSchema = z
       .refine((value) => ['http:', 'https:'].includes(new URL(value).protocol)),
     name: text,
     apiKey: z.string().refine((value) => !value.includes('\0')),
-    maxIterations: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
-    maxTokens: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
     completionCap: z.number().int().positive().safe(),
-    modelWindowTokens: z.number().int().positive().safe().nullable().optional(),
-    reserveTokens: z.number().int().nonnegative().safe().optional(),
   })
   .strict();
 const configSchema = z
@@ -105,6 +111,7 @@ const configSchema = z
     harnessCompletionCap: z.number().int().positive().safe(),
     tzdbVersion: text,
     model: modelSchema.nullable(),
+    harnessLimits: harnessLimitsSchema.optional(),
     routing: z
       .object({
         mode: z.enum(['shadow', 'enforce']),
@@ -210,6 +217,7 @@ export function createConfig(input) {
       : {}),
     tzdbVersion: values.tzdbVersion,
     model: values.model ?? null,
+    ...(values.harnessLimits !== undefined ? { harnessLimits: values.harnessLimits } : {}),
     ...(values.routing !== undefined ? { routing: values.routing } : {}),
     registryFile: values.registryFile ?? null,
     ...(values.identityKeyringFile !== undefined

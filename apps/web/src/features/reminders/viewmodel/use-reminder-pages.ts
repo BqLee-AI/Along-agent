@@ -3,10 +3,10 @@
 import { useEffect, useRef, useState } from 'react';
 import type { z } from 'zod';
 import { readNextPage } from '../model/data';
-import type { PageSnapshot, ReminderPage } from '../model/data';
+import type { PageSnapshot, ReminderPage, ReminderPageLoader } from '../model/data';
 
 export function useReminderPages<T>(
-  path: string,
+  loader: ReminderPageLoader<T>,
   initial: PageSnapshot<T>,
   schema: z.ZodType<ReminderPage<T>>,
   identity: (item: T) => string,
@@ -26,7 +26,7 @@ export function useReminderPages<T>(
     request.current = controller;
     setBusy(true);
     try {
-      const next = await readNextPage(path, resource, schema, identity, controller.signal);
+      const next = await readNextPage(loader, resource, schema, identity, controller.signal);
       if (!controller.signal.aborted) setResource(next);
     } catch (cause) {
       if (!controller.signal.aborted) throw cause;

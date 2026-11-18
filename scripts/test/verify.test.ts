@@ -71,9 +71,10 @@ function fixture({ buildFails = false, typecheckFails = false } = {}) {
     JSON.stringify({
       private: true,
       type: 'module',
-      workspaces: ['packages/*'],
+      workspaces: ['packages/*', 'apps/*'],
       scripts: {
         'build:packages': scripts['build:packages'],
+        'build:api': scripts['build:api'],
         typecheck: scripts.typecheck,
         'test:unit': scripts['test:unit'],
       },
@@ -83,6 +84,18 @@ function fixture({ buildFails = false, typecheckFails = false } = {}) {
   for (const file of ['verify.mjs', 'test-unit.mjs']) {
     cpSync(join(root, 'scripts', file), join(target, 'scripts', file));
   }
+  put(
+    'apps/api/package.json',
+    JSON.stringify({
+      name: '@along/api',
+      private: true,
+      type: 'module',
+      scripts: {
+        build: `bun "${typescript}" --declaration --emitDeclarationOnly --outDir dist src/index.ts`,
+      },
+    }),
+  );
+  put('apps/api/src/index.ts', 'export interface App { value: number }\n');
   put(
     'packages/prepared/package.json',
     JSON.stringify({
@@ -113,8 +126,10 @@ writeFileSync(file, JSON.stringify(count + 1));
   put(
     'packages/prepared/src/check.ts',
     `import { double } from './index';
+import type { App } from '../../../apps/api/dist/index.js';
 const result: ${typecheckFails ? 'string' : 'number'} = double(21);
-export { result };
+const response: App = { value: result };
+export { result, response };
 `,
   );
   for (const consumer of consumers) {

@@ -7,6 +7,7 @@ import { AmbiguousTimeDetailsSchema } from '@along/stream-protocol';
 import { z } from 'zod';
 import type { Me } from '@/shared/session/identity';
 import { readEnvelope } from '@/shared/http/client';
+import { api } from '@/shared/http/eden';
 import { ApprovalActionFailure, postReminderDecision, reminderActionBody } from '../model/approval';
 import type { FoldChoice, ReminderAction, ReminderRequestBody } from '../model/approval';
 
@@ -58,10 +59,9 @@ export function useReminderApproval(initial: ApprovalDetail, me: Me | null) {
     successorController.current = controller;
     setSuccessorReading(true);
     try {
-      const response = await fetch(`/api/v1/approvals/${encodeURIComponent(id)}`, {
-        cache: 'no-store',
-        signal: controller.signal,
-      });
+      const response = await api.api.v1
+        .approvals({ id: encodeURIComponent(id) })
+        .get({ fetch: { signal: controller.signal } });
       const next = ApprovalDetailSchema.parse(await readEnvelope(response));
       if (next.approval_id !== id) throw new Error('后继提议响应关联不一致。');
       if (!controller.signal.aborted) {
@@ -85,10 +85,9 @@ export function useReminderApproval(initial: ApprovalDetail, me: Me | null) {
     readController.current = controller;
     setReading(true);
     try {
-      const response = await fetch(`/api/v1/approvals/${encodeURIComponent(initial.approval_id)}`, {
-        cache: 'no-store',
-        signal: controller.signal,
-      });
+      const response = await api.api.v1
+        .approvals({ id: encodeURIComponent(initial.approval_id) })
+        .get({ fetch: { signal: controller.signal } });
       const next = ApprovalDetailSchema.parse(await readEnvelope(response));
       if (
         next.approval_id !== initial.approval_id ||

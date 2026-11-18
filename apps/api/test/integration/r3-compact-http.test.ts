@@ -4,14 +4,14 @@ import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { Pool } from 'pg';
 import { z } from 'zod';
-import { handleRequest } from '../../src/http/app.js';
-import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import { measureHarnessContext } from '../../src/modules/conversations/harness-context.js';
-import { loadHarnessServices } from '../../src/modules/conversations/harness-config.js';
-import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
-import { createHarnessModelTransport } from '../../src/modules/model-providers/harness-model.js';
-import { createRunDriver, RunDriver } from '../../src/modules/conversations/run-driver.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
+import { handleRequest } from '../helpers/http-app.js';
+import { createContextPolicy } from '../../src/features/conversations/public.js';
+import { measureSdkContext } from '../../src/features/model-providers/public.js';
+import { loadHarnessServices } from '../../src/agent/runtime/config.js';
+import type { HarnessServices } from '../../src/agent/runtime/contracts.js';
+import { createLocalFixtureModelTransport } from '../helpers/local-fixture-model.js';
+import { createRunDriver, RunDriver } from '../../src/agent/runtime/run-driver.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
 import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import { frames, jsonBody, listen, sendModelSse } from '../helpers/harness-consumer.js';
 import {
@@ -170,7 +170,7 @@ suite('native server-owned compact over HTTP', () => {
       mode === 'cancel' || mode === 'cancel-ignore'
         ? new RunDriver(new Pool({ ...db.pool.options, max: 2 }), 1)
         : createRunDriver(db.pool);
-    const upstream = createHarnessModelTransport({
+    const upstream = createLocalFixtureModelTransport({
       baseUrl: `${modelBase}/v1`,
       model: 'fixture-transport-only',
     });
@@ -227,12 +227,12 @@ suite('native server-owned compact over HTTP', () => {
               model: 'fixture-transport-only',
             }),
         model,
-        measure: async (...args: Parameters<typeof measureHarnessContext>) => {
+        measure: async (...args: Parameters<typeof measureSdkContext>) => {
           if (mode === 'active' && ++measureCalls === 1) {
             measureEntered.resolve();
             await releaseMeasure.promise;
           }
-          return measureHarnessContext(...args);
+          return measureSdkContext(...args);
         },
       },
     };

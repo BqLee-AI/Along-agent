@@ -7,7 +7,7 @@ import {
   HarnessStartSchema,
   RunViewSchema,
 } from '@along/contracts';
-import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
+import { createContextPolicy } from '../../src/features/conversations/public.js';
 
 const messageId = randomUUID();
 const snapshot = {

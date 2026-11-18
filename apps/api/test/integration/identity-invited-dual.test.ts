@@ -22,10 +22,14 @@ import {
   authUserDisabledSchema,
   authDeletionRequestedSchema,
 } from '@along/contracts';
-import { handleRequest, type AppDeps } from '../../src/http/app.js';
-import { createAccountService } from '../../src/modules/identity/account-service.js';
-import { createInvitedAccountService } from '../../src/modules/identity/invited-service.js';
-import { openIdentity, parseIdentityKeyring } from '../../src/modules/identity/email-security.js';
+import { handleRequest } from '../helpers/http-app.js';
+import type { AppDeps } from '../../src/http/contracts.js';
+import { createConfiguredAccountService } from '../../src/bootstrap/identity.js';
+import { createInvitedAccountService } from '../../src/features/identity/account/invited-service.js';
+import {
+  openIdentity,
+  parseIdentityKeyring,
+} from '../../src/features/identity/security/email-security.js';
 import { identityKeyfileFixture } from '../helpers/identity-security.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 
@@ -84,7 +88,7 @@ suite('invited accounts signed dual public boundary', () => {
       const deps: AppDeps = {
         pool,
         tzdbVersion: 'fixture-v1',
-        accountService: createAccountService(pool, {
+        accountService: createConfiguredAccountService(pool, {
           secret,
           origin,
           keys,
@@ -168,13 +172,20 @@ suite('invited accounts signed dual public boundary', () => {
             output.delete(name);
             for (const item of Array.isArray(value) ? value : [value]) output.append(name, item);
           },
+          getHeader(name: string) {
+            return output.get(name) ?? undefined;
+          },
           writeHead(code: number, values: Record<string, string>) {
             status = code;
             this.headersSent = true;
             for (const [name, value] of Object.entries(values)) this.setHeader(name, value);
           },
-          end(value: string) {
-            payload = value;
+          write(value: string) {
+            payload += value;
+            return true;
+          },
+          end(value?: string) {
+            if (value) payload += value;
             response.emit('finish');
           },
         });

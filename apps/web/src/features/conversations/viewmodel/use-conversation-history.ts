@@ -5,6 +5,7 @@ import type { Dispatch, SetStateAction } from 'react';
 import { ConversationListPageSchema } from '@along/contracts';
 import type { ConversationListItem } from '@along/contracts';
 import { readHistoryCollectionPage } from '@/shared/http/page';
+import { api } from '@/shared/http/eden';
 import type { HistoryPageState } from '@/shared/http/page';
 import { useHistoryPage } from '@/shared/http/use-page';
 
@@ -19,12 +20,10 @@ export interface ConversationHistoryResource {
 export function useConversationHistory(): ConversationHistoryResource {
   const [search, setSearch] = useState('');
   const loader = useCallback(async (cursor: string | null, signal: AbortSignal) => {
-    const query = new URLSearchParams({ limit: '20' });
-    if (cursor !== null) query.set('cursor', cursor);
+    const query = { limit: '20', ...(cursor !== null ? { cursor } : {}) };
     const page = await readHistoryCollectionPage(
-      `/api/v1/conversations?${query}`,
+      api.api.v1.conversations.get({ query, fetch: { signal } }),
       ConversationListPageSchema,
-      signal,
     );
     return { items: page.items, nextCursor: page.next_cursor };
   }, []);

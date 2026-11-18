@@ -1,9 +1,13 @@
+import {
+  listReminderClarifications,
+  readReminderTimeErrors,
+} from '../../src/agent/tools/reminders/reminder-source.js';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import { acceptReminderDate } from '../../src/modules/conversations/reminder-date.js';
+import { acceptReminderDate } from '../../src/features/conversations/lifecycle/reminder-date.js';
 import { admitTestUser, createIntegrationDatabase, type IntegrationDatabase } from './setup.js';
-import { reserveToolInvocation, invokeTool } from '../../src/modules/tools/gateway.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
+import { reserveToolInvocation, invokeTool } from '../../src/agent/tools/gateway.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
 let db: IntegrationDatabase;
 beforeAll(async () => {
   db = await createIntegrationDatabase();
@@ -62,17 +66,21 @@ test('explicit same-goal time clarification inherits only the accepted unresolve
   );
   const client = await db.pool.connect();
   try {
-    const accepted = await acceptReminderDate(client, {
-      ownerId,
-      conversationId,
-      inputMessageId: messageId,
-      text: '下午三点，上海时间',
-      receivedAtUtc: '2027-11-03T01:02:00Z',
-      foldChoice: 'none',
-      clarificationOfRunId: runId,
-      confirmedTimezone: null,
-      directCreation: true,
-    });
+    const accepted = await acceptReminderDate(
+      client,
+      {
+        ownerId,
+        conversationId,
+        inputMessageId: messageId,
+        text: '下午三点，上海时间',
+        receivedAtUtc: '2027-11-03T01:02:00Z',
+        foldChoice: 'none',
+        clarificationOfRunId: runId,
+        confirmedTimezone: null,
+        directCreation: true,
+      },
+      { listReminderClarifications, readReminderTimeErrors },
+    );
     expect(accepted).toMatchObject({
       anchor: '2027-11-03T01:00:00Z',
       source: { kind: 'clarification', inputMessageId: oldMessage, sourceRunId: runId },
@@ -94,17 +102,21 @@ test('explicit same-goal time clarification inherits only the accepted unresolve
     );
     expect(
       (
-        await acceptReminderDate(client, {
-          ownerId,
-          conversationId,
-          inputMessageId: messageId,
-          text: '下午三点，上海时间',
-          receivedAtUtc: '2027-11-03T01:02:00Z',
-          foldChoice: 'none',
-          clarificationOfRunId: runId,
-          confirmedTimezone: null,
-          directCreation: true,
-        })
+        await acceptReminderDate(
+          client,
+          {
+            ownerId,
+            conversationId,
+            inputMessageId: messageId,
+            text: '下午三点，上海时间',
+            receivedAtUtc: '2027-11-03T01:02:00Z',
+            foldChoice: 'none',
+            clarificationOfRunId: runId,
+            confirmedTimezone: null,
+            directCreation: true,
+          },
+          { listReminderClarifications, readReminderTimeErrors },
+        )
       ).source.kind,
     ).toBe('unresolved');
     await db.pool.query(
@@ -253,17 +265,21 @@ test('timezone-only clarification preserves each selected reminder time and its 
   );
   const client = await db.pool.connect();
   try {
-    const accepted = await acceptReminderDate(client, {
-      ownerId,
-      conversationId,
-      inputMessageId: messageId,
-      text: '上海时间',
-      receivedAtUtc: '2027-11-03T01:02:00Z',
-      foldChoice: 'none',
-      clarificationOfRunId: runId,
-      confirmedTimezone: null,
-      directCreation: true,
-    });
+    const accepted = await acceptReminderDate(
+      client,
+      {
+        ownerId,
+        conversationId,
+        inputMessageId: messageId,
+        text: '上海时间',
+        receivedAtUtc: '2027-11-03T01:02:00Z',
+        foldChoice: 'none',
+        clarificationOfRunId: runId,
+        confirmedTimezone: null,
+        directCreation: true,
+      },
+      { listReminderClarifications, readReminderTimeErrors },
+    );
     expect(accepted).toMatchObject({
       anchor: ctx.anchorReceivedAtUtc,
       timezone: 'Asia/Shanghai',

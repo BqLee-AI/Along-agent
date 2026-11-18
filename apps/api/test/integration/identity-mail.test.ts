@@ -1,3 +1,4 @@
+import { expectApplicationRejection } from '../helpers/application-error.js';
 import { describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
@@ -9,13 +10,15 @@ import {
   sealIdentity,
   tokenDigest,
   type IdentityKeyring,
-} from '../../src/modules/identity/email-security.js';
+} from '../../src/features/identity/security/email-security.js';
 import {
   createResendIdentitySender,
+  type IdentityMailConfig,
+} from '../../src/features/identity/delivery/transport.js';
+import {
   enqueueIdentityMail,
   runIdentityMailTick,
-  type IdentityMailConfig,
-} from '../../src/modules/identity/mail.js';
+} from '../../src/features/identity/delivery/mail.js';
 import { identityKeysFixture } from '../helpers/identity-security.js';
 import { createIntegrationDatabase, databaseUrl } from './setup.js';
 
@@ -420,8 +423,8 @@ integration(
         const previous = process.env.IDENTITY_MAIL_PROVIDER;
         delete process.env.IDENTITY_MAIL_PROVIDER;
         try {
-          await expect(runIdentityMailTick(db.pool, { keys })).rejects.toMatchObject({
-            httpStatus: 503,
+          await expectApplicationRejection(runIdentityMailTick(db.pool, { keys }), {
+            status: 503,
           });
         } finally {
           if (previous === undefined) delete process.env.IDENTITY_MAIL_PROVIDER;
@@ -455,8 +458,8 @@ integration(
         const delivery = await seedDelivery(db.pool, keys);
         const retained = keys.encryption.keys[keys.encryption.active]!;
         delete keys.encryption.keys[keys.encryption.active];
-        await expect(runIdentityMailTick(db.pool, { keys, mail })).rejects.toMatchObject({
-          httpStatus: 503,
+        await expectApplicationRejection(runIdentityMailTick(db.pool, { keys, mail }), {
+          status: 503,
         });
         expect(calls).toBe(0);
         expect(
@@ -491,8 +494,8 @@ integration(
         await db.pool.query(
           `CREATE FUNCTION identity_finish_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.status='submitted' THEN RAISE EXCEPTION 'isolated commit-result fault'; END IF; RETURN NEW; END $$; CREATE TRIGGER identity_finish_fault BEFORE UPDATE ON identity_mail_deliveries FOR EACH ROW EXECUTE FUNCTION identity_finish_fail()`,
         );
-        await expect(runIdentityMailTick(db.pool, { keys, mail })).rejects.toMatchObject({
-          httpStatus: 503,
+        await expectApplicationRejection(runIdentityMailTick(db.pool, { keys, mail }), {
+          status: 503,
         });
         expect(calls).toBe(1);
         expect(

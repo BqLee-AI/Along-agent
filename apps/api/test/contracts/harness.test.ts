@@ -1,11 +1,12 @@
+import { httpStatusForError } from '@along/contracts';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { EnvelopeSchema, HarnessApprovalDecisionSchema } from '@along/contracts';
 import type { ThreadEvent } from '@along/stream-protocol';
-import { HttpError } from '../../src/http/errors.js';
-import { executeRun } from '../../src/modules/conversations/service.js';
-import { parseResult, resultSchema } from '../../src/modules/tools/result-schema.js';
+import { ApplicationError } from '../../src/platform/errors.js';
+import { executeRun } from '../../src/agent/operations/execute.js';
+import { parseResult, resultSchema } from '../../src/agent/tools/result-schema.js';
 import {
   createHarnessConsumer,
   findModelObservation,
@@ -32,9 +33,9 @@ async function typedFailure(work: Promise<unknown>, status: number, code: string
   try {
     await work;
   } catch (error) {
-    expect(error).toBeInstanceOf(HttpError);
-    if (!(error instanceof HttpError)) throw error;
-    expect(error.httpStatus).toBe(status);
+    expect(error).toBeInstanceOf(ApplicationError);
+    if (!(error instanceof ApplicationError)) throw error;
+    expect(httpStatusForError(error.code)).toBe(status);
     expect(error.errorCode).toBe(code);
     return error;
   }
@@ -97,9 +98,9 @@ async function approval(mode: ConsumerMode) {
     for (const reply of replies) {
       if (reply.status === 'fulfilled') accepted.push(reply.value);
       else {
-        expect(reply.reason).toBeInstanceOf(HttpError);
-        if (!(reply.reason instanceof HttpError)) throw reply.reason;
-        expect(reply.reason.httpStatus).toBe(409);
+        expect(reply.reason).toBeInstanceOf(ApplicationError);
+        if (!(reply.reason instanceof ApplicationError)) throw reply.reason;
+        expect(httpStatusForError(reply.reason.code)).toBe(409);
         expect(reply.reason.errorCode).toBe('STATE_CONFLICT');
       }
     }

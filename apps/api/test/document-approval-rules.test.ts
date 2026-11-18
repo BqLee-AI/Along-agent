@@ -4,15 +4,15 @@ import { DocumentApprovalConfirmBodySchema } from '@along/contracts';
 import type {
   DocumentApplyEvidence,
   DocumentReadEvidence,
-} from '../src/modules/approvals/document-evidence.js';
-import type { DocumentApprovalRow } from '../src/modules/approvals/document-query.js';
+} from '../src/features/approvals/document/document-evidence.js';
+import type { DocumentApprovalRow } from '../src/features/approvals/document/document-query.js';
 import {
   assertExactDocumentText,
   buildDocumentPresentation,
   documentContentVersion,
   documentEvidenceLater,
   requireDocumentChainComplete,
-} from '../src/modules/approvals/document-rules.js';
+} from '../src/features/approvals/document/document-rules.js';
 
 function fixture() {
   const ownerId = randomUUID(),

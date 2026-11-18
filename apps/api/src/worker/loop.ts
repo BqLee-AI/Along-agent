@@ -7,14 +7,14 @@ import { randomUUID } from 'node:crypto';
 import { channel } from 'node:diagnostics_channel';
 import { createPool, type Pool } from '../db/pool.js';
 import { OUTBOX_POLL_INTERVAL_MS } from '@along/scheduler-core';
-import { runCancelPhase } from '../modules/tasks/scheduler/cancel-phase.js';
-import { runSchedulePhase } from '../modules/tasks/scheduler/schedule.js';
-import { runClaimPhase } from '../modules/tasks/scheduler/claim.js';
-import { runSendPhase } from '../modules/tasks/scheduler/send.js';
-import { runAckPhase } from '../modules/tasks/scheduler/ack.js';
-import { runMissedPhase } from '../modules/tasks/scheduler/missed.js';
-import { createLocalInAppProvider } from '../modules/notifications/service.js';
-import { runIdentityMailTick } from '../modules/identity/mail.js';
+import { runCancelPhase } from '../features/tasks/public.js';
+import { runSchedulePhase } from '../features/tasks/public.js';
+import { runClaimPhase } from '../features/tasks/public.js';
+import { runSendPhase } from '../features/tasks/public.js';
+import { runAckPhase } from '../features/tasks/public.js';
+import { runMissedPhase } from '../features/tasks/public.js';
+import { createLocalInAppProvider } from '../features/notifications/public.js';
+import { runIdentityMailTick } from '../features/identity/public.js';
 
 const schedulerTicks = channel('along.scheduler.tick');
 

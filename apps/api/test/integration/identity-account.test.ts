@@ -1,3 +1,4 @@
+import { expectApplicationRejection } from '../helpers/application-error.js';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { createServer, request, type Server } from 'node:http';
 import { randomUUID } from 'node:crypto';
@@ -12,18 +13,16 @@ import {
   seedApproval,
   type IntegrationDatabase,
 } from './setup.js';
-import {
-  createAccountService,
-  type AccountService,
-} from '../../src/modules/identity/account-service.js';
-import { createAuth } from '../../src/modules/identity/better-auth.js';
-import { seedSession } from '../../src/modules/identity/seed.js';
+import { type AccountService } from '../../src/features/identity/public.js';
+import { createConfiguredAccountService } from '../../src/bootstrap/identity.js';
+import { createAuth } from '../../src/features/identity/session/better-auth.js';
+import { seedSession } from '../../src/features/identity/session/seed.js';
 import {
   deriveAuthEmail,
   hashSessionToken,
   verifySignedCookieValue,
-} from '../../src/modules/identity/crypto.js';
-import { handleRequest } from '../../src/http/app.js';
+} from '../../src/features/identity/session/crypto.js';
+import { handleRequest } from '../helpers/http-app.js';
 
 const maybe = databaseUrl ? describe : describe.skip;
 const origin = process.env.APP_ORIGIN ?? 'http://localhost:3000';
@@ -59,7 +58,11 @@ maybe('R1 account application service and public HTTP', () => {
   beforeEach(async () => {
     database = await createIntegrationDatabase();
     pool = database.pool;
-    service = createAccountService(pool, { secret, origin, workspaceStatus: unconfigured });
+    service = createConfiguredAccountService(pool, {
+      secret,
+      origin,
+      workspaceStatus: unconfigured,
+    });
   });
   afterEach(async () => {
     if (server) {
@@ -134,7 +137,7 @@ maybe('R1 account application service and public HTTP', () => {
     ).toBe(before);
     expect(await counts()).toEqual([1, 1, 1, 1]);
     await expect(seedSession(pool)).rejects.toThrow('administrator bound');
-    await expect(service.initialize(fields)).rejects.toMatchObject({ httpStatus: 409 });
+    await expectApplicationRejection(service.initialize(fields), { status: 409 });
   });
 
   it('serializes two independent connection initializers with exactly one complete winner', async () => {
@@ -142,7 +145,11 @@ maybe('R1 account application service and public HTTP', () => {
     try {
       const results = await Promise.allSettled([
         service.initialize(fields),
-        createAccountService(second, { secret, origin, workspaceStatus: unconfigured }).initialize({
+        createConfiguredAccountService(second, {
+          secret,
+          origin,
+          workspaceStatus: unconfigured,
+        }).initialize({
           ...fields,
           login_name: 'other',
         }),
@@ -160,7 +167,7 @@ maybe('R1 account application service and public HTTP', () => {
       await pool.query(
         `CREATE FUNCTION account_test_fault() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'account write fault'; END $$; CREATE TRIGGER account_test_fault BEFORE INSERT ON ${table} FOR EACH ROW EXECUTE FUNCTION account_test_fault()`,
       );
-      await expect(service.initialize(fields)).rejects.toMatchObject({ httpStatus: 503 });
+      await expectApplicationRejection(service.initialize(fields), { status: 503 });
       const independent = database.connect();
       try {
         expect((await independent.query('SELECT count(*)::int AS n FROM users')).rows[0].n).toBe(0);
@@ -205,14 +212,17 @@ maybe('R1 account application service and public HTTP', () => {
         return typeof value === 'function' ? value.bind(target) : value;
       },
     });
-    await expect(
-      createAccountService(uncertain, { secret, origin, workspaceStatus: unconfigured }).initialize(
-        fields,
-      ),
-    ).rejects.toMatchObject({ httpStatus: 503 });
+    await expectApplicationRejection(
+      createConfiguredAccountService(uncertain, {
+        secret,
+        origin,
+        workspaceStatus: unconfigured,
+      }).initialize(fields),
+      { status: 503 },
+    );
     expect(await service.status()).toEqual({ state: 'ready' });
     expect(await counts()).toEqual([1, 1, 1, 1]);
-    await expect(service.initialize(fields)).rejects.toMatchObject({ httpStatus: 409 });
+    await expectApplicationRejection(service.initialize(fields), { status: 409 });
   });
 
   it('provides a genuine library factory transaction with rollback visible from an independent pool', async () => {
@@ -241,13 +251,13 @@ maybe('R1 account application service and public HTTP', () => {
   });
 
   it('loaded registration without users closes anonymous setup instead of assuming an empty installation', async () => {
-    const registered = createAccountService(pool, {
+    const registered = createConfiguredAccountService(pool, {
       secret,
       origin,
       workspaceStatus: async () => ({ state: 'loaded', ownerIds: [] }),
     });
     expect(await registered.status()).toEqual({ state: 'legacy_claim_required' });
-    await expect(registered.initialize(fields)).rejects.toMatchObject({ httpStatus: 409 });
+    await expectApplicationRejection(registered.initialize(fields), { status: 409 });
     expect(await counts()).toEqual([0, 0, 0, 0]);
   });
 
@@ -259,13 +269,14 @@ maybe('R1 account application service and public HTTP', () => {
       deriveAuthEmail('occupied', secret),
       other.userId,
     ]);
-    await expect(
+    await expectApplicationRejection(
       service.claim(original.userId, {
         login_name: 'occupied',
         password: fields.password,
         confirmed: true,
       }),
-    ).rejects.toMatchObject({ httpStatus: 409 });
+      { status: 409 },
+    );
     const selected = (await service.listMaintenanceCandidates()).find(
       (candidate) => candidate.displayName === 'No credential',
     )!;
@@ -286,16 +297,16 @@ maybe('R1 account application service and public HTTP', () => {
 
   it('does not initialize over orphan business owners or invalid/unreadable registries', async () => {
     await seedApproval(pool, { ownerId: randomUUID() });
-    await expect(service.status()).rejects.toMatchObject({ httpStatus: 503 });
-    await expect(service.initialize(fields)).rejects.toMatchObject({ httpStatus: 503 });
+    await expectApplicationRejection(service.status(), { status: 503 });
+    await expectApplicationRejection(service.initialize(fields), { status: 503 });
     expect(await counts()).toEqual([0, 0, 0, 0]);
     for (const state of ['invalid', 'unreadable'] as const) {
-      const blocked = createAccountService(pool, {
+      const blocked = createConfiguredAccountService(pool, {
         secret,
         origin,
         workspaceStatus: async () => ({ state, ownerIds: [] }),
       });
-      await expect(blocked.status()).rejects.toMatchObject({ httpStatus: 503 });
+      await expectApplicationRejection(blocked.status(), { status: 503 });
     }
   });
 
@@ -307,7 +318,7 @@ maybe('R1 account application service and public HTTP', () => {
       (await pool.query('SELECT * FROM auth_accounts WHERE user_id=$1', [other.userId])).rows,
     );
     expect((await service.status()).state).toBe('legacy_claim_required');
-    await expect(service.initialize(fields)).rejects.toMatchObject({ httpStatus: 409 });
+    await expectApplicationRejection(service.initialize(fields), { status: 409 });
     const email = (await pool.query('SELECT auth_email FROM users WHERE id=$1', [original.userId]))
       .rows[0].auth_email;
     await expect(
@@ -357,29 +368,32 @@ maybe('R1 account application service and public HTTP', () => {
     const candidates = await service.listMaintenanceCandidates();
     expect(JSON.stringify(candidates)).not.toContain(original.userId);
     const selected = candidates.find((candidate) => candidate.displayName === 'Selected original')!;
-    await expect(
+    await expectApplicationRejection(
       service.bindLocal({
         selection: randomUUID(),
         confirmed: true,
         loginName: 'selected',
         password: fields.password,
       }),
-    ).rejects.toMatchObject({ httpStatus: 400 });
-    await expect(
+      { status: 400 },
+    );
+    await expectApplicationRejection(
       service.claim(original.userId, {
         login_name: 'selected',
         password: 'replacement password',
         confirmed: true,
       }),
-    ).rejects.toMatchObject({ httpStatus: 409 });
-    await expect(
+      { status: 409 },
+    );
+    await expectApplicationRejection(
       service.bindLocal({
         selection: selected.selection,
         confirmed: true,
         loginName: 'selected',
         password: 'wrong password',
       }),
-    ).rejects.toMatchObject({ httpStatus: 401 });
+      { status: 401 },
+    );
     expect(
       await service.bindLocal({
         selection: selected.selection,
@@ -420,13 +434,14 @@ maybe('R1 account application service and public HTTP', () => {
           ])
         ).rows,
       );
-      await expect(
+      await expectApplicationRejection(
         service.claim(original.userId, {
           login_name: 'claimed',
           password: fields.password,
           confirmed: true,
         }),
-      ).rejects.toMatchObject({ httpStatus: 409 });
+        { status: 409 },
+      );
       expect(await service.getBoundAdministrator()).toBeNull();
       expect(
         JSON.stringify(
@@ -621,7 +636,7 @@ maybe('R1 account application service and public HTTP', () => {
 maybe('R1 auth finite uploads', () => {
   it('rejects Origin and declared/chunked UTF8 overflows before upload end and preserves exact byte boundary', async () => {
     const database = await createIntegrationDatabase();
-    const accountService = createAccountService(database.pool, {
+    const accountService = createConfiguredAccountService(database.pool, {
       secret,
       origin,
       workspaceStatus: unconfigured,

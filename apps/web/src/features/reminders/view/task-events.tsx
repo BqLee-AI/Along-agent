@@ -4,7 +4,7 @@ import { History } from 'lucide-react';
 import { Button } from '@lorelum/lumen-ui/components/button';
 import { EmptyState } from '@/shared/ui/page';
 import type { TaskEventItem } from '../model/types';
-import { TaskEventsPageSchema, taskEventsPath } from '../model/data';
+import { TaskEventsPageSchema, taskEventsRequest } from '../model/data';
 import type { PageSnapshot } from '../model/data';
 import { PageControls, ResourceError } from './resource-ui';
 import { useReminderPages } from '../viewmodel/use-reminder-pages';
@@ -20,7 +20,7 @@ export function TaskEvents({
   returnTo: string;
 }) {
   const { page, error, busy, load } = useReminderPages(
-    taskEventsPath(taskId),
+    taskEventsRequest(taskId),
     initial,
     TaskEventsPageSchema,
     eventIdentity,

@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { withTransaction } from '../../src/db/transaction.js';
-import { interruptedGoalResult } from '../../src/modules/conversations/goal-result.js';
-import { invokeTool, reserveToolInvocation } from '../../src/modules/tools/gateway.js';
+import { interruptedGoalResult } from '../../src/agent/operations/goal-result.js';
+import { invokeTool, reserveToolInvocation } from '../../src/agent/tools/gateway.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 import { seedContext } from './tool-invocations-probe.js';
 

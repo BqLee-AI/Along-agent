@@ -13,10 +13,10 @@ import {
   workspaceResultSchema,
   type HarnessModelReply,
 } from '@along/contracts';
-import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import { createHarnessModelTransport } from '../../src/modules/model-providers/harness-model.js';
-import { configureWorkspaceRegistry } from '../../src/modules/workspaces/service.js';
-import type { WorkspaceRegistration } from '../../src/modules/workspaces/service.js';
+import { createContextPolicy } from '../../src/features/conversations/public.js';
+import { createLocalFixtureModelTransport } from '../helpers/local-fixture-model.js';
+import { configureWorkspaceRegistry } from '../../src/features/workspaces/public.js';
+import type { WorkspaceRegistration } from '../../src/features/workspaces/public.js';
 import {
   createHarnessConsumer,
   findModelObservation,
@@ -238,7 +238,7 @@ beforeAll(async () => {
       model: 'controlled-create-resolution',
     }),
   };
-  fixture.model = createHarnessModelTransport({
+  fixture.model = createLocalFixtureModelTransport({
     baseUrl: `${base}/v1`,
     model: 'controlled-create-resolution',
   });

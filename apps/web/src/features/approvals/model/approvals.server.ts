@@ -5,11 +5,14 @@ import { apiGet } from '@/shared/http/server';
 import { pageReturnTo } from '@/shared/session/navigation';
 import type { PageQuery } from '@/shared/session/navigation';
 import { MeSchema } from '@/shared/session/identity';
-import { ApprovalPageSchema, approvalFilter, approvalListPath } from './approval';
+import { ApprovalPageSchema, approvalFilter } from './approval';
 
 export async function readApprovals(query: PageQuery) {
   const status = approvalFilter(query.status);
-  const result = await apiGet<unknown>(approvalListPath(status), pageReturnTo('/approvals', query));
+  const result = await apiGet(
+    (api) => api.api.v1.approvals.get({ query: { status, limit: '50' } }),
+    pageReturnTo('/approvals', query),
+  );
   const parsed = result.ok ? ApprovalPageSchema.safeParse(result.data) : null;
   return {
     status,
@@ -25,8 +28,8 @@ export async function readApprovals(query: PageQuery) {
 export async function readReminderApproval(id: string, query: PageQuery) {
   const returnTo = pageReturnTo(`/approvals/${encodeURIComponent(id)}`, query);
   const [result, identity] = await Promise.all([
-    apiGet<unknown>(`/api/v1/approvals/${encodeURIComponent(id)}`, returnTo),
-    apiGet<unknown>('/api/v1/me', returnTo),
+    apiGet((api) => api.api.v1.approvals({ id: encodeURIComponent(id) }).get(), returnTo),
+    apiGet((api) => api.api.v1.me.get(), returnTo),
   ]);
   const parsed = result.ok ? ApprovalDetailSchema.safeParse(result.data) : null;
   const me = identity.ok ? MeSchema.safeParse(identity.data) : null;
@@ -47,8 +50,11 @@ export async function readReminderApproval(id: string, query: PageQuery) {
 export async function readDocumentApproval(id: string, query: PageQuery) {
   const returnTo = pageReturnTo(`/document-approvals/${encodeURIComponent(id)}`, query);
   const [result, identity] = await Promise.all([
-    apiGet<unknown>(`/api/v1/document-approvals/${encodeURIComponent(id)}`, returnTo),
-    apiGet<unknown>('/api/v1/me', returnTo),
+    apiGet(
+      (api) => api.api.v1['document-approvals']({ id: encodeURIComponent(id) }).get(),
+      returnTo,
+    ),
+    apiGet((api) => api.api.v1.me.get(), returnTo),
   ]);
   const parsed = result.ok ? DocumentApprovalDetailSchema.safeParse(result.data) : null;
   const me = identity.ok ? MeSchema.safeParse(identity.data) : null;

@@ -3,10 +3,11 @@
 import { useEffect, useState } from 'react';
 import type { z } from 'zod';
 import { readAccountCollection } from '../model/account-actions';
+import type { AccountCollection } from '../model/account-actions';
 
 /** Read-only cursor pagination over a protected account collection; never replays a write. */
 export function useAccountCollection<T extends { id: string }>(
-  path: string,
+  path: AccountCollection,
   schema: z.ZodType<{ items: T[]; next_cursor: string | null }>,
 ) {
   const [items, setItems] = useState<T[]>([]);
@@ -18,10 +19,7 @@ export function useAccountCollection<T extends { id: string }>(
     setBusy(true);
     setError(null);
     try {
-      const result = await readAccountCollection(
-        `${path}${next ? `?${new URLSearchParams({ cursor: next })}` : ''}`,
-        schema,
-      );
+      const result = await readAccountCollection(path, schema, undefined, next);
       setItems((old) => (next ? [...old, ...result.items] : result.items));
       setCursor(result.next_cursor);
     } catch (failure) {

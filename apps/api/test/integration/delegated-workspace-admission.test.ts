@@ -1,23 +1,21 @@
+import { expectApplicationRejection } from '../helpers/application-error.js';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { WorkspaceGrant } from '@along/contracts';
-import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import type { ConversationDeps } from '../../src/modules/conversations/contracts.js';
-import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
-import {
-  cancelConversationRun,
-  getRunView,
-} from '../../src/modules/conversations/harness-authority.js';
-import { startConversationRun } from '../../src/modules/conversations/service.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
-import { DELEGATION_TOOL_IDS, R3_MEMORY_TOOL_IDS } from '../../src/modules/tools/contracts.js';
+import { createContextPolicy } from '../../src/features/conversations/public.js';
+import type { ConversationDeps } from '../../src/agent/runtime/contracts.js';
+import type { HarnessServices } from '../../src/agent/runtime/contracts.js';
+import { cancelConversationRun, getRunView } from '../../src/agent/operations/run.js';
+import { startConversationRun } from '../../src/agent/operations/start.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
+import { DELEGATION_TOOL_IDS, R3_MEMORY_TOOL_IDS } from '../../src/agent/tools/contracts.js';
 import {
   configureWorkspaceRegistry,
   resolveFrozenWorkspaceGrant,
-} from '../../src/modules/workspaces/service.js';
+} from '../../src/features/workspaces/public.js';
 import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import {
   createIntegrationDatabase,
@@ -186,9 +184,10 @@ maybe('delegated conversation workspace admission against PostgreSQL', () => {
     expect(replay.runId).toBe(run.runId);
     expect(replay.context).toBeNull();
     expect(replay.replay?.at(-1)?.type).toBe('thread.cancelled');
-    await expect(
+    await expectApplicationRejection(
       start(owner.userId, { ...body, workspace_ids: ['alpha', 'charlie'] }, key),
-    ).rejects.toMatchObject({ httpStatus: 409 });
+      { status: 409 },
+    );
     expect(
       (await stored(run.runId)).frozen_context.workspaceGrants.map((g) => g.workspace_id),
     ).toEqual(['alpha', 'beta']);

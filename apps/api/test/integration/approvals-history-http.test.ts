@@ -5,10 +5,10 @@ import { createServer } from 'node:http';
 import type { Server } from 'node:http';
 import type { Pool } from 'pg';
 import { ApprovalDetailSchema, EnvelopeSchema } from '@along/contracts';
-import { handleRequest } from '../../src/http/app.js';
+import { handleRequest } from '../helpers/http-app.js';
 import { seedAdmittedSession as seedSession } from './setup.js';
-import { confirmApproval } from '../../src/modules/approvals/confirm.js';
-import { getApprovalDetail } from '../../src/modules/approvals/service.js';
+import { confirmApproval } from '../../src/features/approvals/reminder/confirm.js';
+import { getApprovalDetail } from '../../src/features/approvals/reminder/service.js';
 import { createIntegrationDatabase, databaseUrl, seedApproval } from './setup.js';
 import type { IntegrationDatabase } from './setup.js';
 

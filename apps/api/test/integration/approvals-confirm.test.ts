@@ -1,8 +1,12 @@
+import {
+  applicationErrorEvidence,
+  expectApplicationRejection,
+} from '../helpers/application-error.js';
 import { beforeAll, afterAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
-import { confirmApproval, rejectApproval } from '../../src/modules/approvals/confirm.js';
-import { getApprovalDetail } from '../../src/modules/approvals/service.js';
+import { confirmApproval, rejectApproval } from '../../src/features/approvals/reminder/confirm.js';
+import { getApprovalDetail } from '../../src/features/approvals/reminder/service.js';
 import {
   createIntegrationDatabase,
   databaseUrl,
@@ -154,45 +158,48 @@ maybe('approvals confirm transaction', () => {
 
   it('wrong hash is PRESENTATION_MISMATCH 409 and builds no task', async () => {
     const seed = await seedApproval(pool, {});
-    await expect(
+    await expectApplicationRejection(
       confirmApproval({ pool }, seed.ownerId, seed.id, {
         presentation_hash: 'ph_deadbeef',
         seen_content: await seenEcho(pool, seed.ownerId, seed.id),
         idempotency_key: randomUUID(),
       }),
-    ).rejects.toMatchObject({
-      httpStatus: 409,
-      code: 400001,
-      errorCode: 'PRESENTATION_MISMATCH',
-    });
+      {
+        status: 409,
+        code: 400001,
+        errorCode: 'PRESENTATION_MISMATCH',
+      },
+    );
     expect(await taskCount(pool, seed.id)).toBe(0);
   });
 
   it('wrong seen content is PRESENTATION_MISMATCH 409 and builds no task', async () => {
     const seed = await seedApproval(pool, {});
-    await expect(
+    await expectApplicationRejection(
       confirmApproval({ pool }, seed.ownerId, seed.id, {
         presentation_hash: seed.presentationHash,
         seen_content: '有人篡改过的回显',
         idempotency_key: randomUUID(),
       }),
-    ).rejects.toMatchObject({ httpStatus: 409, code: 400001 });
+      { status: 409, code: 400001 },
+    );
     expect(await taskCount(pool, seed.id)).toBe(0);
   });
 
   it('expired approval is APPROVAL_EXPIRED 410 and builds no task', async () => {
     const seed = await seedApproval(pool, { expiresInHours: -1 });
-    await expect(
+    await expectApplicationRejection(
       confirmApproval({ pool }, seed.ownerId, seed.id, {
         presentation_hash: seed.presentationHash,
         seen_content: 'whatever',
         idempotency_key: randomUUID(),
       }),
-    ).rejects.toMatchObject({
-      httpStatus: 410,
-      code: 400002,
-      errorCode: 'APPROVAL_EXPIRED',
-    });
+      {
+        status: 410,
+        code: 400002,
+        errorCode: 'APPROVAL_EXPIRED',
+      },
+    );
     expect(await taskCount(pool, seed.id)).toBe(0);
     // Locked-owner expiry is committed before the outer 410 is raised.
     const { rows } = await pool.query<{ state: string }>(
@@ -218,36 +225,36 @@ maybe('approvals confirm transaction', () => {
       presentation_hash: 'ph_x',
       seen_content: 'x',
       idempotency_key: randomUUID(),
-    }).then(
-      () => null,
-      (e: { httpStatus?: number; code?: number; details?: unknown }) => e,
-    );
-    expect(err).toMatchObject({ httpStatus: 409, code: 400003 });
+    }).then(() => null, applicationErrorEvidence);
+    expect(err).toMatchObject({ status: 409, code: 400003 });
     expect(err?.details).toMatchObject({ successor_approval_id: successorId });
     expect(await taskCount(pool, old.id)).toBe(0);
   });
 
   it('missing body fields are 400, unknown/cross-owner are 404/403', async () => {
     const seed = await seedApproval(pool, {});
-    await expect(
+    await expectApplicationRejection(
       confirmApproval({ pool }, seed.ownerId, seed.id, {
         presentation_hash: seed.presentationHash,
       }),
-    ).rejects.toMatchObject({ httpStatus: 400 });
-    await expect(
+      { status: 400 },
+    );
+    await expectApplicationRejection(
       confirmApproval({ pool }, seed.ownerId, randomUUID(), {
         presentation_hash: seed.presentationHash,
         seen_content: 'x',
         idempotency_key: randomUUID(),
       }),
-    ).rejects.toMatchObject({ httpStatus: 404 });
-    await expect(
+      { status: 404 },
+    );
+    await expectApplicationRejection(
       confirmApproval({ pool }, randomUUID(), seed.id, {
         presentation_hash: seed.presentationHash,
         seen_content: 'x',
         idempotency_key: randomUUID(),
       }),
-    ).rejects.toMatchObject({ httpStatus: 403 });
+      { status: 403 },
+    );
     expect(await taskCount(pool, seed.id)).toBe(0);
   });
 
@@ -278,23 +285,21 @@ maybe('approvals confirm transaction', () => {
     });
     const err = await rejectApproval({ pool }, seed.ownerId, seed.id, {
       idempotency_key: randomUUID(),
-    }).then(
-      () => null,
-      (e: { httpStatus?: number; code?: number; details?: unknown }) => e,
-    );
-    expect(err).toMatchObject({ httpStatus: 409, code: 400010 });
+    }).then(() => null, applicationErrorEvidence);
+    expect(err).toMatchObject({ status: 409, code: 400010 });
     expect(err?.details).toMatchObject({ task_id: done.task_id });
   });
 
   it('confirm after rejected is 409 STATE_CONFLICT, no task', async () => {
     const seed = await seedApproval(pool, { state: 'rejected' });
-    await expect(
+    await expectApplicationRejection(
       confirmApproval({ pool }, seed.ownerId, seed.id, {
         presentation_hash: seed.presentationHash,
         seen_content: 'x',
         idempotency_key: randomUUID(),
       }),
-    ).rejects.toMatchObject({ httpStatus: 409, code: 400010 });
+      { status: 409, code: 400010 },
+    );
     expect(await taskCount(pool, seed.id)).toBe(0);
   });
 

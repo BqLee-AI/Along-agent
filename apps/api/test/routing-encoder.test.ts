@@ -1,13 +1,10 @@
 import { afterAll, describe, expect, it } from 'bun:test';
 import { rmSync, writeFileSync } from 'node:fs';
-import { createRoutingRuntime } from '../src/modules/conversations/routing/index.js';
-import { jsonDigest, validateBundle } from '../src/modules/conversations/routing/bundle.js';
-import {
-  requestEncoding,
-  validateEncoderUrl,
-} from '../src/modules/conversations/routing/encoder.js';
-import type { EncoderDeadline } from '../src/modules/conversations/routing/encoder.js';
-import type { RoutingFetch } from '../src/modules/conversations/routing/types.js';
+import { createRoutingRuntime } from '../src/agent/routing/index.js';
+import { jsonDigest, validateBundle } from '../src/agent/routing/bundle.js';
+import { requestEncoding, validateEncoderUrl } from '../src/platform/encoder.js';
+import type { EncoderDeadline } from '../src/platform/encoder.js';
+import type { RoutingFetch } from '../src/agent/routing/types.js';
 import { createRoutingFixture } from './routing-fixtures.js';
 
 const fixture = createRoutingFixture();

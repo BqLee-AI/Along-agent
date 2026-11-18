@@ -14,33 +14,33 @@ import type { RunView } from '@along/contracts';
 import type { HarnessModelReply } from '@along/contracts';
 import { ThreadEventSchema } from '@along/stream-protocol';
 import type { ThreadEvent } from '@along/stream-protocol';
-import { handleRequest } from '../../src/http/app.js';
-import { HttpError } from '../../src/http/errors.js';
-import { confirmApproval, rejectApproval } from '../../src/modules/approvals/confirm.js';
-import type { ConfirmResult, RejectResult } from '../../src/modules/approvals/confirm.js';
-import { getApprovalDetail } from '../../src/modules/approvals/service.js';
+import { handleRequest } from './http-app.js';
+import { ApplicationError } from '../../src/platform/errors.js';
+import { confirmApproval, rejectApproval } from '../../src/features/approvals/reminder/confirm.js';
+import type { ConfirmResult, RejectResult } from '../../src/features/approvals/reminder/confirm.js';
+import { getApprovalDetail } from '../../src/features/approvals/reminder/service.js';
+import { executeRun } from '../../src/agent/operations/execute.js';
+import { getConversationDetail } from '../../src/features/conversations/lifecycle/service.js';
 import {
   cancelConversationRun,
-  executeRun,
-  getConversationDetail,
   getRunView,
   resumeConversationRun,
-  startConversationRun,
-} from '../../src/modules/conversations/service.js';
+} from '../../src/agent/operations/run.js';
+import { startConversationRun } from '../../src/agent/operations/start.js';
 import type {
   ConversationDeps,
   RunContext,
   StartResult,
-} from '../../src/modules/conversations/contracts.js';
-import { createHarnessModelTransport } from '../../src/modules/model-providers/harness-model.js';
-import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
-import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import { measureHarnessContext } from '../../src/modules/conversations/harness-context.js';
+} from '../../src/agent/runtime/contracts.js';
+import { createLocalFixtureModelTransport } from './local-fixture-model.js';
+import type { HarnessServices } from '../../src/agent/runtime/contracts.js';
+import { createContextPolicy } from '../../src/features/conversations/public.js';
+import { measureSdkContext } from '../../src/features/model-providers/public.js';
 import { configureTestModel } from './model-selection.js';
-import { SendMessageBodySchema } from '../../src/modules/conversations/schemas.js';
+import { SendMessageBodySchema } from '../../src/features/conversations/schemas.js';
 import { seedAdmittedSession as seedSession } from '../integration/setup.js';
-import type { SeededSession } from '../../src/modules/identity/seed.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
+import type { SeededSession } from '../../src/features/identity/session/seed.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
 import { createIntegrationDatabase } from '../integration/setup.js';
 import type { IntegrationDatabase } from '../integration/setup.js';
 
@@ -200,8 +200,7 @@ async function successful(response: Response): Promise<unknown> {
     if (envelope.error.request_id !== envelope.request_id) {
       throw new Error('HTTP error request identity mismatch');
     }
-    throw new HttpError(
-      response.status,
+    throw new ApplicationError(
       envelope.code,
       envelope.error.code,
       envelope.error.message,
@@ -314,7 +313,7 @@ export class HarnessConsumer {
       maxTokens: 8000,
       contextPolicy: createContextPolicy({ completionCap: 1024, model: 'fixture-transport-only' }),
     };
-    this.model = createHarnessModelTransport({
+    this.model = createLocalFixtureModelTransport({
       baseUrl: `${modelBase}/v1`,
       model: 'fixture-transport-only',
     });
@@ -322,7 +321,7 @@ export class HarnessConsumer {
     // encoding, outbound-policy enforcement, or real provider acceptance.
     this.deps.modelTransport = async () => ({
       model: this.model,
-      measure: measureHarnessContext,
+      measure: measureSdkContext,
     });
     this.server = createServer((req, res) => {
       void handleRequest(req, res, {

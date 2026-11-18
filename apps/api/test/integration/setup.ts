@@ -4,12 +4,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Pool, type PoolClient } from 'pg';
 import { createPool } from '../../src/db/pool.js';
-import { computePresentationHash } from '../../src/modules/approvals/presentation.js';
+import { computePresentationHash } from '../../src/features/approvals/reminder/presentation.js';
 import {
   seedSession as seedLegacySession,
   type SeededSession,
   type SeedSessionOptions,
-} from '../../src/modules/identity/seed.js';
+} from '../../src/features/identity/session/seed.js';
 import { identityKeyfileFixture } from '../helpers/identity-security.js';
 
 const originalKeyfile = process.env.IDENTITY_KEYRING_FILE;

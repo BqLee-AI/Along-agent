@@ -61,8 +61,11 @@ function assembleBrief(brief: Brief): BriefWorkspace {
   return { brief, groups };
 }
 
-async function readBrief(path: string, returnTo: string): Promise<ApiResult<BriefWorkspace>> {
-  const response = await apiGet<unknown>(path, returnTo);
+async function readBrief(
+  query: { date?: string; timezone?: string },
+  returnTo: string,
+): Promise<ApiResult<BriefWorkspace>> {
+  const response = await apiGet((api) => api.api.v1.brief.get({ query }), returnTo);
   if (!response.ok) return response;
   const parsed = BriefSchema.safeParse(response.data);
   if (!parsed.success) {
@@ -78,15 +81,15 @@ async function readBrief(path: string, returnTo: string): Promise<ApiResult<Brie
 }
 
 export function loadTodayWorkspace(query: PageQuery): TodayWorkspace {
-  const params = new URLSearchParams();
+  const params: { date?: string; timezone?: string } = {};
   for (const key of ['date', 'timezone'] as const) {
     const raw = query[key];
     const value = Array.isArray(raw) ? raw[0] : raw;
-    if (value !== undefined) params.set(key, value);
+    if (value !== undefined) params[key] = value;
   }
   const refreshHref = pageReturnTo('/', query);
   return {
     refreshHref,
-    result: readBrief(`/api/v1/brief${params.size ? `?${params}` : ''}`, refreshHref),
+    result: readBrief(params, refreshHref),
   };
 }

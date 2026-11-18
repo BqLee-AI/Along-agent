@@ -2,6 +2,8 @@ import { EnvelopeSchema } from '@along/contracts';
 import { z } from 'zod';
 import { requireClientSession } from '@/shared/session/navigation';
 import type { ApiResult } from '@/shared/http/result';
+import { api } from '@/shared/http/eden';
+import type { ApiClient, JsonCall, JsonResult } from '@/shared/http/eden';
 import { TaskDetailSchema, TaskListItemSchema } from './types';
 
 export const taskStates = [
@@ -85,18 +87,23 @@ export function checked<T>(result: ApiResult<unknown>, schema: z.ZodType<T>): Ap
 export function snapshot<T>(result: ApiResult<ReminderPage<T>>): PageSnapshot<T> {
   return result.ok ? { page: result.data, error: null } : { page: null, error: result };
 }
-export function taskListPath(status: TaskFilter): string {
-  return `/api/v1/tasks?${new URLSearchParams({ status, limit: '50' })}`;
+export type ReminderPageLoader<T> = (
+  cursor: string | null,
+  signal?: AbortSignal,
+) => Promise<JsonResult<ReminderPage<T>>>;
+export function taskListRequest(status: TaskFilter, client: ApiClient = api) {
+  return (cursor: string | null, signal?: AbortSignal) =>
+    client.api.v1.tasks.get({
+      query: { status, limit: '50', ...(cursor !== null ? { cursor } : {}) },
+      fetch: { signal },
+    });
 }
-export function taskPath(id: string): string {
-  return `/api/v1/tasks/${encodeURIComponent(id)}`;
-}
-export function taskEventsPath(id: string): string {
-  return `${taskPath(id)}/events?limit=50`;
-}
-export function cursorPath(path: string, cursor: string | null): string {
-  if (cursor === null) return path;
-  return `${path}${path.includes('?') ? '&' : '?'}${new URLSearchParams({ cursor })}`;
+export function taskEventsRequest(id: string, client: ApiClient = api) {
+  return (cursor: string | null, signal?: AbortSignal) =>
+    client.api.v1.tasks({ id: encodeURIComponent(id) }).events.get({
+      query: { limit: '50', ...(cursor !== null ? { cursor } : {}) },
+      fetch: { signal },
+    });
 }
 export function failureExplanation(error: ResourceFailure): string {
   if (error.status === 401) return '会话已失效，请重新登录。返回后仅重新读取，不会重放操作。';
@@ -108,14 +115,15 @@ export function failureExplanation(error: ResourceFailure): string {
   return '此资源暂不可读取，先前内容保留。请重新读取；此错误不代表提醒已取消。';
 }
 export async function readReminder<T>(
-  path: string,
+  call: JsonCall<T>,
   schema: z.ZodType<T>,
   signal?: AbortSignal,
 ): Promise<ApiResult<T>> {
   try {
-    const response = await fetch(path, { method: 'GET', cache: 'no-store', signal });
+    const result = await call(api);
+    const { response } = result;
     requireClientSession(response);
-    const parsed = EnvelopeSchema.safeParse(await response.json().catch(() => null));
+    const parsed = EnvelopeSchema.safeParse(result.error ? result.error.value : result.data);
     if (response.ok && parsed.success && parsed.data.code === 0) {
       const data = schema.safeParse(parsed.data.data);
       return data.success ? { ok: true, data: data.data } : invalidResponse;
@@ -134,7 +142,7 @@ export async function readReminder<T>(
 }
 // Each invocation reads one bounded page. A failed read cannot consume its cursor.
 export async function readNextPage<T>(
-  path: string,
+  load: ReminderPageLoader<T>,
   current: PageSnapshot<T>,
   schema: z.ZodType<ReminderPage<T>>,
   identity: (item: T) => string,
@@ -142,7 +150,7 @@ export async function readNextPage<T>(
 ): Promise<PageSnapshot<T>> {
   if (current.page && current.page.next_cursor === null) return current;
   const result = await readReminder(
-    cursorPath(path, current.page?.next_cursor ?? null),
+    () => load(current.page?.next_cursor ?? null, signal),
     schema,
     signal,
   );
@@ -158,6 +166,10 @@ export async function readNextPage<T>(
   return { page: { items, next_cursor: result.data.next_cursor }, error: null };
 }
 export async function readTask(id: string, signal?: AbortSignal) {
-  const result = await readReminder(taskPath(id), TaskDetailSchema, signal);
+  const result = await readReminder(
+    (api) => api.api.v1.tasks({ id: encodeURIComponent(id) }).get({ fetch: { signal } }),
+    TaskDetailSchema,
+    signal,
+  );
   return result.ok && result.data.task_id !== id ? invalidResponse : result;
 }

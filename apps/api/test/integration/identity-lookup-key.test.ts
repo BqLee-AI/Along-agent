@@ -1,21 +1,20 @@
+import { expectApplicationRejection } from '../helpers/application-error.js';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { randomBytes, randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
-import type { Actor } from '../../src/http/auth.js';
-import {
-  createAccountService,
-  type AccountService,
-} from '../../src/modules/identity/account-service.js';
+import type { Actor } from '../../src/features/identity/session/actor.js';
+import { type AccountService } from '../../src/features/identity/public.js';
+import { createConfiguredAccountService } from '../../src/bootstrap/identity.js';
 import {
   createInvitedAccountService,
   type InvitedAccountService,
-} from '../../src/modules/identity/invited-service.js';
+} from '../../src/features/identity/account/invited-service.js';
 import {
   lookupDigest,
   openIdentity,
   parseIdentityKeyring,
   type IdentityKeyring,
-} from '../../src/modules/identity/email-security.js';
+} from '../../src/features/identity/security/email-security.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 
 const suite = databaseUrl ? describe : describe.skip;
@@ -57,8 +56,13 @@ suite('identity lookup key consistency on PostgreSQL', () => {
     service = createInvitedAccountService(pool, { secret, origin, keys: old, mail });
     wrong = createInvitedAccountService(pool, { secret, origin, keys: changed, mail });
     const workspaceStatus = async () => ({ state: 'unconfigured' as const, ownerIds: [] });
-    accounts = createAccountService(pool, { secret, origin, keys: old, workspaceStatus });
-    wrongAccounts = createAccountService(pool, { secret, origin, keys: changed, workspaceStatus });
+    accounts = createConfiguredAccountService(pool, { secret, origin, keys: old, workspaceStatus });
+    wrongAccounts = createConfiguredAccountService(pool, {
+      secret,
+      origin,
+      keys: changed,
+      workspaceStatus,
+    });
     await accounts.initialize({ login_name: 'admin', password, display_name: 'Administrator' });
     const row = (
       await pool.query('SELECT user_id,id FROM sessions ORDER BY created_at DESC LIMIT 1')
@@ -111,7 +115,7 @@ suite('identity lookup key consistency on PostgreSQL', () => {
     );
     return { id: result.invitation.id, token: await token('invitation') };
   }
-  const unavailable = { httpStatus: 503 };
+  const unavailable = { status: 503 };
 
   it('fails closed uniformly for email lookups and all digest-dependent mutations, and recovers with the original key', async () => {
     await contact();
@@ -125,41 +129,45 @@ suite('identity lookup key consistency on PostgreSQL', () => {
     await service.forgotPassword({ email: 'admin@example.test' }, ip);
     const resetToken = await token('reset_password');
     for (const email of ['admin@example.test', 'nobody@example.test']) {
-      await expect(wrong.forgotPassword({ email }, ip)).rejects.toMatchObject(unavailable);
-      await expect(wrongAccounts.signIn({ email, password }, ip)).rejects.toMatchObject(
-        unavailable,
-      );
+      await expectApplicationRejection(wrong.forgotPassword({ email }, ip), unavailable);
+      await expectApplicationRejection(wrongAccounts.signIn({ email, password }, ip), unavailable);
     }
-    await expect(
+    await expectApplicationRejection(
       wrong.requestContact(admin, { email: 'admin@example.test', current_password: password }, ip),
-    ).rejects.toMatchObject(unavailable);
-    await expect(wrong.verifyContact(admin, { token: verifyToken }, ip)).rejects.toMatchObject(
       unavailable,
     );
-    await expect(
+    await expectApplicationRejection(
+      wrong.verifyContact(admin, { token: verifyToken }, ip),
+      unavailable,
+    );
+    await expectApplicationRejection(
       wrong.createInvitation(
         admin,
         { email: 'admin@example.test', current_password: password, idempotency_key: randomUUID() },
         ip,
       ),
-    ).rejects.toMatchObject(unavailable);
-    await expect(
+      unavailable,
+    );
+    await expectApplicationRejection(
       wrong.resendInvitation(
         admin,
         invitation.id,
         { current_password: password, idempotency_key: randomUUID() },
         ip,
       ),
-    ).rejects.toMatchObject(unavailable);
-    await expect(
+      unavailable,
+    );
+    await expectApplicationRejection(
       wrong.acceptInvitation(
         { token: invitation.token, login_name: 'member', password, display_name: 'Member' },
         ip,
       ),
-    ).rejects.toMatchObject(unavailable);
-    await expect(
+      unavailable,
+    );
+    await expectApplicationRejection(
       wrong.resetPassword({ token: resetToken, new_password: 'a replacement password ' }, ip),
-    ).rejects.toMatchObject(unavailable);
+      unavailable,
+    );
     expect(
       (await wrongAccounts.signIn({ login_name: 'admin', password }, ip)).cookies.length,
     ).toBeGreaterThan(0);
@@ -188,15 +196,17 @@ suite('identity lookup key consistency on PostgreSQL', () => {
       changed.lookup.id,
       lookupDigest(changed, 'admin@example.test'),
     ]);
-    await expect(wrong.forgotPassword({ email: 'nobody@example.test' }, ip)).rejects.toMatchObject(
+    await expectApplicationRejection(
+      wrong.forgotPassword({ email: 'nobody@example.test' }, ip),
       unavailable,
     );
     await pool.query("UPDATE identity_invitations SET state='expired' WHERE id=$1", [
       invitation.id,
     ]);
-    await expect(
+    await expectApplicationRejection(
       wrongAccounts.signIn({ email: 'nobody@example.test', password }, ip),
-    ).rejects.toMatchObject(unavailable);
+      unavailable,
+    );
     await pool.query(
       'UPDATE identity_challenges SET revoked_at=clock_timestamp() WHERE consumed_at IS NULL',
     );
@@ -224,8 +234,10 @@ suite('identity lookup key consistency on PostgreSQL', () => {
       wrong.requestContact(admin, { email: 'two@example.test', current_password: password }, ip),
     ]);
     expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
-    const failure = results.find((result) => result.status === 'rejected');
-    expect(failure?.status === 'rejected' && failure.reason).toMatchObject(unavailable);
+    await expectApplicationRejection(
+      Promise.reject(results.find((result) => result.status === 'rejected')?.reason),
+      unavailable,
+    );
     expect(
       (
         await pool.query(

@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import { loadTimeContext } from '../../src/modules/time/context.js';
-import type { ToolContext } from '../../src/modules/tools/contracts.js';
-import { invokeTool, reserveToolInvocation } from '../../src/modules/tools/gateway.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
+import type { ToolContext } from '../../src/agent/tools/contracts.js';
+import { invokeTool, reserveToolInvocation } from '../../src/agent/tools/gateway.js';
 import { admitTestUser, createIntegrationDatabase, type IntegrationDatabase } from './setup.js';
 
 const text = '三分钟后提醒我核对报告';

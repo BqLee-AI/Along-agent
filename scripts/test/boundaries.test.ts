@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
 import { execFile } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -35,6 +35,11 @@ beforeAll(() => {
   target = mkdtempSync(join(tmpdir(), 'along-boundaries-'));
   cpSync(join(root, 'scripts', 'fixtures', 'boundaries'), target, { recursive: true });
   mkdirSync(join(target, 'node_modules'));
+  mkdirSync(join(target, 'apps/api/dist'), { recursive: true });
+  writeFileSync(
+    join(target, 'apps/api/dist/client-type.d.ts'),
+    'export type App = { version: string };\n',
+  );
   // Resolve installed dependencies, not fake modules: the fixture runs outside the workspace.
   const contractsRequire = createRequire(join(root, 'packages', 'contracts', 'package.json'));
   const rootRequire = createRequire(join(root, 'package.json'));
@@ -48,6 +53,11 @@ beforeAll(() => {
       'junction',
     );
   }
+  symlinkSync(
+    join(root, 'apps', 'api', 'node_modules', 'elysia'),
+    join(target, 'node_modules', 'elysia'),
+    'junction',
+  );
 });
 
 afterAll(async () => {
@@ -103,9 +113,9 @@ async function expectRed(entry: string, rule: string) {
   expect(result.code, result.output).toBe(1);
   expect(result.output).toContain(`error ${rule}: ${entry} → `);
   // Local fixture imports use .js specifiers: a resolved .ts target proves real resolution.
-  // The remaining cases resolve to the installed TypeScript package or a Node builtin.
+  // The remaining cases resolve to an installed package or a Node builtin.
   expect(result.output).toMatch(
-    /→ (?:[^\s]+\.ts|fs|[^\s]*node_modules\/typescript\/[^\s]+\.js)(?:\s|$)/,
+    /→ (?:[^\s]+\.ts|fs|[^\s]*node_modules\/(?:typescript|elysia)\/[^\s]+\.js)(?:\s|$)/,
   );
   console.info(`[red] exit=${result.code}${result.output}`);
 }
@@ -209,10 +219,25 @@ describe.concurrent('D1 dependency boundaries (real depcruise)', () => {
     );
   });
 
+  it.each([
+    'apps/api/src/features/identity/bad-http.ts',
+    'apps/api/src/features/identity/bad-route.ts',
+    'apps/api/src/features/identity/bad-native-route.ts',
+    'apps/api/src/features/identity/bad-nested-route.ts',
+    'apps/api/src/features/identity/bad-elysia.ts',
+    'apps/api/src/features/tasks/bad-http.ts',
+    'apps/api/src/platform/bad-http.ts',
+  ])('rejects business code depending on HTTP implementation: %s', async (entry) => {
+    await expectRed(entry, 'api-business-no-http-implementation');
+  });
+
   it.each(modules)(
     'rejects %s crossing into another module’s storage, including type imports',
     async (module) => {
-      await expectRed(`apps/api/src/modules/${module}/bad.ts`, `no-${module}-cross-module-storage`);
+      await expectRed(
+        `apps/api/src/features/${module}/bad.ts`,
+        `no-${module}-cross-module-storage`,
+      );
     },
   );
 
@@ -220,14 +245,37 @@ describe.concurrent('D1 dependency boundaries (real depcruise)', () => {
     'rejects storage file/directory/suffix and nested type-import shape %i',
     async (index) => {
       await expectRed(
-        `apps/api/src/modules/identity/shapes/bad-${index}.ts`,
+        `apps/api/src/features/identity/shapes/bad-${index}.ts`,
         'no-identity-cross-module-storage',
       );
     },
   );
 
-  it.each(['bad.ts', 'bad-type.ts'])('rejects Web→API %s', async (entry) => {
-    await expectRed(`apps/web/${entry}`, 'no-web-to-api');
+  it.each([
+    ['bad.ts', 'no-web-to-api'],
+    ['bad-type.ts', 'no-web-private-api-types'],
+    ['bad-client-runtime.ts', 'no-web-to-api'],
+  ])('rejects Web→API %s', async (entry, rule) => {
+    await expectRed(`apps/web/${entry}`, rule);
+  });
+
+  it('allows only the declared client type entry from Web', async () => {
+    const result = await cruise('apps/web/client-type.ts', 'json');
+    expect(result.code, result.output).toBe(0);
+    const report = JSON.parse(result.output);
+    expect(report.summary.violations).toEqual([]);
+    expect(
+      report.modules.some(
+        (module: { source: string }) => module.source === 'apps/api/dist/client-type.d.ts',
+      ),
+    ).toBe(true);
+  });
+
+  it.each([
+    ['apps/api/src/features/identity/bad-agent.ts', 'feature-no-agent-implementation'],
+    ['apps/api/src/agent/tools/bad-storage.ts', 'agent-no-private-feature-storage'],
+  ])('rejects execution and persistence ownership leak %s', async (entry, rule) => {
+    await expectRed(entry, rule);
   });
 
   it.each(

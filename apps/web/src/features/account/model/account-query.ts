@@ -20,18 +20,18 @@ function checked<T>(
 }
 
 export async function readAccountStatus(): Promise<AccountRead<AuthStatus>> {
-  return checked(await apiGet<unknown>('/api/v1/auth/status'), (value) =>
+  return checked(await apiGet((api) => api.api.v1.auth.status.get()), (value) =>
     authStatusSchema.safeParse(value),
   );
 }
 
 export async function readAccountIdentity(): Promise<AccountRead<Me>> {
-  return checked(await apiGet<unknown>('/api/v1/me'), (value) => MeSchema.safeParse(value));
+  return checked(await apiGet((api) => api.api.v1.me.get()), (value) => MeSchema.safeParse(value));
 }
 
 /** Owner-scoped account read; a 401 here is a protected-page boundary and redirects to login. */
 export async function readAccountProfile(): Promise<AccountRead<AccountProfile>> {
-  return checked(await apiGet<unknown>('/api/v1/auth/account', '/account'), (value) =>
+  return checked(await apiGet((api) => api.api.v1.auth.account.get(), '/account'), (value) =>
     AccountViewSchema.safeParse(value),
   );
 }

@@ -1,6 +1,7 @@
 import { ConversationMessagePageSchema } from '@along/contracts';
 import { z } from 'zod';
 import { readEnvelope } from '@/shared/http/client';
+import { api, writeOptions } from '@/shared/http/eden';
 import { MeSchema } from '@/shared/session/identity';
 
 export const MemorySchema = z
@@ -28,25 +29,16 @@ export const MemoryPageSchema = z
 export type Memory = z.infer<typeof MemorySchema>;
 
 export async function readMemories(cursor: string | null, signal: AbortSignal) {
-  const query = new URLSearchParams({ limit: '20' });
-  if (cursor !== null) query.set('cursor', cursor);
+  const query = { limit: '20', ...(cursor !== null ? { cursor } : {}) };
   return MemoryPageSchema.parse(
-    await readEnvelope(
-      await fetch(`/api/v1/memories?${query}`, {
-        cache: 'no-store',
-        signal,
-      }),
-    ),
+    await readEnvelope(await api.api.v1.memories.get({ query, fetch: { signal } })),
   );
 }
 
 export async function readMemory(id: string, signal: AbortSignal) {
   const value = MemorySchema.parse(
     await readEnvelope(
-      await fetch(`/api/v1/memories/${encodeURIComponent(id)}`, {
-        cache: 'no-store',
-        signal,
-      }),
+      await api.api.v1.memories({ id: encodeURIComponent(id) }).get({ fetch: { signal } }),
     ),
   );
   if (value.id !== id) throw new Error('记忆身份不匹配，未接纳读取结果。');
@@ -58,37 +50,20 @@ export async function readSourceMessages(
   cursor: string | null,
   signal: AbortSignal,
 ) {
-  const query = new URLSearchParams({ limit: '50' });
-  if (cursor !== null) query.set('cursor', cursor);
+  const query = { limit: '50', ...(cursor !== null ? { cursor } : {}) };
   return ConversationMessagePageSchema.parse(
     await readEnvelope(
-      await fetch(`/api/v1/conversations/${encodeURIComponent(conversationId)}/messages?${query}`, {
-        cache: 'no-store',
-        signal,
-      }),
+      await api.api.v1
+        .conversations({ id: encodeURIComponent(conversationId) })
+        .messages.get({ query, fetch: { signal } }),
     ),
   );
 }
 
-async function postMemory(
-  id: string,
-  action: 'correct' | 'stop-recall',
-  body: object,
-  signal: AbortSignal,
-) {
-  const me = MeSchema.parse(
-    await readEnvelope(await fetch('/api/v1/me', { cache: 'no-store', signal })),
-  );
+async function memoryWriteOptions(signal: AbortSignal) {
+  const me = MeSchema.parse(await readEnvelope(await api.api.v1.me.get({ fetch: { signal } })));
   if (!me.csrf_token) throw new Error('当前会话没有 CSRF 凭据，请重新登录。');
-  return readEnvelope(
-    await fetch(`/api/v1/memories/${encodeURIComponent(id)}/actions/${action}`, {
-      method: 'POST',
-      cache: 'no-store',
-      signal,
-      headers: { 'content-type': 'application/json', 'x-csrf-token': me.csrf_token },
-      body: JSON.stringify(body),
-    }),
-  );
+  return writeOptions(me.csrf_token, signal);
 }
 
 export async function stopMemory(memory: Memory, signal: AbortSignal) {
@@ -96,7 +71,14 @@ export async function stopMemory(memory: Memory, signal: AbortSignal) {
     .object({ id: z.string().uuid(), status: z.literal('stopped') })
     .strict()
     .parse(
-      await postMemory(memory.id, 'stop-recall', { expectedRevision: memory.revision }, signal),
+      await readEnvelope(
+        await api.api.v1
+          .memories({ id: encodeURIComponent(memory.id) })
+          .actions['stop-recall'].post(
+            { expectedRevision: memory.revision },
+            await memoryWriteOptions(signal),
+          ),
+      ),
     );
   if (result.id !== memory.id) throw new Error('停止回执身份不匹配，请重新读取。');
   return result;
@@ -108,17 +90,17 @@ export async function correctMemory(
   signal: AbortSignal,
 ) {
   const result = MemorySchema.parse(
-    await postMemory(
-      memory.id,
-      'correct',
-      {
-        content: source.content,
-        conversationId: memory.conversationId,
-        messageIds: [source.message_id],
-        expectedRevision: memory.revision,
-        expiresAt: memory.expiresAt,
-      },
-      signal,
+    await readEnvelope(
+      await api.api.v1.memories({ id: encodeURIComponent(memory.id) }).actions.correct.post(
+        {
+          content: source.content,
+          conversationId: memory.conversationId,
+          messageIds: [source.message_id],
+          expectedRevision: memory.revision,
+          expiresAt: memory.expiresAt,
+        },
+        await memoryWriteOptions(signal),
+      ),
     ),
   );
   if (result.id !== memory.id || result.revision <= memory.revision)

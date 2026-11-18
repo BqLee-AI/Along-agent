@@ -1,21 +1,21 @@
+import { expectApplicationRejection } from '../helpers/application-error.js';
 // Cancel route: state machine, idempotency, auth/CSRF, terminal guards.
-// Drives requestCancel directly (HTTP envelope parity is asserted through
-// the CSRF + uuid-shape cases below via handleTaskRoute in the route test).
+// Drives requestCancel directly; HTTP envelope parity is covered separately.
 import { beforeAll, afterAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
-import { confirmApproval } from '../../src/modules/approvals/confirm.js';
-import { getApprovalDetail } from '../../src/modules/approvals/service.js';
-import { getTaskDetail } from '../../src/modules/tasks/service.js';
-import { requestCancel, type CancelResult } from '../../src/modules/tasks/cancel.js';
-import { runCancelPhase } from '../../src/modules/tasks/scheduler/cancel-phase.js';
-import { runClaimPhase } from '../../src/modules/tasks/scheduler/claim.js';
+import { confirmApproval } from '../../src/features/approvals/reminder/confirm.js';
+import { getApprovalDetail } from '../../src/features/approvals/reminder/service.js';
+import { getTaskDetail } from '../../src/features/tasks/service.js';
+import { requestCancel, type CancelResult } from '../../src/features/tasks/cancellation/cancel.js';
+import { runCancelPhase } from '../../src/features/tasks/scheduler/cancel-phase.js';
+import { runClaimPhase } from '../../src/features/tasks/scheduler/claim.js';
 import {
   completeCancelFromReceipt,
   revokeLocalTaskQueue,
-} from '../../src/modules/tasks/scheduler/scheduler-repository.js';
+} from '../../src/features/tasks/scheduler/scheduler-repository.js';
 import { withTransaction } from '../../src/db/transaction.js';
-import { runSchedulePhase } from '../../src/modules/tasks/scheduler/schedule.js';
+import { runSchedulePhase } from '../../src/features/tasks/scheduler/schedule.js';
 import {
   createIntegrationDatabase,
   databaseUrl,
@@ -166,7 +166,7 @@ maybe('tasks cancel', () => {
         process.execPath,
         '--eval',
         `import { runCancelPhase } from ${JSON.stringify(
-          new URL('../../src/modules/tasks/scheduler/cancel-phase.ts', import.meta.url).href,
+          new URL('../../src/features/tasks/scheduler/cancel-phase.ts', import.meta.url).href,
         )};
        import { createPool } from ${JSON.stringify(
          new URL('../../src/db/pool.ts', import.meta.url).href,
@@ -427,30 +427,34 @@ maybe('tasks cancel', () => {
 
   it('rejects invalid bodies and terminal states', async () => {
     const { taskId, ownerId } = await confirmTask(pool);
-    await expect(
+    await expectApplicationRejection(
       requestCancel({ pool }, ownerId, taskId, { idempotency_key: 'not-a-uuid' }),
-    ).rejects.toMatchObject({ httpStatus: 400 });
-    await expect(requestCancel({ pool }, ownerId, taskId, {})).rejects.toMatchObject({
-      httpStatus: 400,
+      { status: 400 },
+    );
+    await expectApplicationRejection(requestCancel({ pool }, ownerId, taskId, {}), {
+      status: 400,
     });
 
     // Fired tasks: 409 with current state.
     await pool.query("UPDATE tasks SET state = 'fired' WHERE id = $1", [taskId]);
-    await expect(
+    await expectApplicationRejection(
       requestCancel({ pool }, ownerId, taskId, { idempotency_key: randomUUID() }),
-    ).rejects.toMatchObject({ httpStatus: 409, errorCode: 'STATE_CONFLICT' });
+      { status: 409, errorCode: 'STATE_CONFLICT' },
+    );
 
     // Missed tasks: 409 with current state.
     await pool.query("UPDATE tasks SET state = 'missed' WHERE id = $1", [taskId]);
-    await expect(
+    await expectApplicationRejection(
       requestCancel({ pool }, ownerId, taskId, { idempotency_key: randomUUID() }),
-    ).rejects.toMatchObject({ httpStatus: 409 });
+      { status: 409 },
+    );
   });
 
   it('forbids cross-owner cancel', async () => {
     const { taskId } = await confirmTask(pool);
-    await expect(
+    await expectApplicationRejection(
       requestCancel({ pool }, randomUUID(), taskId, { idempotency_key: randomUUID() }),
-    ).rejects.toMatchObject({ httpStatus: 403 });
+      { status: 403 },
+    );
   });
 });

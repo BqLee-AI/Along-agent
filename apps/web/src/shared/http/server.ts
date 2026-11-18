@@ -1,8 +1,13 @@
+import 'server-only';
+
 // Server-side API access. The browser uses the same-origin proxy at
 // /api/v1/*; server components forward the incoming session cookie.
 import { cookies } from 'next/headers';
 import { EnvelopeSchema } from '@along/contracts';
-import type { Envelope } from '@along/contracts';
+import { treaty } from '@elysia/eden';
+import type { App } from '@along/api/client-type';
+import type { JsonCall } from './eden';
+import { decodeJsonResponse, throwTransportError } from './eden';
 import { redirect } from 'next/navigation';
 import { protectedLoginHref } from '../session/navigation';
 
@@ -11,14 +16,18 @@ const API_BASE = process.env.API_BASE ?? 'http://127.0.0.1:3000';
 import type { ApiResult } from './result';
 export type { ApiResult } from './result';
 
-export async function apiGet<T>(path: string, returnTo?: string): Promise<ApiResult<T>> {
+export async function apiGet<T>(call: JsonCall<T>, returnTo?: string): Promise<ApiResult<T>> {
   const cookie = (await cookies()).toString();
-  let response: Response;
+  const client = treaty<App>(API_BASE, {
+    parseDate: false,
+    throwHttpError: throwTransportError,
+    onResponse: decodeJsonResponse,
+    fetch: { cache: 'no-store' },
+    headers: cookie ? { cookie } : {},
+  });
+  let result;
   try {
-    response = await fetch(`${API_BASE}${path}`, {
-      headers: cookie ? { cookie } : {},
-      cache: 'no-store',
-    });
+    result = await call(client);
   } catch {
     return {
       ok: false,
@@ -28,18 +37,19 @@ export async function apiGet<T>(path: string, returnTo?: string): Promise<ApiRes
       message: '无法连接 API，请确认服务已启动。',
     };
   }
+  const { response } = result;
   if (returnTo !== undefined) {
     const login = protectedLoginHref(response.status, returnTo);
     if (login) redirect(login);
   }
-  let envelope: Envelope | null = null;
+  let envelope;
   try {
-    envelope = EnvelopeSchema.parse(await response.json());
+    envelope = EnvelopeSchema.parse(result.error ? result.error.value : result.data);
   } catch {
     envelope = null;
   }
-  if (response.ok && envelope && envelope.code === 0) {
-    return { ok: true, data: envelope.data as T };
+  if (response.ok && envelope && envelope.code === 0 && result.data) {
+    return { ok: true, data: result.data.data };
   }
   const message =
     envelope?.error?.message ??

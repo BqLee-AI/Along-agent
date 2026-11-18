@@ -1,12 +1,11 @@
 import type { z } from 'zod';
 import { readEnvelope } from './client';
+import type { JsonResult } from './eden';
 export async function readHistoryCollectionPage<T>(
-  url: string,
+  request: Promise<JsonResult<{ items: unknown[]; next_cursor: string | null }>>,
   schema: z.ZodType<{ items: T[]; next_cursor: string | null }>,
-  signal?: AbortSignal,
 ): Promise<{ items: T[]; next_cursor: string | null }> {
-  const response = await fetch(url, { method: 'GET', cache: 'no-store', signal });
-  return schema.parse(await readEnvelope(response));
+  return schema.parse(await readEnvelope(await request));
 }
 export interface HistoryPageState<T> {
   target: string;
