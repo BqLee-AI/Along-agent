@@ -24,11 +24,13 @@ bun --no-env-file run local:init --new
 bun --no-env-file run local:start
 ```
 
-首次按提示选择三个固定端口，默认 PG `55432`、API `3000`、Web `3100`。时间版本必须与本版本内置资源相符。新安装生成独立的模型凭据加密密钥并保存到私有配置，务必安全备份；这不是认证密钥或数据库密码。`HARNESS_COMPLETION_CAP` 是独立单次输出上限，提示默认 4096，可按实际模型和预算调整；即使暂不提供旧模型也会配置。模型由登录用户在设置中配置并设置默认；初始化时收集的旧部署模型资料仅供管理员日后显式导入，不会自动导入或成为默认推理回退。敏感输入不回显，不通过命令行参数传入。
+首次按提示选择三个固定端口，默认 PG `55432`、API `3000`、Web `3100`。时间版本必须与本版本内置资源相符。新安装生成独立的模型凭据加密密钥并保存到私有配置，务必安全备份；这不是认证密钥或数据库密码。模型由登录用户在设置中配置；初始化和接管不收集 Provider 端点、模型名称或 API Key。需要采用原配置时，按下文流程由管理员显式导入到指定账户。
 
-私有配置的 `harnessCompletionCap` 为正安全整数，与累计 Run 预算 `model.maxTokens` 独立；历史 `model.completionCap` 不再控制实际输出上限。旧配置如保留 `model` 对象，仍须含有效 `model.completionCap`；可将原单次上限同时填入顶层 `harnessCompletionCap`，不能借用累计预算。旧模型的 `modelWindowTokens` 和 `reserveTokens` 仍分别映射 `HARNESS_MODEL_WINDOW_TOKENS` 和 `HARNESS_CONTEXT_RESERVE_TOKENS`；无旧模型时窗口未知、预留为 0。
+`harnessCompletionCap` 是独立单次输出上限，默认 4096。可选 `harnessLimits` 设置累计迭代、累计 token、窗口和上下文预留，不包含凭据。没有该字段的旧安装仍从 `model` 读取这些执行参数；历史 `model.completionCap` 不控制实际输出上限。加载旧配置不会重写文件或导入凭据。
 
 `init` 建立一次配置、准备专用持久卷和成套产物，只有核实为空的新应用库才执行全套迁移。它不启动业务写者。已有配置再次 `init` 只复用，不重新生成密钥或覆盖登记；除下述首次接入原部署的准备阶段外，数据库仍须完整核验为当前目标版本，旧库应显式 `local:upgrade`。
+
+准备产物时从不含旧构建输出的源码快照生成 API 及其声明，再构建 Web，最后构建 API/native 镜像。Web 与镜像使用同一份源码快照，不依赖当前工作目录中残留的声明。
 
 `start` 复用准备好的 API/native/Web，不安装、不构建、不执行 DDL。打开命令输出的 Web 地址；固定地址是认证 origin，不要自行把 `localhost` 与 `127.0.0.1` 混用。在 Web 按“首次建号”创建唯一管理员，再运行下文 `local:account` 完成工作区登记。账户、模型、工作区是三个独立状态；账户成功不意味着资料任务已可用。本入口不 seed 用户。
 

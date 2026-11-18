@@ -80,7 +80,7 @@ presentation 输入
   排版空格不计入；时间先归一再编码
 ```
 
-规范编码算法（v1，实现唯一真源 `apps/api/src/modules/approvals/presentation.ts#computePresentationHash`）：
+规范编码算法（v1，实现唯一真源 `apps/api/src/modules/approvals/reminder/presentation.ts#computePresentationHash`）：
 
 - 字段按序取 `[domain, presentation_version, original_text, local_datetime, timezone_id, fold, offset_seconds, occurrence]`，其中 `domain = "along-presentation/v1"`，`local_datetime` 为 time-core 归一后的 `"YYYY-MM-DD HH:mm"`，`fold` 为 `"0"|"1"`，`offset_seconds` 为十进制秒数，`occurrence` 为 `"single"`。
 - 每字段做长度前缀 `len(bytes):bytes`（UTF-8 字节数），直接拼接（无分隔符）得 canonical。
@@ -112,7 +112,7 @@ presentation 输入
 
 ### 9.1 已观察到的边界与目标
 
-- `approvals/create.ts#createTaskApproval` 只 INSERT pending，不替代旧项；`repository.ts#findSuccessorId` 目前 `LIMIT 1`，不是唯一性约束。
+- `approvals/reminder/create.ts#createTaskApproval` 只 INSERT pending，不替代旧项；`repository.ts#findSuccessorId` 目前 `LIMIT 1`，不是唯一性约束。
 - 迁移 0003 已有 `supersedes_approval_id`，没有 `superseded_by_approval_id` 或后继唯一约束。详情 `service.ts#detailOf` 将前驱投影为已有 `recreated_from`；HTTP 详情未输出内部 `successorId`。
 - `confirm.ts` 已识别 superseded，并使用 `409 APPROVAL_SUPERSEDED` / `details.successor_approval_id`；现有相关 PG 用例是预置替代链，不是生产修改入口。
 - confirm/reject 现先在事务外按 DB `now()` 顺路过期，再加行锁，锁后不重新比较时限；本 change 必须修正等待锁期间过期的缺口，且 owner 校验前不得写他人到期状态。
@@ -195,7 +195,7 @@ Web 只在本人 pending create_task 显示“修改这条提议”，预填原�
 
 [Required] `tools/gateway.ts` 的 propose_task/request_cancel_task 在持久调用预约后，经同一 PoolClient 调用本模块创建/取得批准；批准、tool_invocations 接受结果和 tool_calls 审计同事务提交。结果/审计/COMMIT 失败全部回滚，原预约可重交；不能先提交批准、再另写结果。此边界不消费批准、不建 task，按钮 confirm 的创建/取消事务及真实回执门不变。
 
-[Required] 批准结果账只保存原 approval_id 及 fireAt/hash/版本校验材料。`approvals/tool-result.ts#readFrozenToolApproval` 返回原冻结 CreatedApproval、回显、卡片引用与期限，不带动态状态或倒计时；批准进入 consumed/rejected/expired/superseded 后仍返回原引用，不延期限、不重算、不建替代。当前状态由详情接口另查，工具成功不承诺批准仍 pending 或任务已创建。
+[Required] 批准结果账只保存原 approval_id 及 fireAt/hash/版本校验材料。`approvals/reminder/tool-result.ts#readFrozenToolApproval` 返回原冻结 CreatedApproval、回显、卡片引用与期限，不带动态状态或倒计时；批准进入 consumed/rejected/expired/superseded 后仍返回原引用，不延期限、不重算、不建替代。当前状态由详情接口另查，工具成功不承诺批准仍 pending 或任务已创建。
 
 [Required] 同调用引用顺序/并发/丢回答重交只接受一次结果；合法新引用允许同参数新动作。取消提议继续复用既有 pending 批准的业务规则，两次新调用可以关联同一个批准，不能给 approval_id 强加唯一调用约束。调用账、当前权限遮蔽与迁移边界见 design/04 §3。
 

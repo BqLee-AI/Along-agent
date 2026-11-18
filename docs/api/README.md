@@ -78,7 +78,7 @@
   - 有会话但无权访问他人资源返回 `403`（服务端按 `owner_id` 强制过滤，不依赖客户端传参）。
   - 签名会话 POST 继续使用 Cookie session + `X-CSRF-Token`；#68 匿名初始化/登录使用真实 Origin 校验，不能弱化其余业务的 session-bound CSRF。所有账户 POST 均核对实际 Origin。
   - `GET` 与探针不要求 CSRF。
-  - HTTP入口先完成既有身份/适用CSRF头门禁再收集POST body；JSON原始字节累计上限128KiB（131072字节），Content-Length仅用于早拒，chunked仍逐块累计。空/畸形JSON为400，超限413；未消费请求先送完有限响应再关闭连接，不等待上传end，不无界drain；合法完整请求保留keep-alive。详见design/10 §1.1。
+  - HTTP入口先完成既有身份/适用CSRF头门禁再收集POST body；JSON原始字节累计上限128KiB（131072字节），Content-Length仅用于早拒，chunked仍逐块累计。空/畸形JSON为400，超限413；未消费请求须完整发送有限错误并及时关闭，不等待上传end或主动无界drain，允许运行时已缓冲数据及最后chunk的有限越界。合法完整请求保留keep-alive。真实明文/TLS慢速及持续上传的验收要求和有限响应窗口见design/10 §1.1。
   - 服务端对外口径只说“已记录步骤”，不承诺必达（触发/通知语义见 tasks 文档）。
 
 ## 4. 幂等与并发 [Required]

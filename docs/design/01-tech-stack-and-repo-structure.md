@@ -50,10 +50,13 @@ Along-agent/
   apps/
     api/                    # TS 模块化单体入口：api|worker|all 三角色
       src/
-        main.ts             # ROLE=api|worker|all 分发
-        http/               # HTTP 入口、认证与 SSE 响应
-        modules/            # conversations/tools/业务模块与存储
-        worker/             # Scheduler claim/lease/fencing + Notifier 投递
+        main.ts             # 进程入口与关闭信号
+        bootstrap/          # api|worker|all 角色装配
+        http/               # Elysia 装配、请求准入、响应与传输
+        features/           # 按业务能力组织控制器、用例、契约及存储
+        agent/              # 跨能力操作、Run 执行、仓颉协议与工具调用
+        worker/             # 调度、投递及邮件循环
+        bin/                # 本机维护入口
     web/                    # Next.js App Router（Web 先行；后被 Electron 套同一份）
       src/app/              # 路由参数、RSC/身份入口与 feature screen 组装
       src/shell/            # model/viewmodel/view：持续聊天与工作区的 URL、表面及框架
@@ -78,7 +81,24 @@ Along-agent/
     prd/                    # 跟随
 ```
 
-[Observed] 对话运行、ToolGateway 与业务存储在 `apps/api/src/modules/conversations|tools|approvals|tasks|notifications|identity|time|brief`，不是独立 `agent-runtime` 包。上图为关键目录摘要，不要求每个模块建立同名空壳层。
+[Observed] 会话、Run 和 checkpoint 的持久事实归 `apps/api/src/features/conversations/`；跨请求执行和 ToolGateway 归 `apps/api/src/agent/`。二者都在独立 Bun API 中，不另设运行时服务。
+
+[Required] API 按功能组织 MVC：Elysia 控制器直接声明路由与 Zod 输入输出契约，并调用具体用例；Service 接收明确参数，持有业务判断、事务与锁，不接收框架 Context；Model 是请求与响应契约，不是数据库实体。JSON、Cookie 和 SSE 编码留在 HTTP 边界。不为目录对称增加空壳层。
+
+`agent/operations/` 编排接纳、暂停、继续与终结；`agent/runtime/` 持有跨请求 Run 的 driver、执行权和单 attempt 会话；`agent/harness/` 负责仓颉进程与帧协议。会话历史和事务内持久化不归 driver。
+
+其他 API 功能按能力和生命周期组织：
+
+- `identity/account/` 负责账户用例及 HTTP；`identity/session/` 管认证与会话，`security/` 管密钥、资格凭据与限流，`delivery/` 管邮件处理及传输，`profile/` 管偏好和资格投影。
+- `model-providers/http/` 接入请求，`configuration/` 管配置及密钥，`outbound/` 管网络限制和连接探测，`runtime/` 管 Run 绑定和模型传输。
+- `workspaces/registry/` 是工作区与 grant 权威；`read/`、`write/` 分别拥有读取及受控写入，`http/` 和 `mcp/` 是入口。
+- `approvals/reminder/` 与 `approvals/document/` 分别持有提醒批准和文档批准；共享决议和 HTTP 装配留在 approvals 根目录。`tasks/cancellation/` 拥有取消用例及存取，`tasks/scheduler/` 拥有调度生命周期。
+- `agent/tools/` 按工具能力归置；`invocations/` 管调用账、效果许可和接受结果，文档目标判断复用调用者持有的 Run 锁。
+- `memory/recall/` 管召回资格、语义检索及回执；记忆写入服务留在根目录。简报、通知和时间各自只有一个聚合生命周期，控制器、服务和存取保持就近，不建立空子目录。
+
+`http/app.ts` 组装 Elysia 功能控制器；`access.ts` 和 `request/` 保持认证、端点识别、CSRF、连接资格与有限 body 解析的顺序。未匹配交给 `routing/fallback-controller.ts`，不执行另一套业务路由。`transport/` 负责 Node socket 与 Web Request/Response 桥接、连接收尾和 SSE 背压；`errors.ts` 映射公共错误。Next.js 继续提供同源代理，JSON 网关通过 Eden 从 API 声明推导类型，SSE 继续使用独立事件协议。
+
+Harness 会话初始化在原 Run 事务内读取续接快照和冻结路由资格；路由事实校验独立于帧分发。模型流、暂停许可与终态仍由同一会话协调，不复制其可变状态。
 
 [Required] 仓颉 Harness 的具体目录/传输适配随 R1 决定，不再限制为 `spikes/` 候选第二实现；TS 长期保留 ToolGateway、tools、memory/grep、MCP、PC/browser、办公连接器、身份/批准/时间/任务/worker/API/Web 与 Run/checkpoint 持久存储。尚未实现的能力不能据目录设计宣称已存在。
 

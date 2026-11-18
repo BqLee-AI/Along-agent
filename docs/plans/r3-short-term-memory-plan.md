@@ -14,7 +14,7 @@
 
 ## 现状和边界
 
-- **Observed**：`apps/api/src/modules/conversations/repository.ts` 保存消息，并在接纳时选择同一会话的近期历史；`service.ts` 冻结相关引用。`run-state.ts` 在终态事务保存最终助手消息。原文已有持久存储，不需要再建立 Markdown 或 JSONL 事实副本。
+- **Observed**：`apps/api/src/modules/conversations/run/repository.ts` 保存消息，并在接纳时选择同一会话的近期历史；`service.ts` 冻结相关引用。`run-state.ts` 在终态事务保存最终助手消息。原文已有持久存储，不需要再建立 Markdown 或 JSONL 事实副本。
 - **Observed**：R2-A 是单 Run 有界上下文，既有回取针对本 Run 已接受的观察，不是跨 Run 记忆；参考 [design/18](../design/18-r2a-harness-context.md)。[design/19](../design/19-r2b-readonly-intent-routing.md) 的 R2-B 默认关闭，不是 R3 前置条件。
 - **Required**：短期记忆须跨会话；原消息仍可通过现有历史路径读取。
 - **Deferred**：保留期限、历史回填和停止召回的具体产品语义仍需评审；不把此前的 7 天或当前会话建议当成决定。

@@ -1,6 +1,6 @@
 # 仓颉原生 Harness
 
-生产源位于本目录，目标平台 Linux x86_64，仅使用继承的 stdin/stdout 交换 `harness/v6` 和 `harness/v7`；`v5` 与未知版本硬拒绝。v6 只接受 snapshot version 2；v7 接受 version 2（批准恢复）和 version 3（安全点暂停恢复），普通 checkpoint 仍输出 version 2。不监听端口、不持有模型凭据、不包含模型 fixture 或网络 transport。准确 wire DTO 见 `packages/contracts/src/harness.ts`、`goals.ts` 与 `routing.ts`；身份、授权、调用预约、效果、批准与持久事实由 TypeScript 裁决。
+生产源位于本目录，目标平台 Linux x86_64，仅使用继承的 stdin/stdout 交换 `harness/v6`、`harness/v7` 与 `harness/v8`；`v5` 和未知版本硬拒绝。v6 使用 snapshot version 2；v7 另支持 version 3 的安全点恢复；v8 使用 version 4 的 R3 上下文和快照，支持仅计量的 `measure_only` 请求。不监听端口，不持有模型凭据，也不包含模型网络传输。wire DTO 见 `packages/contracts/src/harness.ts`、`goals.ts` 与 `routing.ts`；身份、授权、调用预约、效果、批准与持久事实由 TypeScript 裁决。
 
 源码按职责分层：`src/main.cj` 负责进程入口；`src/protocol/` 校验 wire 数据，`src/transport/` 负责管道帧及请求应答，`src/session/` 持有会话状态、恢复、路由及模型循环。
 
@@ -37,9 +37,9 @@ unknown 与取消后迟到调用另验证真实非事务调用核心到 native �
 
 每个 Run 另外冻结 `context_policy`：单次正整数 `completion_cap` 与累计预算独立，窗口能力未知为 null，计量能力及 model/adapter 绑定不含凭据。native 先检查本地完整模型帧，再调用零 provider 请求的 `measure_context`；服务端使用 Vercel AI SDK 本地构造请求体，计量完整 HTTP UTF-8 字节、输入计量质量及可行输出上限，实际发送前比较 SDK 生成的请求体。改变输出 O 后重新计量。unavailable 不编造输入 token，estimated 不冒充 provider usage。真实请求仅使用显式 O，不把 Run 余额直接当 `max_tokens`；冻结绑定不兼容不能静默替换。
 
-用户配置必须调用 `createUserConfiguredHarnessModelTransport({ baseUrl, model, apiKey? }, network)`，缺少 `network` 会立即失败，不回退全局 fetch。`network` 是 `(url, init) => Promise<Response>` 形式的流式执行器：接收 SDK 原始 URL、请求头和请求体及 `init.signal`，返回可持续读取的 Response；调用方负责 DNS 与实际 socket 绑定、重定向限制，并在请求和响应流期间遵守取消。它不能用只返回 JSON 的出站接口代替。`createHarnessModelTransport` 仅供部署级 legacy 用途，使用全局 fetch，不得用于用户配置。
+生产使用 `createUserConfiguredHarnessModelTransport({ baseUrl, model, apiKey? }, network)`，缺少 `network` 会立即失败，不回退全局 fetch。执行器接收 SDK 的请求和 `init.signal`，返回可持续读取的 Response；生产出站负责实际 socket 绑定、重定向限制和取消。合成测试可显式注入回环模拟服务。
 
-两种工厂均在创建时快照配置。调用者须为每个 Run 提供与冻结模型绑定一致的配置版本，并负责凭据生命周期。计量 `measureHarnessContext` 为异步且不经过上述网络执行器；`HarnessServices.measure` 可返回结果或 Promise，调用处须等待。这些工厂不读取用户配置、不选择默认模型、不执行工具，也不恢复旧 Run。
+工厂在创建时快照配置。调用者须提供与 Run 冻结模型绑定一致的配置版本。`measureHarnessContext` 是异步本地计量，不调用网络执行器。工厂不选择默认模型、不执行工具，也不恢复旧 Run。
 
 ## 执行与失败合同
 

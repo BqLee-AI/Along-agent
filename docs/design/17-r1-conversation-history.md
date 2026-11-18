@@ -17,13 +17,13 @@ Required：清空临时状态且不保留旧URL，退出后同账户登录，仍
 
 实现责任与源码入口（运行证据单独记录）：
 
-| 责任                                              | 位置                                                                                 |
-| ------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| 无尾斜线集合与既有深路由接入                      | `apps/api/src/http/app.ts`、`apps/api/src/modules/conversations/routes.ts`           |
-| owner/parent 作用域、稳定分页与可信原话投影       | `apps/api/src/modules/conversations/history-service.ts`、`history-repository.ts`     |
-| 用户原文与新 Run 输入引用、终结消息的既有合并规则 | `apps/api/src/modules/conversations/service.ts`、`run-state.ts`                      |
-| 任务批准详情和决议共用真实结果投影                | `apps/api/src/modules/approvals/repository.ts`、`service.ts`、`decision.ts`          |
-| 四个查询索引及真实结构核验                        | `infra/migrations/0018_conversation_history.sql`、`scripts/local/baselines/0018.sql` |
+| 责任                                              | 位置                                                                                             |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| 无尾斜线集合与既有深路由接入                      | `apps/api/src/http/app.ts`、`apps/api/src/modules/conversations/routes.ts`                       |
+| owner/parent 作用域、稳定分页与可信原话投影       | `apps/api/src/modules/conversations/history/history-service.ts`、`history/history-repository.ts` |
+| 用户原文与新 Run 输入引用、终结消息的既有合并规则 | `apps/api/src/modules/conversations/lifecycle/admission.ts`、`run/run-terminal.ts`               |
+| 任务批准详情和决议共用真实结果投影                | `apps/api/src/modules/approvals/reminder/repository.ts`、`reminder/service.ts`、`decision.ts`    |
+| 四个查询索引及真实结构核验                        | `infra/migrations/0018_conversation_history.sql`、`scripts/local/baselines/0018.sql`             |
 
 ## 2. 所有权与方案取舍
 

@@ -37,7 +37,7 @@ TS 模块化单体（`apps/api` 内按模块分目录，单镜像 `api|worker|al
 - [Required] ID-first 约束身份与资源关联（如 task/approval/run ID），不是禁止 DTO：公共用例可接收显式参数并返回只读投影。写侧不任意操作他人表；跨模块读取优先所属模块公共入口，明确只读投影可在读取侧 join 并保留 owner 过滤。
 - [Required] 受控跨模块写事务是确认消费：创建批准消费 + task/created/outbox；取消批准消费 + tasks 公共取消用例的状态/事件/取消命令与旧工作失效。不得为旧“只有创建例外”的文字拆开取消事务；失败全回滚，撤销回执仍由 tasks 裁决。
 - [Required] 本地工具提议是另一项限定原子边界：tools 持有调用引用，经 conversations 公共用例锁定执行资格，同一 client 调用 approvals 创建/取得批准，再接受结果并追加审计；任一步失败全部回滚。此事务不消费批准、不建 task，也不把任意外部副作用纳入 PG 原子性；具体合同见 04 §3、06 §10。
-- [Observed] `conversations/service.ts` 同步调用 `tools/gateway.ts`；`tasks/service.ts#getTaskDetail` 同步调用 `notifications/service.ts#getTaskNotifications` 返回 DTO。这些公共调用不经 outbox，通知读取也不创建副作用。
+- [Observed] `conversations/lifecycle/service.ts` 同步调用 `tools/gateway.ts`；`tasks/service.ts#getTaskDetail` 同步调用 `notifications/service.ts#getTaskNotifications` 返回 DTO。这些公共调用不经 outbox，通知读取也不创建副作用。
 - [Proposed · R1] 文档授权、一次 apply 绑定和明确零写冲突前驱归 approvals 的 `document_approvals`/`document_approval_decisions`；调用接受/审计仍归 tools。只读 MCP IO 在 Run 锁事务外进行；文件写入只走既有非事务一次许可，不扩大本地确认事务。详见 [14 §4–§6](14-r1-document-task-loop.md)。
 
 ## 2. 模块自有 schema / outbox 约定（Required）
@@ -49,7 +49,9 @@ TS 模块化单体（`apps/api` 内按模块分目录，单镜像 `api|worker|al
 
 ### D1 与 SQL 所有权（Observed / Required）
 
-`.dependency-cruiser.cjs` 动态发现模块，禁止跨模块导入 repository/schema 等存储实现（含 type import），允许公共函数调用；它不解析 SQL，不证明表所有权或 owner 过滤完整。`tools/gateway.ts#runGetUserPrefs` 仍直接查询 users，这是现存边界债务，不是新增写侧直读许可。触及相关能力时向所属公共用例/明确只读投影归位；SQL 表归属、owner、锁与事务范围仍需人工审查和行为测试，不用 D1 绿色代替。
+`.dependency-cruiser.cjs` 动态发现模块，禁止跨模块导入 repository/schema 等存储实现（含 type import），并禁止非路由业务代码依赖 HTTP 实现、路由或 Hono；允许所属模块的公共函数调用。它不解析 SQL，不证明表所有权或 owner 过滤完整。SQL 表归属、owner、锁与事务范围仍需人工审查和行为测试，不用 D1 绿色代替。
+
+会话接纳归 `conversations/lifecycle/admission.ts`，用户暂停和 compact 编排分别归 `conversations/harness/harness-pause.ts`、`conversations/compact/compact-authority.ts`；Run 事实与终结证据分开组合，不复制 attempt session 状态。`tools/gateway.ts` 负责调用选择，具体处理按提醒、偏好、工作区和记忆分担，调用接受账由 `tools/invocations/` 持有。模型 Run 绑定的事务内资格检查归 `model-providers/runtime/run-binding.ts`；工作区登记和 grant 归 `workspaces/registry/service.ts`，文件读取归 `workspaces/read/files.ts`，发布仍由创建和替换用例负责。
 
 ## 3. 拆分判据 a–d（Required，量化触发指标）
 

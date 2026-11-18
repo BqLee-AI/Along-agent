@@ -28,8 +28,10 @@
 - [Required] CI 合并检查为 `checks` 与 `integration`，按 PR 变更范围选择验证；文档、Web、已知 API 业务源码及独立 API 集成测试各运行适用检查，未知变更及 main push 执行完整集合。两个 job 均须成功；被跳过的检查不计为本次运行证据。分类和隔离边界见 design/13 §3–§4。
 - [Required] 工具链验收遵循 Bun 1.4.2 冻结安装、Oxlint 1.89.0、Oxfmt 0.74.0 与 `bun:test`；代码变更使用本地同一 `bun run verify`。依赖优先构建后串行执行全部 workspace 类型检查，保留源码、测试与 Next route typegen。文件级并行保留隔离及 mock/时钟恢复；只读边界 fixture 最多两个真实 CLI 并行。完整验证保留 API 双入口及契约包、真实 PostgreSQL 16 集成文件和 D9 指定集；D1/D2 原边界与断言不因调度改变（见 design/13 §3–§4）。
 - [Required] 同次 verify 仅复用成功 typecheck 构建的共享 packages；失败构建不消费，独立单元入口与跳过 typecheck 的 verify 仍真实准备包，不依赖旧 dist 或跨 job 产物。Compose 宿主不安装没有宿主消费者的依赖，镜像内仍真实执行 Bun 冻结安装、构建与运行；缺/有 `TZDB_VERSION` 两轮全新卷的就绪场景均须保留，格式错误不能作为警告放行。验收结果记在对应 change tasks / PR，不把未执行检查写成完成。
-- [Required · #43] HTTP入口在业务POST收集前复用身份与适用CSRF头门禁；原始JSON字节累计不超过131072（含分块/UTF8），超限413 PAYLOAD_TOO_LARGE，空/畸形JSON400 VALIDATION_ERROR，响应头/envelope/error的request_id一致。拒绝未消费上传先发有限响应再关闭，不等end或无界drain；合法小JSON与keep-alive、冻结确认/取消事务不回归。真实HTTP有限上传和隔离PG覆盖见对应PR；不以此声明DoS、代理缓冲、内存/吞吐或慢连接防护已验收（design/10 §1.1）。
+- [Required · #43] HTTP入口在业务POST收集前复用身份与适用CSRF头门禁；原始JSON字节累计不超过131072（含分块/UTF8），超限413 PAYLOAD_TOO_LARGE，空/畸形JSON400 VALIDATION_ERROR，响应头/envelope/error的request_id一致。认证/CSRF、未知路径及超限拒绝未结束上传时须完整发送有限错误并及时关闭，不等end或主动无界drain；允许运行时已缓冲数据及触发超限的最后chunk有限越界，不要求零读取。合法小JSON与keep-alive、冻结确认/取消事务不回归；不以此声明DoS、代理缓冲、内存/吞吐等通用防护已验证（design/10 §1.1）。
+  - HTTP 路由实现的更换不改变此验收：生产handler须通过真实明文及TLS连接，分别用慢速和持续上传验证上述拒绝、完整错误和及时关闭；合法连接复用、账户和业务写的错误先后，以及 SSE 断连/撤权也须通过真实连接分别验证。框架内部请求不能替代实际socket证据。详见 design/10 §1.1。
 - [Required · 职责基线] 仓颉唯一组织模型/工具循环、本次上下文、行动选择、预算、等待/恢复/停止；TS 长期保留 ToolGateway/能力、身份/批准/时间/任务/worker、API/Web 与 Run/checkpoint 存储（design/09/11、ADR0009）。native 源码分层见 [Harness README](../../apps/harness/README.md)，不改变该职责或 wire 合同。最小接入不等于完整 R1；补读不执行，checkpoint/fencing 不保证通用 external exactly-once。
+- [Required · API 功能职责] API 按功能及实际业务生命周期就近组织控制器、用例、契约与持久化；分工见 design/01 §2。Elysia 是已注册端点的唯一分发器，未命中不重跑业务控制器。公共入口分开请求准入、响应表示和连接处理；目录及适配调整不得改变认证、请求拒绝、流式披露、事务或运行角色行为（design/10 §1）。
 - [Required · #144] 用户可请求运行在安全点暂停，并在原 Run 显式继续；在途效果如实裁决，预算和授权不重置。刷新和只读跟随不继续，取消先提交使资格失效；不将用户暂停等同批准或通用崩溃恢复（design/23 §3、conversations API §9）。
 - [Required · #144 记忆] 本人可要求记住并在其他会话召回，也可查看来源、按修订更正或停止召回；owner 隔离和当前来源资格适用于读取及重放。字面无命中或降级不证明不存在，记忆不是授权，也不能保证模型准确理解本人意图（design/23 §6、API §12）。
 - [Required · 工具提议] 供应商一次返回多个工具提议时均不执行；助理在原预算内按单步继续，逐项依据真实结果决策，不重复既成或效果未知的动作（design/09 §2）。

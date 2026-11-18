@@ -134,7 +134,7 @@ initialize 原子提交 user/credential/session/安装绑定后才发 Cookie。c
 
 ### 5.2 窄路由
 
-下列是必要 API 全集，不是库 handler 通配；`http/app.ts` 与 `identity/routes.ts` 复用同一精确名单并分别执行入口控制，共享 DTO 是输入/输出契约。`{}` 为严格空对象。
+下列是必要 API 全集，不是库 handler 通配；`identity/account/native-routes.ts` 注册窄入口并装配账户用例，`identity/account/routes.ts` 处理各入口资格、Origin 和请求，共享 DTO 是输入/输出契约。`{}` 为严格空对象。
 
 | 方法/路径                           | 资格                 | strict body / query                           | 成功 data                                                                     |
 | ----------------------------------- | -------------------- | --------------------------------------------- | ----------------------------------------------------------------------------- |

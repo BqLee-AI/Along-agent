@@ -9,6 +9,7 @@
 
 原生 Harness 源码分层入口及构建哈希范围见 [Harness README](../apps/harness/README.md)；历史基线的文件路径与证据仍按其原版本理解。
 用户安全点暂停、显式继续和 compact 接口见 [conversations API §9–§10](api/conversations/conversations_routes.md#9-用户安全点暂停和继续)；本人记忆管理见 [API §12](api/README.md#12-本人短期记忆)，R3 边界见 design/23。
+API 将业务能力放在 `features/`，将跨功能操作、Run 执行和仓颉会话放在 `agent/`，由 Elysia 组装唯一业务路由。职责与事务边界见 [design/01 §2](design/01-tech-stack-and-repo-structure.md#2-monorepo-布局observedv0-关键目录)。Web 的 JSON 调用由 Eden 推导类型，SSE 保留独立协议。
 
 ## 一、PRD（产品需求，5 篇）
 
@@ -22,31 +23,31 @@
 
 ## 二、总体设计（真源，22 篇）
 
-| 序号 | 文档                                                                     | 作用                                                                                                                              |
-| ---- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
-| 01   | [技术栈与仓库结构](design/01-tech-stack-and-repo-structure.md)           | TS/Bun 依赖方向；LumenUI/Base UI + Tailwind v4、原生玻璃材质与一致首屏、分层导航、Markdown 聊天及 RSC/client/controller/data 边界 |
-| 02   | [模块化单体与拆分触发](design/02-modular-monolith-and-split-triggers.md) | 模块所有权、确认/工具结果的限定原子事务、拆分判据与D1边界                                                                         |
-| 03   | [v0 垂直切片](design/03-v0-vertical-slice.md)                            | 简报→卡片→对话→按钮确认→调度→站内通知详情投影→活动账；真实取消回执与七步证据边界                                                  |
-| 04   | [五缝契约](design/04-five-seams-contract.md)                             | 稳定工具调用、原子接受结果、只追加审计与非事务未知边界；其余能力端口                                                              |
-| 05   | [time-core 时间层](design/05-time-core.md)                               | 请求接纳日期锚/可信澄清来源、本地午夜边界、完整提醒与中文时钟映射、纯函数 normalize 和 typed 时间失败                             |
-| 06   | [approvals 确认门](design/06-approvals-confirmation-gate.md)             | 版本化冻结回显、显式修改、按钮确认及工具批准/结果原子边界                                                                         |
-| 07   | [task_events 事件账](design/07-task-events-ledger.md)                    | 只追加账本、取消优先、活动页读模型                                                                                                |
-| 08   | [调度与投递](design/08-scheduler-and-delivery.md)                        | 未排期过窗终结与遗留恢复、一次性调用许可、独立本地接收、未知不重发及取消栅栏                                                      |
-| 09   | [Harness 与 checkpoint](design/09-agent-runtime-and-checkpoint.md)       | 正式仓颉循环、逐项工具决策、TS 资格/事实、原子终态、有限批准恢复与只读补读                                                        |
-| 10   | [API 与流式通道](design/10-api-and-stream-design.md)                     | REST 真源、envelope、128KiB原始JSON字节边界与未消费流收尾、SSE版本化、WS延后                                                      |
-| 11   | [仓颉 Harness 与 TS 能力层](design/11-cangjie-runtime-spike.md)          | 正式 native/固定工具链/纯模型 transport；接入、消费者门与完整 R1 分级验收                                                         |
-| 12   | [a13n 六思想落点](design/12-a13n-principles-landing.md)                  | harness/checkpoint/自托管/revision/AG-UI 投影/readyz                                                                              |
-| 13   | [P0 开工与 CI 死规矩](design/13-p0-bootstrap-and-ci-rules.md)            | D1–D10、按变更范围执行的两项 CI 检查、正式 native 双入口消费者及本次执行证据                                                      |
-| 14   | [R1 资料到简报任务闭环](design/14-r1-document-task-loop.md)              | 受管工作区与真实 MCP、legacy 精确批准、新委托精确编辑、一次许可及同 Run 新回读；设计不替代运行证据                                |
-| 15   | [R1 本地生命周期与配置复用](design/15-r1-local-lifecycle.md)             | #67 初始化/启停/升级目标合同、原配置与目录身份保留、数据库分流及 #68 接口；不代表运行验收                                         |
-| 16   | [R1 账户与正式登录](design/16-r1-account-access.md)                      | #68 唯一管理员、原身份转正、库适配、固定会话、401 只读恢复及本机登记收尾合同；独立实验与验收                                      |
-| 17   | [R1 会话历史与只读恢复](design/17-r1-conversation-history.md)            | #69 服务端会话发现、原话/多 Run、稳定分页及零执行恢复；#91 当前 Harness 提醒完整冻结审阅、明确确认并继续，不扩展 business 或文档  |
-| 18   | [R2-A 单 Run 有界上下文](design/18-r2a-harness-context.md)               | #83 四种额度、可信计量与未知输入的后验超额边界、不可变策略、来源投影/分页回取及有界批准恢复；实现、受控消费者、真实模型分级取证   |
-| 19   | [R2-B 有限只读意图路由](design/19-r2b-readonly-intent-routing.md)        | #88：BGE INT8、三类只读、仓颉首轮决议、默认关闭；兼容 legacy 和本人委托，不自动接管                                               |
-| 20   | [本人目标内委托与授权](design/20-goal-scoped-delegation.md)              | 冻结实际能力与本人登记集合、资料编辑及有限创建、撞名恢复、v6/SSE v2 和执行生命周期；按事先明确的合同或预期核对真实效果            |
-| 21   | [受邀账户准入与恢复](design/21-invited-account-access.md)                | #112 显式准入/有限管理、停用后的流式披露边界、邀请/恢复/会话与前向升级；#131 本机口令重置；隔离实现证据与真实外部放行分列         |
-| 22   | [用户模型接入与运行绑定](design/22-model-provider-settings.md)           | Proposed：本人模型配置、各接入默认、加密凭据、冻结决议、SDK 受控流式出站与受限 Fake-IP 例外；真实外部验收独立                     |
-| 23   | [R3 跨会话记忆与 compact](design/23-r3-short-term-memory-and-compact.md) | 通用暂停继续、摘要压缩、来源记忆、安全边界及最小 MVP 验收                                                                         |
+| 序号 | 文档                                                                     | 作用                                                                                                                             |
+| ---- | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| 01   | [技术栈与仓库结构](design/01-tech-stack-and-repo-structure.md)           | TS/Bun 依赖方向、Elysia 请求分发、API 功能与生命周期、Web 组件及 RSC 边界                                                        |
+| 02   | [模块化单体与拆分触发](design/02-modular-monolith-and-split-triggers.md) | 模块和运行职责、确认/工具结果的限定原子事务、拆分判据与 D1 边界                                                                  |
+| 03   | [v0 垂直切片](design/03-v0-vertical-slice.md)                            | 简报→卡片→对话→按钮确认→调度→站内通知详情投影→活动账；真实取消回执与七步证据边界                                                 |
+| 04   | [五缝契约](design/04-five-seams-contract.md)                             | 稳定工具调用、原子接受结果、只追加审计与非事务未知边界；其余能力端口                                                             |
+| 05   | [time-core 时间层](design/05-time-core.md)                               | 请求接纳日期锚/可信澄清来源、本地午夜边界、完整提醒与中文时钟映射、纯函数 normalize 和 typed 时间失败                            |
+| 06   | [approvals 确认门](design/06-approvals-confirmation-gate.md)             | 版本化冻结回显、显式修改、按钮确认及工具批准/结果原子边界                                                                        |
+| 07   | [task_events 事件账](design/07-task-events-ledger.md)                    | 只追加账本、取消优先、活动页读模型                                                                                               |
+| 08   | [调度与投递](design/08-scheduler-and-delivery.md)                        | 未排期过窗终结与遗留恢复、一次性调用许可、独立本地接收、未知不重发及取消栅栏                                                     |
+| 09   | [Harness 与 checkpoint](design/09-agent-runtime-and-checkpoint.md)       | 正式仓颉循环、逐项工具决策、TS 资格/事实、原子终态、有限批准恢复与只读补读                                                       |
+| 10   | [API 与流式通道](design/10-api-and-stream-design.md)                     | Elysia 控制器、请求准入、响应表示与 socket 边界、128KiB JSON 限制、SSE 背压与断连                                                |
+| 11   | [仓颉 Harness 与 TS 能力层](design/11-cangjie-runtime-spike.md)          | 正式 native/固定工具链/纯模型 transport；接入、消费者门与完整 R1 分级验收                                                        |
+| 12   | [a13n 六思想落点](design/12-a13n-principles-landing.md)                  | harness/checkpoint/自托管/revision/AG-UI 投影/readyz                                                                             |
+| 13   | [P0 开工与 CI 死规矩](design/13-p0-bootstrap-and-ci-rules.md)            | D1–D10、按变更范围执行的两项 CI 检查、正式 native 双入口消费者及本次执行证据                                                     |
+| 14   | [R1 资料到简报任务闭环](design/14-r1-document-task-loop.md)              | 受管工作区与真实 MCP、legacy 精确批准、新委托精确编辑、一次许可及同 Run 新回读；设计不替代运行证据                               |
+| 15   | [R1 本地生命周期与配置复用](design/15-r1-local-lifecycle.md)             | #67 初始化/启停/升级目标合同、原配置与目录身份保留、数据库分流及 #68 接口；不代表运行验收                                        |
+| 16   | [R1 账户与正式登录](design/16-r1-account-access.md)                      | #68 唯一管理员、原身份转正、库适配、固定会话、401 只读恢复及本机登记收尾合同；独立实验与验收                                     |
+| 17   | [R1 会话历史与只读恢复](design/17-r1-conversation-history.md)            | #69 服务端会话发现、原话/多 Run、稳定分页及零执行恢复；#91 当前 Harness 提醒完整冻结审阅、明确确认并继续，不扩展 business 或文档 |
+| 18   | [R2-A 单 Run 有界上下文](design/18-r2a-harness-context.md)               | #83 四种额度、可信计量与未知输入的后验超额边界、不可变策略、来源投影/分页回取及有界批准恢复；实现、受控消费者、真实模型分级取证  |
+| 19   | [R2-B 有限只读意图路由](design/19-r2b-readonly-intent-routing.md)        | #88：BGE INT8、三类只读、仓颉首轮决议、默认关闭；兼容 legacy 和本人委托，不自动接管                                              |
+| 20   | [本人目标内委托与授权](design/20-goal-scoped-delegation.md)              | 冻结实际能力与本人登记集合、资料编辑及有限创建、撞名恢复、v6/SSE v2 和执行生命周期；按事先明确的合同或预期核对真实效果           |
+| 21   | [受邀账户准入与恢复](design/21-invited-account-access.md)                | #112 显式准入/有限管理、停用后的流式披露边界、邀请/恢复/会话与前向升级；#131 本机口令重置；隔离实现证据与真实外部放行分列        |
+| 22   | [用户模型接入与运行绑定](design/22-model-provider-settings.md)           | Proposed：本人模型配置、各接入默认、加密凭据、冻结决议、SDK 受控流式出站与受限 Fake-IP 例外；真实外部验收独立                    |
+| 23   | [R3 跨会话记忆与 compact](design/23-r3-short-term-memory-and-compact.md) | 通用暂停继续、摘要压缩、来源记忆、安全边界及最小 MVP 验收                                                                        |
 
 活动列表为空与历史创建事实、批量请求部分完成及标题序号的证据边界见[design/09 §5](design/09-agent-runtime-and-checkpoint.md#5-toolgateway-交互required)。
 
@@ -87,20 +88,22 @@ R2-B 的完整目标及多轮自主查询边界见[design/19 §4、§6](design/1
 | 6    | [对话运行与预算](agent/05-chat-runtime-flow-and-budget.md)  | Run/attempt/调用边界、native 累计预算、同 Run 批准恢复与取消       |
 | 7    | [评测夹具](agent/06-eval-fixtures.md)                       | 50 条时间表达集、200 卡片集版本化、指标口径                        |
 
-## 六、实施与演进规划（7 篇）
+## 六、实施与演进规划（10 篇）
 
 规划保留各自基线、状态与取舍；历史计划或 Proposed 建议不代表能力已经上线。
 
-| 序号 | 文档                                                                        | 作用                                                                                                     |
-| ---- | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| 1    | [R2-A 上下文工程合同入口](plans/r2a-context-engineering-plan.md)            | 已收敛草案的正式设计、行为合同与分级验收导航，不维护第二套合同                                           |
-| 2    | [v0 七步 smoke 收口计划](plans/v0-smoke-closeout-plan.md)                   | 真实链路缺口、最小实施顺序、七步证据与完整 v0 验收边界                                                   |
-| 3    | [v0 完整收口计划](plans/v0-closeout-plan.md)                                | A2 原子替代、A3 崩溃恢复与不确定窗口、A4 时间合同、镜像部署及完整验收门槛                                |
-| 4    | [#91 对话内提醒确认收口计划](plans/inline-reminder-closeout-plan.md)        | 已有证据的版本边界、真实文档/后继补验、隔离范围与独立归档 PR 要求                                        |
-| 5    | [助理能力与授权模型重构方案](plans/agent-capability-refactor-plan.md)       | Proposed：委托内自主执行、可信上下文、真实工具/产物、必要澄清、停止与兼容迁移；不启用新权限              |
-| 6    | [账户产品化与首个办公只读连接](plans/account-and-office-connectors-plan.md) | Proposed：邀请入驻、真实邮件恢复、双用户隔离与无损迁移；飞书用户授权和单 Docx 只读，不接管 #104 执行重构 |
-| 7    | [R3 跨窗口短期记忆规划](plans/r3-short-term-memory-plan.md)                 | Proposed 演进背景；MVP 合并与安全门槛以 design/23、OpenSpec 和 PRD 为准                                  |
-| 8    | [持续对话与工作区](plans/desktop-experience-plan.md)                        | 全应用双栏工作台、聊天与工作区切换、功能分层与验收范围                                                   |
+| 序号 | 文档                                                                           | 作用                                                                                                     |
+| ---- | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| 1    | [R2-A 上下文工程合同入口](plans/r2a-context-engineering-plan.md)               | 已收敛草案的正式设计、行为合同与分级验收导航，不维护第二套合同                                           |
+| 2    | [v0 七步 smoke 收口计划](plans/v0-smoke-closeout-plan.md)                      | 真实链路缺口、最小实施顺序、七步证据与完整 v0 验收边界                                                   |
+| 3    | [v0 完整收口计划](plans/v0-closeout-plan.md)                                   | A2 原子替代、A3 崩溃恢复与不确定窗口、A4 时间合同、镜像部署及完整验收门槛                                |
+| 4    | [#91 对话内提醒确认收口计划](plans/inline-reminder-closeout-plan.md)           | 已有证据的版本边界、真实文档/后继补验、隔离范围与独立归档 PR 要求                                        |
+| 5    | [助理能力与授权模型重构方案](plans/agent-capability-refactor-plan.md)          | Proposed：委托内自主执行、可信上下文、真实工具/产物、必要澄清、停止与兼容迁移；不启用新权限              |
+| 6    | [账户产品化与首个办公只读连接](plans/account-and-office-connectors-plan.md)    | Proposed：邀请入驻、真实邮件恢复、双用户隔离与无损迁移；飞书用户授权和单 Docx 只读，不接管 #104 执行重构 |
+| 7    | [R3 跨窗口短期记忆规划](plans/r3-short-term-memory-plan.md)                    | Proposed 演进背景；MVP 合并与安全门槛以 design/23、OpenSpec 和 PRD 为准                                  |
+| 8    | [持续对话与工作区](plans/desktop-experience-plan.md)                           | 全应用双栏工作台、聊天与工作区切换、功能分层与验收范围                                                   |
+| 9    | [Hono API 与后端职责重构计划](plans/hono-backend-migration-plan.md)            | Hono 路线的历史设计依据；目标框架与实施路线由 Elysia 全 API 模块化方案取代                               |
+| 10   | [Elysia API 与全后端模块化重构方案](plans/elysia-api-modular-refactor-plan.md) | Proposed：替换 Hono，重划全 API 功能、执行与事务边界，接入 Eden，并保全 HTTP/SSE、角色与历史合同         |
 
 ## 七、操作指南（1 篇）
 
@@ -118,7 +121,7 @@ R2-B 的完整目标及多轮自主查询边界见[design/19 §4、§6](design/1
 | 2    | [time-core 黄金用例](demo/time-core-golden-cases.md) | 4 基准+DST+50 表达；第14条区分新请求/可信澄清锚、同日等待与真实午夜，纯函数不代替消费者验收 |
 | 3    | [故障注入 smoke](demo/fault-injection-smoke.md)      | 真实强杀、取消竞争及规则故障；分别计数实际调用与持久结果                                    |
 
-## 九、历史验收与实验记录（17 篇）
+## 九、历史验收与实验记录
 
 这些记录绑定各自日期、源码、环境与实际覆盖范围，不代替现行规范，也不证明新版本或 Proposed 方案已验收。
 
@@ -142,6 +145,7 @@ R2-B 的完整目标及多轮自主查询边界见[design/19 §4、§6](design/1
 | 16   | [2026-11-13 R3 阶段 0 实验](verification/r3-stage-zero-2026-11-13.md)                            | Run 静态边界、真实模型摘要试验及 PG16/pgvector 中文检索比较；不代替 R3 验收                         |
 | 17   | [2026-11-16 R3 MVP 验收](verification/r3-mvp-acceptance-2026-11-16.md)                           | 真实模型、隔离检索、受控竞争与升级恢复证据及未覆盖边界                                              |
 | 18   | [2026-11-02—03 桌面工作台验证](verification/desktop-experience-verification-2026-11-02.md)       | 工作台构建、真实浏览器与本机实测的分段证据及未覆盖范围                                              |
+| 19   | [2026-11-18 Elysia API 重构验证](verification/elysia-api-modular-refactor-2026-11-18.md)         | 独立工作树的 HTTP/TLS、Eden、浏览器、PostgreSQL 与仓颉验证及未覆盖范围                              |
 
 ## 十、References（3 篇）
 

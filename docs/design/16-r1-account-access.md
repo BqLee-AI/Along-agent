@@ -11,7 +11,7 @@
 
 identity 拥有安装管理员绑定、credential 和会话；复用锁定 Better Auth 1.7.10 的密码哈希/验证、Cookie 及现有 resolver，不挂载库的全量 handler。正式交付是 API、数据库、账户页面与本机维护的完整切片，不是登录表单或临时 Cookie 桥。
 
-[Required] `identity/better-auth.ts` 与 `pg-adapter.ts` 负责库标准字段、真实事务和存储 HMAC 边界；HTTP 入口只开放批准的账户用例，Web proxy 保留实际 Origin、多 Set-Cookie 和流式通道。库返回值不能替代数据库提交或正式 Cookie 往返的证据。
+[Required] `identity/session/better-auth.ts` 与 `session/pg-adapter.ts` 负责库标准字段、真实事务和存储 HMAC 边界；HTTP 入口只开放批准的账户用例，Web proxy 保留实际 Origin、多 Set-Cookie 和流式通道。库返回值不能替代数据库提交或正式 Cookie 往返的证据。
 
 [Required] 原 users.id、历史、任务、批准与工作区 owner 保持。新增账户不能替代原身份；存在其他 owner 不代表允许将其数据合并给管理员。#67 的配置、原卷与认证密钥保持，不因登录补建另一套安装。
 

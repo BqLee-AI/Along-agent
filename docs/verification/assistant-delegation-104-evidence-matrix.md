@@ -25,7 +25,7 @@
 
 ### 3.6 整体核对结论
 
-- **合同和实现**：逐项映射见上表及下方证据。新旧 profile 与冻结能力对应 `conversations/schemas.ts`、`service.ts`，v6 与结果由 `packages/contracts/src/harness.ts`、`goals.ts` 和 `conversations/goal-result.ts` 承担；提醒事务、时间依据和冻结展示分别由 `tasks/create.ts`、迁移 0023/0024/0026 及任务投影承担。资料许可/新读、停止与历史发布分别按 3.4 和 #137 所列范围取证；受控消费者不充当真实模型。
+- **合同和实现**：逐项映射见上表及下方证据。新旧 profile 与冻结能力对应 `conversations/schemas.ts`、`service.ts`，v6 与结果由 `packages/contracts/src/harness.ts`、`goals.ts` 和 `conversations/goals/goal-result.ts` 承担；提醒事务、时间依据和冻结展示分别由 `tasks/create.ts`、迁移 0023/0024/0026 及任务投影承担。资料许可/新读、停止与历史发布分别按 3.4 和 #137 所列范围取证；受控消费者不充当真实模型。
 - **API、schema、PRD、规则**：对照 `docs/api/conversations/conversations_routes.md` 的接纳、生命周期、结果及只读恢复，`docs/schema/conversation-and-runs-schema.md` 的冻结与终态，以及 PRD 04 的 #104 条目和 `CONTRIBUTING.md` §6.1/§8。核对时发现 schema 文档仍有仅 request-bound 和 v5 新执行措辞，与当前 v6 及两种冻结生命周期不一致，本次已按实际实现修正；无迁移或运行代码变更。
 - **五门与评估**：`5cd3d53` 的 static、migration-scan、scheduler-fault、contracts-dual、compose-smoke 全部通过；后续文档更正的 head 五门另查。下表列出 §10 所需类别的实际观察，非必要打断证据不足处标未知而非零。unknown 按事前既有 design/20 §6.3、§7 的未知不冒成功、不盲重写合同核对；用户未审定该样本，[此前错误主张已公开更正](https://github.com/BqLee-AI/Along-agent/pull/139#issuecomment-6816049444)。
 - **失败和判断**：撞名文件精确内容 0/1、登记外完整目标 0/1，分别是实际错误文件内容和用户未收到明确拒绝说明；本次未将它们改计通过。前者未能证明写入链路改写字节，后者存在明确用户可见缺口，但原始轮次及用量不足以确定预算耗尽来源；没有据此确认可定位的确定性代码缺陷或修改运行代码。历史误取消是实际错误效果，不能声称语义选择可靠或没有风险；现有证据未确认阻断全部 #104 用户能力的确定性功能缺陷。
@@ -114,7 +114,7 @@ FUSE 可用性另在无网络、自有容器内探测：显式映射 `/dev/fuse`
 
 ### 最小候选的具体评估
 
-- **事务内准入**：`conversations/service.ts` 在运行事务内写入调用方内容和 owner 的 message 后插入随机 Run；`tasks/create.ts` 明确由调用方负责校验来源。把授权登记放进 `SECURITY DEFINER` 函数可使登记与产品事务同提交或回滚，但若其只检查运行角色可写的 message、invocation 或调用方提供的 owner/ID，运行方仍能构造来源并自扩权。前述隔离 Run 探针还观察到事务外管理员看不到未提交 message。合理候选需要独立可信主体验证来源和具体效果，提供运行角色不能伪造的授权，再由受限数据库入口绑定来源、目标和新 ID 并在同一事务内消费；同时要分离迁移、运行及派生连接的身份。现有产品没有这些入口或独立凭证，本轮没有以手工授权替身重复探针，也没有证明此候选能端到端工作。
+- **事务内准入**：`conversations/lifecycle/service.ts` 在运行事务内写入调用方内容和 owner 的 message 后插入随机 Run；`tasks/create.ts` 明确由调用方负责校验来源。把授权登记放进 `SECURITY DEFINER` 函数可使登记与产品事务同提交或回滚，但若其只检查运行角色可写的 message、invocation 或调用方提供的 owner/ID，运行方仍能构造来源并自扩权。前述隔离 Run 探针还观察到事务外管理员看不到未提交 message。合理候选需要独立可信主体验证来源和具体效果，提供运行角色不能伪造的授权，再由受限数据库入口绑定来源、目标和新 ID 并在同一事务内消费；同时要分离迁移、运行及派生连接的身份。现有产品没有这些入口或独立凭证，本轮没有以手工授权替身重复探针，也没有证明此候选能端到端工作。
 - **目标级文件**：Linux [Landlock 文件权限](https://docs.kernel.org/userspace-api/landlock.html#filesystem-flags)针对文件层级及目录内容，创建和替换要对同一父目录允许临时文件创建与 `link`/`rename`；目录规则不能按目标文件名单独授权。该判断来自内核文档与源码，并非本机 Landlock 实测。目标单文件挂载的 `EBUSY`、同身份 DAC 绕过和仅裸 FUSE 挂载的证据见上，不代表所有内核机制都不可行。独立发布进程是候选，但当前 gateway 在 API 进程内直接发布；需要独立核验冻结授权与许可，并阻止运行进程绕过发布者，再以真实派发、原注册 grant 的根及输出目录 `dev:ino`、并发和在途效果验证。替换前会校验原目标 inode；原子 rename 后目标变为新 inode，本身不是身份失败。
 
 当前没有可直接接入、已端到端验证的独立边界。缺的是独立来源与授权凭证、可信准入/发布组件和启动前分离连接与文件访问的实际部署方式，以及真实原挂载的身份事实；扩大权限、禁用后台或把受控代理当独立授权，都不能代替这些前置。是否构建上述组件或采用其他机制需要具体设计和验证；本记录不宣称原理上不存在其他方案。
@@ -211,7 +211,7 @@ FUSE 可用性另在无网络、自有容器内探测：显式映射 `/dev/fuse`
 
 - **撞名多换行**：两次 `workspace_create` 冻结的内容都已经含末尾换行；第二次创建的 28 字节与独立新读一致。`apps/api/src/modules/tools/invocations.ts` 对解析后的 `content` 直接 UTF-8 编码并冻结，发布和新读核验冻结字节；未发现文件发布阶段追加换行的证据。provider 原始工具参数未持久化，因此不能把换行的来源断言为已直接观测的模型输出。模型对用户明确文本的语义偏差是可能原因，但现存证据不足以排除参数链路中的其他转换。
 - **结果含义**：`apps/api/src/modules/tools/query.ts` 核验零写撞名、替代创建及新读的来源和字节一致性，不比较用户自然语言中指定的精确文本。产品接受 `completed` 证明所声明的创建和回读有对应事实，不证明模型准确理解或逐字遵守用户文本；该样本精确内容仍为 0/1，不能将产品状态当作验收通过。
-- **登记外与预算**：该运行一个 attempt，依次持久化六次成功列表及一次 `TOOL_FORBIDDEN` 读取，其后无其他持久化业务调用。拒绝后曾出现将如实说明拒绝的流式文字，但终态因 `BUDGET_EXCEEDED` 保存通用中断答复；流式文字不等于最终明确答复。`apps/harness/src/main.cj` 在硬拒绝后限制后续业务动作，并要求在原预算内以 `finish_goal` 终结；`apps/api/src/modules/conversations/run-state.ts` 在无结构化终态时生成中断结果。已观察的安全拒绝与未完成的用户目标应分开记录。
+- **登记外与预算**：该运行一个 attempt，依次持久化六次成功列表及一次 `TOOL_FORBIDDEN` 读取，其后无其他持久化业务调用。拒绝后曾出现将如实说明拒绝的流式文字，但终态因 `BUDGET_EXCEEDED` 保存通用中断答复；流式文字不等于最终明确答复。`apps/harness/src/main.cj` 在硬拒绝后限制后续业务动作，并要求在原预算内以 `finish_goal` 终结；`apps/api/src/modules/conversations/run/run-state.ts` 在无结构化终态时生成中断结果。已观察的安全拒绝与未完成的用户目标应分开记录。
 - **归因边界**：原始模型轮次、被拒读取的原始路径及终态用量未完整保存，无法判断预算是迭代还是 token 耗尽、是否曾提交无效 `finish_goal`，也无法将此次中断唯一归因于模型或实现。可确认的用户可见缺口是预算耗尽后最终答复未保留明确拒绝说明；不以更改预期、重试样本或单独代码推测掩盖失败。
 
 ### 独立双账户跨 owner 补验
