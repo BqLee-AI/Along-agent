@@ -28,7 +28,11 @@ export function createRequestHandler(deps: AppDeps) {
           : {}),
       });
       const response = await app.handle(request);
-      if (res.destroyed || req.aborted) return;
+      if (res.destroyed || req.aborted) {
+        // No socket writer will take ownership of this body or cancel its producer.
+        void response.body?.cancel().catch(() => {});
+        return;
+      }
       if (
         !response.headers.get('content-type')?.startsWith('text/event-stream') &&
         !req.readableEnded &&
