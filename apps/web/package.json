@@ -28,7 +28,7 @@
     "@lorelum/lumen-ui": "file:vendor/lorelum-lumen-ui-0.0.1-alpha.0-b95a5409bfaba0e0f8db65c7a82257425f2ca99e.tgz",
     "lucide-react": "^1.63.0",
     "motion": "^14.9.0",
-    "next": "^16.4.2",
+    "next": "^16.4.5",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "zod": "3.25.76"
