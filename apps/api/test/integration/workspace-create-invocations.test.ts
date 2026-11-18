@@ -3,13 +3,13 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
-import { startConversationRun } from '../../src/modules/conversations/service.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
-import { invokeTool, reserveToolInvocation } from '../../src/modules/tools/gateway.js';
-import { configureWorkspaceRegistry } from '../../src/modules/workspaces/service.js';
-import { readRunGoalDocumentEvidence } from '../../src/modules/tools/query.js';
+import { createContextPolicy } from '../../src/features/conversations/public.js';
+import type { HarnessServices } from '../../src/agent/runtime/contracts.js';
+import { startConversationRun } from '../../src/agent/operations/start.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
+import { invokeTool, reserveToolInvocation } from '../../src/agent/tools/gateway.js';
+import { configureWorkspaceRegistry } from '../../src/features/workspaces/public.js';
+import { readRunGoalDocumentEvidence } from '../../src/agent/tools/query.js';
 import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import {
   createIntegrationDatabase,

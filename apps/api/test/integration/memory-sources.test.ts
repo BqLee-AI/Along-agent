@@ -5,7 +5,7 @@ import {
   conversationMemorySources,
   readMemoryRunSource,
   readMemorySource,
-} from '../../src/modules/conversations/memory-sources.js';
+} from '../../src/features/conversations/history/memory-sources.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 
 const maybe = databaseUrl ? describe : describe.skip;

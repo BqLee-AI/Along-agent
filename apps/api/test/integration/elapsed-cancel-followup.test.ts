@@ -1,15 +1,16 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import { confirmApproval } from '../../src/modules/approvals/confirm.js';
-import { getApprovalDetail } from '../../src/modules/approvals/service.js';
-import { executeRun, startConversationRun } from '../../src/modules/conversations/service.js';
+import { confirmApproval } from '../../src/features/approvals/reminder/confirm.js';
+import { getApprovalDetail } from '../../src/features/approvals/reminder/service.js';
+import { executeRun } from '../../src/agent/operations/execute.js';
+import { startConversationRun } from '../../src/agent/operations/start.js';
 import type { ThreadEvent } from '@along/stream-protocol';
-import { getTaskDetail } from '../../src/modules/tasks/service.js';
-import { runCancelPhase } from '../../src/modules/tasks/scheduler/cancel-phase.js';
-import { runSchedulePhase } from '../../src/modules/tasks/scheduler/schedule.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
-import type { ToolContext } from '../../src/modules/tools/contracts.js';
-import { invokeTool, reserveToolInvocation } from '../../src/modules/tools/gateway.js';
+import { getTaskDetail } from '../../src/features/tasks/service.js';
+import { runCancelPhase } from '../../src/features/tasks/scheduler/cancel-phase.js';
+import { runSchedulePhase } from '../../src/features/tasks/scheduler/schedule.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
+import type { ToolContext } from '../../src/agent/tools/contracts.js';
+import { invokeTool, reserveToolInvocation } from '../../src/agent/tools/gateway.js';
 import {
   admitTestUser,
   createIntegrationDatabase,

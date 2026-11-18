@@ -19,12 +19,12 @@ import {
   type HarnessModelReply,
   type WorkspaceResult,
 } from '@along/contracts';
-import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import { createHarnessModelTransport } from '../../src/modules/model-providers/harness-model.js';
+import { createContextPolicy } from '../../src/features/conversations/public.js';
+import { createLocalFixtureModelTransport } from '../helpers/local-fixture-model.js';
 import {
   configureWorkspaceRegistry,
   type WorkspaceRegistration,
-} from '../../src/modules/workspaces/service.js';
+} from '../../src/features/workspaces/public.js';
 import {
   createHarnessConsumer,
   jsonBody,
@@ -267,7 +267,10 @@ beforeAll(async () => {
     maxTokens: 64000,
     contextPolicy: createContextPolicy({ completionCap: 1024, model: 'context-consumer' }),
   };
-  fixture.model = createHarnessModelTransport({ baseUrl: `${base}/v1`, model: 'context-consumer' });
+  fixture.model = createLocalFixtureModelTransport({
+    baseUrl: `${base}/v1`,
+    model: 'context-consumer',
+  });
 }, 30_000);
 
 afterAll(async () => {

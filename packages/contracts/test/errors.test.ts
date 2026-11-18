@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { ERROR_CODES } from '../src/errors.js';
+import { ERROR_CODES, httpStatusForError } from '../src/errors.js';
 import { EnvelopeSchema } from '../src/envelope.js';
 
 describe('errors', () => {
@@ -13,6 +13,19 @@ describe('errors', () => {
     expect(ERROR_CODES.TZDB_UNAVAILABLE).toEqual({ code: 400006, http: 503 });
     expect(ERROR_CODES.NOT_READY).toEqual({ code: 400011, http: 503 });
     expect(ERROR_CODES.BUDGET_EXCEEDED).toEqual({ code: 400008, http: 429 });
+  });
+
+  it.each([
+    [400001, 409],
+    [400002, 410],
+    [400006, 503],
+    [400008, 429],
+    [422, 422],
+    [500, 500],
+    [502, 502],
+    [503, 503],
+  ])('preserves the wire status of numeric error code %i', (code, status) => {
+    expect(httpStatusForError(code)).toBe(status);
   });
 });
 

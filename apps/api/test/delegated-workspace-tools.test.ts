@@ -4,8 +4,8 @@ import {
   WorkspaceCreateInputSchema,
   WorkspaceReplaceInputSchema,
   WorkspaceReadInputSchema,
-} from '../src/modules/tools/schemas.js';
-import { DELEGATION_TOOL_DEFINITIONS } from '../src/modules/tools/catalog.js';
+} from '../src/agent/tools/schemas.js';
+import { DELEGATION_TOOL_DEFINITIONS } from '../src/agent/tools/catalog.js';
 
 it('accepts only the exact delegated create arguments', () => {
   const args = { workspace_id: 'one', output_directory: 'out', filename: 'a.txt', content: '' };

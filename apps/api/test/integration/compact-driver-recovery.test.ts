@@ -1,12 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
-import {
-  cancelConversationRun,
-  getCompactReceipt,
-} from '../../src/modules/conversations/harness-authority.js';
-import { createRunDriver } from '../../src/modules/conversations/run-driver.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
+import { cancelConversationRun } from '../../src/agent/operations/run.js';
+import { getCompactReceipt } from '../../src/agent/operations/compact.js';
+import { createRunDriver } from '../../src/agent/runtime/run-driver.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
 import {
   admitTestUser,
   createIntegrationDatabase,

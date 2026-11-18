@@ -176,7 +176,7 @@ describe('explicit invited-account action controller states', () => {
     let calls = 0;
     const lost = await submitAccountAction(
       'password/change',
-      {},
+      { current_password: 'password', new_password: 'new-password' },
       'csrf',
       authPasswordChangedSchema,
       async () => {
@@ -188,7 +188,7 @@ describe('explicit invited-account action controller states', () => {
     expect(calls).toBe(1);
     const malformed = await submitAccountAction(
       'password/change',
-      {},
+      { current_password: 'password', new_password: 'new-password' },
       'csrf',
       authPasswordChangedSchema,
       async () => response(200, { password_changed: true }),
@@ -209,7 +209,7 @@ describe('explicit invited-account action controller states', () => {
       }),
     ).rejects.toThrow();
     expect(navigations).toEqual(['/login?returnTo=%2Faccount']);
-    expect(calls).toEqual([{ url: '/api/v1/auth/sessions', method: undefined }]);
+    expect(calls).toEqual([{ url: '/api/v1/auth/sessions', method: 'GET' }]);
     navigations.length = 0;
     for (const status of [403, 429, 503])
       await expect(

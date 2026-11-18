@@ -6,7 +6,8 @@ import {
   initialHistoryPage,
   readHistoryCollectionPage,
 } from '@/shared/http/page';
-import { ApprovalPageSchema, approvalListPath } from '../model/approval';
+import { ApprovalPageSchema } from '../model/approval';
+import { api } from '@/shared/http/eden';
 import type { ApprovalFilter, ApprovalPage } from '../model/approval';
 
 export interface ApprovalListProps {
@@ -37,9 +38,15 @@ export function useApprovalList({ status, initial, initialError }: ApprovalListP
     dispatch({ type: 'start', target: status, request: id, reset });
     try {
       const page = await readHistoryCollectionPage(
-        approvalListPath(status, reset ? null : state.nextCursor),
+        api.api.v1.approvals.get({
+          query: {
+            status,
+            limit: '50',
+            ...(!reset && state.nextCursor !== null ? { cursor: state.nextCursor } : {}),
+          },
+          fetch: { signal: controller.signal },
+        }),
         ApprovalPageSchema,
-        controller.signal,
       );
       if (!controller.signal.aborted) {
         dispatch({

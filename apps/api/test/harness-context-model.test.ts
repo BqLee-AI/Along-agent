@@ -1,11 +1,8 @@
 import { afterEach, expect, test } from 'bun:test';
 import { createServer, type Server } from 'node:http';
-import { createHarnessModelTransport } from '../src/modules/model-providers/harness-model.js';
-import { createContextPolicy } from '../src/modules/conversations/context-policy.js';
-import {
-  buildHarnessModelBody,
-  measureHarnessContext,
-} from '../src/modules/conversations/harness-context.js';
+import { createLocalFixtureModelTransport } from './helpers/local-fixture-model.js';
+import { createContextPolicy } from '../src/features/conversations/public.js';
+import { serializeSdkRequest, measureSdkContext } from '../src/features/model-providers/public.js';
 import type { HarnessRequest } from '@along/contracts';
 
 const servers: Server[] = [];
@@ -44,7 +41,7 @@ test('R2-A sends the independent completion cap rather than the cumulative balan
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('missing port');
-  const model = createHarnessModelTransport({
+  const model = createLocalFixtureModelTransport({
     baseUrl: `http://127.0.0.1:${address.port}/v1`,
     model: 'bounded',
   });
@@ -96,21 +93,21 @@ test('verified complete input enforces both window reserve and cumulative balanc
     input_tokens: 100,
     meter_revision: 'complete-fixture/1',
   });
-  expect(await measureHarnessContext(candidate, [], policy, meter)).toMatchObject({
+  expect(await measureSdkContext(candidate, [], policy, meter)).toMatchObject({
     output_ceiling: 1,
     limit_reason: null,
   });
   expect(
-    await measureHarnessContext({ ...candidate, remaining_tokens: 100 }, [], policy, meter),
+    await measureSdkContext({ ...candidate, remaining_tokens: 100 }, [], policy, meter),
   ).toMatchObject({ output_ceiling: 0, limit_reason: 'budget' });
   expect(
-    await measureHarnessContext({ ...candidate, remaining_tokens: 101 }, [], policy, meter),
+    await measureSdkContext({ ...candidate, remaining_tokens: 101 }, [], policy, meter),
   ).toMatchObject({ output_ceiling: 1, limit_reason: null });
   expect(
-    await measureHarnessContext(candidate, [], { ...policy, model_window_tokens: 120 }, meter),
+    await measureSdkContext(candidate, [], { ...policy, model_window_tokens: 120 }, meter),
   ).toMatchObject({ output_ceiling: 0, limit_reason: 'context' });
   expect(
-    await measureHarnessContext(
+    await measureSdkContext(
       { ...candidate, remaining_tokens: 0 },
       [],
       { ...policy, model_window_tokens: 120 },
@@ -135,7 +132,7 @@ test('missing current meter and missing provider usage remain unknown rather tha
     remaining_tokens: null,
     max_output_tokens: 37,
   };
-  expect(await measureHarnessContext(candidate, [], policy)).toMatchObject({
+  expect(await measureSdkContext(candidate, [], policy)).toMatchObject({
     output_ceiling: 37,
     limit_reason: null,
     input_meter: { quality: 'unavailable', input_tokens: null, meter_revision: 'unavailable/1' },
@@ -164,7 +161,7 @@ test('SDK preview serializes an accepted unanswered tool call without inventing 
     remaining_tokens: 1000,
     max_output_tokens: 37,
   };
-  const body = JSON.parse(await buildHarnessModelBody('bounded', candidate, []));
+  const body = JSON.parse(await serializeSdkRequest('bounded', candidate, []));
   expect(body.messages.at(-1)).toMatchObject({
     role: 'assistant',
     tool_calls: [
@@ -227,12 +224,12 @@ test('SDK preflight meters the exact body later sent without contacting the prov
     max_output_tokens: 37,
   };
   let measured = '';
-  const measurement = await measureHarnessContext(candidate, [], policy, (body) => {
+  const measurement = await measureSdkContext(candidate, [], policy, (body) => {
     measured = body;
     return { quality: 'verified', input_tokens: 10, meter_revision: 'capture/1' };
   });
   expect(requests).toBe(0);
-  const transport = createHarnessModelTransport({
+  const transport = createLocalFixtureModelTransport({
     baseUrl: `http://127.0.0.1:${address.port}/v1`,
     model: 'opaque/model',
   });

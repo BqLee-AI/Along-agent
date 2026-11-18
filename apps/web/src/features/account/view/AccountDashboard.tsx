@@ -5,6 +5,7 @@ import * as auth from '@along/contracts';
 import type { z } from 'zod';
 import { Button } from '@lorelum/lumen-ui/components/button';
 import { useAccountCollection } from '../viewmodel/use-account-collection';
+import type { AccountCollection } from '../model/account-actions';
 import AccountActionForm from './AccountActionForm';
 
 const currentPassword = {
@@ -59,7 +60,7 @@ function Collection<T extends { id: string }>({
   title,
   render,
 }: {
-  path: string;
+  path: AccountCollection;
   schema: z.ZodType<{ items: T[]; next_cursor: string | null }>;
   title: string;
   render: (item: T) => ReactNode;
@@ -224,7 +225,7 @@ export default function AccountDashboard({
                 {invitation.state === 'pending' || invitation.state === 'expired' ? (
                   <>
                     <AccountActionForm
-                      path={`invitations/${invitation.id}/resend`}
+                      path={{ kind: 'invitation-resend', id: invitation.id }}
                       title="发送新一代邀请"
                       values={{ idempotency_key: null }}
                       fields={[currentPassword]}
@@ -234,7 +235,7 @@ export default function AccountDashboard({
                       success="新一代邀请已接受，旧链接失效。请只读核对邮件状态。"
                     />
                     <AccountActionForm
-                      path={`invitations/${invitation.id}/revoke`}
+                      path={{ kind: 'invitation-revoke', id: invitation.id }}
                       title="撤销邀请"
                       fields={[currentPassword]}
                       inputSchema={auth.authInvitationRevokeSchema}
@@ -262,7 +263,7 @@ export default function AccountDashboard({
                   <p>唯一管理员受保护，不可在线停用或申请删除。</p>
                 ) : user.status === 'active' ? (
                   <AccountActionForm
-                    path={`users/${user.id}/disable`}
+                    path={{ kind: 'user-disable', id: user.id }}
                     title="停用此普通账户"
                     fields={[currentPassword, confirmed]}
                     inputSchema={auth.authDisableUserSchema}

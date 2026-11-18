@@ -100,7 +100,7 @@ describe('affected CI selection', () => {
 
   it('unions Web and API impact without enabling unrelated checks', () => {
     expect(select([webSource, apiSource])).toEqual(plan(['web', 'api'], 'api', true));
-    expect(select([apiSource])).toEqual(plan(['api'], 'api', true));
+    expect(select([apiSource])).toEqual(plan(['web', 'api'], 'api', true));
   });
 
   it('selects package consumers without automatically including every app', () => {
@@ -111,7 +111,7 @@ describe('affected CI selection', () => {
     }
     for (const name of ['time-core', 'scheduler-core', 'notifier-core']) {
       expect(select([`packages/${name}/src/index.ts`])).toEqual(
-        plan(['api', 'packages'], 'full', true),
+        plan(['web', 'api', 'packages'], 'full', true),
       );
     }
   });
@@ -129,12 +129,16 @@ describe('affected CI selection', () => {
   });
 
   it('widens shared integration setup and backend shared state', () => {
+    expect(select(['apps/api/test/integration/setup.ts'])).toEqual(plan(['api'], 'full', true));
     for (const path of [
-      'apps/api/test/integration/setup.ts',
       'apps/api/src/db/schema.ts',
-      'apps/api/src/modules/identity/service.ts',
+      'apps/api/src/features/identity/account/account-service.ts',
+      'apps/api/src/features/conversations/run/context-policy.ts',
+      'apps/api/src/features/conversations/run-event-response.ts',
+      'apps/web/src/shared/http/eden.ts',
+      'apps/web/src/app/api/[...path]/route.ts',
     ]) {
-      expect(select([path])).toEqual(plan(['api'], 'full', true));
+      expect(select([path])).toEqual(plan(['web', 'api'], 'full', true));
     }
   });
 
@@ -185,8 +189,11 @@ describe('affected CI selection', () => {
       ['scripts/lint-rules.mjs', plan(['web', 'tooling'])],
       ['scripts/fixtures/frozen-bad.ts', plan(['tooling'])],
       ['scripts/test/fixtures/0024_tasks_elapsed_basis.sql', plan(['tooling'], 'full')],
-      ['apps/api/src/modules/workspaces/service.ts', plan(['api', 'tooling'], 'api', true)],
-      ['apps/api/src/http/errors.ts', plan(['api', 'tooling'], 'api', true)],
+      [
+        'apps/api/src/features/workspaces/registry/service.ts',
+        plan(['web', 'api', 'tooling'], 'api', true),
+      ],
+      ['apps/api/src/http/errors.ts', plan(['web', 'api', 'tooling'], 'api', true)],
       ['ci/native-tests.txt', plan(['api', 'tooling'], 'full', true)],
       ['ci/gates.json', plan(['tooling'], 'none', true)],
     ] as const;
@@ -331,11 +338,11 @@ describe('prior successful gate reuse', () => {
   });
 
   it.each([
-    [apiSource, plan(['api'], 'api', true)],
+    [apiSource, plan(['web', 'api'], 'api', true)],
     ['packages/contracts/src/index.ts', plan(['web', 'api', 'packages'], 'full', true)],
     ['packages/time-core/src/index.ts', plan(['web', 'api', 'packages'], 'full', true)],
     ['scripts/test/fixtures/0024_tasks_elapsed_basis.sql', plan([], 'full')],
-    ['apps/api/src/modules/workspaces/service.ts', plan(['tooling'])],
+    ['apps/api/src/features/workspaces/registry/service.ts', plan(['tooling'])],
     ['apps/api/src/http/errors.ts', plan(['tooling'])],
     ['scripts/ci/select-scope.mjs', all],
   ] as const)('invalidates %s for its consumers', async (path, requested) => {
@@ -350,11 +357,10 @@ describe('prior successful gate reuse', () => {
         [successfulRun(prior, base)],
         context(repo, base, head, prior),
       );
-      const unchanged = path.startsWith('packages/time-core/') ? ['web'] : [];
-      expect(result.checks).toEqual(requested.checks.filter((lane) => !unchanged.includes(lane)));
+      expect(result.checks).toEqual(requested.checks);
       expect(result.database).toEqual(requested.database);
       expect(result.runtime).toBe(requested.runtime);
-      expect(Object.keys(result.reused)).toEqual(unchanged);
+      expect(Object.keys(result.reused)).toEqual([]);
     });
   });
 

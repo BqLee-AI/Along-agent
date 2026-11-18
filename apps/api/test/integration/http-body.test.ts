@@ -3,7 +3,7 @@ import { Agent, createServer, request, type Server } from 'node:http';
 import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import { randomUUID } from 'node:crypto';
-import { handleRequest } from '../../src/http/app.js';
+import { handleRequest } from '../helpers/http-app.js';
 import { seedAdmittedSession as seedSession } from './setup.js';
 import {
   createIntegrationDatabase,

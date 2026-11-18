@@ -13,11 +13,11 @@ import {
   parseIdentityKeyring,
   sealIdentity,
   tokenDigest,
-} from '../src/modules/identity/email-security.js';
+} from '../src/features/identity/security/email-security.js';
 import {
   createResendIdentitySender,
   requireIdentityMailReady,
-} from '../src/modules/identity/mail.js';
+} from '../src/features/identity/delivery/transport.js';
 import { identityKeyfileFixture, identityKeysFixture } from './helpers/identity-security.js';
 
 describe('identity strict email and recoverable cryptographic boundary', () => {

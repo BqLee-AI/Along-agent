@@ -44,7 +44,7 @@ JSON 的 `stages.confirmation`、`stages.fired_notice`、`stages.cancel`、`prov
 - 对话：`Chat.tsx#send` → Next 同源 `/api/v1/conversations/messages` → `conversations/routes.ts#handleConversationRoute` → `service.ts#startConversationRun/executeRun/runTurn` → `tools/gateway.ts#runProposeTask` → `time-core.classifyEntry/normalize` → `approvals/create.ts#createTaskApproval` → PG。
 - 确认：`ApprovalActions.tsx#call` → `approvals/routes.ts` → `confirm.ts#confirmApproval` → approval 行锁、hash/seen、task/created/outbox/consumed 单事务。
 - 调度：`main.ts` → `worker/loop.ts:51–56` 的 cancel→schedule→claim→send→ack→missed；`send.ts:225–244` 持 task 锁后调用 `sendOne`；`send.ts:125–136` 进入 `deliverInApp`；`notifications/service.ts:71–112` 实际调用 provider 后写通知；随后 fired/outbox 结果提交。
-- 时间：生产 gateway 直接使用 `FIXTURE_V1`（`gateway.ts:205–259`）；`conversations/service.ts#startPayload` 同样直接报告该常量；`http/app.ts:70–85` 的 readyz 只看版本字符串。
+- 时间：生产 gateway 直接使用 `FIXTURE_V1`（`gateway.ts:205–259`）；`conversations/lifecycle/service.ts#startPayload` 同样直接报告该常量；`http/app.ts:70–85` 的 readyz 只看版本字符串。
 
 本次无可用语言服务器，符号和行号由只读文件及文本搜索定位，不声称完成语言服务器引用分析。引用行号是本次源码快照，实施时以符号及实际 diff 重新定位。
 
@@ -175,7 +175,7 @@ JSON 的 `stages.confirmation`、`stages.fired_notice`、`stages.cancel`、`prov
 | 规则缺失      | normalize可识别部分坏ruleset；gateway总传FIXTURE_V1；readyz只看字符串                              | 缺alias/ruleset/内容时readyz503，入口在调用normalize前拒绝，不降级                   |
 | DB不可达      | API文档§6要求readyz非就绪；实现未查DB                                                              | 不能pool存在或版本非空即200；用最小真实DB探测，不扩大成全系统健康框架                |
 
-关键依据：`normalize.ts:42–112`；`entry.ts:106–124`；`gateway.ts:205–259`；`conversations/service.ts:421–469、runTurn`；`conversations/routes.ts:80–108`；`conversations-sse.test.ts:158–280`；`Chat.tsx#applyEvent/send`；`http/app.ts:70–85`。API conversations §2表已经写时间错误thread.failed，但§4又写completed，本身也需同步。
+关键依据：`normalize.ts:42–112`；`entry.ts:106–124`；`gateway.ts:205–259`；`conversations/lifecycle/service.ts:421–469、runTurn`；`conversations/routes.ts:80–108`；`conversations-sse.test.ts:158–280`；`Chat.tsx#applyEvent/send`；`http/app.ts:70–85`。API conversations §2表已经写时间错误thread.failed，但§4又写completed，本身也需同步。
 
 ### 5.2 推荐最小统一方案
 

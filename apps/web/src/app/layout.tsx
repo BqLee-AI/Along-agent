@@ -7,7 +7,6 @@ import { AppShell } from '@/shell/view/app-shell';
 import { AppTheme } from '@/shared/ui/app-theme';
 import { parseThemeMode, THEME_COOKIE } from '@/shared/ui/theme-mode';
 import { apiGet } from '@/shared/http/server';
-import type { Me } from '@/shared/session/identity';
 
 export const metadata: Metadata = {
   title: 'Along',
@@ -15,7 +14,7 @@ export const metadata: Metadata = {
 };
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
-  const identity = await apiGet<Me>('/api/v1/me');
+  const identity = await apiGet((api) => api.api.v1.me.get());
   const displayName = identity.ok ? identity.data.user.display_name : null;
   const mode = parseThemeMode((await cookies()).get(THEME_COOKIE)?.value);
   return (

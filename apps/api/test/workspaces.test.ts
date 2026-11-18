@@ -9,24 +9,26 @@ import {
   loadWorkspaceRegistry,
   getWorkspaceGrant,
   listWorkspaces,
-  readWorkspaceFile,
-  listWorkspaceFiles,
-  searchWorkspaceFiles,
   validateWorkspaceGrant,
   resolveWorkspaceGrants,
   resolveFrozenWorkspaceGrant,
-  getWorkspaceOutputIdentity,
   hashBytes,
   strictUtf8,
   utf8Bytes,
   WorkspaceDeniedError,
-} from '../src/modules/workspaces/service.js';
+} from '../src/features/workspaces/public.js';
+import {
+  readWorkspaceFile,
+  listWorkspaceFiles,
+  searchWorkspaceFiles,
+  getWorkspaceOutputIdentity,
+} from '../src/features/workspaces/read/files.js';
 import {
   applyWorkspaceReplace,
   compileWorkspaceEdit,
   publishWorkspaceReplace,
-} from '../src/modules/workspaces/replace.js';
-import { publishWorkspaceCreate } from '../src/modules/workspaces/create.js';
+} from '../src/features/workspaces/write/replace.js';
+import { publishWorkspaceCreate } from '../src/features/workspaces/write/create.js';
 
 let root: string;
 const owner = 'workspace-test-owner';

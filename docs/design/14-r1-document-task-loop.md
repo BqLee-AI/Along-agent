@@ -17,16 +17,16 @@
 
 ## 2. 职责边界与实现真源
 
-| 边界           | 实现真源                                                              | 约束                                                                                                                      |
-| -------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| 可信工作区     | workspaces/service.ts；conversations/schemas.ts、service.ts           | 部署登记、有限相对路径和 owner；新请求选择绑定 hash 与冻结 grant，模型不能自报 root/allowlist                             |
-| 工具目录与执行 | tools/catalog.ts、contracts.ts、gateway.ts、invocations.ts            | 五个业务工具、五个 workspace 工具及原事实回取；分类由服务端固定，纯读事务外 MCP、写入一次许可，不能让模型选择执行种类     |
-| 唯一循环       | apps/harness/src/session/；packages/contracts/src/harness.ts          | harness/v5（路由默认 off），逐次真实函数配对及模型增量、有界来源投影、typed task/document 决议；TS transport 不规划下一步 |
-| 文档授权       | approvals/document-service.ts、document-actions.ts、decision.ts；0016 | 独立批准/决议表、完整冻结内容、唯一 apply；跨模块 ID 经公共用例验证，不新增跨模块强 FK                                    |
-| 文件效果       | workspaces/replace.ts；tools/invocations.ts、query.ts                 | 非事务替换、真实 applied/conflict/unknown；unknown 不补报、不重写、不产生可恢复 checkpoint                                |
-| 历史与当前资格 | conversations/repository.ts、run-state.ts、harness-authority.ts       | 冻结摘要保留可读；新动作和继续重新核验登记，限定旧 task snapshot1 读取不扩权                                              |
-| 外部配置与预算 | conversations/harness-config.ts、model-providers/harness-model.ts     | 现行基线部署固定 provider 与预算，Run 预算跨 attempt 累计；拟议本人选择及版本冻结见 design/22                             |
-| 展示和证据     | packages/stream-protocol；Web Chat/document-approvals；ci/gates.json  | 保留七事件，不伪造 task 卡片；D8 按实际消费者及本次报告声明，不能替代真实模型或用户材料验收                               |
+| 边界           | 实现真源                                                                                | 约束                                                                                                                      |
+| -------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| 可信工作区     | workspaces/registry/service.ts；conversations/schemas.ts、lifecycle/admission.ts        | 部署登记、有限相对路径和 owner；新请求选择绑定 hash 与冻结 grant，模型不能自报 root/allowlist                             |
+| 工具目录与执行 | tools/catalog.ts、contracts.ts、gateway.ts、invocations/invocations.ts                  | 五个业务工具、五个 workspace 工具及原事实回取；分类由服务端固定，纯读事务外 MCP、写入一次许可，不能让模型选择执行种类     |
+| 唯一循环       | apps/harness/src/session/；packages/contracts/src/harness.ts                            | harness/v5（路由默认 off），逐次真实函数配对及模型增量、有界来源投影、typed task/document 决议；TS transport 不规划下一步 |
+| 文档授权       | approvals/document/document-service.ts、document/document-actions.ts、decision.ts；0016 | 独立批准/决议表、完整冻结内容、唯一 apply；跨模块 ID 经公共用例验证，不新增跨模块强 FK                                    |
+| 文件效果       | workspaces/write/replace.ts；tools/invocations/invocations.ts、query.ts                 | 非事务替换、真实 applied/conflict/unknown；unknown 不补报、不重写、不产生可恢复 checkpoint                                |
+| 历史与当前资格 | conversations/run/repository.ts、run/run-state.ts、harness/harness-authority.ts         | 冻结摘要保留可读；新动作和继续重新核验登记，限定旧 task snapshot1 读取不扩权                                              |
+| 外部配置与预算 | conversations/harness/harness-config.ts、model-providers/runtime/harness-model.ts       | 现行基线部署固定 provider 与预算，Run 预算跨 attempt 累计；拟议本人选择及版本冻结见 design/22                             |
+| 展示和证据     | packages/stream-protocol；Web Chat/document-approvals；ci/gates.json                    | 保留七事件，不伪造 task 卡片；D8 按实际消费者及本次报告声明，不能替代真实模型或用户材料验收                               |
 
 路径均相对 apps/api/src/modules，除表中明确列出的跨包位置。#45–#47 的底座合同和历史证据保留其适用范围，不重做为 R1 新成果。
 
@@ -203,7 +203,7 @@ workspace_list/grep/read 走真实 initialize→listTools→callTool，返回实
 
 ## 9. 模型配置与运行前提
 
-现行基线复用 loadHarnessServices/createHarnessModelTransport 和部署级 HARNESS_MODEL 配置。拟议本人接入及逐 Run 选择见 [design/22](22-model-provider-settings.md)；保留单工具提议、真实 usage、abort 和仓颉唯一循环，native/MCP 不获得 Key，TS 不增加规划/Agent 循环。
+生产模型来自用户所选 Provider 的冻结版本，出站传输和已部署单模型的显式导入见 [design/22](22-model-provider-settings.md)。保留单工具提议、真实 usage、abort 和仓颉唯一循环，native/MCP 不获得 Key，TS 不增加规划或 Agent 循环。
 
 模型消息使用标准 assistant `tool_calls` 与配对 `tool_call_id` 的 `role=tool` 结果，由 native 构造；不能把工具提议写成普通 assistant 文本，让模型照抄而不实际调用。transport 请求 `parallel_tool_calls:false`，native 也要求逐次等待真实观察；供应商仍返回多个调用时拒绝整个响应，不丢弃调用或在 TS 拆出第二个循环。
 
@@ -215,7 +215,7 @@ workspace_list/grep/read 走真实 initialize→listTools→callTool，返回实
 
 | 所有者           | 责任与主要文件                                                                                                                                                                                  |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| workspaces       | 登记、路径/文本/版本规则、有限 list/search/read、受控替换；modules/workspaces/service.ts、replace.ts、routes.ts、mcp-server.ts；不拥有模型循环或工具结果账                                      |
+| workspaces       | 登记、路径/文本/版本规则、有限 list/search/read、受控替换；modules/workspaces 的 registry、read、write、http 和 mcp 子模块；不拥有模型循环或工具结果账                                          |
 | tools            | 静态五旧＋五新定义、strict 输入/结果、MCP adapter、既有 reservation/local/non_transactional coordinator、typed 批准引用/接受结果/审计；修改 contracts/schemas/result-schema/gateway/invocations |
 | approvals        | document_approvals、按钮决议/冻结预览、一次 apply 绑定及公共授权/决议读取；新增窄文档用例文件，保留旧 task create/confirm/revise                                                                |
 | conversations    | 选择/hash/Run 冻结/资格/等待/终态及公开只读结果；service/schemas/contracts/run-state/tool-binding/harness-authority/config                                                                      |
@@ -245,7 +245,7 @@ workspace_list/grep/read 走真实 initialize→listTools→callTool，返回实
 | 至少一条真实 TS MCP 调用                                    | tools/MCP主责                                               | 正式 Client/TS Server initialize/listTools/callTool，返回实际文件数据被 native 消费并影响后续请求；实际改变源文件会改变消费者结果；移除调用或结果纳入，同一个正式消费者失败                                                            |
 | 必要批准回同 Run；不宣称任意恢复                            | approvals授权主责；conversations/native恢复协作             | 提议→真实冻结预览→确认/拒绝→原 Run 唯一 attempt+1；pending拒绝、早确认/并发/丢回答/换键不重复；approved不等于写入，拒绝不绕过。未知直接正常失败、无 unknown checkpoint，普通/终态恢复拒绝                                              |
 | 冲突处理绑定 observed version、exact content、approval      | approvals主责，workspaces执行                               | 分别在 read后、批准前、批准后改变文件；原 apply只报冲突/零写，不对新内容重匹配。新修改需新读/新批准；同批准换 invocation 不可第二写                                                                                                    |
-| 稳定模型配置、缺前置真实失败                                | conversations model transport主责                           | 现行基线使用固定部署模型；拟议本人选择、不可变绑定和旧部署显式导入见 design/22。缺依赖明确失败；不启动 fixture/TS Agent                                                                                                                |
+| 稳定模型配置、缺前置真实失败                                | model-providers 管模型版本与传输                            | 本人选择、不可变绑定和旧部署显式导入见 design/22。缺依赖明确失败；不启动 fixture 或 TS Agent                                                                                                                                           |
 
 ### 11.1 确定性门与真实任务评估
 

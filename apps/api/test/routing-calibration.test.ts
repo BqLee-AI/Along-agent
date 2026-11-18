@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it } from 'bun:test';
 import { rmSync } from 'node:fs';
-import { bundlePolicy } from '../src/modules/conversations/routing/bundle.js';
+import { bundlePolicy } from '../src/agent/routing/bundle.js';
 import { calibrateThresholds, nextNumber } from '../../../scripts/routing/calibration.js';
 import {
   candidateCorrect,

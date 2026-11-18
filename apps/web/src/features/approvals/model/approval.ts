@@ -2,6 +2,7 @@ import { ApprovalStatusSchema, EnvelopeSchema } from '@along/contracts';
 import type { ApprovalDetail } from '@along/contracts';
 import { z } from 'zod';
 import { ApiReadError } from '@/shared/http/client';
+import { api, writeOptions } from '@/shared/http/eden';
 import { requireClientSession } from '@/shared/session/navigation';
 
 export const approvalStatusLabels = {
@@ -45,9 +46,6 @@ export const ApprovalPageSchema = z
   })
   .strict();
 export type ApprovalPage = z.infer<typeof ApprovalPageSchema>;
-export function approvalListPath(status: ApprovalFilter, cursor: string | null = null) {
-  return `/api/v1/approvals?${new URLSearchParams({ status, limit: '50', ...(cursor ? { cursor } : {}) })}`;
-}
 export type FoldChoice = 'first' | 'second' | 'none';
 export interface RevisionInput {
   raw_text: string;
@@ -112,21 +110,26 @@ export class ApprovalActionFailure extends ApiReadError {
 export async function postReminderDecision(
   detail: ApprovalDetail,
   action: ReminderAction,
-  body: unknown,
+  body: ReminderRequestBody,
   csrf: string | null,
   signal: AbortSignal,
 ) {
-  const response = await fetch(
-    `/api/v1/approvals/${encodeURIComponent(detail.approval_id)}/actions/${action}`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...(csrf ? { 'x-csrf-token': csrf } : {}) },
-      body: JSON.stringify(body),
-      signal,
-    },
-  );
+  const endpoint = api.api.v1.approvals({ id: encodeURIComponent(detail.approval_id) }).actions;
+  const options = writeOptions(csrf, signal);
+  const resultResponse =
+    action === 'confirm' && 'presentation_hash' in body
+      ? await endpoint.confirm.post(body, options)
+      : action === 'revise' && 'raw_text' in body
+        ? await endpoint.revise.post(body, options)
+        : action === 'reject'
+          ? await endpoint.reject.post({ idempotency_key: body.idempotency_key }, options)
+          : null;
+  if (!resultResponse) throw new Error('决议输入与操作不匹配。');
+  const { response } = resultResponse;
   requireClientSession(response);
-  const payload = EnvelopeSchema.parse(await response.json());
+  const payload = EnvelopeSchema.parse(
+    resultResponse.error ? resultResponse.error.value : resultResponse.data,
+  );
   if (!response.ok || payload.code !== 0)
     throw new ApprovalActionFailure(
       response.status,

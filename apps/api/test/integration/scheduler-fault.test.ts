@@ -4,23 +4,23 @@
 import { beforeAll, afterAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
-import { confirmApproval } from '../../src/modules/approvals/confirm.js';
-import { getApprovalDetail } from '../../src/modules/approvals/service.js';
-import { getTaskDetail } from '../../src/modules/tasks/service.js';
-import { requestCancel } from '../../src/modules/tasks/cancel.js';
-import { runSchedulePhase } from '../../src/modules/tasks/scheduler/schedule.js';
-import { runSendPhase } from '../../src/modules/tasks/scheduler/send.js';
-import { runMissedPhase } from '../../src/modules/tasks/scheduler/missed.js';
+import { confirmApproval } from '../../src/features/approvals/reminder/confirm.js';
+import { getApprovalDetail } from '../../src/features/approvals/reminder/service.js';
+import { getTaskDetail } from '../../src/features/tasks/service.js';
+import { requestCancel } from '../../src/features/tasks/cancellation/cancel.js';
+import { runSchedulePhase } from '../../src/features/tasks/scheduler/schedule.js';
+import { runSendPhase } from '../../src/features/tasks/scheduler/send.js';
+import { runMissedPhase } from '../../src/features/tasks/scheduler/missed.js';
 import { driveClaimUntilLeased, driveSendUntilFired } from './scheduler-drivers.js';
-import { recordCancelBreach } from '../../src/modules/tasks/scheduler/scheduler-repository.js';
-import { runCancelPhase } from '../../src/modules/tasks/scheduler/cancel-phase.js';
-import { runClaimPhase } from '../../src/modules/tasks/scheduler/claim.js';
-import { runAckPhase } from '../../src/modules/tasks/scheduler/ack.js';
+import { recordCancelBreach } from '../../src/features/tasks/scheduler/scheduler-repository.js';
+import { runCancelPhase } from '../../src/features/tasks/scheduler/cancel-phase.js';
+import { runClaimPhase } from '../../src/features/tasks/scheduler/claim.js';
+import { runAckPhase } from '../../src/features/tasks/scheduler/ack.js';
 import {
   createLocalInAppProvider,
   type InAppNotice,
   type InAppProvider,
-} from '../../src/modules/notifications/service.js';
+} from '../../src/features/notifications/service.js';
 import {
   createIntegrationDatabase,
   databaseUrl,

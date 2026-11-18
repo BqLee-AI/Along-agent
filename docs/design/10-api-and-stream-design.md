@@ -23,14 +23,16 @@ Observed / Required / Proposed / Deferred 同 01。
 - 认证：v0 `GET /me` 外全部需 Better Auth session（模式 Deferred，P0 定）；写操作 CSRF（SameSite cookie + `X-CSRF-Token`，对标 QuantAgent api 约定 Observed）。
 - 版本化：破坏性变更走 `/api/v2`；SSE 事件带 `protocol_version`（见 §4）。
 
+HTTP 入口保留原生连接以读取可信 peer、限制未结束上传和控制连接收尾。Elysia 以真实方法和 URL 匹配端点，经准入检查后按需读取 body，产生 JSON 或 SSE `Response`；业务用例不依赖框架 Context。已持久化事件的订阅通过有界流桥接到原生响应，写入发生背压时在授权事务之外等待；客户端断开取消订阅流。流头建立后的错误不能再改写为 JSON，server-owned Run 的执行所有权独立于订阅连接。
+
 ### 1.1 JSON 请求体边界（Required · #43）
 
 - HTTP入口唯一拥有请求体收集与连接收尾。批准、对话、任务POST先复用既有actor与适用的CSRF请求头门禁，再收集body；模块仍使用同一actor执行owner/业务授权，不新增身份体系。未知路由不解析或无界drain上传。
 - JSON body原始累计上限为 **128 KiB（131072字节）**，包含语法、转义和全部字段，按UTF8字节而非字符计数；等于上限可解析，超过一字节即拒绝。既有最长文本/回显20000字符，最坏JSON转义约120000字节，余量用于协议字段；业务schema长度不变。此传输合同不承诺接受任意空白/填充或大文件。
 - 身份/CSRF在先；可用Content-Length超限提前413，但它不替代每个到达块的累计检查，无长度/chunked同样有界。越界块不加入保存数组，不做concat/JSON.parse；释放已收集块。未新增Content-Type或解压支持合同。
 - 超限返回HTTP413、顶层`code:413`、`error.code:PAYLOAD_TOO_LARGE`；空/畸形JSON返回既有HTTP400/`VALIDATION_ERROR`。均使用通用envelope，响应头、顶层和error的`request_id`一致；不新增40xxxx业务编号。SSE头仅在入口通过后建立。
-- 提前拒绝或超限且流未消费完时暂停读取，发送有限错误响应并声明`Connection: close`，响应发送完成后销毁未结束请求/连接；不等客户端end、不无界drain。客户端中断/流错误结束读取并移除读取监听器，不解析部分JSON或进入业务。合法完整请求保留keep-alive；既有owner、冻结确认、幂等和取消事务不变。
-- 该边界只限制应用保存/解析的JSON字节，不声明总进程内存/吞吐/代理缓冲/慢连接防护已验证；独立上传平台、代理与超时策略不在#43范围。
+- 提前拒绝或超限且流未消费完时，须完整发送有限错误响应并及时关闭连接，不主动无界读取上传或等待客户端end；可声明`Connection: close`并在响应收尾后关闭。运行时/网络栈可能已经缓冲数据，累计检查也可能收到触发超限的整个最后chunk；允许这种有限越界，不要求绝对零读取或零drain。客户端中断/流错误结束读取并移除读取监听器，不解析部分JSON或进入业务。合法完整请求保留keep-alive；既有owner、冻结确认、幂等和取消事务不变。
+- 有未结束上传的有限JSON错误按明确长度发送，并定时在250毫秒后结束响应和关闭；客户端断开时提前清理，事件循环阻塞可能延迟计时器。这个有限窗口不能保证断网或长期不读取响应的客户端收到完整内容，也不覆盖总进程吞吐、代理缓冲或一般慢连接防护。认证/CSRF、未知路径及超限的行为须通过生产handler的真实明文与TLS连接，分别以慢速和持续上传验证；应用内部请求不替代真实socket证据。
 
 ## 2. v0 路由表（Required，13 业务端点 + 2 探针）
 

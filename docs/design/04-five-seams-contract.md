@@ -62,7 +62,7 @@ invokeTool(pool, trustedContext, {invocationId, toolId, args})
 - [Required] 本地 `reserved → completed`；锁序为 attempt → Run → invocation，沿公共用例取得执行资格，与取消/终结串行。已取消 Run/无效 attempt 不获新执行资格；当前权限遮蔽历史结果但不覆盖它，最初接受的 denied 不因放权变成执行。
 - [Required] 批准创建/取得、接受结果和审计共用同一 client/事务。审计、结果或提交失败全回滚，预约保留；明确领域失败回滚工具效果后保存脱敏 failed。提交回答丢失后查同引用，不另造调用；completed 结果不可改删。
 - [Required] 接受结果分类仍为 success、approval_pending、clarification、time_error、denied、failed，不因文档新增事件词或结果账。task批准保存冻结校验引用；document提议保存typed receipt引用，经所属公共读取恢复原完整冻结预览，不因动态批准状态重建。只读工具重放原安全快照，新引用才刷新；接受结果应用JSON上限240000字节。
-- [Observed] `tools/invocations.ts#executeNonTransactionalInvocation` 为可信TS一次许可/只读核对边界，R1产品写工具workspace_apply_replace复用它。独立提交 `reserved→unknown` 及dispatch审计，仅明确取得COMMIT回答的当前栈可执行。并发、重启、丢回答及未知效果不重发；引用/摘要绑定的可信只读证据才能完成，未证实为TOOL_EFFECT_UNKNOWN。普通内容相等不是效果证据，不证明外部通用exactly-once。
+- [Observed] `tools/invocations/invocations.ts#executeNonTransactionalInvocation` 为可信TS一次许可/只读核对边界，R1产品写工具workspace_apply_replace复用它。独立提交 `reserved→unknown` 及dispatch审计，仅明确取得COMMIT回答的当前栈可执行。并发、重启、丢回答及未知效果不重发；引用/摘要绑定的可信只读证据才能完成，未证实为TOOL_EFFECT_UNKNOWN。普通内容相等不是效果证据，不证明外部通用exactly-once。
 - [Required] tool_invocations 是身份/结果事实，tool_calls 仍只追加审计；不把 legacy args_hash 唯一键当调用去重。字段和迁移停写切换见 [schema](../schema/conversation-and-runs-schema.md#tool_invocations) 与 infra/migrations。failed/unknown 不能被 caller 当成功终结；事件补读不重做工具，也不自动恢复 Run。
 - [Required] TS 保留工具定义、校验、授权、记录；memory/grep、MCP、PC/browser、办公 connector 仍为 TS 能力。v0 不给任意代码执行/网页浏览；MCP 必须经网关，工具不隐藏完整模型/工具循环。既有确认消费、确定性时间、冻结展示、取消与回执合同不变。
 

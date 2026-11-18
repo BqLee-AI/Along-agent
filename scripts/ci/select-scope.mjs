@@ -68,11 +68,18 @@ export function classifyChanges(changes, nativeTests = []) {
     if (documentation(path)) continue;
     if (path.startsWith('apps/web/')) {
       checks.add('web');
+      if (/^apps\/web\/src\/(?:shared\/http|app\/api)\//.test(path)) backend(true);
       if (path === 'apps/web/package.json' || path.startsWith('apps/web/vendor/')) runtime = true;
     } else if (path.startsWith('apps/api/src/')) {
-      backend(/^apps\/api\/src\/(?:db\/|modules\/identity\/)/.test(path));
+      // The Web lane compiles the API and consumes its emitted declarations.
+      checks.add('web');
+      backend(
+        /^apps\/api\/src\/(?:db\/|features\/(?:identity\/|conversations\/(?:run\/|run-event-response\.ts$)))/.test(
+          path,
+        ),
+      );
       if (
-        path.startsWith('apps/api/src/modules/workspaces/') ||
+        path.startsWith('apps/api/src/features/workspaces/') ||
         path === 'apps/api/src/http/errors.ts'
       ) {
         checks.add('tooling');
@@ -93,13 +100,15 @@ export function classifyChanges(changes, nativeTests = []) {
       checks.add('api');
       runtime = true;
     } else if (path.startsWith('apps/api/test/')) checks.add('api');
-    else if (path.startsWith('apps/api/')) backend(true);
-    else if (
+    else if (path.startsWith('apps/api/')) {
+      checks.add('web');
+      backend(true);
+    } else if (
       /^packages\/(contracts|stream-protocol|time-core|scheduler-core|notifier-core)\//.test(path)
     ) {
       checks.add('packages');
       backend(true);
-      if (/^packages\/(contracts|stream-protocol)\//.test(path)) checks.add('web');
+      checks.add('web');
     } else if (path.startsWith('apps/harness/')) {
       checks.add('harness');
       runtime = true;

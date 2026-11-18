@@ -9,14 +9,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { withTransaction } from '../../src/db/transaction.js';
-import { confirmDocumentApproval } from '../../src/modules/approvals/document-actions.js';
-import { readDocumentApprovalReceipt } from '../../src/modules/approvals/decision.js';
-import { configureWorkspaceRegistry } from '../../src/modules/workspaces/service.js';
-import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import { createHarnessModelTransport } from '../../src/modules/model-providers/harness-model.js';
-import { createRunDriver } from '../../src/modules/conversations/run-driver.js';
-import { startConversationRun } from '../../src/modules/conversations/service.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
+import { confirmDocumentApproval } from '../../src/agent/operations/document-decision.js';
+import { readDocumentApprovalReceipt } from '../../src/features/approvals/decision.js';
+import { configureWorkspaceRegistry } from '../../src/features/workspaces/public.js';
+import { createContextPolicy } from '../../src/features/conversations/public.js';
+import { createLocalFixtureModelTransport } from '../helpers/local-fixture-model.js';
+import { createRunDriver } from '../../src/agent/runtime/run-driver.js';
+import { startConversationRun } from '../../src/agent/operations/start.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
 import { listen, sendModelSse } from '../helpers/harness-consumer.js';
 import {
   createIntegrationDatabase,
@@ -56,10 +56,10 @@ maybe('server-owned approval resume across processes', () => {
 
   beforeAll(async () => {
     try {
-      await access(new URL('../../dist/modules/workspaces/mcp-server.js', import.meta.url));
+      await access(new URL('../../dist/features/workspaces/mcp/mcp-server.js', import.meta.url));
     } catch {
       throw new Error(
-        'Build apps/api/dist/modules/workspaces/mcp-server.js before running this native workspace test',
+        'Build apps/api/dist/features/workspaces/mcp/mcp-server.js before running this native workspace test',
       );
     }
     database = await createIntegrationDatabase();
@@ -174,7 +174,7 @@ maybe('server-owned approval resume across processes', () => {
           completionCap: 1024,
           model: 'fixture-transport-only',
         }),
-        model: createHarnessModelTransport({
+        model: createLocalFixtureModelTransport({
           baseUrl: `${modelBase}/v1`,
           model: 'fixture-transport-only',
         }),
@@ -263,14 +263,16 @@ maybe('server-owned approval resume across processes', () => {
       // until the winner's actual native execution is released.
       const source = `
         import { Pool } from 'pg';
+        import { httpStatusForError } from '@along/contracts';
+        import { ApplicationError } from './src/platform/errors.ts';
         import { randomUUID } from 'node:crypto';
         import { once } from 'node:events';
-        import { createContextPolicy } from './src/modules/conversations/context-policy.ts';
-        import { createHarnessModelTransport } from './src/modules/model-providers/harness-model.ts';
-        import { createRunDriver } from './src/modules/conversations/run-driver.ts';
-        import { resumeConversationRun } from './src/modules/conversations/harness-authority.ts';
-        import { loadTimeContext } from './src/modules/time/context.ts';
-        import { configureWorkspaceRegistry } from './src/modules/workspaces/service.ts';
+        import { createContextPolicy } from './src/features/conversations/public.ts';
+        import { createLocalFixtureModelTransport } from './test/helpers/local-fixture-model.ts';
+        import { createRunDriver } from './src/agent/runtime/run-driver.ts';
+        import { resumeConversationRun } from './src/agent/operations/run.ts';
+        import { loadTimeContext } from './src/features/time/context.ts';
+        import { configureWorkspaceRegistry } from './src/features/workspaces/registry/service.ts';
         import { controlledModelDeps } from './test/helpers/model-selection.ts';
         await configureWorkspaceRegistry([{ workspace_id: 'documents', label: 'Documents',
           owner_id: process.env.RACE_OWNER, root: process.env.RACE_ROOT,
@@ -281,7 +283,7 @@ maybe('server-owned approval resume across processes', () => {
           harness: { binaryPath: process.env.HARNESS_BINARY, libraryPath: process.env.HARNESS_LIBRARY_PATH,
             maxIterations: 8, maxTokens: 8000,
             contextPolicy: createContextPolicy({ completionCap: 1024, model: 'fixture-transport-only' }),
-            model: createHarnessModelTransport({ baseUrl: process.env.RACE_MODEL + '/v1', model: 'fixture-transport-only' }) } };
+            model: createLocalFixtureModelTransport({ baseUrl: process.env.RACE_MODEL + '/v1', model: 'fixture-transport-only' }) } };
         controlledModelDeps(deps);
         console.log(JSON.stringify({ ready: true }));
         await once(process.stdin, 'data');
@@ -290,7 +292,10 @@ maybe('server-owned approval resume across processes', () => {
             process.env.RACE_RUN, randomUUID(), { checkpoint_id: process.env.RACE_CHECKPOINT, idempotency_key: randomUUID() });
           console.log(JSON.stringify({ ok: true, serverOwned: result.serverOwned }));
         } catch (error) {
-          console.log(JSON.stringify({ ok: false, httpStatus: error.httpStatus, errorCode: error.errorCode }));
+          if (!(error instanceof ApplicationError)) throw error;
+          const status = httpStatusForError(error.code);
+          const { errorCode } = error;
+          console.log(JSON.stringify({ ok: false, status, errorCode }));
         }
         await once(process.stdin, 'data');
         await driver.shutdown();
@@ -330,7 +335,7 @@ maybe('server-owned approval resume across processes', () => {
       const results = await Promise.all(readers.map(next));
       expect(results.filter((result) => result.ok)).toEqual([{ ok: true, serverOwned: true }]);
       expect(results.filter((result) => !result.ok)).toEqual([
-        expect.objectContaining({ ok: false, httpStatus: 409 }),
+        expect.objectContaining({ ok: false, status: 409 }),
       ]);
       await resumedModel.promise;
       expect(modelCalls).toBe(3);

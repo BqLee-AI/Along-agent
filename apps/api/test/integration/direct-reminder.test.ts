@@ -1,13 +1,14 @@
-import { readAcceptedInvocationResult } from '../../src/modules/tools/accepted-result.js';
+import { expectApplicationRejection } from '../helpers/application-error.js';
+import { readAcceptedInvocationResult } from '../../src/agent/tools/invocations/accepted-result.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import { invokeTool, reserveToolInvocation } from '../../src/modules/tools/gateway.js';
+import { invokeTool, reserveToolInvocation } from '../../src/agent/tools/gateway.js';
 import {
   readRunCreatedReminders,
   readRunInterruptionEvidence,
-} from '../../src/modules/tools/query.js';
-import type { ToolContext, ToolOutcome } from '../../src/modules/tools/contracts.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
+} from '../../src/agent/tools/query.js';
+import type { ToolContext, ToolOutcome } from '../../src/agent/tools/contracts.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
 import {
   admitTestUser,
   createIntegrationDatabase,
@@ -17,9 +18,9 @@ import {
 import {
   interruptedGoalResult,
   validateGoalResult,
-} from '../../src/modules/conversations/goal-result.js';
-import { acceptTargetContinuation } from '../../src/modules/conversations/target-continuation.js';
-import { createTaskWithinTransaction } from '../../src/modules/tasks/create.js';
+} from '../../src/agent/operations/goal-result.js';
+import { acceptTargetContinuation } from '../../src/agent/operations/target-continuation.js';
+import { createTaskWithinTransaction } from '../../src/features/tasks/create.js';
 
 describe('direct reminder accepted facts', () => {
   let db: IntegrationDatabase;
@@ -904,8 +905,8 @@ describe('direct reminder accepted facts', () => {
       ).toMatchObject({ status: 'denied' });
       const client = await db.pool.connect();
       try {
-        await expect(readRunCreatedReminders(client, disabled)).rejects.toMatchObject({
-          httpStatus: 403,
+        await expectApplicationRejection(readRunCreatedReminders(client, disabled), {
+          status: 403,
         });
         expect((await readRunInterruptionEvidence(client, disabled)).creations).toMatchObject([
           { invocation_id: binding.invocationId, kind: 'task_created' },

@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import { Pool } from 'pg';
-import { invokeTool } from '../../../src/modules/tools/gateway.js';
-import { loadTimeContext } from '../../../src/modules/time/context.js';
-import { ProposeTaskInputSchema } from '../../../src/modules/tools/schemas.js';
+import { invokeTool } from '../../../src/agent/tools/gateway.js';
+import { loadTimeContext } from '../../../src/features/time/context.js';
+import { ProposeTaskInputSchema } from '../../../src/agent/tools/schemas.js';
 
 const fixture = z
   .object({

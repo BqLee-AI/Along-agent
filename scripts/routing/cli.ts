@@ -8,20 +8,14 @@ import {
   loadBundle,
   matrixDigest,
   validateBundle,
-} from '../../apps/api/src/modules/conversations/routing/bundle.js';
-import type { RoutingBundle } from '../../apps/api/src/modules/conversations/routing/bundle.js';
-import { normalizeEncodingText } from '../../apps/api/src/modules/conversations/routing/facts.js';
-import {
-  requestEncoding,
-  validateEncoderUrl,
-} from '../../apps/api/src/modules/conversations/routing/encoder.js';
-import { EncodingManifestSchema } from '../../apps/api/src/modules/conversations/routing/encoding-manifest.js';
-import { normalizeVector } from '../../apps/api/src/modules/conversations/routing/scorer.js';
-import {
-  REVISIONS,
-  ROUTING_INTENTS,
-} from '../../apps/api/src/modules/conversations/routing/types.js';
-import type { EnabledRoutingPolicy } from '../../apps/api/src/modules/conversations/routing/types.js';
+} from '../../apps/api/src/agent/routing/bundle.js';
+import type { RoutingBundle } from '../../apps/api/src/agent/routing/bundle.js';
+import { normalizeEncodingText } from '../../apps/api/src/agent/routing/facts.js';
+import { requestEncoding, validateEncoderUrl } from '../../apps/api/src/platform/encoder.js';
+import { EncodingManifestSchema } from '../../apps/api/src/agent/routing/encoding-manifest.js';
+import { normalizeVector } from '../../apps/api/src/platform/vector.js';
+import { REVISIONS, ROUTING_INTENTS } from '../../apps/api/src/agent/routing/types.js';
+import type { EnabledRoutingPolicy } from '../../apps/api/src/agent/routing/types.js';
 import { calibrateThresholds } from './calibration.js';
 import { evaluationReport, readDataset, scoreDataset } from './evaluation.js';
 

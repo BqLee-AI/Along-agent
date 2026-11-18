@@ -1,6 +1,9 @@
 import { open, readFile } from 'node:fs/promises';
 import { z } from 'zod';
-import type { EffectBinding, EffectEvidence } from '../../src/modules/tools/invocations.js';
+import type {
+  EffectBinding,
+  EffectEvidence,
+} from '../../src/agent/tools/invocations/invocations.js';
 
 const recordSchema = z
   .object({

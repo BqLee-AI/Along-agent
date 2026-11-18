@@ -4,11 +4,11 @@ import type { PoolClient } from 'pg';
 import {
   freezeR3ControlContext,
   readR3ControlContext,
-} from '../../src/modules/conversations/r3-context.js';
+} from '../../src/features/conversations/compact/r3-context.js';
 import {
   lockIdleCompactRequest,
   saveIdleCompactRequest,
-} from '../../src/modules/conversations/idle-compact.js';
+} from '../../src/features/conversations/compact/idle-compact.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 
 const suite = databaseUrl ? describe : describe.skip;

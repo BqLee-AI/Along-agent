@@ -17,3 +17,13 @@ export const ERROR_CODES = {
 
 export type ErrorName = keyof typeof ERROR_CODES;
 export type ErrorEntry = (typeof ERROR_CODES)[ErrorName];
+
+const statusByCode = new Map<number, number>(
+  Object.values(ERROR_CODES).map(({ code, http }) => [code, http]),
+);
+
+// Legacy numeric codes are already HTTP statuses. Catalog codes remain
+// distinct from symbolic names, which can occur under several legacy codes.
+export function httpStatusForError(code: number): number {
+  return statusByCode.get(code) ?? code;
+}

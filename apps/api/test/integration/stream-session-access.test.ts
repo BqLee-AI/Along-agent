@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import type { ThreadEvent } from '@along/stream-protocol';
-import { writeAuthorizedEvent } from '../../src/modules/conversations/stream-authorization.js';
+import { writeAuthorizedEvent } from '../../src/features/conversations/run/stream-authorization.js';
 import {
   createIntegrationDatabase,
   databaseUrl,

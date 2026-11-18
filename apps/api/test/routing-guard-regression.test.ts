@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { collectFacts } from '../src/modules/conversations/routing/facts.js';
-import { REVISIONS } from '../src/modules/conversations/routing/types.js';
+import { collectFacts } from '../src/agent/routing/facts.js';
+import { REVISIONS } from '../src/agent/routing/types.js';
 import type { RoutingPolicy } from '@along/contracts';
 
 const policy: RoutingPolicy = {

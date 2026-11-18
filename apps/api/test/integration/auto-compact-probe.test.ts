@@ -2,11 +2,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { HARNESS_CONTEXT_PROTOCOL_VERSION, type HarnessRequest } from '@along/contracts';
 import { withTransaction } from '../../src/db/transaction.js';
-import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import { createHarnessSession } from '../../src/modules/conversations/harness-authority.js';
-import { freezeR3Context } from '../../src/modules/conversations/r3-context.js';
-import { startConversationRun } from '../../src/modules/conversations/service.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
+import { createContextPolicy } from '../../src/features/conversations/public.js';
+import { createHarnessSession } from '../../src/agent/runtime/attempt-session.js';
+import { freezeR3Context } from '../../src/features/conversations/compact/r3-context.js';
+import { startConversationRun } from '../../src/agent/operations/start.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
 import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import {
   createIntegrationDatabase,

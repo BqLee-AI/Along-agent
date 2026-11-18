@@ -4,14 +4,15 @@ import type { PoolClient } from 'pg';
 import {
   freezeCompact,
   publishCompact,
-  type CompactBinding,
-} from '../../src/modules/conversations/compact-store.js';
+} from '../../src/features/conversations/compact/compact-store.js';
+import type { CompactBinding } from '../../src/features/conversations/compact/compact-eligibility.js';
 import {
   freezeR3Context,
   readR3Context,
   type R3ContextBinding,
-} from '../../src/modules/conversations/r3-context.js';
-import { appendEvent, commitTerminal } from '../../src/modules/conversations/run-state.js';
+} from '../../src/features/conversations/compact/r3-context.js';
+import { appendEvent } from '../../src/features/conversations/run/run-state.js';
+import { commitTerminal } from '../../src/agent/operations/finish.js';
 import {
   admitTestUser,
   createIntegrationDatabase,

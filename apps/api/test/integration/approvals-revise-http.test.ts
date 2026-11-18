@@ -4,8 +4,9 @@ import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { Pool } from 'pg';
-import { handleRequest, type AppDeps } from '../../src/http/app.js';
-import { loadTimeContext, createTimeContext } from '../../src/modules/time/context.js';
+import { handleRequest } from '../helpers/http-app.js';
+import type { AppDeps } from '../../src/http/contracts.js';
+import { loadTimeContext, createTimeContext } from '../../src/features/time/context.js';
 import { seedAdmittedSession as seedSession } from './setup.js';
 import {
   createIntegrationDatabase,

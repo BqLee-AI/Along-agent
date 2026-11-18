@@ -1,15 +1,22 @@
+import {
+  applicationErrorEvidence,
+  expectApplicationRejection,
+} from '../helpers/application-error.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import {
   createTaskApproval,
   createCancelTaskApproval,
-} from '../../src/modules/approvals/create.js';
-import { confirmApproval, rejectApproval } from '../../src/modules/approvals/confirm.js';
-import { reviseApproval, revisionRequestHash } from '../../src/modules/approvals/revise.js';
-import { ReviseBodySchema } from '../../src/modules/approvals/schemas.js';
-import { getApprovalDetail } from '../../src/modules/approvals/service.js';
-import { loadTimeContext, createTimeContext } from '../../src/modules/time/context.js';
+} from '../../src/features/approvals/reminder/create.js';
+import { confirmApproval, rejectApproval } from '../../src/features/approvals/reminder/confirm.js';
+import {
+  reviseApproval,
+  revisionRequestHash,
+} from '../../src/features/approvals/reminder/revise.js';
+import { ReviseBodySchema } from '../../src/features/approvals/reminder/schemas.js';
+import { getApprovalDetail } from '../../src/features/approvals/reminder/service.js';
+import { loadTimeContext, createTimeContext } from '../../src/features/time/context.js';
 import {
   createIntegrationDatabase,
   databaseUrl,
@@ -117,15 +124,16 @@ maybe('approval revise durable PostgreSQL behavior', () => {
       { ...body(), presentation_hash: 'x' },
       { ...body(), idempotency_key: 'x' },
     ]) {
-      await expect(revise(old.ownerId, old.id, input)).rejects.toMatchObject({ httpStatus: 400 });
+      await expectApplicationRejection(revise(old.ownerId, old.id, input), { status: 400 });
     }
-    await expect(revise(randomUUID(), old.id, body())).rejects.toMatchObject({ httpStatus: 403 });
-    await expect(revise(old.ownerId, randomUUID(), body())).rejects.toMatchObject({
-      httpStatus: 404,
+    await expectApplicationRejection(revise(randomUUID(), old.id, body()), { status: 403 });
+    await expectApplicationRejection(revise(old.ownerId, randomUUID(), body()), {
+      status: 404,
     });
-    await expect(
+    await expectApplicationRejection(
       reviseApproval({ pool, timeContext: unavailable }, old.ownerId, old.id, body()),
-    ).rejects.toMatchObject({ httpStatus: 503, errorCode: 'TZDB_UNAVAILABLE' });
+      { status: 503, errorCode: 'TZDB_UNAVAILABLE' },
+    );
     expect(await reservations(pool, old.ownerId)).toHaveLength(0);
     expect((await state(pool, old.id)).state).toBe('pending');
     for (const action of [confirmApproval, rejectApproval]) {
@@ -133,8 +141,8 @@ maybe('approval revise durable PostgreSQL behavior', () => {
         action === confirmApproval
           ? await confirmBody(pool, old.ownerId, old.id)
           : { idempotency_key: randomUUID() };
-      await expect(action({ pool }, randomUUID(), old.id, input)).rejects.toMatchObject({
-        httpStatus: 403,
+      await expectApplicationRejection(action({ pool }, randomUUID(), old.id, input), {
+        status: 403,
       });
       expect((await state(pool, old.id)).state).toBe('pending');
     }
@@ -154,12 +162,13 @@ maybe('approval revise durable PostgreSQL behavior', () => {
       'duplicate',
       'successor_approval_id',
     ]);
-    await expect(
+    await expectApplicationRejection(
       revise(old.ownerId, old.id, { ...input, raw_text: `${raw} ` }),
-    ).rejects.toMatchObject({ httpStatus: 409, errorCode: 'STATE_CONFLICT' });
+      { status: 409, errorCode: 'STATE_CONFLICT' },
+    );
     const sibling = await seedApproval(pool, { ownerId: old.ownerId });
-    await expect(revise(old.ownerId, sibling.id, input)).rejects.toMatchObject({
-      httpStatus: 409,
+    await expectApplicationRejection(revise(old.ownerId, sibling.id, input), {
+      status: 409,
       errorCode: 'STATE_CONFLICT',
     });
     expect(await counts(pool, old.ownerId)).toEqual({
@@ -255,15 +264,19 @@ maybe('approval revise durable PostgreSQL behavior', () => {
     ] as const) {
       const old = await seedApproval(pool, {});
       const input = { ...body(text), confirmed_timezone: timezone };
-      const error = await revise(old.ownerId, old.id, input).catch((e) => e);
-      expect(error).toMatchObject({ httpStatus: status, errorCode: code });
-      if (code === 'AMBIGUOUS_LOCAL_TIME') {
-        expect(error.details).toMatchObject({
-          wall_time: '2026-11-01T01:30:00',
-          timezone_id: timezone,
-          candidates: [{ fold_choice: 'first' }, { fold_choice: 'second' }],
-        });
-      }
+      await expectApplicationRejection(revise(old.ownerId, old.id, input), {
+        status,
+        errorCode: code,
+        ...(code === 'AMBIGUOUS_LOCAL_TIME'
+          ? {
+              details: {
+                wall_time: '2026-11-01T01:30:00',
+                timezone_id: timezone,
+                candidates: [{ fold_choice: 'first' }, { fold_choice: 'second' }],
+              },
+            }
+          : {}),
+      });
       const requests = await reservations(pool, old.ownerId);
       expect(requests).toHaveLength(1);
       expect(requests[0].successor_approval_id).toBeNull();
@@ -324,8 +337,9 @@ maybe('approval revise durable PostgreSQL behavior', () => {
     const winner = results.find((r) => r.status === 'fulfilled');
     const loser = results.find((r) => r.status === 'rejected');
     expect(winner?.status).toBe('fulfilled');
-    expect(loser?.status === 'rejected' && loser.reason).toMatchObject({
-      httpStatus: 409,
+    if (loser?.status !== 'rejected') throw new Error('Expected a rejected revision');
+    expect(applicationErrorEvidence(loser.reason)).toMatchObject({
+      status: 409,
       errorCode: 'APPROVAL_SUPERSEDED',
     });
     expect(
@@ -373,7 +387,7 @@ maybe('approval revise durable PostgreSQL behavior', () => {
           const writerPid = await waitBlocked(pool, locker);
           const two = (first === 'revise' ? write() : revise(old.ownerId, old.id, body())).then(
             (value) => ({ value }),
-            (error) => ({ error }),
+            (error) => ({ error: applicationErrorEvidence(error) }),
           );
           await waitBlocked(pool, writerPid);
           await locker.query('COMMIT');
@@ -381,7 +395,7 @@ maybe('approval revise durable PostgreSQL behavior', () => {
           expect(a).toHaveProperty('value');
           expect(b).toMatchObject({
             error: {
-              httpStatus: 409,
+              status: 409,
               errorCode: first === 'revise' ? 'APPROVAL_SUPERSEDED' : 'STATE_CONFLICT',
             },
           });
@@ -421,8 +435,8 @@ maybe('approval revise durable PostgreSQL behavior', () => {
       tzdbVersion: 'fixture-v1',
     });
     const before = await counts(pool, old.ownerId);
-    await expect(revise(old.ownerId, cancel.approvalId, body())).rejects.toMatchObject({
-      httpStatus: 409,
+    await expectApplicationRejection(revise(old.ownerId, cancel.approvalId, body()), {
+      status: 409,
       errorCode: 'STATE_CONFLICT',
     });
     expect(await counts(pool, old.ownerId)).toEqual(before);
@@ -495,9 +509,10 @@ maybe('approval revise durable PostgreSQL behavior', () => {
       "UPDATE approvals SET expires_at=clock_timestamp()+interval '1 second' WHERE id=$1",
       [old.id],
     );
-    await expect(
+    await expectApplicationRejection(
       reviseApproval({ pool, timeContext: delayedRules }, old.ownerId, old.id, body()),
-    ).rejects.toMatchObject({ httpStatus: 410 });
+      { status: 410 },
+    );
     expect(delayed).toBe(true);
     expect((await state(pool, old.id)).state).toBe('expired');
     expect((await reservations(pool, old.ownerId))[0].successor_approval_id).toBeNull();
@@ -529,14 +544,14 @@ maybe('approval revise durable PostgreSQL behavior', () => {
               : revise(old.ownerId, old.id, body())
         ).then(
           (value) => ({ value }),
-          (error) => ({ error }),
+          (error) => ({ error: applicationErrorEvidence(error) }),
         );
         try {
           await waitBlocked(pool, locker);
           await locker.query('SELECT pg_sleep(0.35)');
           await locker.query('COMMIT');
           expect(await pending).toMatchObject({
-            error: { httpStatus: 410, errorCode: 'APPROVAL_EXPIRED' },
+            error: { status: 410, errorCode: 'APPROVAL_EXPIRED' },
           });
           expect((await state(pool, old.id)).state).toBe('expired');
           expect(await counts(pool, old.ownerId)).toEqual({
@@ -556,8 +571,8 @@ maybe('approval revise durable PostgreSQL behavior', () => {
 
   it('new target already past returns 410 without expiring a still-valid old approval', async () => {
     const old = await seedApproval(pool, {});
-    await expect(revise(old.ownerId, old.id, body('2026-01-02 09:20 喝水'))).rejects.toMatchObject({
-      httpStatus: 410,
+    await expectApplicationRejection(revise(old.ownerId, old.id, body('2026-01-02 09:20 喝水')), {
+      status: 410,
     });
     expect((await state(pool, old.id)).state).toBe('pending');
     expect(await counts(pool, old.ownerId)).toEqual({

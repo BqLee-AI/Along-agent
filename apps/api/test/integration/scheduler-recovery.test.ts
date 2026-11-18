@@ -5,22 +5,22 @@ import { randomUUID } from 'node:crypto';
 import { channel } from 'node:diagnostics_channel';
 import { Pool } from 'pg';
 import { sendKeyFor } from '@along/scheduler-core';
-import { confirmApproval } from '../../src/modules/approvals/confirm.js';
-import { getApprovalDetail } from '../../src/modules/approvals/service.js';
-import { requestCancel } from '../../src/modules/tasks/cancel.js';
-import { getTaskDetail } from '../../src/modules/tasks/service.js';
-import { runSchedulePhase } from '../../src/modules/tasks/scheduler/schedule.js';
-import { runClaimPhase } from '../../src/modules/tasks/scheduler/claim.js';
-import { runSendPhase } from '../../src/modules/tasks/scheduler/send.js';
-import { runAckPhase } from '../../src/modules/tasks/scheduler/ack.js';
-import { runMissedPhase } from '../../src/modules/tasks/scheduler/missed.js';
+import { confirmApproval } from '../../src/features/approvals/reminder/confirm.js';
+import { getApprovalDetail } from '../../src/features/approvals/reminder/service.js';
+import { requestCancel } from '../../src/features/tasks/cancellation/cancel.js';
+import { getTaskDetail } from '../../src/features/tasks/service.js';
+import { runSchedulePhase } from '../../src/features/tasks/scheduler/schedule.js';
+import { runClaimPhase } from '../../src/features/tasks/scheduler/claim.js';
+import { runSendPhase } from '../../src/features/tasks/scheduler/send.js';
+import { runAckPhase } from '../../src/features/tasks/scheduler/ack.js';
+import { runMissedPhase } from '../../src/features/tasks/scheduler/missed.js';
 import { startWorkerLoop } from '../../src/worker/loop.js';
 import {
   createLocalInAppProvider,
   getReceivedInApp,
   type InAppNotice,
   type InAppProvider,
-} from '../../src/modules/notifications/service.js';
+} from '../../src/features/notifications/service.js';
 import {
   createIntegrationDatabase,
   databaseUrl,

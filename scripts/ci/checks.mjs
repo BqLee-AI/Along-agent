@@ -30,8 +30,7 @@ const lanes = {
     ['run', 'format:check'],
   ],
   web: [
-    workspace('contracts', 'build'),
-    workspace('stream-protocol', 'build'),
+    ['run', 'build:api'],
     lint('apps/web'),
     workspace('web', 'typecheck'),
     [...unit, './apps/web'],
@@ -39,7 +38,7 @@ const lanes = {
     workspace('web', 'build'),
   ],
   api: [
-    ['run', 'build:packages'],
+    ['run', 'build:api'],
     lint('apps/api'),
     workspace('api', 'typecheck'),
     [...unit, './apps/api'],
@@ -75,7 +74,7 @@ const env = { ...process.env, OPENSPEC_TELEMETRY: '0' };
 if (lane === 'tooling') delete env.DATABASE_URL;
 for (const args of lanes[lane]) {
   console.log(`\n[checks:${lane}] bun ${args.join(' ')}`);
-  const result = spawnSync('bun', ['--no-env-file', ...args], {
+  const result = spawnSync(process.execPath, ['--no-env-file', ...args], {
     cwd: root,
     env,
     stdio: 'inherit',

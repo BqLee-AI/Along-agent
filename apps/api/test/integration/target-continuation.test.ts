@@ -1,3 +1,8 @@
+import { expectApplicationRejection } from '../helpers/application-error.js';
+import {
+  listReminderClarifications,
+  readReminderTimeErrors,
+} from '../../src/agent/tools/reminders/reminder-source.js';
 import { configureTestModel } from '../helpers/model-selection.js';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
@@ -5,23 +10,23 @@ import type { GoalResult } from '@along/contracts';
 import {
   acceptTargetContinuation,
   readCancellationScopeInput,
-} from '../../src/modules/conversations/target-continuation.js';
-import { acceptReminderDate } from '../../src/modules/conversations/reminder-date.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
+} from '../../src/agent/operations/target-continuation.js';
+import { acceptReminderDate } from '../../src/features/conversations/lifecycle/reminder-date.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
 import {
   admitTestUser,
   createIntegrationDatabase,
   seedApproval,
   type IntegrationDatabase,
 } from './setup.js';
-import { invokeTool, reserveToolInvocation } from '../../src/modules/tools/gateway.js';
-import { validateGoalResult } from '../../src/modules/conversations/goal-result.js';
-import { startConversationRun } from '../../src/modules/conversations/service.js';
-import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
+import { invokeTool, reserveToolInvocation } from '../../src/agent/tools/gateway.js';
+import { validateGoalResult } from '../../src/agent/operations/goal-result.js';
+import { startConversationRun } from '../../src/agent/operations/start.js';
+import { createContextPolicy } from '../../src/features/conversations/public.js';
 import {
   readShownCancellationCandidates,
   renderCancellationClarification,
-} from '../../src/modules/tools/reminder-cancel-scope.js';
+} from '../../src/agent/tools/reminders/reminder-cancel-scope.js';
 
 let db: IntegrationDatabase;
 beforeAll(async () => {
@@ -452,7 +457,7 @@ test('unverifiable source asks for the relationship without admitting an effect'
       },
     },
   };
-  await expect(
+  await expectApplicationRejection(
     startConversationRun(
       deps,
       f.ownerId,
@@ -466,7 +471,8 @@ test('unverifiable source asks for the relationship without admitting an effect'
       },
       null,
     ),
-  ).rejects.toMatchObject({ httpStatus: 400, message: expect.stringContaining('请说明') });
+    { status: 400, message: expect.stringContaining('请说明') },
+  );
   expect(
     (
       await db.pool.query('SELECT count(*)::int n FROM messages WHERE conversation_id=$1', [
@@ -599,15 +605,19 @@ test('an independent same-text delegation is a new input without a source refere
   );
   const client = await db.pool.connect();
   try {
-    const source = await acceptReminderDate(client, {
-      ...f,
-      inputMessageId,
-      text: '取消提醒',
-      receivedAtUtc: '2026-11-03T01:00:00Z',
-      foldChoice: 'none',
-      confirmedTimezone: null,
-      directCreation: true,
-    });
+    const source = await acceptReminderDate(
+      client,
+      {
+        ...f,
+        inputMessageId,
+        text: '取消提醒',
+        receivedAtUtc: '2026-11-03T01:00:00Z',
+        foldChoice: 'none',
+        confirmedTimezone: null,
+        directCreation: true,
+      },
+      { listReminderClarifications, readReminderTimeErrors },
+    );
     expect(source.source).toEqual({ version: 1, kind: 'new', inputMessageId });
   } finally {
     client.release();

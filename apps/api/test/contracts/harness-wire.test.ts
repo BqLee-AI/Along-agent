@@ -18,9 +18,9 @@ import {
 import {
   executeNonTransactionalInvocation,
   reserveInvocation,
-} from '../../src/modules/tools/invocations.js';
-import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import { measureHarnessContext } from '../../src/modules/conversations/harness-context.js';
+} from '../../src/agent/tools/invocations/invocations.js';
+import { createContextPolicy } from '../../src/features/conversations/public.js';
+import { measureSdkContext } from '../../src/features/model-providers/public.js';
 import { createIntegrationDatabase, type IntegrationDatabase } from '../integration/setup.js';
 import { appendFileEffect } from '../integration/tool-invocations-file-effect.js';
 import { args, fileLines, seedContext, toolId } from '../integration/tool-invocations-probe.js';
@@ -133,7 +133,7 @@ test('D8.wire-rejection', async () => {
         let value: unknown;
         switch (request.type) {
           case 'measure_context':
-            value = await measureHarnessContext(request, start.tools, contextPolicy);
+            value = await measureSdkContext(request, start.tools, contextPolicy);
             break;
           case 'model':
             modelCalls++;

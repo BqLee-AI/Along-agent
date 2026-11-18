@@ -1,10 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
-import { readCancelTaskCandidate, readToolTaskList } from '../../src/modules/tasks/tool-query.js';
-import { readToolBriefCards } from '../../src/modules/brief/tool-query.js';
-import { isActiveOwner, readUserPreferences } from '../../src/modules/identity/preferences.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
+import { readCancelTaskCandidate, readToolTaskList } from '../../src/features/tasks/tool-query.js';
+import { readToolBriefCards } from '../../src/features/brief/tool-query.js';
+import {
+  isActiveOwner,
+  readUserPreferences,
+} from '../../src/features/identity/profile/preferences.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
 import {
   admitTestUser,
   createIntegrationDatabase,

@@ -33,7 +33,7 @@ export async function configuredIdentityKeys(config, source = repositoryRoot) {
   try {
     const input = await loadPrivateJson(config.identityKeyringFile);
     const { parseIdentityKeyring } = await import(
-      pathToFileURL(path.join(source, 'apps/api/src/modules/identity/email-security.ts')).href
+      pathToFileURL(path.join(source, 'apps/api/src/features/identity/public.ts')).href
     );
     return parseIdentityKeyring(input);
   } catch {
@@ -46,6 +46,7 @@ export function installationEnvironment(config, image = 'along-local:unprepared'
   databaseUrl.username = config.database.user;
   databaseUrl.password = config.database.password;
   databaseUrl.pathname = `/${config.database.name}`;
+  const limits = config.harnessLimits ?? config.model;
   return hostEnvironment({
     ALONG_INSTALLATION: config.installationId,
     ALONG_DB_USER: config.database.user,
@@ -72,16 +73,16 @@ export function installationEnvironment(config, image = 'along-local:unprepared'
     IDENTITY_MAIL_API_KEY: config.identityMail?.apiKey ?? '',
     API_BASE: `http://127.0.0.1:${config.ports.api}`,
     TZDB_VERSION: config.tzdbVersion,
-    HARNESS_MAX_ITERATIONS: String(config.model?.maxIterations ?? 24),
-    HARNESS_MAX_TOKENS: String(config.model?.maxTokens ?? 64000),
+    HARNESS_MAX_ITERATIONS: String(limits?.maxIterations ?? 24),
+    HARNESS_MAX_TOKENS: String(limits?.maxTokens ?? 64000),
     HARNESS_COMPLETION_CAP: String(config.harnessCompletionCap),
     HARNESS_MODEL_WINDOW_TOKENS:
-      config.model?.modelWindowTokens == null ? '' : String(config.model.modelWindowTokens),
+      limits?.modelWindowTokens == null ? '' : String(limits.modelWindowTokens),
     HARNESS_ROUTING_MODE: config.routing?.mode ?? 'off',
     HARNESS_ROUTING_BUNDLE: config.routing ? '/run/along-routing-bundle.json' : '',
     HARNESS_ROUTING_ENCODER_URL: config.routing?.encoderUrl ?? '',
     HARNESS_ROUTING_INTENTS: config.routing?.intents.join(',') ?? '',
-    HARNESS_CONTEXT_RESERVE_TOKENS: String(config.model?.reserveTokens ?? 0),
+    HARNESS_CONTEXT_RESERVE_TOKENS: String(limits?.reserveTokens ?? 0),
     WORKSPACE_REGISTRY_FILE: config.registryFile ? '/run/along-registry.json' : '',
   });
 }

@@ -1,17 +1,15 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
-import { readCompactContinuation } from '../../src/modules/conversations/compact-continuation.js';
-import { freezeR3Context } from '../../src/modules/conversations/r3-context.js';
-import type { CompactBinding } from '../../src/modules/conversations/compact-store.js';
-import {
-  cancelConversationRun,
-  executeRuntimeCompact,
-} from '../../src/modules/conversations/harness-authority.js';
-import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import type { ConversationDeps, RunContext } from '../../src/modules/conversations/contracts.js';
-import { RunOwnership } from '../../src/modules/conversations/run-ownership.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
+import { readCompactContinuation } from '../../src/agent/runtime/compact-continuation.js';
+import { freezeR3Context } from '../../src/features/conversations/compact/r3-context.js';
+import type { CompactBinding } from '../../src/features/conversations/compact/compact-eligibility.js';
+import { cancelConversationRun } from '../../src/agent/operations/run.js';
+import { executeRuntimeCompact } from '../../src/agent/operations/compact.js';
+import { createContextPolicy } from '../../src/features/conversations/public.js';
+import type { ConversationDeps, RunContext } from '../../src/agent/runtime/contracts.js';
+import { RunOwnership } from '../../src/agent/runtime/run-ownership.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
 import {
   admitTestUser,
   createIntegrationDatabase,

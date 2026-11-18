@@ -3,18 +3,19 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { Pool } from 'pg';
-import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
-import type { ConversationDeps } from '../../src/modules/conversations/contracts.js';
+import type { ConversationDeps, HarnessServices } from '../../src/agent/runtime/contracts.js';
 import {
   createProvider,
   listProviders,
+  updateProvider,
+} from '../../src/features/model-providers/configuration/service.js';
+import {
   testProviderConnection,
   testProvider,
-  updateProvider,
-} from '../../src/modules/model-providers/service.js';
-import { handleRequest } from '../../src/http/app.js';
+} from '../../src/features/model-providers/outbound/probe.js';
+import { handleRequest } from '../helpers/http-app.js';
 import { csrfTokenFor } from '../../src/http/auth.js';
-import { createUserModelTransport } from '../../src/modules/conversations/harness-config.js';
+import { createUserModelTransport } from '../../src/features/model-providers/runtime/model-transport.js';
 
 const schema = `probe_test_${randomUUID().replaceAll('-', '')}`;
 const url = process.env.MODEL_PROVIDER_TEST_DATABASE_URL ?? process.env.DATABASE_URL;

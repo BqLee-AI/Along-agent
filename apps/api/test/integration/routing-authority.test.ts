@@ -18,38 +18,39 @@ import type {
   ConversationDeps,
   RunContext,
   StartResult,
-} from '../../src/modules/conversations/contracts.js';
-import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
-import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
+} from '../../src/agent/runtime/contracts.js';
+import type { HarnessServices } from '../../src/agent/runtime/contracts.js';
+import { createContextPolicy } from '../../src/features/conversations/public.js';
+import { cancelConversationRun, getRunView } from '../../src/agent/operations/run.js';
 import {
-  createHarnessSession,
-  cancelConversationRun,
-  getRunView,
   requestConversationPause,
   continueConversationPause,
-} from '../../src/modules/conversations/harness-authority.js';
-import type { HarnessSession } from '../../src/modules/conversations/harness-authority.js';
-import { startConversationRun } from '../../src/modules/conversations/service.js';
+} from '../../src/agent/operations/pause.js';
+import {
+  createHarnessSession,
+  type HarnessSession,
+} from '../../src/agent/runtime/attempt-session.js';
+import { startConversationRun } from '../../src/agent/operations/start.js';
 import {
   insertRoutingPolicy,
   readRoutingPolicy,
   routingHash,
   decisionPayload,
   acceptRoutingDecision,
-} from '../../src/modules/conversations/routing-checkpoints.js';
+} from '../../src/agent/routing/routing-checkpoints.js';
 import {
   listRunEvents,
   listConversationEvents,
   lockRun,
-} from '../../src/modules/conversations/repository.js';
+} from '../../src/features/conversations/run/repository.js';
 import {
   createRoutingRuntime,
   type RoutingRuntime,
   type EnabledRoutingPolicy,
-} from '../../src/modules/conversations/routing/index.js';
+} from '../../src/agent/routing/index.js';
 import { seedAdmittedSession as seedSession } from './setup.js';
-import type { SeededSession } from '../../src/modules/identity/seed.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
+import type { SeededSession } from '../../src/features/identity/session/seed.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 
 const maybe = databaseUrl ? describe : describe.skip;

@@ -8,6 +8,7 @@ import {
   authSignOutSchema,
 } from '@along/contracts';
 import { MeSchema } from '@/shared/session/identity';
+import { createBrowserApi, writeOptions } from '@/shared/http/eden';
 
 export type AccountOperation = 'initialize' | 'claim' | 'sign-in' | 'sign-out';
 export type AccountFailure = {
@@ -107,17 +108,18 @@ export async function submitAccountOperation(
   csrfToken: string | null,
   request: (url: string, init: RequestInit) => Promise<Response> = fetch,
 ): Promise<AccountOutcome> {
-  let response: Response;
+  const api = createBrowserApi((input, init) => request(String(input), init ?? {})).api.v1;
+  let result;
   try {
-    response = await request(`/api/v1/auth/${operation}`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        ...(csrfToken !== null ? { 'x-csrf-token': csrfToken } : {}),
-      },
-      body: JSON.stringify(body),
-      cache: 'no-store',
-    });
+    const options = writeOptions(csrfToken);
+    result =
+      operation === 'initialize'
+        ? await api.auth.initialize.post(authInitializeSchema.parse(body), options)
+        : operation === 'claim'
+          ? await api.auth.claim.post(authClaimSchema.parse(body), options)
+          : operation === 'sign-in'
+            ? await api.auth['sign-in'].post(authSignInSchema.parse(body), options)
+            : await api.auth['sign-out'].post(authSignOutSchema.parse(body), options);
   } catch {
     return {
       kind: 'unconfirmed',
@@ -130,8 +132,8 @@ export async function submitAccountOperation(
       },
     };
   }
-  const payload = await response.json().catch(() => null);
-  const envelope = EnvelopeSchema.safeParse(payload);
+  const { response } = result;
+  const envelope = EnvelopeSchema.safeParse(result.error ? result.error.value : result.data);
   const failure: AccountFailure = {
     message: rejectionMessage(
       operation,
@@ -190,8 +192,11 @@ export async function submitAccountOperation(
   const workspacePending = authenticated.data.workspace_binding === 'pending_local_configuration';
   let meResponse: Response | null = null;
   try {
-    meResponse = await request('/api/v1/me', { cache: 'no-store' });
-    const meEnvelope = EnvelopeSchema.safeParse(await meResponse.json());
+    const meResult = await api.me.get();
+    meResponse = meResult.response;
+    const meEnvelope = EnvelopeSchema.safeParse(
+      meResult.error ? meResult.error.value : meResult.data,
+    );
     if (
       meResponse.ok &&
       meEnvelope.success &&

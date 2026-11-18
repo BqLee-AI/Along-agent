@@ -1,10 +1,10 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { createServer, type Server } from 'node:http';
 import { HARNESS_PROTOCOL_VERSION, type HarnessRequest } from '@along/contracts';
-import { createUserConfiguredHarnessModelTransport } from '../src/modules/model-providers/harness-model.js';
-import { createContextPolicy } from '../src/modules/conversations/context-policy.js';
-import { measureHarnessContext } from '../src/modules/conversations/harness-context.js';
-import { OutboundError } from '../src/modules/model-providers/outbound.js';
+import { createConfiguredSdkStep } from '../src/features/model-providers/public.js';
+import { createContextPolicy } from '../src/features/conversations/public.js';
+import { measureSdkContext } from '../src/features/model-providers/public.js';
+import { OutboundError } from '../src/features/model-providers/outbound/outbound.js';
 
 const servers: Server[] = [];
 afterEach(async () => {
@@ -41,14 +41,14 @@ async function listen(server: Server): Promise<string> {
 }
 
 test('user configuration requires an explicit network boundary', () => {
-  expect(() => createUserConfiguredHarnessModelTransport(config, undefined as never)).toThrow();
+  expect(() => createConfiguredSdkStep(config, undefined as never)).toThrow();
 });
 
 test('a denied network operation never falls back or exposes the boundary error', async () => {
   const globalFetch = spyOn(globalThis, 'fetch');
   let calls = 0;
   try {
-    const transport = createUserConfiguredHarnessModelTransport(config, async () => {
+    const transport = createConfiguredSdkStep(config, async () => {
       calls++;
       throw new Error('private network policy detail');
     });
@@ -70,7 +70,7 @@ test('a denied network operation never falls back or exposes the boundary error'
 test('reports a safe outbound failure category without exposing error details', async () => {
   const warn = spyOn(console, 'warn').mockImplementation(() => {});
   try {
-    const transport = createUserConfiguredHarnessModelTransport(config, async () => {
+    const transport = createConfiguredSdkStep(config, async () => {
       throw new OutboundError('blocked_address');
     });
     const steps = await Array.fromAsync(transport(request, [], new AbortController().signal));
@@ -89,7 +89,7 @@ test('reports an outbound disconnect while reading an accepted response body', a
   const warn = spyOn(console, 'warn').mockImplementation(() => {});
   try {
     let sent = false;
-    const transport = createUserConfiguredHarnessModelTransport(
+    const transport = createConfiguredSdkStep(
       config,
       async () =>
         new Response(
@@ -135,14 +135,14 @@ test('user model request uses the boundary while local measurement does not, and
   let calls = 0;
   let target = '';
   let sentBody = '';
-  const transport = createUserConfiguredHarnessModelTransport(config, async (url, init) => {
+  const transport = createConfiguredSdkStep(config, async (url, init) => {
     calls++;
     target = String(url);
     sentBody = String(init?.body);
     return fetch(local, init);
   });
   const policy = createContextPolicy({ model: config.model, completionCap: 32 });
-  const measured = await measureHarnessContext({ ...request, type: 'measure_context' }, [], policy);
+  const measured = await measureSdkContext({ ...request, type: 'measure_context' }, [], policy);
   expect(calls).toBe(0);
   const stream = transport(request, [], new AbortController().signal);
   try {
@@ -170,7 +170,7 @@ test('cancellation aborts the injected network operation and its active stream',
   });
   const local = await listen(server);
   let boundarySignal: AbortSignal | null | undefined;
-  const transport = createUserConfiguredHarnessModelTransport(config, async (_url, init) => {
+  const transport = createConfiguredSdkStep(config, async (_url, init) => {
     boundarySignal = init?.signal;
     return fetch(local, init);
   });

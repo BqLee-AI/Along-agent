@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
-import { forbidden } from '../../src/http/errors.js';
-import { createMemoryService, type MemoryService } from '../../src/modules/memory/service.js';
-import type { MemorySources } from '../../src/modules/memory/types.js';
+import { forbidden } from '../../src/platform/errors.js';
+import { createMemoryService, type MemoryService } from '../../src/features/memory/service.js';
+import type { MemorySources } from '../../src/features/memory/types.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 
 const maybe = databaseUrl ? describe : describe.skip;

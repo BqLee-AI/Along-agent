@@ -17,10 +17,10 @@ import {
   workspaceResultSchema,
 } from '@along/contracts';
 import type { HarnessModelReply, WorkspaceResult } from '@along/contracts';
-import { createHarnessModelTransport } from '../../src/modules/model-providers/harness-model.js';
-import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import { configureWorkspaceRegistry } from '../../src/modules/workspaces/service.js';
-import type { WorkspaceRegistration } from '../../src/modules/workspaces/service.js';
+import { createLocalFixtureModelTransport } from '../helpers/local-fixture-model.js';
+import { createContextPolicy } from '../../src/features/conversations/public.js';
+import { configureWorkspaceRegistry } from '../../src/features/workspaces/public.js';
+import type { WorkspaceRegistration } from '../../src/features/workspaces/public.js';
 import {
   createHarnessConsumer,
   jsonBody,
@@ -430,7 +430,7 @@ beforeAll(async () => {
       model: 'controlled-workspace-consumer',
     }),
   };
-  fixture.model = createHarnessModelTransport({
+  fixture.model = createLocalFixtureModelTransport({
     baseUrl: `${base}/v1`,
     model: 'controlled-workspace-consumer',
   });

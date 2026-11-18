@@ -2,9 +2,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
 import type { ThreadEvent } from '@along/stream-protocol';
-import { executeRun, startConversationRun } from '../../src/modules/conversations/service.js';
-import { listRunEvents } from '../../src/modules/conversations/repository.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
+import { executeRun } from '../../src/agent/operations/execute.js';
+import { startConversationRun } from '../../src/agent/operations/start.js';
+import { listRunEvents } from '../../src/features/conversations/run/repository.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
 import {
   admitTestUser,
   createIntegrationDatabase,

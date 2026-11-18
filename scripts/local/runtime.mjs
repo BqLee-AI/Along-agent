@@ -192,7 +192,7 @@ async function runtimeReport(config, directory) {
           'bun',
           '--no-env-file',
           '-e',
-          'import {loadWorkspaceRegistry} from "./apps/api/dist/modules/workspaces/service.js"; console.log(JSON.stringify(await loadWorkspaceRegistry()));',
+          'import {loadWorkspaceRegistry} from "./apps/api/dist/features/workspaces/public.js"; console.log(JSON.stringify(await loadWorkspaceRegistry()));',
         ]),
       );
     } catch {
@@ -358,7 +358,7 @@ async function inspectWaitingForUpgrade(
       '--entrypoint',
       'bun',
       'api',
-      'apps/api/dist/release-inspection.js',
+      'apps/api/dist/bin/release-inspection.js',
     ],
     { image: artifact.image, source: artifact.source },
   );
@@ -434,7 +434,7 @@ export async function upgradeInstallation(file, { stopWaiting } = {}) {
               '--entrypoint',
               'bun',
               'api',
-              'apps/api/dist/release-waiting-detail.js',
+              'apps/api/dist/bin/release-waiting-detail.js',
             ],
             {
               image: artifact.image,
@@ -484,7 +484,7 @@ export async function upgradeInstallation(file, { stopWaiting } = {}) {
             '--entrypoint',
             'bun',
             'api',
-            'apps/api/dist/release-stop.js',
+            'apps/api/dist/bin/release-stop.js',
           ],
           { image: artifact.image, source: artifact.source, input: JSON.stringify(selection) },
         );

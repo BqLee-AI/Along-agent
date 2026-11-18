@@ -3,9 +3,12 @@ import { randomUUID } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { Pool } from 'pg';
 import { admitTestUser, databaseUrl, createIntegrationDatabase } from './setup.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
-import type { ToolContext } from '../../src/modules/tools/contracts.js';
-import { executeLocalInvocation, reserveInvocation } from '../../src/modules/tools/invocations.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
+import type { ToolContext } from '../../src/agent/tools/contracts.js';
+import {
+  executeLocalInvocation,
+  reserveInvocation,
+} from '../../src/agent/tools/invocations/invocations.js';
 
 const maybe = databaseUrl ? describe : describe.skip;
 const migrations = new URL('../../../../infra/migrations/', import.meta.url);

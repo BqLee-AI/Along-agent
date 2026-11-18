@@ -14,11 +14,11 @@ import {
 } from '@along/contracts';
 import { ThreadEventSchema } from '@along/stream-protocol';
 import type { ThreadEvent } from '@along/stream-protocol';
-import { handleRequest } from '../../src/http/app.js';
-import { createHarnessModelTransport } from '../../src/modules/model-providers/harness-model.js';
-import { runNativeHarness } from '../../src/modules/conversations/harness-process.js';
-import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import { measureHarnessContext } from '../../src/modules/conversations/harness-context.js';
+import { handleRequest } from '../helpers/http-app.js';
+import { createLocalFixtureModelTransport } from '../helpers/local-fixture-model.js';
+import { runNativeHarness } from '../../src/agent/harness/harness-process.js';
+import { createContextPolicy } from '../../src/features/conversations/public.js';
+import { measureSdkContext } from '../../src/features/model-providers/public.js';
 import { seedAdmittedSession as seedSession } from './setup.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 import {
@@ -213,7 +213,7 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
       });
     });
     const modelBase = await listen(modelServer);
-    const model = createHarnessModelTransport({
+    const model = createLocalFixtureModelTransport({
       baseUrl: `${modelBase}/v1`,
       model: 'fixture-transport-only',
     });
@@ -232,7 +232,7 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
           }),
         },
         // Controlled HTTP protocol fixture, not SDK or outbound-policy coverage.
-        modelTransport: async () => ({ model, measure: measureHarnessContext }),
+        modelTransport: async () => ({ model, measure: measureSdkContext }),
       }).catch(() => res.destroy());
     });
     base = await listen(server);
@@ -820,7 +820,7 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
     hold.set(id, gate);
     const address = modelServer.address();
     if (!address || typeof address === 'string') throw new Error('missing provider address');
-    const model = createHarnessModelTransport({
+    const model = createLocalFixtureModelTransport({
       baseUrl: `http://127.0.0.1:${address.port}/v1`,
       model: 'exit-lifecycle-fixture',
     });
@@ -834,9 +834,6 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
       services: {
         binaryPath,
         libraryPath: process.env.HARNESS_LIBRARY_PATH ?? '/app/harness/lib',
-        maxIterations: 8,
-        maxTokens: 8000,
-        contextPolicy,
       },
       start: HarnessStartSchema.parse({
         protocol: HARNESS_PROTOCOL_VERSION,
@@ -856,7 +853,7 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
       onExit: () => provider.abort(),
       handleRequest: async (request) => {
         if (request.type === 'measure_context')
-          return measureHarnessContext(request, [], contextPolicy);
+          return measureSdkContext(request, [], contextPolicy);
         if (request.type !== 'model')
           throw new Error('unexpected native action while provider is held');
         const stream = model(request, [], provider.signal);

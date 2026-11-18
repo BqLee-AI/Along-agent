@@ -1,10 +1,10 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { jsonDigest, matrixDigest } from '../src/modules/conversations/routing/bundle.js';
-import type { RoutingBundle } from '../src/modules/conversations/routing/bundle.js';
-import { PINNED_ENCODING_FILES } from '../src/modules/conversations/routing/encoding-manifest.js';
-import { REVISIONS, ROUTING_INTENTS } from '../src/modules/conversations/routing/types.js';
+import { jsonDigest, matrixDigest } from '../src/agent/routing/bundle.js';
+import type { RoutingBundle } from '../src/agent/routing/bundle.js';
+import { PINNED_ENCODING_FILES } from '../src/agent/routing/encoding-manifest.js';
+import { REVISIONS, ROUTING_INTENTS } from '../src/agent/routing/types.js';
 
 export interface RoutingTestFixture {
   directory: string;

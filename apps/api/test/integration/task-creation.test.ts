@@ -3,15 +3,15 @@ import { randomUUID } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import type { Pool } from 'pg';
 import { withClient, withTransaction } from '../../src/db/transaction.js';
-import { confirmApproval } from '../../src/modules/approvals/confirm.js';
-import { getApprovalDetail } from '../../src/modules/approvals/service.js';
+import { confirmApproval } from '../../src/features/approvals/reminder/confirm.js';
+import { getApprovalDetail } from '../../src/features/approvals/reminder/service.js';
 import {
   createTaskWithinTransaction,
   readCreatedTaskReceipt,
-} from '../../src/modules/tasks/create.js';
-import { getTaskNotificationSource } from '../../src/modules/tasks/notification-source.js';
-import { runSchedulePhase } from '../../src/modules/tasks/scheduler/schedule.js';
-import { getTaskDetail, listTasksForOwner } from '../../src/modules/tasks/service.js';
+} from '../../src/features/tasks/create.js';
+import { getTaskNotificationSource } from '../../src/features/tasks/notification-source.js';
+import { runSchedulePhase } from '../../src/features/tasks/scheduler/schedule.js';
+import { getTaskDetail, listTasksForOwner } from '../../src/features/tasks/service.js';
 import { createIntegrationDatabase, databaseUrl, seedApproval } from './setup.js';
 import type { IntegrationDatabase } from './setup.js';
 

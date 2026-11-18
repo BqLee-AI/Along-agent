@@ -3,8 +3,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
-import { handleRequest } from '../../src/http/app.js';
-import { createAuth } from '../../src/modules/identity/better-auth.js';
+import { handleRequest } from '../helpers/http-app.js';
+import { createAuth } from '../../src/features/identity/session/better-auth.js';
 import {
   createIntegrationDatabase,
   databaseUrl,
@@ -12,7 +12,7 @@ import {
   seedApproval,
 } from './setup.js';
 import { seedAdmittedSession as seedSession } from './setup.js';
-import { getApprovalDetail } from '../../src/modules/approvals/service.js';
+import { getApprovalDetail } from '../../src/features/approvals/reminder/service.js';
 const maybe = databaseUrl ? describe : describe.skip;
 
 interface FakeResponse extends ServerResponse {

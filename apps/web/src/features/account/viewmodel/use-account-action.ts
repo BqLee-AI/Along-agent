@@ -4,7 +4,7 @@ import { useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { z } from 'zod';
 import { submitAccountAction } from '../model/account-actions';
-import type { ActionState } from '../model/account-actions';
+import type { ActionState, AccountActionPath } from '../model/account-actions';
 
 export type AccountActionField = {
   name: string;
@@ -14,7 +14,7 @@ export type AccountActionField = {
 };
 
 export type AccountActionConfig = {
-  path: string;
+  path: AccountActionPath;
   fields: AccountActionField[];
   inputSchema: z.ZodType;
   resultSchema: z.ZodType;

@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert';
 import * as http from 'node:http';
 import type { LookupFunction } from 'node:net';
-import { outboundFetchForTest } from '../../src/modules/model-providers/outbound.js';
+import { outboundFetchForTest } from '../../src/features/model-providers/outbound/outbound.js';
 
 const server = http.createServer((_req, res) => res.end('pinned'));
 const listening = Promise.withResolvers<void>();

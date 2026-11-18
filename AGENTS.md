@@ -23,7 +23,7 @@ TypeScript + Next.js（App Router）+ PostgreSQL 16 的云端个人助理；包�
 
 ## 代码约定
 
-- TypeScript 严格模式；模块按 `apps/api/src/modules/<name>/` 划分所有权，一模块一 schema 前缀。
+- TypeScript 严格模式；`apps/api/src/features/<name>/` 划分业务所有权，`agent/` 持有跨功能操作与执行状态；功能通过公共用例和投影协作。
 - 跨模块资源关联 ID-first；允许同步公共用例、显式 DTO 与只读投影，不直读对方私有表。确认创建或取消保持受控单事务，其他可靠异步命令/事件走 outbox，不将公共读取/同步调用强制入队；D1 只证明存储实现导入边界，不证明 SQL 所有权（见 design/02、04、ADR 0009）。
 - 授权边界见 `docs/design/20-goal-scoped-delegation.md` 和 OpenSpec 主规范；变更记录在 `openspec/changes/archive/2026-11-12-refactor-assistant-capability-authorization/`。下列安全内核保留；“全部写入必须按钮/只提议”和 wall 缺字段必问仅约束 legacy profile。新 profile 的本人委托内设置、明确提醒、受管资料正常写入无需逐项审批，严格 elapsed 不问无关时区；实质缺口/新增影响才问，硬资格不能按钮突破。旧 pending 不自动消费；TS/native/Web 配套，不能模拟 confirm。
 - 安全内核 5 条（硬规则）：

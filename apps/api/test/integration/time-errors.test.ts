@@ -5,11 +5,13 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { Pool } from 'pg';
 import { ThreadEventSchema, type ThreadEvent } from '@along/stream-protocol';
-import { handleRequest, type AppDeps } from '../../src/http/app.js';
-import type { Actor } from '../../src/http/auth.js';
-import { createTimeContext, loadTimeContext } from '../../src/modules/time/context.js';
-import { executeRun, startConversationRun } from '../../src/modules/conversations/service.js';
-import { listRunEvents } from '../../src/modules/conversations/repository.js';
+import { handleRequest } from '../helpers/http-app.js';
+import type { AppDeps } from '../../src/http/contracts.js';
+import type { Actor } from '../../src/features/identity/session/actor.js';
+import { createTimeContext, loadTimeContext } from '../../src/features/time/context.js';
+import { executeRun } from '../../src/agent/operations/execute.js';
+import { startConversationRun } from '../../src/agent/operations/start.js';
+import { listRunEvents } from '../../src/features/conversations/run/repository.js';
 import {
   createIntegrationDatabase,
   databaseUrl,

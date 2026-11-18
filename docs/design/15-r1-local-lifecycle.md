@@ -9,7 +9,7 @@
 
 [Observed] 根 package.json 提供依赖优先构建和开发入口；infra/compose/compose.yaml 编排 PG16 与 API/all，挂载 pgdata、workspace_data，未编排 Web。infra/docker/Dockerfile 构建正式 Linux x64 native 并打包 API/MCP。apps/web/package.json 有 Next build/start，Web 经同源代理访问 API。根 dev 不建立这套正式运行环境。
 
-[Observed] scripts/db/apply.sh 按文件名执行全部 SQL，无旧库分流。0012 才建立 schema_migrations，0012–0016 各自记账；早期 SQL 不能重复初始化。API main 只在启动时加载工作区；workspaces/service.ts 的登记缺失或读取失败均清空可用项。harness-config.ts 只接受显式模型配置，缺失时不启用 Harness。上述是静态代码依据，不是安装/升级演练。
+[Observed] scripts/db/apply.sh 按文件名执行全部 SQL，无旧库分流。0012 才建立 schema_migrations，0012–0016 各自记账；早期 SQL 不能重复初始化。API main 只在启动时加载工作区；workspaces/registry/service.ts 的登记缺失或读取失败均清空可用项。harness-config.ts 只接受显式模型配置，缺失时不启用 Harness。上述是静态代码依据，不是安装/升级演练。
 
 [Required] 在现有 Bun scripts、Compose、正式镜像和 Next.js 生产 server 外补一层本机命令编排，不引入常驻管理服务、第二套 Agent 或配置 Web 平台。生命周期逻辑归 scripts/infra，业务事实仍归现有 TS 模块。Windows Web 与 Linux 容器分工保留；Web 进程仅承载生产页面和私有就绪标记，不作为管理 daemon。直接把 dev 或 apply.sh 包成启动命令无法满足持久配置、旧库和写者切换要求，不采用。
 

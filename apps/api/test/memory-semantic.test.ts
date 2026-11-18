@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { loadMemorySemanticConfig } from '../src/modules/memory/semantic.js';
+import { loadMemorySemanticConfig } from '../src/features/memory/recall/semantic.js';
 
 const binding = 'a'.repeat(64);
 describe('memory semantic configuration', () => {

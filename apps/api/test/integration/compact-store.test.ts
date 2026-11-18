@@ -5,14 +5,14 @@ import {
   freezeCompact,
   publishCompact,
   readCompactView,
-  type CompactBinding,
-} from '../../src/modules/conversations/compact-store.js';
-import { validateCompactSources } from '../../src/modules/conversations/compact-sources.js';
+} from '../../src/features/conversations/compact/compact-store.js';
+import type { CompactBinding } from '../../src/features/conversations/compact/compact-eligibility.js';
+import { validateCompactSources } from '../../src/features/conversations/compact/compact-sources.js';
 import {
   freezeR3Context,
   freezeR3ControlContext,
-} from '../../src/modules/conversations/r3-context.js';
-import { RunOwnership } from '../../src/modules/conversations/run-ownership.js';
+} from '../../src/features/conversations/compact/r3-context.js';
+import { RunOwnership } from '../../src/agent/runtime/run-ownership.js';
 import {
   admitTestUser,
   createIntegrationDatabase,

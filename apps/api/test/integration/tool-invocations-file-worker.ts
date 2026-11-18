@@ -1,7 +1,7 @@
 import { Pool } from 'pg';
 import { z } from 'zod';
-import { loadTimeContext } from '../../src/modules/time/context.js';
-import { executeNonTransactionalInvocation } from '../../src/modules/tools/invocations.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
+import { executeNonTransactionalInvocation } from '../../src/agent/tools/invocations/invocations.js';
 import { appendFileEffect } from './tool-invocations-file-effect.js';
 
 const input = z

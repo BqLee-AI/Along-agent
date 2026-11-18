@@ -10,16 +10,17 @@ import {
   type HarnessModelReply,
 } from '@along/contracts';
 import { ThreadEventSchema, type ThreadEvent } from '@along/stream-protocol';
-import { handleRequest } from '../../src/http/app.js';
-import { startConversationRun, executeRun } from '../../src/modules/conversations/service.js';
-import type { ConversationDeps } from '../../src/modules/conversations/contracts.js';
-import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import { createHarnessModelTransport } from '../../src/modules/model-providers/harness-model.js';
-import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
+import { handleRequest } from '../helpers/http-app.js';
+import { executeRun } from '../../src/agent/operations/execute.js';
+import { startConversationRun } from '../../src/agent/operations/start.js';
+import type { ConversationDeps } from '../../src/agent/runtime/contracts.js';
+import { createContextPolicy } from '../../src/features/conversations/public.js';
+import { createLocalFixtureModelTransport } from '../helpers/local-fixture-model.js';
+import type { HarnessServices } from '../../src/agent/runtime/contracts.js';
 import { seedAdmittedSession as seedSession } from '../integration/setup.js';
-import { invokeTool, reserveToolInvocation } from '../../src/modules/tools/gateway.js';
-import type { ToolContext } from '../../src/modules/tools/contracts.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
+import { invokeTool, reserveToolInvocation } from '../../src/agent/tools/gateway.js';
+import type { ToolContext } from '../../src/agent/tools/contracts.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
 import { createIntegrationDatabase, type IntegrationDatabase } from '../integration/setup.js';
 import {
   findModelObservation,
@@ -138,7 +139,7 @@ beforeAll(async () => {
     maxIterations: 8,
     maxTokens: 8000,
     contextPolicy: createContextPolicy({ completionCap: 1024, model: 'hard-denial-controlled' }),
-    model: createHarnessModelTransport({
+    model: createLocalFixtureModelTransport({
       baseUrl: `${modelBase}/v1`,
       model: 'hard-denial-controlled',
     }),

@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import { conversationMemorySources } from '../../src/modules/conversations/memory-sources.js';
-import { createMemoryService } from '../../src/modules/memory/service.js';
-import { invokeTool, reserveToolInvocation } from '../../src/modules/tools/gateway.js';
+import { conversationMemorySources } from '../../src/features/conversations/history/memory-sources.js';
+import { createMemoryService } from '../../src/features/memory/service.js';
+import { invokeTool, reserveToolInvocation } from '../../src/agent/tools/gateway.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 import { seedContext } from './tool-invocations-probe.js';
 

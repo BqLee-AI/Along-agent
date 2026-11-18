@@ -6,20 +6,18 @@ import {
   RoutingFactsSchema,
   type HarnessRequest,
 } from '@along/contracts';
-import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import {
-  createHarnessSession,
-  getRunView,
-  requestConversationPause,
-} from '../../src/modules/conversations/harness-authority.js';
-import { startConversationRun } from '../../src/modules/conversations/service.js';
-import { routingHash } from '../../src/modules/conversations/routing-checkpoints.js';
+import { createContextPolicy } from '../../src/features/conversations/public.js';
+import { getRunView } from '../../src/agent/operations/run.js';
+import { createHarnessSession } from '../../src/agent/runtime/attempt-session.js';
+import { requestConversationPause } from '../../src/agent/operations/pause.js';
+import { startConversationRun } from '../../src/agent/operations/start.js';
+import { routingHash } from '../../src/agent/routing/routing-checkpoints.js';
 import {
   createRoutingRuntime,
   type EnabledRoutingPolicy,
   type RoutingRuntime,
-} from '../../src/modules/conversations/routing/index.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
+} from '../../src/agent/routing/index.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
 import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import {
   createIntegrationDatabase,

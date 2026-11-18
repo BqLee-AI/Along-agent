@@ -1,12 +1,17 @@
-import type { IncomingMessage } from 'node:http';
+export interface ActorRequest {
+  method?: string;
+  url?: string;
+  headers: Record<string, string | string[] | undefined>;
+}
 import type { Pool } from 'pg';
 import {
   deriveCsrfToken,
   hashSessionToken,
   verifyCsrfToken,
   verifySignedCookieValue,
-} from '../modules/identity/crypto.js';
-import { notReady } from './errors.js';
+} from '../features/identity/public.js';
+import { notReady } from '../platform/errors.js';
+import type { Actor } from '../features/identity/public.js';
 
 // Actor resolution for HTTP routes (issue #27). Production posture is
 // deny-by-default: the resolver returns null (-> 401 UNAUTHENTICATED) unless
@@ -14,19 +19,12 @@ import { notReady } from './errors.js';
 // + DEV_OWNER_ID) exists only so routes can be exercised before Better Auth
 // credentials exist; it MUST NOT trust any client-supplied owner header.
 
-export interface Actor {
-  ownerId: string;
-  sessionId: string | null;
-  displayName: string;
-  timezoneId: string | null;
-}
-
 export interface ActorResolutionContext {
   allowLegacyClaim?: boolean;
 }
 
 export type ActorResolver = (
-  req: IncomingMessage,
+  req: ActorRequest,
   context?: ActorResolutionContext,
 ) => Promise<Actor | null>;
 
@@ -36,8 +34,9 @@ export interface ResolverDeps {
 
 const SESSION_COOKIES = ['better-auth.session_token', '__Secure-better-auth.session_token'];
 
-function cookieOf(req: IncomingMessage, name: string): string | null {
-  const raw = req.headers.cookie;
+function cookieOf(req: ActorRequest, name: string): string | null {
+  const value = req.headers.cookie;
+  const raw = Array.isArray(value) ? value[0] : value;
   if (!raw) return null;
   for (const part of raw.split(';')) {
     const idx = part.indexOf('=');
@@ -54,7 +53,7 @@ function cookieOf(req: IncomingMessage, name: string): string | null {
   return null;
 }
 
-function sessionTokenOf(req: IncomingMessage): string | null {
+function sessionTokenOf(req: ActorRequest): string | null {
   for (const name of SESSION_COOKIES) {
     const value = cookieOf(req, name);
     if (value) return value;
@@ -106,7 +105,7 @@ async function resolveSession(
 export function createActorResolver(deps: ResolverDeps = { pool: null }): ActorResolver {
   const allowDevAuth = process.env.ALLOW_DEV_AUTH === '1';
   const devOwnerId = process.env.DEV_OWNER_ID;
-  return async (req: IncomingMessage, context?: ActorResolutionContext) => {
+  return async (req: ActorRequest, context?: ActorResolutionContext) => {
     if (allowDevAuth && devOwnerId) {
       if (!deps.pool) throw notReady('session dependency unavailable');
       // Local dev bridge: still read the seeded user's display name/timezone so
@@ -156,7 +155,7 @@ export function createActorResolver(deps: ResolverDeps = { pool: null }): ActorR
 // state-changing methods require the X-CSRF-Token header bound to the
 // session id. Dev-bridge actors carry no session, so the guard passes them
 // (local-only path; production always has a session).
-export function verifyCsrf(req: IncomingMessage, actor: Actor): boolean {
+export function verifyCsrf(req: ActorRequest, actor: Actor): boolean {
   if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return true;
   if (!actor.sessionId) return true;
   const presented = req.headers['x-csrf-token'];

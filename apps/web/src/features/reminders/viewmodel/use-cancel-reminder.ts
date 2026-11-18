@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { EnvelopeSchema } from '@along/contracts';
 import { requireClientSession } from '@/shared/session/navigation';
 import type { ApiResult } from '@/shared/http/result';
+import { api, writeOptions } from '@/shared/http/eden';
 import { MeSchema } from '@/shared/session/identity';
 import type { Me } from '@/shared/session/identity';
 import {
@@ -12,7 +13,6 @@ import {
   invalidResponse,
   readReminder,
   readTask,
-  taskPath,
 } from '../model/data';
 import type { ResourceFailure } from '../model/data';
 
@@ -39,7 +39,11 @@ export function useCancelReminder(taskId: string, initialState: string, initialM
     setBusy('read');
     try {
       if (resource === 'identity') {
-        const me = await readReminder('/api/v1/me', MeSchema, controller.signal);
+        const me = await readReminder(
+          (api) => api.api.v1.me.get({ fetch: { signal: controller.signal } }),
+          MeSchema,
+          controller.signal,
+        );
         if (!controller.signal.aborted) setIdentity(me);
       } else {
         const task = await readTask(taskId, controller.signal);
@@ -66,14 +70,15 @@ export function useCancelReminder(taskId: string, initialState: string, initialM
     setError(null);
     key.current ??= crypto.randomUUID();
     try {
-      const response = await fetch(`${taskPath(taskId)}/actions/cancel`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-csrf-token': identity.data.csrf_token! },
-        body: JSON.stringify({ idempotency_key: key.current }),
-        signal: controller.signal,
-      });
+      const result = await api.api.v1
+        .tasks({ id: encodeURIComponent(taskId) })
+        .actions.cancel.post(
+          { idempotency_key: key.current },
+          writeOptions(identity.data.csrf_token, controller.signal),
+        );
+      const { response } = result;
       requireClientSession(response);
-      const envelope = EnvelopeSchema.safeParse(await response.json().catch(() => null));
+      const envelope = EnvelopeSchema.safeParse(result.error ? result.error.value : result.data);
       if (controller.signal.aborted) return;
       if (response.ok && envelope.success && envelope.data.code === 0) {
         const receipt = cancelReceipt(envelope.data.data, taskId);

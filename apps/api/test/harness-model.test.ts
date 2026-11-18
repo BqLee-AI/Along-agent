@@ -1,9 +1,14 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { createServer, type Server, type RequestListener, type ServerResponse } from 'node:http';
-import { HARNESS_PROTOCOL_VERSION } from '@along/contracts';
-import { createHarnessModelTransport } from '../src/modules/model-providers/harness-model.js';
-import { loadHarnessServices } from '../src/modules/conversations/harness-config.js';
-import { failEnvelope, HttpError } from '../src/http/errors.js';
+import { HARNESS_PROTOCOL_VERSION, httpStatusForError } from '@along/contracts';
+import { createLocalFixtureModelTransport } from './helpers/local-fixture-model.js';
+import { loadHarnessServices } from '../src/agent/runtime/config.js';
+import { failEnvelope } from '../src/http/errors.js';
+import { ApplicationError } from '../src/platform/errors.js';
+import {
+  createConfiguredSdkStep,
+  type SdkStepNetwork,
+} from '../src/features/model-providers/public.js';
 
 const servers: Server[] = [];
 afterEach(async () => {
@@ -27,8 +32,11 @@ async function provider(listener: RequestListener): Promise<string> {
   return `http://127.0.0.1:${address.port}/v1`;
 }
 
-function request(baseUrl: string, signal = new AbortController().signal) {
-  const model = createHarnessModelTransport({ baseUrl, model: 'contract-model' });
+function request(baseUrl: string, signal = new AbortController().signal, network?: SdkStepNetwork) {
+  const config = { baseUrl, model: 'contract-model' };
+  const model = network
+    ? createConfiguredSdkStep(config, network)
+    : createLocalFixtureModelTransport(config);
   return model(
     {
       protocol: HARNESS_PROTOCOL_VERSION,
@@ -51,14 +59,13 @@ function complete(res: ServerResponse, reason = 'stop'): void {
   res.write(`data: ${JSON.stringify({ choices: [], usage: { total_tokens: 7 } })}\n\n`);
   res.end('data: [DONE]\n\n');
 }
-async function rejected(baseUrl: string): Promise<HttpError> {
+async function rejected(baseUrl: string): Promise<ApplicationError> {
   const steps = await Array.fromAsync(request(baseUrl));
   expect(steps.some((step) => step.type === 'complete')).toBe(false);
   const failure = steps.at(-1);
   if (failure?.type !== 'failed') throw new Error('unsafe model response accepted');
   expect(failure.usage).toBeNull();
-  return new HttpError(
-    failure.error.code === 'HARNESS_UNAVAILABLE' ? 503 : 502,
+  return new ApplicationError(
     failure.error.code === 'HARNESS_UNAVAILABLE' ? 503 : 502,
     failure.error.code,
     failure.error.message,
@@ -82,7 +89,7 @@ describe('harness incremental model HTTP transport', () => {
       })();
     });
     const config = { baseUrl, model: 'frozen-model', apiKey: 'frozen-key' };
-    const model = createHarnessModelTransport(config);
+    const model = createLocalFixtureModelTransport(config);
     config.model = 'changed-model';
     config.apiKey = 'changed-key';
     await Array.fromAsync(
@@ -181,18 +188,17 @@ describe('harness incremental model HTTP transport', () => {
       }),
       { headers: { 'content-type': 'text/event-stream' } },
     );
-    const fetch = spyOn(globalThis, 'fetch').mockResolvedValueOnce(response);
-    try {
-      expect(await Array.fromAsync(request('https://controlled-byte-fixture.invalid/v1'))).toEqual([
-        { type: 'delta', delta: '中😀文' },
-        {
-          type: 'complete',
-          reply: { message: { content: '中😀文', tool_calls: [] }, usage: null },
-        },
-      ]);
-    } finally {
-      fetch.mockRestore();
-    }
+    expect(
+      await Array.fromAsync(
+        request('https://controlled-byte-fixture.invalid/v1', undefined, async () => response),
+      ),
+    ).toEqual([
+      { type: 'delta', delta: '中😀文' },
+      {
+        type: 'complete',
+        reply: { message: { content: '中😀文', tool_calls: [] }, usage: null },
+      },
+    ]);
   });
 
   test('assembles function metadata and JSON arguments only into the final tool proposal with usage', async () => {
@@ -323,7 +329,7 @@ describe('harness incremental model HTTP transport', () => {
     expect(JSON.stringify(steps)).not.toContain(privateBody);
     const error = await rejected(baseUrl);
     expect(error.errorCode).toBe('HARNESS_UNAVAILABLE');
-    expect(error.httpStatus).toBe(503);
+    expect(httpStatusForError(error.code)).toBe(503);
     expect(JSON.stringify(failEnvelope(error, 'model-boundary'))).not.toContain(privateBody);
   });
 
@@ -356,7 +362,7 @@ describe('harness incremental model HTTP transport', () => {
         res.write(chunk({ content: 'private text' }));
         res.end(chunk({}, 'length'));
       });
-      const model = createHarnessModelTransport({
+      const model = createLocalFixtureModelTransport({
         baseUrl,
         model: 'contract-model',
         diagnostic: { runId: 'run-1', attemptId: 'attempt-1', operation: 'compact' },

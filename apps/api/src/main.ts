@@ -1,66 +1,13 @@
-import { parseRole } from './role.js';
-import { serve } from './http/server.js';
-import { startWorkerLoop } from './worker/loop.js';
-import { createPool } from './db/pool.js';
-import {
-  createUserModelTransport,
-  loadHarnessServices,
-} from './modules/conversations/harness-config.js';
-import { loadWorkspaceRegistry } from './modules/workspaces/service.js';
-import { createRoutingRuntime } from './modules/conversations/routing/index.js';
-import { createRunDriver } from './modules/conversations/run-driver.js';
+import { startApplication } from './bootstrap/application.js';
 
-const role = parseRole(process.env.ROLE);
-
-// Main owns the request/scheduler pool; the worker owns its receive pool.
-const pool = createPool();
-const runDriver = pool && (role === 'api' || role === 'all') ? createRunDriver(pool) : undefined;
-if (role === 'api' || role === 'all') {
-  const registry = await loadWorkspaceRegistry();
-  console.info(
-    'Workspace registry:',
-    registry.state,
-    'accepted:',
-    registry.accepted,
-    'rejected:',
-    registry.rejected,
-  );
-}
-const server =
-  role === 'api' || role === 'all'
-    ? serve({
-        port: Number(process.env.PORT ?? 3000),
-        pool,
-        harness: loadHarnessServices(),
-        modelTransport: createUserModelTransport,
-        routing: createRoutingRuntime(),
-        runDriver,
-      })
-    : null;
-const worker = role === 'worker' || role === 'all' ? startWorkerLoop({ pool }) : null;
-
+const application = await startApplication();
 let shuttingDown = false;
 function shutdown(): void {
   if (shuttingDown) return;
   shuttingDown = true;
-  // Preserve the service's existing upper bound, including open SSE clients.
+  // Open SSE clients and external IO must not extend the process exit contract.
   setTimeout(() => process.exit(0), 5000).unref();
-  const serverClosed = new Promise<void>((resolve) => {
-    if (server) server.close(() => resolve());
-    else resolve();
-  });
-  void (async () => {
-    try {
-      await Promise.all([
-        serverClosed,
-        worker?.stop().catch(() => undefined),
-        runDriver?.shutdown().catch(() => undefined),
-      ]);
-    } finally {
-      await pool?.end().catch(() => undefined);
-      process.exit(0);
-    }
-  })();
+  void application.stop().finally(() => process.exit(0));
 }
 
 process.on('SIGTERM', shutdown);

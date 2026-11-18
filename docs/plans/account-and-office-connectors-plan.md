@@ -52,7 +52,7 @@
 - `apps/web/src/app/api/[...path]/route.ts` 保留真实 Origin、多 Set-Cookie、no-store、流式 body 和取消传播；当前响应转发名单**没有 `Location`**。OAuth 回调若需要 303 导航，必须有针对性支持固定站内目的地，不能假设现有 proxy 已能处理，也不能全局放行任意上游重定向。
 - `scripts/local/account.mjs#maintainAccount` 现在从 `getBoundAdministrator()` 取得登记 owner；已存在但不属于管理员的登记不会自动修改。`requestRegistration` 生成的登记数组只包含当前管理员。多用户实施必须增加明确的普通账户资源维护路径，而不是把这个默认值继续当作所有人的 owner。
 - `workspaces/service.ts#configureWorkspaceRegistry` 已能处理多个条目，并拒绝重复 workspace ID、重复物理根和包含/重叠根；`listWorkspaces(ownerId)`、`getWorkspaceGrant`、`selected` 会验 owner、digest 和 root identity。
-- `conversations/service.ts` 只有提供 `workspace_id` 才取 grant；没有 grant 使用 `HARNESS_BASE_TOOL_IDS`。`workspaces/routes.ts` 对无登记的已登录用户可返回空集合。**代码已有“无本机工作区”的合法运行分支；本规划应保留而不是新增全局资料门。**聊天仍取决于实际模型/native/时间等原有依赖，不因新账户成功就虚报模型可用。
+- `conversations/lifecycle/service.ts` 只有提供 `workspace_id` 才取 grant；没有 grant 使用 `HARNESS_BASE_TOOL_IDS`。`workspaces/routes.ts` 对无登记的已登录用户可返回空集合。**代码已有“无本机工作区”的合法运行分支；本规划应保留而不是新增全局资料门。**聊天仍取决于实际模型/native/时间等原有依赖，不因新账户成功就虚报模型可用。
 
 ### 2.3 Schema、迁移与有效合同
 
@@ -169,7 +169,7 @@
 | tasks、events、notifications     | `tasks/repository.ts#listTasks/getTask`；`tasks/service.ts#getTaskDetail/getTaskEvents` 先验父 task owner 再读事件；`notifications` 公共投影带 owner/task | 列表、详情、事件、通知、取消、旧深链、分页和相同幂等键均不跨用户；不能只测列表                                        |
 | approvals、文档批准、后继修订    | `approvals/confirm.ts`、`decision.ts`、`document-repository.ts` 校验 owner；修订/决议键带 owner                                                           | 另一用户不能确认、拒绝、修改、继续或消耗批准；管理员同样无越权例外                                                    |
 | conversations、messages、history | `history-service.ts#requireHistoryConversation/cursorOf` 绑定 owner/parent；repository 查询带父归属                                                       | 从真实第二账户发现的集合为空；猜 ID、换 parent、复用游标不泄漏原话、标题或来源                                        |
-| Run、attempt、SSE、checkpoint    | `conversations/repository.ts#lockRun`、`harness-authority.ts#getRunView`、`tool-binding.ts`                                                               | GET/cancel/resume、事件补读、签名 HTTP/native 消费均绑定 owner/Run/attempt；不同路由既有 403/404 语义保留，不强行统一 |
+| Run、attempt、SSE、checkpoint    | `conversations/run/repository.ts#lockRun`、`harness-authority.ts#getRunView`、`tool-binding.ts`                                                           | GET/cancel/resume、事件补读、签名 HTTP/native 消费均绑定 owner/Run/attempt；不同路由既有 403/404 语义保留，不强行统一 |
 | 工具调用、接受结果、上下文来源   | `tools/invocations.ts#reserveInvocation/gate`；`tools/query.ts#readRunContextObservations` 会重新核验披露资格                                             | 稳定调用键、来源引用、重放、上下文分页、跨 Run 引用与撤权后结果返回都不能换 owner；旧接受事实不覆写                   |
 | workspaces/本机登记              | `listWorkspaces/getWorkspaceGrant/selected`、root 重叠检查                                                                                                | 新人空集合；管理员不能经维护默认值把他人登记改给自己；显式新增登记合并保留其他条目和原字节事实                        |
 | 邮箱/邀请/恢复/会话              | 新 identity 合同                                                                                                                                          | 本人数据与窄管理元数据分离；邮箱相同不合并历史；管理员不可读取他人的恢复 token/password/session                       |
@@ -366,7 +366,7 @@ type DocumentRead = {
 
 可以并行：公开资料/权限实验、邮件供应商适配、飞书固定读取客户端、owner 数据模型评审。必须串行：新用户正式入口开放前的隔离验收；连接激活前的 owner/session 绑定；工具进入真实 profile 前的共享合同/native/Web 集成。
 
-`packages/contracts`、`tools/gateway.ts`、`conversations/harness-authority.ts`、Web 对话 controller 的同一文件由一位集成负责人协调，不能两个方向各建第二套合同或直接覆盖主线变更。
+`packages/contracts`、`tools/gateway.ts`、`conversations/harness/harness-authority.ts`、Web 对话 controller 的同一文件由一位集成负责人协调，不能两个方向各建第二套合同或直接覆盖主线变更。
 
 ## 9. 分阶段实施与独立验收
 

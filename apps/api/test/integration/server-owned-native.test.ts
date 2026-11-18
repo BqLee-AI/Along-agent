@@ -5,13 +5,13 @@ import { once } from 'node:events';
 import { createServer, type Server } from 'node:http';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
-import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import { createHarnessModelTransport } from '../../src/modules/model-providers/harness-model.js';
-import { createRunDriver } from '../../src/modules/conversations/run-driver.js';
-import { handleConversationRoute } from '../../src/modules/conversations/routes.js';
+import { createContextPolicy } from '../../src/features/conversations/public.js';
+import { createLocalFixtureModelTransport } from '../helpers/local-fixture-model.js';
+import { createRunDriver } from '../../src/agent/runtime/run-driver.js';
+import { handleRequest } from '../helpers/http-app.js';
 import { ThreadEventSchema } from '@along/stream-protocol';
-import { startConversationRun } from '../../src/modules/conversations/service.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
+import { startConversationRun } from '../../src/agent/operations/start.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
 import { listen, sendModelSse } from '../helpers/harness-consumer.js';
 import {
   admitTestUser,
@@ -93,7 +93,7 @@ maybe('server-owned native execution', () => {
             completionCap: 1024,
             model: 'fixture-transport-only',
           }),
-          model: createHarnessModelTransport({
+          model: createLocalFixtureModelTransport({
             baseUrl: `${base}/v1`,
             model: 'fixture-transport-only',
           }),
@@ -101,7 +101,7 @@ maybe('server-owned native execution', () => {
       };
       controlledModelDeps(deps);
       api = createServer((req, res) => {
-        void handleConversationRoute(req, res, new URL(req.url ?? '/', 'http://localhost'), {
+        void handleRequest(req, res, {
           ...deps,
           resolveActor: async () => ({
             ownerId,
@@ -200,7 +200,7 @@ maybe('server-owned native execution', () => {
       });
       const modelBase = await listen(heldModel);
       const driver = createRunDriver(database.pool);
-      const transport = createHarnessModelTransport({
+      const transport = createLocalFixtureModelTransport({
         baseUrl: `${modelBase}/v1`,
         model: 'fixture-transport-only',
       });
@@ -244,8 +244,8 @@ maybe('server-owned native execution', () => {
         await received.promise;
         const childSource = `
         import { Pool } from 'pg';
-        import { cancelConversationRun } from './src/modules/conversations/service.ts';
-        import { loadTimeContext } from './src/modules/time/context.ts';
+        import { cancelConversationRun } from './src/agent/operations/run.ts';
+        import { loadTimeContext } from './src/features/time/context.ts';
         import { randomUUID } from 'node:crypto';
         const pool = new Pool({ connectionString: process.env.OWNERSHIP_TEST_DATABASE });
         if (process.env.OWNERSHIP_TEST_MODE === 'disable') {

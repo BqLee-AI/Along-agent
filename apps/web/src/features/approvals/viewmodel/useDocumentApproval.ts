@@ -4,6 +4,7 @@ import { useEffect, useReducer, useRef, useState } from 'react';
 import { DocumentApprovalActionResultSchema, DocumentApprovalDetailSchema } from '@along/contracts';
 import type { DocumentApprovalDetail } from '@along/contracts';
 import { ApiReadError, readEnvelope } from '@/shared/http/client';
+import { api, writeOptions } from '@/shared/http/eden';
 import { readRun } from '@/features/conversations/model/conversation-run';
 import { documentConfirmBody, documentEffectReadReducer } from '../model/document-loop';
 import type { Me } from '@/shared/session/identity';
@@ -58,10 +59,9 @@ export function useDocumentApproval(initial: DocumentApprovalDetail, me: Me | nu
           setRunError(null);
         }
       } else {
-        const response = await fetch(
-          `/api/v1/document-approvals/${encodeURIComponent(initial.approval_id)}`,
-          { cache: 'no-store', signal: controller.signal },
-        );
+        const response = await api.api.v1['document-approvals']({
+          id: encodeURIComponent(initial.approval_id),
+        }).get({ fetch: { signal: controller.signal } });
         const next = DocumentApprovalDetailSchema.parse(await readEnvelope(response));
         if (
           next.approval_id !== initial.approval_id ||
@@ -121,20 +121,14 @@ export function useDocumentApproval(initial: DocumentApprovalDetail, me: Me | nu
     setError(null);
     try {
       const key = (keys.current[action] ??= crypto.randomUUID());
-      const body =
-        action === 'confirm' ? documentConfirmBody(initial, key) : { idempotency_key: key };
-      const response = await fetch(
-        `/api/v1/document-approvals/${encodeURIComponent(initial.approval_id)}/actions/${action}`,
-        {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            ...(me.csrf_token ? { 'x-csrf-token': me.csrf_token } : {}),
-          },
-          body: JSON.stringify(body),
-          signal: controller.signal,
-        },
-      );
+      const endpoint = api.api.v1['document-approvals']({
+        id: encodeURIComponent(initial.approval_id),
+      }).actions;
+      const options = writeOptions(me.csrf_token, controller.signal);
+      const response =
+        action === 'confirm'
+          ? await endpoint.confirm.post(documentConfirmBody(initial, key), options)
+          : await endpoint.reject.post({ idempotency_key: key }, options);
       const result = DocumentApprovalActionResultSchema.parse(await readEnvelope(response));
       if (
         result.approval_id !== initial.approval_id ||

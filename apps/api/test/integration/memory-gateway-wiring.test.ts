@@ -1,11 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { withTransaction } from '../../src/db/transaction.js';
-import { conversationMemorySources } from '../../src/modules/conversations/memory-sources.js';
-import { createMemoryService } from '../../src/modules/memory/service.js';
-import { invokeTool, reserveToolInvocation } from '../../src/modules/tools/gateway.js';
-import { readInvocationSnapshots } from '../../src/modules/tools/invocations.js';
-import { readRunContextObservations } from '../../src/modules/tools/query.js';
+import { conversationMemorySources } from '../../src/features/conversations/history/memory-sources.js';
+import { createMemoryService } from '../../src/features/memory/service.js';
+import { invokeTool, reserveToolInvocation } from '../../src/agent/tools/gateway.js';
+import { readInvocationSnapshots } from '../../src/agent/tools/invocations/invocations.js';
+import { readRunContextObservations } from '../../src/agent/tools/invocations/context-query.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 import { seedContext } from './tool-invocations-probe.js';
 

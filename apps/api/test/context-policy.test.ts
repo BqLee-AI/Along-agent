@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
-import {
-  createContextPolicy,
-  digestContextPolicy,
-} from '../src/modules/conversations/context-policy.js';
+import { createContextPolicy, digestContextPolicy } from '../src/features/conversations/public.js';
 
 describe('strict frozen context policy', () => {
   it('keeps completion cap independent of Run budget and freezes unavailable defaults', () => {

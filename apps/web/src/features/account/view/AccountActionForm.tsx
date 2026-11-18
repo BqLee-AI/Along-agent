@@ -10,9 +10,10 @@ import { Label } from '@lorelum/lumen-ui/components/label';
 import WorkspaceLink from '@/shell/view/workspace-link';
 import { useAccountAction } from '../viewmodel/use-account-action';
 import type { AccountActionField } from '../viewmodel/use-account-action';
+import type { AccountActionPath } from '../model/account-actions';
 
 export type AccountActionFormProps = {
-  path: string;
+  path: AccountActionPath;
   title: string;
   fields: AccountActionField[];
   inputSchema: z.ZodType;
@@ -53,7 +54,7 @@ export default function AccountActionForm({
   );
   const signInNext =
     state.kind === 'success' &&
-    (SIGN_IN_AFTER.test(path) ||
+    ((typeof path === 'string' && SIGN_IN_AFTER.test(path)) ||
       (typeof state.data === 'object' &&
         state.data !== null &&
         'signed_out' in state.data &&

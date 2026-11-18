@@ -1,21 +1,24 @@
+import {
+  applicationErrorEvidence,
+  expectApplicationRejection,
+} from '../helpers/application-error.js';
+import { httpStatusForError } from '@along/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { randomBytes, randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
-import type { Actor } from '../../src/http/auth.js';
-import {
-  createAccountService,
-  type AccountService,
-} from '../../src/modules/identity/account-service.js';
+import type { Actor } from '../../src/features/identity/session/actor.js';
+import { type AccountService } from '../../src/features/identity/public.js';
+import { createConfiguredAccountService } from '../../src/bootstrap/identity.js';
 import {
   createInvitedAccountService,
   type InvitedAccountService,
-} from '../../src/modules/identity/invited-service.js';
+} from '../../src/features/identity/account/invited-service.js';
 import {
   openIdentity,
   parseIdentityKeyring,
   type IdentityKeyring,
-} from '../../src/modules/identity/email-security.js';
-import type { IdentityMailConfig } from '../../src/modules/identity/mail.js';
+} from '../../src/features/identity/security/email-security.js';
+import type { IdentityMailConfig } from '../../src/features/identity/delivery/transport.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 
 const maybe = databaseUrl ? describe : describe.skip;
@@ -82,7 +85,7 @@ maybe('invited identity core actual PostgreSQL behavior', () => {
     db = await createIntegrationDatabase();
     pool = db.pool;
     keys = fixtureKeys();
-    accounts = createAccountService(pool, {
+    accounts = createConfiguredAccountService(pool, {
       secret,
       origin,
       keys,
@@ -183,8 +186,8 @@ maybe('invited identity core actual PostgreSQL behavior', () => {
       password: memberPassword,
       display_name: 'Member',
     };
-    await expect(service.acceptInvitation(input, ip, admin)).rejects.toMatchObject({
-      httpStatus: 409,
+    await expectApplicationRejection(service.acceptInvitation(input, ip, admin), {
+      status: 409,
       details: { reason: 'SIGN_OUT_REQUIRED' },
     });
     await expect(
@@ -215,9 +218,10 @@ maybe('invited identity core actual PostgreSQL behavior', () => {
     await pool.query('DELETE FROM identity_account_admissions WHERE user_id=$1', [
       admitted.actor.ownerId,
     ]);
-    await expect(
+    await expectApplicationRejection(
       accounts.signIn({ login_name: 'member', password: memberPassword }, ip),
-    ).rejects.toMatchObject({ httpStatus: 401 });
+      { status: 401 },
+    );
     const selected = (await accounts.listMaintenanceCandidates()).find(
       (row) => row.displayName === 'Member',
     )!;
@@ -255,9 +259,10 @@ maybe('invited identity core actual PostgreSQL behavior', () => {
     await expect(
       service.createInvitation(admin, { ...input, email: 'other@example.test' }, ip),
     ).rejects.toMatchObject({ details: { reason: 'IDEMPOTENCY_MISMATCH' } });
-    await expect(
+    await expectApplicationRejection(
       service.createInvitation(admin, { ...input, current_password: 'incorrect password' }, ip),
-    ).rejects.toMatchObject({ httpStatus: 401 });
+      { status: 401 },
+    );
     expect(
       (
         await pool.query(
@@ -319,8 +324,8 @@ maybe('invited identity core actual PostgreSQL behavior', () => {
       ip,
     );
     const adminToken = await latestToken('verify_contact', admin.ownerId);
-    await expect(service.verifyContact(admin, { token: memberToken }, ip)).rejects.toMatchObject({
-      httpStatus: 403,
+    await expectApplicationRejection(service.verifyContact(admin, { token: memberToken }, ip), {
+      status: 403,
     });
     const results = await Promise.allSettled([
       service.verifyContact(actor, { token: memberToken }, ip),
@@ -356,9 +361,10 @@ maybe('invited identity core actual PostgreSQL behavior', () => {
         )
       ).rows[0].n,
     ).toBe(0);
-    await expect(
+    await expectApplicationRejection(
       accounts.signIn({ login_name: 'member', password: memberPassword }, ip),
-    ).rejects.toMatchObject({ httpStatus: 401 });
+      { status: 401 },
+    );
     await expect(
       service.resetPassword({ token: reset, new_password: memberPassword }, ip),
     ).rejects.toMatchObject({ details: { reason: 'TOKEN_INVALID' } });
@@ -393,14 +399,14 @@ maybe('invited identity core actual PostgreSQL behavior', () => {
                 keys,
                 mail,
               }).resetPassword({ token: reset, new_password: replacement }, ip)
-            : createAccountService(firstPool.pool, { secret, origin, keys }).signIn(
+            : createConfiguredAccountService(firstPool.pool, { secret, origin, keys }).signIn(
                 { login_name: 'member', password: memberPassword },
                 ip,
               );
         await firstPool.entered;
         const secondOperation =
           first === 'reset'
-            ? createAccountService(secondPool.pool, { secret, origin, keys }).signIn(
+            ? createConfiguredAccountService(secondPool.pool, { secret, origin, keys }).signIn(
                 { login_name: 'member', password: memberPassword },
                 ip,
               )
@@ -419,7 +425,8 @@ maybe('invited identity core actual PostgreSQL behavior', () => {
         firstPool.release();
         await firstOperation;
         const second = await secondSettled;
-        if (first === 'reset') expect('error' in second && second.error.httpStatus).toBe(401);
+        if (first === 'reset')
+          expect('error' in second && httpStatusForError(second.error.code)).toBe(401);
         else expect('value' in second).toBe(true);
         expect(
           (
@@ -446,9 +453,10 @@ maybe('invited identity core actual PostgreSQL behavior', () => {
     await pool.query(
       "CREATE FUNCTION identity_core_fault() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'isolated fault'; END $$; CREATE TRIGGER identity_core_fault BEFORE UPDATE ON sessions FOR EACH ROW EXECUTE FUNCTION identity_core_fault()",
     );
-    await expect(
+    await expectApplicationRejection(
       service.resetPassword({ token: reset, new_password: replacement }, ip),
-    ).rejects.toMatchObject({ httpStatus: 503 });
+      { status: 503 },
+    );
     expect(
       (
         await pool.query('SELECT password_hash FROM auth_accounts WHERE user_id=$1', [
@@ -487,27 +495,29 @@ maybe('invited identity core actual PostgreSQL behavior', () => {
         ip,
       ),
     ).rejects.toMatchObject({ details: { reason: 'SOLE_ADMIN_PROTECTED' } });
-    await expect(
+    await expectApplicationRejection(
       service.disableUser(
         actor,
         admin.ownerId,
         { current_password: memberPassword, confirmed: true },
         ip,
       ),
-    ).rejects.toMatchObject({ httpStatus: 403 });
+      { status: 403 },
+    );
     await service.forgotPassword({ email: 'member@example.test' }, ip);
     const reset = await latestToken('reset_password', actor.ownerId);
     await pool.query(
       "CREATE FUNCTION identity_core_fault() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'isolated fault'; END $$; CREATE TRIGGER identity_core_fault BEFORE UPDATE ON sessions FOR EACH ROW EXECUTE FUNCTION identity_core_fault()",
     );
-    await expect(
+    await expectApplicationRejection(
       service.disableUser(
         admin,
         actor.ownerId,
         { current_password: adminPassword, confirmed: true },
         ip,
       ),
-    ).rejects.toMatchObject({ httpStatus: 503 });
+      { status: 503 },
+    );
     expect(
       (await pool.query('SELECT status FROM users WHERE id=$1', [actor.ownerId])).rows[0].status,
     ).toBe('active');
@@ -531,20 +541,21 @@ maybe('invited identity core actual PostgreSQL behavior', () => {
     await expect(
       service.resetPassword({ token: reset, new_password: replacement }, ip),
     ).rejects.toMatchObject({ details: { reason: 'TOKEN_INVALID' } });
-    await expect(
+    await expectApplicationRejection(
       accounts.signIn({ email: 'member@example.test', password: memberPassword }, ip),
-    ).rejects.toMatchObject({ httpStatus: 401 });
+      { status: 401 },
+    );
   });
   it('binds signed list cursors to actor and collection and never exposes credential material', async () => {
     const { actor } = await member();
     await accounts.signIn({ login_name: 'member', password: memberPassword }, ip);
     const sessions = await service.sessions(actor, { limit: 1 });
     expect(sessions.next_cursor).not.toBeNull();
-    await expect(service.sessions(admin, { cursor: sessions.next_cursor })).rejects.toMatchObject({
-      httpStatus: 400,
+    await expectApplicationRejection(service.sessions(admin, { cursor: sessions.next_cursor }), {
+      status: 400,
     });
-    await expect(service.users(actor, { cursor: sessions.next_cursor })).rejects.toMatchObject({
-      httpStatus: 400,
+    await expectApplicationRejection(service.users(actor, { cursor: sessions.next_cursor }), {
+      status: 400,
     });
     expect(JSON.stringify(await service.account(actor))).not.toMatch(
       /auth_email|password|ciphertext|token_digest/,
@@ -574,14 +585,15 @@ maybe('invited identity core actual PostgreSQL behavior', () => {
       }) as PoolClient;
     }) as Pool['connect'];
     const uncertain = createInvitedAccountService(facade, { secret, origin, keys, mail });
-    await expect(
+    await expectApplicationRejection(
       uncertain.changePassword(
         actor,
         { current_password: memberPassword, new_password: replacement },
         headers,
         ip,
       ),
-    ).rejects.toMatchObject({ httpStatus: 503 });
+      { status: 503 },
+    );
     expect(
       (
         await pool.query(
@@ -590,9 +602,10 @@ maybe('invited identity core actual PostgreSQL behavior', () => {
         )
       ).rows[0].n,
     ).toBe(0);
-    await expect(
+    await expectApplicationRejection(
       accounts.signIn({ login_name: 'member', password: memberPassword }, ip),
-    ).rejects.toMatchObject({ httpStatus: 401 });
+      { status: 401 },
+    );
     expect(
       (await accounts.signIn({ login_name: 'member', password: replacement }, ip)).cookies.length,
     ).toBeGreaterThan(0);
@@ -606,8 +619,8 @@ maybe('invited identity core actual PostgreSQL behavior', () => {
         actor.sessionId,
       ])
     ).rows[0].id;
-    await expect(service.revokeSession(actor, admin.sessionId!, headers)).rejects.toMatchObject({
-      httpStatus: 404,
+    await expectApplicationRejection(service.revokeSession(actor, admin.sessionId!, headers), {
+      status: 404,
     });
     expect(await service.revokeSession(actor, other, headers)).toEqual({
       signed_out: false,
@@ -647,9 +660,10 @@ maybe('invited identity core actual PostgreSQL behavior', () => {
       ip,
     );
     expect(changed.cookies.some((cookie) => cookie.includes('Max-Age=0'))).toBe(true);
-    await expect(
+    await expectApplicationRejection(
       accounts.signIn({ login_name: 'member', password: memberPassword }, ip),
-    ).rejects.toMatchObject({ httpStatus: 401 });
+      { status: 401 },
+    );
     const signed = await accounts.signIn({ login_name: 'member', password: replacement }, ip);
     const newSession = (
       await pool.query('SELECT id FROM sessions WHERE user_id=$1 AND revoked_at IS NULL', [
@@ -676,9 +690,10 @@ maybe('invited identity core actual PostgreSQL behavior', () => {
         ])
       ).rows[0].n,
     ).toBe(1);
-    await expect(
+    await expectApplicationRejection(
       accounts.signIn({ login_name: 'member', password: replacement }, ip),
-    ).rejects.toMatchObject({ httpStatus: 401 });
+      { status: 401 },
+    );
   });
   it('rejects expired tokens but permits explicit expired-invitation resend with a fresh generation', async () => {
     const invitation = await invite();
@@ -731,9 +746,10 @@ maybe('invited identity core actual PostgreSQL behavior', () => {
     await expect(
       service.resetPassword({ token: old, new_password: replacement }, ip),
     ).rejects.toMatchObject({ details: { reason: 'TOKEN_INVALID' } });
-    await expect(
+    await expectApplicationRejection(
       accounts.signIn({ email: 'member@example.test', password: memberPassword }, ip),
-    ).rejects.toMatchObject({ httpStatus: 401 });
+      { status: 401 },
+    );
     expect(
       (await accounts.signIn({ email: 'replacement@example.test', password: memberPassword }, ip))
         .cookies.length,
@@ -741,7 +757,7 @@ maybe('invited identity core actual PostgreSQL behavior', () => {
   });
   it('charges invitation resend quota even when its target does not exist', async () => {
     for (let attempt = 0; attempt <= 20; attempt += 1) {
-      await expect(
+      await expectApplicationRejection(
         service.resendInvitation(
           admin,
           randomUUID(),
@@ -751,7 +767,8 @@ maybe('invited identity core actual PostgreSQL behavior', () => {
           },
           ip,
         ),
-      ).rejects.toMatchObject({ httpStatus: attempt < 20 ? 404 : 429 });
+        { status: attempt < 20 ? 404 : 429 },
+      );
     }
   });
   it('preflights missing historical contact keys independently of an anonymous recovery target', async () => {
@@ -762,8 +779,8 @@ maybe('invited identity core actual PostgreSQL behavior', () => {
       keys: { ...keys, encryption: { active: 'next', keys: { next: randomBytes(32) } } },
     });
     for (const email of ['admin@example.test', 'absent@example.test']) {
-      await expect(unavailable.forgotPassword({ email }, ip)).rejects.toMatchObject({
-        httpStatus: 503,
+      await expectApplicationRejection(unavailable.forgotPassword({ email }, ip), {
+        status: 503,
       });
     }
     expect(await service.forgotPassword({ email: 'absent@example.test' }, ip)).toEqual({
@@ -785,8 +802,8 @@ maybe('invited identity core actual PostgreSQL behavior', () => {
       display_name: 'Restored Key',
     };
     for (const token of [input.token, randomBytes(32).toString('base64url')]) {
-      await expect(unavailable.acceptInvitation({ ...input, token }, ip)).rejects.toMatchObject({
-        httpStatus: 503,
+      await expectApplicationRejection(unavailable.acceptInvitation({ ...input, token }, ip), {
+        status: 503,
       });
     }
     expect(
@@ -800,8 +817,8 @@ maybe('invited identity core actual PostgreSQL behavior', () => {
       account_created: true,
       authenticated: false,
     });
-    await expect(unavailable.acceptInvitation(input, ip)).rejects.toMatchObject({
-      httpStatus: 409,
+    await expectApplicationRejection(unavailable.acceptInvitation(input, ip), {
+      status: 409,
     });
   });
   it('replays the original invitation result after challenge key rotation', async () => {
@@ -863,7 +880,7 @@ maybe('invited identity core actual PostgreSQL behavior', () => {
       },
       ip,
     );
-    await expect(
+    await expectApplicationRejection(
       service.resendInvitation(
         admin,
         first.id,
@@ -873,7 +890,8 @@ maybe('invited identity core actual PostgreSQL behavior', () => {
         },
         ip,
       ),
-    ).rejects.toMatchObject({ httpStatus: 409, details: { reason: 'CONTACT_UNAVAILABLE' } });
+      { status: 409, details: { reason: 'CONTACT_UNAVAILABLE' } },
+    );
   });
   for (const [first, second] of [
     ['accept', 'revoke'],
@@ -943,7 +961,10 @@ maybe('invited identity core actual PostgreSQL behavior', () => {
         const [winner, follower] = await Promise.all([leading, following]);
         expect(winner.ok).toBe(true);
         if (first === 'resend' && second === 'revoke') expect(follower.ok).toBe(true);
-        else expect(follower).toMatchObject({ ok: false, error: { httpStatus: 409 } });
+        else {
+          if (follower.ok) throw new Error('Expected the follower to encounter a conflict');
+          expect(applicationErrorEvidence(follower.error).status).toBe(409);
+        }
         const accepted = first === 'accept';
         const state = accepted
           ? 'accepted'
@@ -1023,7 +1044,7 @@ maybe('invited identity core actual PostgreSQL behavior', () => {
         password: memberPassword,
         display_name: 'Atomic invitee',
       };
-      await expect(service.acceptInvitation(input, ip)).rejects.toMatchObject({ httpStatus: 503 });
+      await expectApplicationRejection(service.acceptInvitation(input, ip), { status: 503 });
       expect(await snapshot()).toEqual(before);
       await pool.query(`DROP TRIGGER isolated_accept_fault ON ${fault.table}`);
       expect(await service.acceptInvitation(input, ip)).toEqual({

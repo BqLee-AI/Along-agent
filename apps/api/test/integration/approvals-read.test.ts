@@ -1,13 +1,19 @@
+import { expectApplicationRejection } from '../helpers/application-error.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
 import { ApprovalDetailSchema } from '@along/contracts';
-import { confirmApproval, rejectApproval } from '../../src/modules/approvals/confirm.js';
-import { createCancelTaskApproval } from '../../src/modules/approvals/create.js';
-import { readApprovalDecision } from '../../src/modules/approvals/decision.js';
-import { reviseApproval } from '../../src/modules/approvals/revise.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
-import { getApprovalDetail, listApprovalsForOwner } from '../../src/modules/approvals/service.js';
+import {
+  confirmApproval,
+  rejectApproval,
+  createCancelTaskApproval,
+  readApprovalDecision,
+  readReleaseApprovalDetail,
+  reviseApproval,
+  getApprovalDetail,
+  listApprovalsForOwner,
+} from '../../src/features/approvals/public.js';
+import { loadTimeContext } from '../../src/features/time/public.js';
 import {
   createIntegrationDatabase,
   databaseUrl,
@@ -62,6 +68,33 @@ maybe('approvals read routes', () => {
     await database?.close();
   });
 
+  it('reads release materials on the supplied read-only client without expiring or consuming them', async () => {
+    const seed = await seedApproval(pool, { expiresInHours: -1 });
+    const before = await historyFacts(pool, seed.ownerId);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN READ ONLY');
+      expect(await readReleaseApprovalDetail(client, seed.ownerId, seed.id)).toMatchObject({
+        approvalState: 'pending',
+        timezone: 'Asia/Shanghai',
+        documentPath: null,
+        documentPreview: null,
+      });
+      expect(await readReleaseApprovalDetail(client, randomUUID(), seed.id)).toEqual({
+        approvalState: null,
+        reminderText: null,
+        wallTime: null,
+        timezone: null,
+        documentPath: null,
+        documentPreview: null,
+      });
+    } finally {
+      await client.query('ROLLBACK');
+      client.release();
+    }
+    expect(await historyFacts(pool, seed.ownerId)).toEqual(before);
+  });
+
   it('lists only pending by default with keyset pagination', async () => {
     const owner = randomUUID();
     await seedApproval(pool, { ownerId: owner });
@@ -104,11 +137,11 @@ maybe('approvals read routes', () => {
 
   it('cross-owner reads are forbidden, missing rows are 404', async () => {
     const seed = await seedApproval(pool, {});
-    await expect(getApprovalDetail({ pool }, randomUUID(), seed.id)).rejects.toMatchObject({
-      httpStatus: 403,
+    await expectApplicationRejection(getApprovalDetail({ pool }, randomUUID(), seed.id), {
+      status: 403,
     });
-    await expect(getApprovalDetail({ pool }, seed.ownerId, randomUUID())).rejects.toMatchObject({
-      httpStatus: 404,
+    await expectApplicationRejection(getApprovalDetail({ pool }, seed.ownerId, randomUUID()), {
+      status: 404,
     });
   });
 
@@ -157,10 +190,8 @@ maybe('approvals read routes', () => {
     ]);
     expect(stored.rows[0].consumed_task_id).toBeNull();
     expect(await historyFacts(pool, seed.ownerId)).toEqual(before);
-    await expect(
-      getApprovalDetail({ pool }, randomUUID(), cancel.approvalId),
-    ).rejects.toMatchObject({
-      httpStatus: 403,
+    await expectApplicationRejection(getApprovalDetail({ pool }, randomUUID(), cancel.approvalId), {
+      status: 403,
     });
   });
 
@@ -262,17 +293,17 @@ maybe('approvals read routes', () => {
   it('reports a corrupt consumed result instead of null success and still enforces owner', async () => {
     const seed = await seedApproval(pool, { state: 'consumed' });
     const before = await historyFacts(pool, seed.ownerId);
-    await expect(getApprovalDetail({ pool }, seed.ownerId, seed.id)).rejects.toMatchObject({
-      httpStatus: 409,
+    await expectApplicationRejection(getApprovalDetail({ pool }, seed.ownerId, seed.id), {
+      status: 409,
       errorCode: 'STATE_CONFLICT',
     });
-    await expect(getApprovalDetail({ pool }, randomUUID(), seed.id)).rejects.toMatchObject({
-      httpStatus: 403,
+    await expectApplicationRejection(getApprovalDetail({ pool }, randomUUID(), seed.id), {
+      status: 403,
     });
     const client = await pool.connect();
     try {
-      await expect(readApprovalDecision(client, seed.ownerId, seed.id)).rejects.toMatchObject({
-        httpStatus: 409,
+      await expectApplicationRejection(readApprovalDecision(client, seed.ownerId, seed.id), {
+        status: 409,
         errorCode: 'STATE_CONFLICT',
       });
     } finally {

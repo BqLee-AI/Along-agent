@@ -128,11 +128,12 @@ export async function prepareArtifact(config, directory, { upgrade = false } = {
     ],
     { cwd: source, env, log, code: 'DEPENDENCY_INSTALL_FAILED' },
   );
-  await run(process.execPath, ['--no-env-file', 'run', 'build:packages'], {
+  // The host Web build needs API declarations before the API image exists.
+  await run(process.execPath, ['--no-env-file', 'run', 'build:api'], {
     cwd: source,
     env,
     log,
-    code: 'WEB_BUILD_FAILED',
+    code: 'API_BUILD_FAILED',
   });
   await run(
     process.execPath,

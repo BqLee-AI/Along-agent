@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { EnvelopeSchema } from '@along/contracts';
-import { handleRequest } from '../src/http/app.js';
+import { handleRequest } from './helpers/http-app.js';
 
 test('document decisions authenticate before parsing an oversized request body', async () => {
   const server = createServer((req, res) => {

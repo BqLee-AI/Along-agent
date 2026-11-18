@@ -1,12 +1,13 @@
+import { expectApplicationRejection } from '../helpers/application-error.js';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import type { ConversationDeps } from '../../src/modules/conversations/contracts.js';
-import type { HarnessServices } from '../../src/modules/conversations/harness-process.js';
-import { getRunView } from '../../src/modules/conversations/harness-authority.js';
-import { getConversationRuns } from '../../src/modules/conversations/history-service.js';
-import { startConversationRun } from '../../src/modules/conversations/service.js';
+import { createContextPolicy } from '../../src/features/conversations/public.js';
+import type { ConversationDeps } from '../../src/agent/runtime/contracts.js';
+import type { HarnessServices } from '../../src/agent/runtime/contracts.js';
+import { getRunView } from '../../src/agent/operations/run.js';
+import { getConversationRuns } from '../../src/features/conversations/history/history-service.js';
+import { startConversationRun } from '../../src/agent/operations/start.js';
 import {
   addModel,
   createProvider,
@@ -14,8 +15,8 @@ import {
   listProviders,
   setDefault,
   updateProvider,
-} from '../../src/modules/model-providers/service.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
+} from '../../src/features/model-providers/configuration/service.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
 import { controlledModelDeps } from '../helpers/model-selection.js';
 import {
   createIntegrationDatabase,
@@ -66,8 +67,8 @@ suite('model selection admission and historical projection', () => {
     const [a, b] = await Promise.all([start(body), start(body)]);
     expect(a.runId).toBe(b.runId);
     expect([a, b].filter((result) => result.context !== null)).toHaveLength(1);
-    await expect(start({ ...body, model_selection: selection })).rejects.toMatchObject({
-      httpStatus: 409,
+    await expectApplicationRejection(start({ ...body, model_selection: selection }), {
+      status: 409,
     });
     await updateProvider(db.pool, owner.userId, provider.id, { name: 'Renamed' });
     await deleteProvider(db.pool, owner.userId, provider.id);

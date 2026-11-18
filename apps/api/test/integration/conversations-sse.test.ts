@@ -1,3 +1,4 @@
+import { expectApplicationRejection } from '../helpers/application-error.js';
 import { admitTestUser } from './setup.js';
 // Issue #9: conversation SSE contract — deterministic triage, approval
 // cards, typed time failures, budget, idempotent replay,
@@ -7,22 +8,20 @@ import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { EventEmitter } from 'node:events';
+import { setTimeout as delay } from 'node:timers/promises';
 import type { Pool } from 'pg';
 import { ThreadEventSchema, type ThreadEvent } from '@along/stream-protocol';
-import { handleRequest } from '../../src/http/app.js';
-import { handleConversationRoute } from '../../src/modules/conversations/routes.js';
-import {
-  executeRun,
-  getConversationDetail,
-  startConversationRun,
-} from '../../src/modules/conversations/service.js';
-import type { StartResult } from '../../src/modules/conversations/contracts.js';
-import { listRunEvents } from '../../src/modules/conversations/repository.js';
-import { invokeTool, reserveToolInvocation } from '../../src/modules/tools/gateway.js';
-import { confirmApproval } from '../../src/modules/approvals/confirm.js';
-import { getApprovalDetail } from '../../src/modules/approvals/service.js';
-import { getTaskDetail } from '../../src/modules/tasks/service.js';
+import { handleRequest } from '../helpers/http-app.js';
+import { executeRun } from '../../src/agent/operations/execute.js';
+import { getConversationDetail } from '../../src/features/conversations/lifecycle/service.js';
+import { startConversationRun } from '../../src/agent/operations/start.js';
+import type { StartResult } from '../../src/agent/runtime/contracts.js';
+import { findIdempotency, listRunEvents } from '../../src/features/conversations/run/repository.js';
+import { streamRun } from '../../src/features/conversations/run-event-response.js';
+import { invokeTool, reserveToolInvocation } from '../../src/agent/tools/gateway.js';
+import { confirmApproval } from '../../src/features/approvals/reminder/confirm.js';
+import { getApprovalDetail } from '../../src/features/approvals/reminder/service.js';
+import { getTaskDetail } from '../../src/features/tasks/service.js';
 import {
   createIntegrationDatabase,
   databaseUrl,
@@ -30,33 +29,11 @@ import {
   seedApproval,
   seedAdmittedSession,
 } from './setup.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
 
 const timeContext = loadTimeContext('fixture-v1');
 
 const maybe = databaseUrl ? describe : describe.skip;
-
-class CapturedResponse extends EventEmitter {
-  status = 0;
-  headers: Record<string, string> = {};
-  writableEnded = false;
-  destroyed = false;
-  constructor(private readonly frames: string[]) {
-    super();
-  }
-  flushHeaders() {}
-  writeHead(status: number, headers: Record<string, string>) {
-    this.status = status;
-    this.headers = headers;
-  }
-  write(chunk: string) {
-    this.frames.push(chunk);
-    return true;
-  }
-  end() {
-    this.writableEnded = true;
-  }
-}
 
 async function seedUser(pool: Pool): Promise<string> {
   const id = randomUUID();
@@ -67,6 +44,42 @@ async function seedUser(pool: Pool): Promise<string> {
   );
   await admitTestUser(pool, id);
   return id;
+}
+
+async function postReminderMessage(pool: Pool, ownerId: string, requestId: string) {
+  const server = createServer((req, res) => {
+    void handleRequest(req, res, {
+      pool,
+      timeContext,
+      resolveActor: async () => ({
+        ownerId,
+        sessionId: null,
+        displayName: 'tester',
+        timezoneId: 'Asia/Shanghai',
+      }),
+    });
+  });
+  const listening = once(server, 'listening');
+  server.listen(0, '127.0.0.1');
+  await listening;
+  try {
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('missing server address');
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/v1/conversations/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-request-id': requestId },
+      body: JSON.stringify({
+        raw_text: '明天 9:20 提醒我喝水',
+        confirmed_timezone: 'Asia/Shanghai',
+      }),
+    });
+    return { response, text: await response.text() };
+  } finally {
+    const closed = once(server, 'close');
+    server.closeAllConnections();
+    server.close();
+    await closed;
+  }
 }
 
 async function collect(
@@ -354,7 +367,7 @@ maybe('conversation runtime', () => {
       { ...body, raw_text: '明天 10:20 提醒我喝水' },
       key,
     );
-    await expect(mismatch).rejects.toMatchObject({ httpStatus: 409 });
+    await expectApplicationRejection(mismatch, { status: 409 });
   });
 
   it('does not replay stored SSE after the owner is disabled following admission', async () => {
@@ -444,6 +457,36 @@ maybe('conversation runtime', () => {
     }
   });
 
+  it('offers the stored POST replay only while the admitted session is valid', async () => {
+    const session = await seedAdmittedSession(pool);
+    const actor = {
+      ownerId: session.userId,
+      sessionId: session.sessionId,
+      displayName: 'tester',
+      timezoneId: 'Asia/Shanghai',
+    };
+    const deps = { pool, timeContext };
+    const key = randomUUID();
+    const body = { raw_text: '明天 9:20 提醒我喝水', confirmed_timezone: 'Asia/Shanghai' };
+    const original = await collect(
+      pool,
+      await startConversationRun(deps, actor.ownerId, randomUUID(), body, key),
+    );
+    expect(original.length).toBeGreaterThan(0);
+    const replay = await startConversationRun(deps, actor.ownerId, randomUUID(), body, key);
+    const authorized = await streamRun(deps, replay, actor, randomUUID());
+    expect(await authorized.text()).toBe(
+      original.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''),
+    );
+
+    await pool.query('UPDATE sessions SET revoked_at=clock_timestamp() WHERE id=$1', [
+      session.sessionId,
+    ]);
+    const revoked = await streamRun(deps, replay, actor, randomUUID());
+    expect(await revoked.text()).toBe('');
+    expect(await listRunEvents(pool, actor.ownerId, replay.runId)).toEqual(original);
+  });
+
   it('an expired idempotency key starts a fresh run instead of colliding', async () => {
     const ownerId = await seedUser(pool);
     const key = randomUUID();
@@ -522,30 +565,9 @@ maybe('conversation runtime', () => {
 
   it('oversized request ids are replaced before they reach checkpoints', async () => {
     const ownerId = await seedUser(pool);
-    const frames: string[] = [];
-    const req = {
-      method: 'POST',
-      url: '/api/v1/conversations/messages',
-      headers: { 'x-request-id': 'x'.repeat(300) },
-    } as unknown as IncomingMessage;
-    const res = new CapturedResponse(frames);
-    await handleConversationRoute(
-      req,
-      res as unknown as ServerResponse,
-      new URL(req.url ?? '/', 'http://localhost'),
-      {
-        pool,
-        timeContext,
-        resolveActor: async () => ({
-          ownerId,
-          sessionId: null,
-          displayName: 'tester',
-          timezoneId: 'Asia/Shanghai',
-        }),
-        body: { raw_text: '明天 9:20 提醒我喝水', confirmed_timezone: 'Asia/Shanghai' },
-      },
-    );
-    const events = frames
+    const { text } = await postReminderMessage(pool, ownerId, 'x'.repeat(300));
+    const events = text
+      .split('\n\n')
       .filter((frame) => frame.startsWith('data: '))
       .map((frame) => ThreadEventSchema.parse(JSON.parse(frame.slice(6))));
     expect(events).toHaveLength(5);
@@ -683,6 +705,109 @@ maybe('conversation runtime', () => {
     expect(approvals[0]?.n).toBe(0);
   });
 
+  it('cancels a request-bound run when the socket closes before SSE headers', async () => {
+    const session = await seedAdmittedSession(pool);
+    const key = randomUUID();
+    const admitted = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    const socketClosed = Promise.withResolvers<boolean>();
+    let paused = false;
+    const gatedPool = new Proxy(pool, {
+      get(target, property) {
+        if (property === 'connect' && !paused)
+          return async () => {
+            const client = await target.connect();
+            return new Proxy(client, {
+              get(connection, property) {
+                if (property === 'query')
+                  return async (...args: unknown[]) => {
+                    const result = await Reflect.apply(connection.query, connection, args);
+                    if (args[0] === 'COMMIT' && !paused) {
+                      // Pause after durable admission, before the route creates the SSE body.
+                      paused = true;
+                      admitted.resolve();
+                      await resume.promise;
+                    }
+                    return result;
+                  };
+                const value = Reflect.get(connection, property, connection);
+                return typeof value === 'function' ? value.bind(connection) : value;
+              },
+            });
+          };
+        const value = Reflect.get(target, property, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    let handled: Promise<void> | undefined;
+    const server = createServer((req, res) => {
+      res.once('close', () => socketClosed.resolve(res.headersSent));
+      handled = handleRequest(req, res, { pool: gatedPool, timeContext });
+    });
+    const listening = once(server, 'listening');
+    server.listen(0, '127.0.0.1');
+    await listening;
+    const abort = new AbortController();
+    try {
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('missing server address');
+      const response = fetch(`http://127.0.0.1:${address.port}/api/v1/conversations/messages`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          cookie: `better-auth.session_token=${session.token}`,
+          'x-csrf-token': session.csrfToken,
+          'idempotency-key': key,
+        },
+        body: JSON.stringify({
+          raw_text: '明天 9:20 提醒我喝水',
+          confirmed_timezone: 'Asia/Shanghai',
+        }),
+        signal: AbortSignal.any([abort.signal, AbortSignal.timeout(5000)]),
+      }).then(
+        () => 'response',
+        () => 'disconnected',
+      );
+      const first = await Promise.race([admitted.promise.then(() => 'admitted'), response]);
+      expect(first).toBe('admitted');
+      abort.abort();
+      expect(await response).toBe('disconnected');
+      const headersSent = await Promise.race([
+        socketClosed.promise,
+        delay(5000, undefined, { ref: false }),
+      ]);
+      expect(headersSent).toBe(false);
+      resume.resolve();
+      await handled;
+
+      const accepted = await findIdempotency(pool, session.userId, key);
+      if (!accepted) throw new Error('missing admitted run');
+      let status: string | undefined;
+      const deadline = Date.now() + 5000;
+      do {
+        const { rows } = await pool.query<{ status: string }>(
+          'SELECT status FROM agent_runs WHERE id = $1',
+          [accepted.run_id],
+        );
+        status = rows[0]?.status;
+        if (status !== 'running') break;
+        await delay(20);
+      } while (Date.now() < deadline);
+      expect(status).toBe('cancelled');
+      const events = await listRunEvents(pool, session.userId, accepted.run_id);
+      expect(events.map((event) => event.type)).toEqual(['thread.started', 'thread.cancelled']);
+      expect(events.at(-1)?.payload).toMatchObject({ reason: 'client_disconnected' });
+    } finally {
+      abort.abort();
+      resume.resolve();
+      const closed = once(server, 'close');
+      server.closeAllConnections();
+      server.close();
+      await closed;
+      await handled;
+    }
+  });
+
   it('cancel intent builds a cancel approval and confirm moves the task', async () => {
     const ownerId = await seedUser(pool);
     const seed = await seedApproval(pool, { ownerId });
@@ -799,21 +924,16 @@ maybe('conversation runtime', () => {
     };
 
     const own = make(ownerId);
-    await handleConversationRoute(
-      own.req,
-      own.res,
-      new URL(own.req.url ?? '/', 'http://localhost'),
-      {
-        pool,
-        timeContext,
-        resolveActor: async () => ({
-          ownerId: own.actorId,
-          sessionId: null,
-          displayName: 'tester',
-          timezoneId: 'Asia/Shanghai',
-        }),
-      },
-    );
+    await handleRequest(own.req, own.res, {
+      pool,
+      timeContext,
+      resolveActor: async () => ({
+        ownerId: own.actorId,
+        sessionId: null,
+        displayName: 'tester',
+        timezoneId: 'Asia/Shanghai',
+      }),
+    });
     expect(own.res.status).toBe(200);
     const payload = JSON.parse(own.res.payload) as { data: { events: ThreadEvent[] } };
     expect(payload.data.events.map((event) => event.type)).toEqual([
@@ -823,54 +943,26 @@ maybe('conversation runtime', () => {
     ]);
 
     const other = make(randomUUID());
-    await handleConversationRoute(
-      other.req,
-      other.res,
-      new URL(other.req.url ?? '/', 'http://localhost'),
-      {
-        pool,
-        timeContext,
-        resolveActor: async () => ({
-          ownerId: other.actorId,
-          sessionId: null,
-          displayName: 'other',
-          timezoneId: 'Asia/Shanghai',
-        }),
-      },
-    );
+    await handleRequest(other.req, other.res, {
+      pool,
+      timeContext,
+      resolveActor: async () => ({
+        ownerId: other.actorId,
+        sessionId: null,
+        displayName: 'other',
+        timezoneId: 'Asia/Shanghai',
+      }),
+    });
     expect(other.res.status).toBe(403);
   });
 
   it('SSE route emits data: frames that parse against the v1 envelope', async () => {
     const ownerId = await seedUser(pool);
-    const frames: string[] = [];
-    const req = {
-      method: 'POST',
-      url: '/api/v1/conversations/messages',
-      headers: { 'x-request-id': randomUUID() },
-    } as unknown as IncomingMessage;
-    const res = new CapturedResponse(frames);
-
-    const handled = await handleConversationRoute(
-      req,
-      res as unknown as ServerResponse,
-      new URL(req.url ?? '/', 'http://localhost'),
-      {
-        pool,
-        timeContext,
-        resolveActor: async () => ({
-          ownerId,
-          sessionId: null,
-          displayName: 'tester',
-          timezoneId: 'Asia/Shanghai',
-        }),
-        body: { raw_text: '明天 9:20 提醒我喝水', confirmed_timezone: 'Asia/Shanghai' },
-      },
-    );
-    expect(handled).toBe(true);
-    expect(res.status).toBe(200);
-    expect(res.headers['content-type']).toBe('text/event-stream');
-    const events = frames
+    const { response, text } = await postReminderMessage(pool, ownerId, randomUUID());
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('text/event-stream');
+    const events = text
+      .split('\n\n')
       .filter((frame) => frame.startsWith('data: '))
       .map((frame) => ThreadEventSchema.parse(JSON.parse(frame.slice(6))));
     expect(events.map((e) => e.type)).toEqual([
@@ -894,7 +986,7 @@ maybe('conversation runtime', () => {
     const original = await collect(pool, started);
     const path = `/api/v1/conversations/${started.conversationId}/runs/${started.runId}/events?after_seq=${original[0]!.seq}`;
     const server = createServer((req, res) => {
-      void handleConversationRoute(req, res, new URL(req.url ?? '/', 'http://localhost'), {
+      void handleRequest(req, res, {
         pool,
         timeContext,
         resolveActor: async () => ({
@@ -936,7 +1028,7 @@ maybe('conversation runtime', () => {
     );
     const path = `/api/v1/conversations/${started.conversationId}/runs/${started.runId}/events`;
     const server = createServer((req, res) => {
-      void handleConversationRoute(req, res, new URL(req.url ?? '/', 'http://localhost'), {
+      void handleRequest(req, res, {
         pool,
         timeContext,
         resolveActor: async () => ({

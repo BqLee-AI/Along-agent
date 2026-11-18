@@ -141,4 +141,4 @@ DST 补充样例可使用 fixture 内 `2027-03-14 02:30` 与 `2026-11-01 01:30` 
 - `apps/api/src/modules/tasks/scheduler/registry.ts:24–31`、`cancel-phase.ts:65–95`：撤销终态依赖回执，`recordCancelReceipt` 在 apps/packages 的调用仅见两处集成测试，未见生产调用。无可用语言服务器，引用核对采用文本搜索并结合实际调用代码。
 - `apps/web/src/app/tasks/[id]/page.tsx:14–78`、原 tasks API 详情：当前仅展示任务与事件账，尚无 notifications 数组/面板。#26 独立 spec PR 冻结新数组合同，批准合并不等于源码已实现；具体字段见 tasks API 文档与七步手册。
 - `docs/design/07-task-events-ledger.md:45–47`：取消后零触发指标数的是调用接口的瞬间；零通知/零 fired 只能作为辅助证据。
-- `openspec/specs/v0-safety-contract/spec.md:20–23`、`apps/api/src/modules/conversations/service.ts:447–469`、`docs/api/conversations/conversations_routes.md:60–64`：冻结 spec 要求时间错误走 thread.failed，实际澄清走 thread.completed；`apps/api/src/http/app.ts:70–85` 的 readiness 只判断版本值是否存在。这些是完整验收边界，不因 #26 七步授权或文档落地而被视为通过，不自动扩入 P4。
+- `openspec/specs/v0-safety-contract/spec.md:20–23`、`apps/api/src/modules/conversations/lifecycle/service.ts:447–469`、`docs/api/conversations/conversations_routes.md:60–64`：冻结 spec 要求时间错误走 thread.failed，实际澄清走 thread.completed；`apps/api/src/http/app.ts:70–85` 的 readiness 只判断版本值是否存在。这些是完整验收边界，不因 #26 七步授权或文档落地而被视为通过，不自动扩入 P4。

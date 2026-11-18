@@ -6,6 +6,7 @@ import type { ApprovalDetail, DocumentApprovalDetail } from '@along/contracts';
 import { TaskDetailSchema } from '@/features/reminders/model/types';
 import type { TaskDetail } from '@/features/reminders/model/types';
 import { readEnvelope } from '@/shared/http/client';
+import { api } from '@/shared/http/eden';
 import type { HistoryApprovalReference } from '../model/conversation-run';
 import { inlineReminderWaiting } from '@/features/approvals/model/inline-reminder';
 import { inlineDocumentWaiting } from '@/features/approvals/model/inline-document';
@@ -21,7 +22,7 @@ export function useTaskHistoryResult(taskId: string) {
     async (_cursor: string | null, signal: AbortSignal) => {
       const detail = TaskDetailSchema.parse(
         await readEnvelope(
-          await fetch(`/api/v1/tasks/${encodeURIComponent(taskId)}`, { cache: 'no-store', signal }),
+          await api.api.v1.tasks({ id: encodeURIComponent(taskId) }).get({ fetch: { signal } }),
         ),
       );
       if (detail.task_id !== taskId) throw new Error('提醒结果引用不匹配；未确认结果。');
@@ -53,7 +54,18 @@ export function useApprovalHistory({
   const query = new URLSearchParams({ conversation_id: conversationId, run_id: runId });
   const loader = useCallback(
     async (_cursor: string | null, signal: AbortSignal) => {
-      const data = await readEnvelope(await fetch(`/api/v1${path}`, { cache: 'no-store', signal }));
+      const data =
+        kind === 'document'
+          ? await readEnvelope(
+              await api.api.v1['document-approvals']({ id: encodeURIComponent(approvalId) }).get({
+                fetch: { signal },
+              }),
+            )
+          : await readEnvelope(
+              await api.api.v1
+                .approvals({ id: encodeURIComponent(approvalId) })
+                .get({ fetch: { signal } }),
+            );
       const item: ApprovalHistoryDetail =
         kind === 'document'
           ? { kind: 'document', detail: DocumentApprovalDetailSchema.parse(data) }

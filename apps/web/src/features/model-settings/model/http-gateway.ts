@@ -8,6 +8,7 @@ import {
 } from '@along/contracts';
 import { z } from 'zod';
 import { readEnvelope } from '@/shared/http/client';
+import { api, writeOptions } from '@/shared/http/eden';
 import { MeSchema } from '@/shared/session/identity';
 
 export type Provider = ProviderView;
@@ -29,44 +30,58 @@ export function validateDraft(provider: Provider, draft: Draft): string | null {
   return null;
 }
 
-async function get(path: string): Promise<unknown> {
-  return readEnvelope(await fetch(`/api/v1${path}`, { cache: 'no-store' }));
-}
-async function post(path: string, body: unknown): Promise<unknown> {
-  const me = MeSchema.parse(await get('/me'));
+async function csrfOptions() {
+  const me = MeSchema.parse(await readEnvelope(await api.api.v1.me.get()));
   if (!me.csrf_token) throw new Error('当前会话没有 CSRF 凭据，请重新登录。');
-  return readEnvelope(
-    await fetch(`/api/v1${path}`, {
-      method: 'POST',
-      cache: 'no-store',
-      headers: { 'content-type': 'application/json', 'x-csrf-token': me.csrf_token },
-      body: JSON.stringify(body),
-    }),
-  );
+  return writeOptions(me.csrf_token);
 }
-const providerPath = (id: string) => `/model-providers/${encodeURIComponent(id)}`;
 export async function listModelProviders() {
-  return ProviderListSchema.parse(await get('/model-providers'));
+  return ProviderListSchema.parse(await readEnvelope(await api.api.v1['model-providers'].get()));
 }
 export async function updateProvider(id: string, body: ProviderUpdate) {
-  return ProviderViewSchema.parse(await post(`${providerPath(id)}/actions/update`, body));
+  return ProviderViewSchema.parse(
+    await readEnvelope(
+      await api.api.v1['model-providers']({ id: encodeURIComponent(id) }).actions.update.post(
+        body,
+        await csrfOptions(),
+      ),
+    ),
+  );
 }
 export async function createProvider(name: string) {
-  return ProviderViewSchema.parse(await post('/model-providers', { name }));
+  return ProviderViewSchema.parse(
+    await readEnvelope(await api.api.v1['model-providers'].post({ name }, await csrfOptions())),
+  );
 }
 export async function deleteProvider(id: string) {
   return z
     .object({ deleted: z.literal(true) })
-    .parse(await post(`${providerPath(id)}/actions/delete`, {}));
+    .parse(
+      await readEnvelope(
+        await api.api.v1['model-providers']({ id: encodeURIComponent(id) }).actions.delete.post(
+          {},
+          await csrfOptions(),
+        ),
+      ),
+    );
 }
 export async function syncModels(id: string) {
-  return z
-    .object({ provider: ProviderViewSchema, added_model_ids: z.array(z.string()) })
-    .parse(await post(`${providerPath(id)}/models/actions/sync`, {}));
+  return z.object({ provider: ProviderViewSchema, added_model_ids: z.array(z.string()) }).parse(
+    await readEnvelope(
+      await api.api.v1['model-providers']({
+        id: encodeURIComponent(id),
+      }).models.actions.sync.post({}, await csrfOptions()),
+    ),
+  );
 }
 export async function addModel(id: string, model_id: string, context_window_tokens: number | null) {
   return ProviderViewSchema.parse(
-    await post(`${providerPath(id)}/models`, { model_id, context_window_tokens }),
+    await readEnvelope(
+      await api.api.v1['model-providers']({ id: encodeURIComponent(id) }).models.post(
+        { model_id, context_window_tokens },
+        await csrfOptions(),
+      ),
+    ),
   );
 }
 export async function updateModelContextWindow(
@@ -75,27 +90,53 @@ export async function updateModelContextWindow(
   context_window_tokens: number | null,
 ) {
   return ProviderViewSchema.parse(
-    await post(`${providerPath(id)}/models/actions/context-window`, {
-      model_id,
-      context_window_tokens,
-    }),
+    await readEnvelope(
+      await api.api.v1['model-providers']({ id: encodeURIComponent(id) }).models.actions[
+        'context-window'
+      ].post(
+        {
+          model_id,
+          context_window_tokens,
+        },
+        await csrfOptions(),
+      ),
+    ),
   );
 }
 export async function removeModel(id: string, model_id: string) {
   return ProviderViewSchema.parse(
-    await post(`${providerPath(id)}/models/actions/remove`, { model_id }),
+    await readEnvelope(
+      await api.api.v1['model-providers']({
+        id: encodeURIComponent(id),
+      }).models.actions.remove.post({ model_id }, await csrfOptions()),
+    ),
   );
 }
 export async function testConnection(id: string, draft: Draft) {
   return ConnectionResultSchema.parse(
-    await post(`${providerPath(id)}/actions/test-connection`, draft),
+    await readEnvelope(
+      await api.api.v1['model-providers']({ id: encodeURIComponent(id) }).actions[
+        'test-connection'
+      ].post(draft, await csrfOptions()),
+    ),
   );
 }
 export async function testModel(id: string, draft: Draft & { model_id: string }) {
-  return ProviderTestResultSchema.parse(await post(`${providerPath(id)}/actions/test`, draft));
+  return ProviderTestResultSchema.parse(
+    await readEnvelope(
+      await api.api.v1['model-providers']({ id: encodeURIComponent(id) }).actions.test.post(
+        draft,
+        await csrfOptions(),
+      ),
+    ),
+  );
 }
 export async function setDefault(id: string, model_id: string | null) {
   return ProviderViewSchema.parse(
-    await post(`${providerPath(id)}/actions/default-model`, { model_id }),
+    await readEnvelope(
+      await api.api.v1['model-providers']({ id: encodeURIComponent(id) }).actions[
+        'default-model'
+      ].post({ model_id }, await csrfOptions()),
+    ),
   );
 }

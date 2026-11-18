@@ -3,8 +3,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { randomUUID } from 'node:crypto';
-import { handleRequest } from '../../src/http/app.js';
-import { isActiveOwner } from '../../src/modules/identity/preferences.js';
+import { handleRequest } from '../helpers/http-app.js';
+import { isActiveOwner } from '../../src/features/identity/profile/preferences.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 
 const suite = databaseUrl ? describe : describe.skip;

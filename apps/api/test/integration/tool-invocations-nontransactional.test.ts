@@ -3,13 +3,13 @@ import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createTaskApproval } from '../../src/modules/approvals/create.js';
+import { createTaskApproval } from '../../src/features/approvals/reminder/create.js';
 import {
   executeLocalInvocation,
   executeNonTransactionalInvocation,
   reserveInvocation,
   ToolExecutionError,
-} from '../../src/modules/tools/invocations.js';
+} from '../../src/agent/tools/invocations/invocations.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 import { appendFileEffect, reconcileFileEffect } from './tool-invocations-file-effect.js';
 import { args, fileLines, runChild, seedContext, toolId } from './tool-invocations-probe.js';

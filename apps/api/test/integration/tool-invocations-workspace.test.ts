@@ -9,25 +9,25 @@ import { withTransaction } from '../../src/db/transaction.js';
 import {
   validateDocumentApprovalsDone,
   validateDocumentApprovalApply,
-} from '../../src/modules/approvals/document-service.js';
-import { applyWorkspaceReplace } from '../../src/modules/workspaces/replace.js';
+} from '../../src/features/approvals/document/document-service.js';
+import { applyWorkspaceReplace } from '../../src/features/workspaces/write/replace.js';
 import {
   configureWorkspaceRegistry,
   getWorkspaceGrant,
-} from '../../src/modules/workspaces/service.js';
-import { invokeTool, reserveToolInvocation } from '../../src/modules/tools/gateway.js';
+} from '../../src/features/workspaces/public.js';
+import { invokeTool, reserveToolInvocation } from '../../src/agent/tools/gateway.js';
 import {
   executeReadOnlyInvocation,
   executeNonTransactionalInvocation,
-  readRunInvocationStates,
-} from '../../src/modules/tools/invocations.js';
-import { callWorkspaceMcp } from '../../src/modules/tools/mcp-workspace.js';
-import { readRunDocumentEvidence } from '../../src/modules/tools/query.js';
+} from '../../src/agent/tools/invocations/invocations.js';
+import { readRunInvocationStates } from '../../src/agent/tools/invocations/run-state.js';
+import { callWorkspaceMcp } from '../../src/agent/tools/workspace/mcp-workspace.js';
+import { readRunDocumentEvidence } from '../../src/agent/tools/query.js';
 import {
   WORKSPACE_TOOL_IDS,
   type ToolContext,
   type ToolOutcome,
-} from '../../src/modules/tools/contracts.js';
+} from '../../src/agent/tools/contracts.js';
 import { seedContext } from './tool-invocations-probe.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 

@@ -5,8 +5,8 @@ import {
   beginCompactCall,
   failCompact,
   recordCompactUsage,
-} from '../../src/modules/conversations/compact-operations.js';
-import type { CompactBinding } from '../../src/modules/conversations/compact-store.js';
+} from '../../src/features/conversations/compact/compact-operations.js';
+import type { CompactBinding } from '../../src/features/conversations/compact/compact-eligibility.js';
 import {
   admitTestUser,
   createIntegrationDatabase,

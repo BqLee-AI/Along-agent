@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { encryptCredential, decryptCredential } from '../src/modules/model-providers/crypto.js';
+import {
+  encryptCredential,
+  decryptCredential,
+} from '../src/features/model-providers/configuration/crypto.js';
 
 const key = Buffer.alloc(32, 7);
 describe('provider credential encryption', () => {

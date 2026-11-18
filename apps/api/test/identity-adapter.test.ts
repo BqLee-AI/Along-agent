@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { mapValue, translateWhere } from '../src/modules/identity/pg-adapter.js';
+import { mapValue, translateWhere } from '../src/features/identity/session/pg-adapter.js';
 
 const SECRET = 'test-secret-for-identity-unit';
 

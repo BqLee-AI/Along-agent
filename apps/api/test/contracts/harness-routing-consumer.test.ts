@@ -4,9 +4,9 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ThreadEvent } from '@along/stream-protocol';
-import { createRoutingRuntime } from '../../src/modules/conversations/routing/index.js';
-import { configureWorkspaceRegistry } from '../../src/modules/workspaces/service.js';
-import { digestInvocationArgs } from '../../src/modules/tools/invocations.js';
+import { createRoutingRuntime } from '../../src/agent/routing/index.js';
+import { configureWorkspaceRegistry } from '../../src/features/workspaces/public.js';
+import { digestInvocationArgs } from '../../src/agent/tools/invocations/invocations.js';
 import { createRoutingFixture, type RoutingTestFixture } from '../routing-fixtures.js';
 import {
   createHarnessConsumer,

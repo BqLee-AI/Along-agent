@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { PoolClient } from 'pg';
 import { noticeCopyFor } from '@along/notifier-core';
-import { getTaskNotificationSource } from '../src/modules/tasks/notification-source.js';
+import { getTaskNotificationSource } from '../src/features/tasks/notification-source.js';
 
 function clientFor(row: object): PoolClient {
   return { query: async () => ({ rows: [row] }) } as unknown as PoolClient;

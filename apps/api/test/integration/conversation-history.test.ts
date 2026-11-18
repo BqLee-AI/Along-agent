@@ -13,10 +13,13 @@ import type {
   MessageHistoryItem,
   ConversationRunHistoryItem,
 } from '@along/contracts';
-import { handleConversationRoute } from '../../src/modules/conversations/routes.js';
+import { handleRequest } from '../helpers/http-app.js';
 import { withTransaction } from '../../src/db/transaction.js';
-import { appendCheckpoint, insertAttempt } from '../../src/modules/conversations/repository.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
+import {
+  appendCheckpoint,
+  insertAttempt,
+} from '../../src/features/conversations/run/repository.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
 import { createIntegrationDatabase, databaseUrl } from './setup.js';
 import type { IntegrationDatabase } from './setup.js';
 
@@ -37,6 +40,7 @@ async function get(pool: Pool | null, ownerId: string | null, path: string): Pro
   };
   const req = {
     method: 'GET',
+    url: path,
     headers: { 'x-request-id': 'history-contract' },
   } as unknown as IncomingMessage;
   const res = {
@@ -48,13 +52,12 @@ async function get(pool: Pool | null, ownerId: string | null, path: string): Pro
       reply.body = JSON.parse(body);
     },
   } as unknown as ServerResponse;
-  const handled = await handleConversationRoute(req, res, new URL(path, 'http://localhost'), {
+  await handleRequest(req, res, {
     pool,
     timeContext,
     resolveActor: async () =>
       ownerId ? { ownerId, sessionId: null, displayName: 'history', timezoneId: null } : null,
   });
-  expect(handled).toBe(true);
   expect(reply.headers['cache-control']).toBe('no-store');
   return reply;
 }

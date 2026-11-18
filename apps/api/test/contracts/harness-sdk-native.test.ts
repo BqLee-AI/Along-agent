@@ -5,9 +5,12 @@ import { createServer, type Server } from 'node:http';
 import { z } from 'zod';
 import { HarnessModelMessageSchema } from '@along/contracts';
 import { ThreadEventSchema } from '@along/stream-protocol';
-import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import { createUserModelTransport } from '../../src/modules/conversations/harness-config.js';
-import { listProviders, updateProvider } from '../../src/modules/model-providers/service.js';
+import { createContextPolicy } from '../../src/features/conversations/public.js';
+import { createUserModelTransport } from '../../src/features/model-providers/runtime/model-transport.js';
+import {
+  listProviders,
+  updateProvider,
+} from '../../src/features/model-providers/configuration/service.js';
 import type { HarnessConsumer } from '../helpers/harness-consumer.js';
 import type * as HarnessHelpers from '../helpers/harness-consumer.js';
 

@@ -12,8 +12,8 @@
 
 实现边界：
 
-- `identity/account-service.ts` 以显式 admission 与 active 校验用户名/已验证邮箱登录；安装初始化仍使用安装锁，普通认证、改密和恢复使用逐用户锁与 credential revision。
-- `identity/crypto.ts#deriveAuthEmail` 保留原不透明认证句柄；`email-security.ts` 独立持有 contact lookup、challenge、encryption、rate-limit 四类密钥，不从原认证 secret 派生。
+- `identity/account/account-service.ts` 以显式 admission 与 active 校验用户名/已验证邮箱登录；安装初始化仍使用安装锁，普通认证、改密和恢复使用逐用户锁与 credential revision。
+- `identity/session/crypto.ts#deriveAuthEmail` 保留原不透明认证句柄；`identity/security/email-security.ts` 独立持有 contact lookup、challenge、encryption、rate-limit 四类密钥，不从原认证 secret 派生。
 - Better Auth 1.7.10、604800 秒固定会话、无 refresh/cache、PG token HMAC、同 client 事务及确认提交后的库 Cookie 发布保持不变。
 - resolver、Run/工具与只读历史入口核对当前资格；历史事实的内部终态记账不重新授予披露权，撤销后仍记录原已接受结果并结束执行。
 - scheduler 在 task/outbox 栅栏下提交一次许可时持 user SHARE，网络前释放；notifications 以独立连接核对当前资格并提交。既有回执只读核对原发送版本，不能把篡改版本当有效接收。
@@ -118,7 +118,7 @@ IP 只取经过明确可信代理链配置的 socket/转发元数据；不能信
 
 管理停用只允许普通账户；本人注销请求需当前密码/确认。事务锁定并复核绑定与目标，设置 `disabled` / `deleted_requested`，递增 credential revision、撤销 sessions、未消费 challenge 及尚未发送的邮件资格。**唯一绑定管理员无论本人注销还是管理停用都返回 `409 SOLE_ADMIN_PROTECTED`**，不开放交接/解绑接口，不删除 user、不迁 owner、不开放再次初始化；需要交接时走另行评审的本机维护方案。本切片无在线恢复 disabled/deleted_requested 的入口，恢复 token 也不能复活状态。
 
-identity 只更新自有事实，不反向锁 task/Run 或写取消状态机。复用 `identity/preferences.ts` 的现有公共资格入口，拟议将 `isActiveOwner(client, ownerId, {lock:"share"}) → boolean` 扩为同时检查准入/active，并按需在当前 client 锁 user；无锁读取仍服务于既有资格检查，不建立第二套权限服务。各模块调用这一公共规则，不直读 identity 私表，也不修改本人时区/偏好合同。相关规则：
+identity 只更新自有事实，不反向锁 task/Run 或写取消状态机。复用 `identity/profile/preferences.ts` 的现有公共资格入口，拟议将 `isActiveOwner(client, ownerId, {lock:"share"}) → boolean` 扩为同时检查准入/active，并按需在当前 client 锁 user；无锁读取仍服务于既有资格检查，不建立第二套权限服务。各模块调用这一公共规则，不直读 identity 私表，也不修改本人时区/偏好合同。相关规则：
 
 - scheduler 的新发送许可事务维持 task → outbox 原锁序，随后持 user **FOR SHARE** 核验准入/active，许可提交释放锁；停用持 user 更新锁，二者由数据库串行裁决。停用先提交，许可数/实际调用增量均为零；许可先提交属于已许可在途，不能声称已追回。
 - 调用前保留原 task/outbox 取消与时间栅栏；可再查当前资格以缩小在途，但不许把已提交许可当作可重新领取。无资格且确定尚未调用的 send 标 superseded，并保留脱敏 `owner_ineligible` 原因；不得把 task 标 cancelled/fired，不制造撤销回执。任务原窗口/过窗和 unknown 核对规则继续生效。

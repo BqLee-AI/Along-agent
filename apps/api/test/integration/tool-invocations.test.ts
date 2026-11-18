@@ -3,11 +3,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import type { Pool } from 'pg';
-import { startConversationRun } from '../../src/modules/conversations/service.js';
-import { confirmApproval } from '../../src/modules/approvals/confirm.js';
-import { invokeTool, reserveToolInvocation } from '../../src/modules/tools/gateway.js';
-import type { ToolContext, ToolOutcome } from '../../src/modules/tools/contracts.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
+import { startConversationRun } from '../../src/agent/operations/start.js';
+import { confirmApproval } from '../../src/features/approvals/reminder/confirm.js';
+import { invokeTool, reserveToolInvocation } from '../../src/agent/tools/gateway.js';
+import type { ToolContext, ToolOutcome } from '../../src/agent/tools/contracts.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
 import {
   createIntegrationDatabase,
   databaseUrl,

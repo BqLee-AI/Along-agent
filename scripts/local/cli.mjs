@@ -149,27 +149,17 @@ async function newInstallationInput(mode) {
     values.harnessCompletionCap = Number(
       await ask('HARNESS_COMPLETION_CAP（独立单次输出上限）', 4096),
     );
-    const model = await ask(
-      mode === 'adopt'
-        ? '原部署有模型配置？有请填 y；原本无配置回车'
-        : '配置已授权模型？填 y；暂不配置回车',
-      'n',
-    );
-    if (model === 'y') {
-      values.model = {
-        baseUrl: await ask('HARNESS_MODEL_BASE_URL（隐藏输入）', undefined, true),
-        name: await ask('HARNESS_MODEL（不提供默认替代值）', undefined, true),
-        apiKey: await ask('HARNESS_MODEL_API_KEY（隐藏输入；原服务无认证才留空）', '', true),
-        maxIterations: Number(await ask('HARNESS_MAX_ITERATIONS', 24)),
-        maxTokens: Number(await ask('HARNESS_MAX_TOKENS', 64000)),
-        completionCap: values.harnessCompletionCap,
-        reserveTokens: Number(await ask('HARNESS_CONTEXT_RESERVE_TOKENS', 0)),
+    if ((await ask('自定义 Harness 执行预算和上下文上限？填 y；回车用默认值', 'n')) === 'y') {
+      const maxIterations = Number(await ask('HARNESS_MAX_ITERATIONS', 24));
+      const maxTokens = Number(await ask('HARNESS_MAX_TOKENS', 64000));
+      const reserveTokens = Number(await ask('HARNESS_CONTEXT_RESERVE_TOKENS', 0));
+      const window = await ask('HARNESS_MODEL_WINDOW_TOKENS（可选：未知留空）', '');
+      values.harnessLimits = {
+        maxIterations,
+        maxTokens,
+        reserveTokens,
+        modelWindowTokens: window === '' ? null : Number(window),
       };
-      const window = await ask(
-        'HARNESS_MODEL_WINDOW_TOKENS（可选：有依据的模型窗口；未知留空）',
-        '',
-      );
-      values.model.modelWindowTokens = window === '' ? null : Number(window);
     }
     return values;
   } finally {

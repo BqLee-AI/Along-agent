@@ -66,7 +66,7 @@ describe('Compact control requests', () => {
     expect(calls[0]?.url).toBe(`/api/v1/conversations/${cid}/runs/${rid}/actions/compact`);
     expect(calls[0]?.init?.headers).toEqual({
       'content-type': 'application/json',
-      'Idempotency-Key': cid,
+      'idempotency-key': cid,
       'x-csrf-token': 'csrf',
     });
     expect(calls[0]?.init?.body).toBe('{}');
@@ -150,7 +150,7 @@ describe('User pause actions', () => {
     expect(calls[0]?.init?.method).toBe('POST');
     expect(calls[0]?.init?.headers).toEqual({
       'content-type': 'application/json',
-      'Idempotency-Key': cid,
+      'idempotency-key': cid,
       'x-csrf-token': 'csrf',
     });
     expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({ reason: 'user', purpose: 'none' });

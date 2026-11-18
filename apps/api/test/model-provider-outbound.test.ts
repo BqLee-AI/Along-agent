@@ -5,7 +5,7 @@ import {
   outboundFetch,
   outboundFetchForTest,
   outboundJson,
-} from '../src/modules/model-providers/outbound.js';
+} from '../src/features/model-providers/outbound/outbound.js';
 
 describe('provider outbound address policy', () => {
   test('denies internal, mapped and non-global destinations', () => {

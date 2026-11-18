@@ -5,11 +5,12 @@ import { once } from 'node:events';
 import { createServer, type Server } from 'node:http';
 import type { Pool, PoolClient } from 'pg';
 import type { ThreadEvent } from '@along/stream-protocol';
-import { createContextPolicy } from '../../src/modules/conversations/context-policy.js';
-import { createHarnessModelTransport } from '../../src/modules/model-providers/harness-model.js';
-import { executeRun, startConversationRun } from '../../src/modules/conversations/service.js';
-import { listRunEvents } from '../../src/modules/conversations/repository.js';
-import { loadTimeContext } from '../../src/modules/time/context.js';
+import { createContextPolicy } from '../../src/features/conversations/public.js';
+import { createLocalFixtureModelTransport } from '../helpers/local-fixture-model.js';
+import { executeRun } from '../../src/agent/operations/execute.js';
+import { startConversationRun } from '../../src/agent/operations/start.js';
+import { listRunEvents } from '../../src/features/conversations/run/repository.js';
+import { loadTimeContext } from '../../src/features/time/context.js';
 import { listen, sendModelSse } from '../helpers/harness-consumer.js';
 import {
   admitTestUser,
@@ -70,7 +71,7 @@ maybe('harness stream authority at a concurrent deactivation', () => {
           completionCap: 1024,
           model: 'fixture-transport-only',
         }),
-        model: createHarnessModelTransport({
+        model: createLocalFixtureModelTransport({
           baseUrl: `${modelBase}/v1`,
           model: 'fixture-transport-only',
         }),

@@ -1,22 +1,17 @@
+import { httpStatusForError } from '@along/contracts';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
+import { ApplicationError, notReady, validationError } from '../platform/errors.js';
+import { status } from 'elysia';
+import type { HttpAccess } from './access.js';
+import { errorResponses } from './model.js';
+import { unmatchedError } from './routing/fallback-controller.js';
+import { writeFiniteResponse } from './transport/unread-upload.js';
 
 // Shared HTTP envelope helpers (design/10 §1).
 // Envelope code carries the HTTP status for transport errors; error.code is
 // the symbolic name (UNAUTHENTICATED, NOT_FOUND, ...). Business 40xxxx codes
 // land with confirm/reject in PR2.
-
-export class HttpError extends Error {
-  constructor(
-    public httpStatus: number,
-    public code: number,
-    public errorCode: string,
-    message: string,
-    public details?: unknown,
-  ) {
-    super(message);
-  }
-}
 
 // Bounded: the id is echoed in every envelope and persisted in checkpoints,
 // whose protocol schema caps request_id at 200 chars.
@@ -34,20 +29,55 @@ export function sendJson(
   requestId: string,
   extraHeaders?: Record<string, string>,
 ): void {
-  res.writeHead(status, {
-    'content-type': 'application/json',
-    'x-request-id': requestId,
-    'cache-control': 'no-store',
-    ...extraHeaders,
+  writeFiniteResponse(
+    res,
+    status,
+    {
+      'content-type': 'application/json',
+      'x-request-id': requestId,
+      'cache-control': 'no-store',
+      ...extraHeaders,
+    },
+    JSON.stringify(body),
+  );
+}
+
+export function jsonResponse(
+  status: number,
+  body: unknown,
+  requestId: string,
+  extraHeaders?: Record<string, string>,
+): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      'content-type': 'application/json',
+      'x-request-id': requestId,
+      'cache-control': 'no-store',
+      ...extraHeaders,
+    },
   });
-  res.end(JSON.stringify(body));
 }
 
-export function okEnvelope(data: unknown, requestId: string): unknown {
-  return { code: 0, data, msg: 'ok', error: null, request_id: requestId };
+export function internalErrorResponse(requestId: string): Response {
+  return jsonResponse(
+    500,
+    {
+      code: 500,
+      data: null,
+      msg: 'internal error',
+      error: { code: 'INTERNAL_ERROR', message: 'internal error', request_id: requestId },
+      request_id: requestId,
+    },
+    requestId,
+  );
 }
 
-export function failEnvelope(err: HttpError, requestId: string): unknown {
+export function okEnvelope<T>(data: T, requestId: string) {
+  return { code: 0 as const, data, msg: 'ok' as const, error: null, request_id: requestId };
+}
+
+export function failEnvelope(err: ApplicationError, requestId: string) {
   return {
     code: err.code,
     data: null,
@@ -62,72 +92,54 @@ export function failEnvelope(err: HttpError, requestId: string): unknown {
   };
 }
 
-export function unauthorized(message = 'unauthorized'): HttpError {
-  return new HttpError(401, 401, 'UNAUTHENTICATED', message);
-}
-
-export function forbidden(message = 'forbidden'): HttpError {
-  return new HttpError(403, 403, 'FORBIDDEN', message);
-}
-
-// CSRF guard failure (issue #27): POST without a valid X-CSRF-Token.
-// Same envelope code shape as FORBIDDEN, distinguished by details.reason.
-export function csrfMismatch(): HttpError {
-  return new HttpError(403, 403, 'FORBIDDEN', 'csrf mismatch', {
-    reason: 'CSRF_MISMATCH',
-  });
-}
-
-export function notFound(message = 'not found'): HttpError {
-  return new HttpError(404, 404, 'NOT_FOUND', message);
-}
-
-export function validationError(message: string): HttpError {
-  return new HttpError(400, 400, 'VALIDATION_ERROR', message);
-}
-
-// Confirm-gate business errors (PR2): numeric 40xxxx codes per contracts
-// catalog (docs/design/10 §6, S0 frozen). HTTP status from the catalog.
-export function presentationMismatch(message = '所见与存档不一致'): HttpError {
-  return new HttpError(409, 400001, 'PRESENTATION_MISMATCH', message);
-}
-
-export function approvalExpired(message = 'approval expired'): HttpError {
-  return new HttpError(410, 400002, 'APPROVAL_EXPIRED', message);
-}
-
-export function approvalSuperseded(successorApprovalId: string | null): HttpError {
-  return new HttpError(409, 400003, 'APPROVAL_SUPERSEDED', 'approval superseded', {
-    successor_approval_id: successorApprovalId,
-  });
-}
-
-export function stateConflict(message = 'state conflict', details?: unknown): HttpError {
-  return new HttpError(409, 400010, 'STATE_CONFLICT', message, details);
-}
-
-export function notReady(message = 'database unavailable'): HttpError {
-  return new HttpError(503, 503, 'NOT_READY', message);
-}
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-export function isUuid(value: string): boolean {
-  return UUID_RE.test(value);
-}
-
-export function encodeCursor(payload: Record<string, string>): string {
-  return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
-}
-
-export function decodeCursor(raw: string): Record<string, string> | null {
-  try {
-    const parsed: unknown = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return null;
+export function createErrorHandler(hasPool: boolean, access: HttpAccess) {
+  return async ({
+    code,
+    error,
+    request,
+    set,
+  }: {
+    code: string | number;
+    error: unknown;
+    request: Request;
+    set: { headers: Record<string, string | number | string[]> };
+  }) => {
+    let failure: ApplicationError;
+    try {
+      const cause = code === 'PARSE' && error instanceof Error ? error.cause : error;
+      if (cause instanceof ApplicationError) failure = cause;
+      else if (code === 'NOT_FOUND') failure = await unmatchedError(request, hasPool, access);
+      else if (
+        code === 'PARSE' ||
+        (code === 'VALIDATION' &&
+          !(error && typeof error === 'object' && 'type' in error && error.type === 'response'))
+      )
+        failure = validationError('invalid request body');
+      else if (
+        new URL(request.url).pathname.startsWith('/api/v1/auth/') ||
+        new URL(request.url).pathname.startsWith('/api/v1/model-')
+      )
+        failure = notReady();
+      else failure = new ApplicationError(500, 'INTERNAL_ERROR', 'internal error');
+    } catch (caught) {
+      failure = caught instanceof ApplicationError ? caught : notReady();
     }
-    return parsed as Record<string, string>;
-  } catch {
-    return null;
-  }
+    const details = failure.details;
+    if (
+      httpStatusForError(failure.code) === 429 &&
+      details &&
+      typeof details === 'object' &&
+      'retry_after_seconds' in details &&
+      typeof details.retry_after_seconds === 'number' &&
+      Number.isFinite(details.retry_after_seconds) &&
+      details.retry_after_seconds > 0
+    )
+      set.headers['retry-after'] = String(Math.ceil(details.retry_after_seconds));
+    set.headers['x-request-id'] = access.requestId(request);
+    set.headers['cache-control'] = 'no-store';
+    return status(
+      httpStatusForError(failure.code) as keyof typeof errorResponses,
+      failEnvelope(failure, access.requestId(request)),
+    );
+  };
 }

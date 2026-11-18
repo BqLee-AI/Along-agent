@@ -6,11 +6,13 @@ import {
   configureWorkspaceRegistry,
   getWorkspaceGrant,
   resolveWorkspaceGrants,
-  getWorkspaceOutputIdentity,
-  readWorkspaceBytes,
   hashBytes,
   validateWorkspaceGrant,
-} from '../src/modules/workspaces/service.js';
+} from '../src/features/workspaces/public.js';
+import {
+  getWorkspaceOutputIdentity,
+  readWorkspaceBytes,
+} from '../src/features/workspaces/read/files.js';
 
 describe('workspace physical identity', () => {
   test('registers separate directories and preserves safe legacy grants without accepting unsafe numeric grants', async () => {

@@ -1,23 +1,22 @@
+import { expectApplicationRejection } from '../helpers/application-error.js';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { createServer, type Server } from 'node:http';
 import { randomBytes, randomUUID } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import type { Pool } from 'pg';
-import { handleRequest } from '../../src/http/app.js';
-import {
-  createAccountService,
-  type AccountService,
-} from '../../src/modules/identity/account-service.js';
-import { createAuth } from '../../src/modules/identity/better-auth.js';
+import { handleRequest } from '../helpers/http-app.js';
+import { type AccountService } from '../../src/features/identity/public.js';
+import { createConfiguredAccountService } from '../../src/bootstrap/identity.js';
+import { createAuth } from '../../src/features/identity/session/better-auth.js';
 import {
   createInvitedAccountService,
   type InvitedAccountService,
-} from '../../src/modules/identity/invited-service.js';
+} from '../../src/features/identity/account/invited-service.js';
 import {
   parseIdentityKeyring,
   type IdentityKeyring,
-} from '../../src/modules/identity/email-security.js';
-import type { IdentityMailConfig } from '../../src/modules/identity/mail.js';
+} from '../../src/features/identity/security/email-security.js';
+import type { IdentityMailConfig } from '../../src/features/identity/delivery/transport.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 
 const maybe = databaseUrl ? describe : describe.skip;
@@ -58,7 +57,7 @@ maybe('local administrator password reset against actual PostgreSQL', () => {
     db = await createIntegrationDatabase();
     pool = db.pool;
     const keys = fixtureKeys();
-    accounts = createAccountService(pool, {
+    accounts = createConfiguredAccountService(pool, {
       secret,
       origin,
       keys,
@@ -177,13 +176,15 @@ maybe('local administrator password reset against actual PostgreSQL', () => {
       }),
     ).toEqual({ reset: true });
 
-    await expect(
+    await expectApplicationRejection(
       accounts.signIn({ login_name: 'admin', password: forgotten }, ip),
-    ).rejects.toMatchObject({ httpStatus: 401 });
+      { status: 401 },
+    );
     // Passwords are not trimmed: the edge spaces are part of the secret.
-    await expect(
+    await expectApplicationRejection(
       accounts.signIn({ login_name: 'admin', password: replacement.trim() }, ip),
-    ).rejects.toMatchObject({ httpStatus: 401 });
+      { status: 401 },
+    );
     expect(
       (await accounts.signIn({ login_name: 'admin', password: replacement }, ip)).cookies.length,
     ).toBeGreaterThan(0);
@@ -255,9 +256,10 @@ maybe('local administrator password reset against actual PostgreSQL', () => {
       confirmed: true,
       password: replacement,
     });
-    await expect(
+    await expectApplicationRejection(
       accounts.signIn({ login_name: 'member', password: memberOriginal }, ip),
-    ).rejects.toMatchObject({ httpStatus: 401 });
+      { status: 401 },
+    );
     expect(
       (await accounts.signIn({ login_name: 'member', password: replacement }, ip)).cookies.length,
     ).toBeGreaterThan(0);
@@ -316,24 +318,27 @@ maybe('local administrator password reset against actual PostgreSQL', () => {
   it('refuses without explicit confirmation, unknown selection, or invalid password and changes nothing', async () => {
     const target = await select('Original Administrator');
     const before = await facts();
-    await expect(
+    await expectApplicationRejection(
       accounts.resetLocalPassword({
         selection: target.selection,
         confirmed: false as unknown as true,
         password: replacement,
       }),
-    ).rejects.toMatchObject({ httpStatus: 400 });
-    await expect(
+      { status: 400 },
+    );
+    await expectApplicationRejection(
       accounts.resetLocalPassword({
         selection: randomUUID(),
         confirmed: true,
         password: replacement,
       }),
-    ).rejects.toMatchObject({ httpStatus: 400 });
+      { status: 400 },
+    );
     for (const password of ['short', 'x'.repeat(129)])
-      await expect(
+      await expectApplicationRejection(
         accounts.resetLocalPassword({ selection: target.selection, confirmed: true, password }),
-      ).rejects.toMatchObject({ httpStatus: 400 });
+        { status: 400 },
+      );
     expect(await facts()).toBe(before);
     expect(
       (await accounts.signIn({ login_name: 'admin', password: forgotten }, ip)).cookies.length,
@@ -374,13 +379,14 @@ maybe('local administrator password reset against actual PostgreSQL', () => {
       const candidate = await select(`Victim ${conflict}`);
       expect(candidate.eligible).toBe(false);
       const before = await facts();
-      await expect(
+      await expectApplicationRejection(
         accounts.resetLocalPassword({
           selection: candidate.selection,
           confirmed: true,
           password: replacement,
         }),
-      ).rejects.toMatchObject({ httpStatus: 409 });
+        { status: 409 },
+      );
       expect(await facts()).toBe(before);
     });
   }
@@ -394,13 +400,14 @@ maybe('local administrator password reset against actual PostgreSQL', () => {
     await pool.query(
       'CREATE TRIGGER reset_131_fail BEFORE UPDATE ON sessions FOR EACH ROW EXECUTE FUNCTION reset_131_fail()',
     );
-    await expect(
+    await expectApplicationRejection(
       accounts.resetLocalPassword({
         selection: target.selection,
         confirmed: true,
         password: replacement,
       }),
-    ).rejects.toMatchObject({ httpStatus: 503 });
+      { status: 503 },
+    );
     await pool.query('DROP TRIGGER reset_131_fail ON sessions');
     expect(await facts()).toBe(before);
     expect(

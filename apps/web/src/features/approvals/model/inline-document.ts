@@ -5,6 +5,7 @@ import {
   type RunView,
 } from '@along/contracts';
 import { readEnvelope } from '@/shared/http/client';
+import { api, writeOptions } from '@/shared/http/eden';
 import { documentConfirmBody } from '@/features/approvals/model/document-loop';
 
 export function inlineDocumentWaiting(run: RunView | null, approvalId: string): boolean {
@@ -22,9 +23,8 @@ export function inlineDocumentWaiting(run: RunView | null, approvalId: string): 
 export async function readInlineDocument(initial: DocumentApprovalDetail, signal: AbortSignal) {
   const current = DocumentApprovalDetailSchema.parse(
     await readEnvelope(
-      await fetch(`/api/v1/document-approvals/${encodeURIComponent(initial.approval_id)}`, {
-        cache: 'no-store',
-        signal,
+      await api.api.v1['document-approvals']({ id: encodeURIComponent(initial.approval_id) }).get({
+        fetch: { signal },
       }),
     ),
   );
@@ -69,17 +69,11 @@ export async function confirmInlineDocument({
   if (current.state !== 'pending') throw new Error('此文档提议已不可授权，请读取原决议。');
   const result = DocumentApprovalActionResultSchema.parse(
     await readEnvelope(
-      await fetch(
-        `/api/v1/document-approvals/${encodeURIComponent(current.approval_id)}/actions/confirm`,
-        {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            ...(csrf ? { 'x-csrf-token': csrf } : {}),
-          },
-          body: JSON.stringify(documentConfirmBody(current, current.approval_id)),
-          signal,
-        },
+      await api.api.v1['document-approvals']({
+        id: encodeURIComponent(current.approval_id),
+      }).actions.confirm.post(
+        documentConfirmBody(current, current.approval_id),
+        writeOptions(csrf, signal),
       ),
     ),
   );
