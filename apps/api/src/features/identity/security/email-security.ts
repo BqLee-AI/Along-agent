@@ -119,7 +119,7 @@ export function normalizeContactEmail(input: string): {
   masked: string;
 } {
   if (typeof input !== 'string') throw validationError('invalid contact email');
-  const value = input.replace(/^[\x09-\x0d\x20]+|[\x09-\x0d\x20]+$/g, '');
+  const value = input.replace(/^[\t\n\v\f\r ]+|[\t\n\v\f\r ]+$/g, '');
   if (value.length > 254 || /[^\x21-\x7e]/.test(value))
     throw validationError('invalid contact email');
   const parts = value.split('@');

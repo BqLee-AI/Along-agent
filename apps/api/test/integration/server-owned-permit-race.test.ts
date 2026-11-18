@@ -192,10 +192,11 @@ maybe('server-owned one-time external dispatch permit', () => {
         state: 'unknown',
         accepted_result: null,
       });
+      // Wait for backend exit and lock release, not just signal delivery.
       expect(
         (
           await control.query<{ terminated: boolean }>(
-            'SELECT pg_terminate_backend($1) AS terminated',
+            'SELECT pg_terminate_backend($1, 5000) AS terminated',
             [pid],
           )
         ).rows[0]?.terminated,

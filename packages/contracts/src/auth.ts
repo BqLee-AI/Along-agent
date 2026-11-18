@@ -14,7 +14,7 @@ export const authClaimSchema = z
 // Syntax only here; identity owns the single mailbox policy and normalization.
 const email = z
   .string()
-  .transform((value) => value.replace(/^[\x09-\x0d\x20]+|[\x09-\x0d\x20]+$/g, ''))
+  .transform((value) => value.replace(/^[\t\n\v\f\r ]+|[\t\n\v\f\r ]+$/g, ''))
   .pipe(
     z
       .string()
@@ -155,7 +155,7 @@ export const SessionViewSchema = z
     device_summary: z
       .string()
       .max(128)
-      .regex(/^[^\u0000-\u001f\u007f]*$/)
+      .regex(/^[\x20-\x7e\u0080-\uffff]*$/)
       .nullable(),
   })
   .strict();

@@ -26,6 +26,7 @@ maybe('routing authority trusted answer boundary', () => {
         maxIterations: 8,
         maxTokens: 8000,
         contextPolicy: createContextPolicy({ completionCap: 512, model: 'routing-authority-test' }),
+        // oxlint-disable-next-line require-yield -- Failure-only provider intentionally emits no events.
         model: async function* () {
           throw new Error('provider must not be called');
         },

@@ -136,6 +136,7 @@ maybe('harness authority signed HTTP boundary', () => {
           maxIterations: 8,
           maxTokens: 8000,
           contextPolicy: createContextPolicy({ completionCap: 512, model: 'http-test-model' }),
+          // oxlint-disable-next-line require-yield -- Failure-only provider intentionally emits no events.
           model: async function* () {
             models += 1;
             throw new Error('GET/cancel must never call model');
@@ -200,6 +201,7 @@ maybe('harness authority signed HTTP boundary', () => {
           maxIterations: 8,
           maxTokens: 8000,
           contextPolicy: createContextPolicy({ completionCap: 512, model: 'http-test-model' }),
+          // oxlint-disable-next-line require-yield -- Failure-only provider intentionally emits no events.
           model: async function* () {
             throw new Error('cancel must never execute model');
           },

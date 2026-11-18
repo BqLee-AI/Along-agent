@@ -32,8 +32,22 @@ COPY packages/notifier-core/package.json packages/notifier-core/
 COPY scripts/package.json scripts/
 RUN --mount=type=cache,id=along-bun-downloads,target=/root/.bun/install/cache,sharing=locked \
     bun install --frozen-lockfile
-COPY . .
+# Only compiler inputs invalidate the API build; runtime assets/tests follow it.
+COPY tsconfig.base.json ./
+COPY packages/contracts/tsconfig.json packages/contracts/
+COPY packages/contracts/src packages/contracts/src
+COPY packages/stream-protocol/tsconfig.json packages/stream-protocol/
+COPY packages/stream-protocol/src packages/stream-protocol/src
+COPY packages/time-core/tsconfig.json packages/time-core/
+COPY packages/time-core/src packages/time-core/src
+COPY packages/scheduler-core/tsconfig.json packages/scheduler-core/
+COPY packages/scheduler-core/src packages/scheduler-core/src
+COPY packages/notifier-core/tsconfig.json packages/notifier-core/
+COPY packages/notifier-core/src packages/notifier-core/src
+COPY apps/api/tsconfig.json apps/api/
+COPY apps/api/src apps/api/src
 RUN bun run build:api
+COPY . .
 COPY --from=harness-native /out/ /app/harness/
 ENV HARNESS_BINARY=/app/harness/bin/along-harness
 ENV HARNESS_LIBRARY_PATH=/app/harness/lib

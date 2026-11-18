@@ -74,12 +74,12 @@
 
 ### Requirement: verify 主链覆盖
 
-一键 verify SHALL 以 `bun run verify` 为本地与代码变更 CI 的共同入口，按既有顺序执行 lint、typecheck、depcruise、gate-manifest、gates-executable、frozen-names、copy-claims、unit、OpenSpec 严格校验与阻塞式 format:check；构建前置不得省略门，任一步失败即停并报告步名及非零退出码。同次执行中成功 typecheck 准备的 packages SHALL 被 unit 复用；独立入口及未执行 typecheck 的路径仍自行完成真实构建，不依据旧 dist、跨 job 产物或持久完成标记判定已准备。
+一键 verify SHALL 保留 `bun run verify` 本地完整入口，按既有顺序执行 lint、typecheck、depcruise、gate-manifest、gates-executable、frozen-names、copy-claims、unit、OpenSpec 严格校验与阻塞式 format:check；CI 按受影响分域执行对应检查。构建前置不得省略门，任一步失败即停并报告步名及非零退出码。同次 verify 中成功 typecheck 准备的 packages SHALL 被 unit 复用；独立入口及未执行 typecheck 的路径仍自行完成真实构建，不依据旧 dist、跨 job 产物或持久完成标记判定已准备。
 
-#### Scenario: 本地与 CI 同一阻塞主链
+#### Scenario: 本地完整验证与 CI 分域验证
 
-- WHEN 在干净安装后运行 `bun run verify`，或代码变更的 checks job 调用该入口
-- THEN 相同门以相同顺序执行，gates-executable 位于 gate-manifest 之后；成功 typecheck 完成的 packages 前置不在 unit 重复执行，全部门成功才返回 0（映射 D1/D2/D10）
+- WHEN 在干净安装后运行 `bun run verify`，或 checks job 执行受影响分域
+- THEN 对应检查均阻塞；本地完整入口中 gates-executable 位于 gate-manifest 之后，成功 typecheck 完成的 packages 前置不在 unit 重复执行，全部所需检查成功才返回 0（映射 D1/D2/D10）
 
 #### Scenario: 格式错误不是非阻塞警告
 
@@ -90,6 +90,11 @@
 
 - WHEN gate-manifest、gates-executable、frozen-names 或 copy-claims 任一步失败
 - THEN verify 报告失败步名并中止后续步骤，原禁词/口径与缺执行检查不因优化跳过
+
+#### Scenario: 冻结名检查不随 CI 分域省略
+
+- WHEN CI 选择任意变更范围或沿用历史成功结果
+- THEN checks 仍扫描 apps、packages、infra 中的交付代码，冻结别名违规使 checks 失败，不要求选中 tooling 分域
 
 #### Scenario: 干净 checkout 恢复构建依赖
 
@@ -306,14 +311,14 @@ Docker/Compose SHALL 使用固定 Bun 的冻结安装、工作区构建与服务
 
 ### Requirement: CI 按变更范围验证
 
-CI SHALL 保留 checks 和 integration 两个 required checks；两个 job 均须成功。PR 按 base 与 checkout 的实际 diff 决定检查范围，main push 和无法确定的变更执行完整集合。被跳过的测试不作为本次执行证据。
+CI SHALL 保留 checks、database 和 integration 三个 required checks，分别负责静态/Web、PostgreSQL/升级、正式 native/Compose。PR 按累计 diff、main push 按 before diff 选择受影响检查的并集；三者均须成功。跳过或沿用的检查不得记为本次执行。
 
 #### Scenario: 文档与 Web 变更
 
 - WHEN PR 仅修改允许的文档路径
 - THEN 运行文案、OpenSpec 和格式检查，不构建应用或启动数据库、native 与 Compose
-- WHEN PR 仅修改 Web 源码或测试及允许的文档
-- THEN 运行完整 verify 和 Web 构建，不运行无关的重集成
+- WHEN PR 或 main push 仅修改 Web 源码、样式或测试及允许的文档
+- THEN 运行 Web 的 lint、类型检查、单元测试、依赖边界及构建，不运行后端构建、数据库或 native；Web 依赖清单及 vendor 变化另验证受影响的生产镜像
 
 #### Scenario: 已知 API 业务源码或数据库测试变更
 
@@ -321,15 +326,26 @@ CI SHALL 保留 checks 和 integration 两个 required checks；两个 job 均�
 - THEN 保留数据库约束、完整 API 集成、native 合同及 Compose 检查，跳过不依赖这些源码的历史升级测试
 - WHEN PR 只修改允许的独立 API 数据库集成测试，可混合允许的文档
 - THEN 使用真实 PostgreSQL 和原迁移运行每个修改的测试文件，不运行未选中的测试、历史升级、native 合同或 Compose
-- WHEN 变更同时包含 Web 和 API，或者触及 identity、数据库共享设施、迁移、升级实现或 native 测试
-- THEN 回退完整范围
+- WHEN 修改 ci/native-tests.txt 中的正式 native 集成文件
+- THEN 在正式镜像内执行，不交给缺 native 的宿主数据库入口；共享数据库及 identity 变更保留历史升级检查
+- WHEN 同时修改多个已知范围
+- THEN 执行各范围所需检查的并集，不自动扩大为所有检查
 
 #### Scenario: 未知或完整范围
 
-- WHEN PR 涉及其他路径、删除或重命名、无效或不可用 base、空 diff，或运行不是 PR
-- THEN 运行完整 verify、构建、真实数据库与调度、正式 native 消费者及 Compose 全新卷检查
+- WHEN 涉及未知路径/状态、无效或不可用 base、空 diff，或非 push/PR 事件
+- THEN 运行完整静态检查、Web 构建、真实数据库与调度、正式 native 消费者及 Compose 全新卷检查
+- WHEN PR 或 main push 只删除或重命名允许的文档
+- THEN 同时检查新旧路径，运行文档检查，不因文件状态单独触发重集成
 
 #### Scenario: 完整范围任一检查失败
 
 - WHEN 完整范围的数据库、调度、契约、Compose 或静态检查中任一失败或取消
-- THEN 对应 job 不成功，两个 required checks 的合并条件不满足；并行运行不共享可变数据库，不用退出码吞并放行
+- THEN 对应 job 不成功，三个 required checks 的合并条件不满足；数据库与正式镜像检查独立运行，不共享可变数据库，不用退出码吞并放行
+
+#### Scenario: 未变化输入沿用已执行证据
+
+- WHEN 同一 PR 的祖先版本已有成功检查，可确认其实际执行的合并树，目标分支 SHA、执行树中该检查相关输入及 CI 定义均未变化，且此前实际执行范围覆盖本次所需范围
+- THEN 可省略该检查并关联原运行；当前变更的检查仍执行
+- WHEN 原检查失败、跳过、未完成，或输入/目标分支变化、执行树未知、证据查询不可用或超时
+- THEN 不得以该记录放行，正常执行受影响检查

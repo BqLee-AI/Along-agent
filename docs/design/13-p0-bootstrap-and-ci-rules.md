@@ -53,18 +53,20 @@ Observed / Required / Proposed / Deferred 同 01。
 
 ## 4. CI 布局（Required）
 
-- CI 使用 `checks` 和 `integration` 两个 job，均按 PR base 与 checkout 的实际 diff 分类；非 PR、空 diff、无效 base、删除、重命名和未知路径按完整范围执行。分类依据及结果写入 job 日志。
-- 仅 `docs/`、`openspec/` 的 Markdown 或根 `README.md`、`CONTRIBUTING.md` 改动时运行文案、OpenSpec 和格式检查；仅 Web 的 `src/`、`test/` 文件及上述文档改动时，运行完整 `verify` 和 Web 生产构建。非 identity 的已知 API 业务模块 TypeScript 源码变更运行完整 API 数据库集成、约束、native 合同及 Compose，但跳过不依赖这些源码的本地历史升级测试。仅修改允许的 API 数据库集成测试时，只执行变更的测试文件及其真实 PG 迁移前置。Web 与 API 混合、identity、共享数据库设施、迁移、升级实现、native 测试及其他未知路径，以及 main push，运行完整检查。
-- 完整范围下，`checks` 运行本地同一 `bun run verify`；`integration` 独立并行运行数据库及调度、正式 native 合同和 Compose 冒烟，分别使用独立数据库或容器。API 集成目录已包含 D9 指定调度测试，同一 job 不再重复执行指定集或重复构建。任一失败使 job 失败；两个 job 均须成功。跳过的检查不作为本次运行证据，main 仍运行完整集合。
+- CI 保留三个 required checks：`checks` 负责静态/Web，`database` 负责 PostgreSQL/历史升级，`integration` 负责正式 native/Compose；三者均须成功。
+- `plan` 按 PR 累计 diff 或 main push 的 `before` diff 计算各检查的并集。Web 源码/样式只运行 Web 检查；API、共享包、数据库、native 和运行镜像分别按消费者展开，不因混合改动自动全量。删除/重命名检查涉及的路径；未知输入、无效 base 和空 diff 回退完整验证。具体路径由 `scripts/ci/select-scope.mjs` 及其行为测试维护。
+- `checks` 经 `scripts/ci/checks.mjs` 独立执行 Web、API、共享包、工具脚本及 Harness 静态检查；`common` 中的冻结名扫描与文档检查每次执行，不受分域选择或历史结果沿用影响。本地整仓 `bun run verify` 保留。`database` 经 `scripts/ci/database.sh` 执行适用的真实 PG16 检查；`integration` 经 `scripts/ci/runtime.sh` 执行正式 native/Compose。Web 只构建自身的 contracts/stream-protocol 依赖，不构建后端。
+  完整数据库范围在同一 `database` job 内先执行历史升级测试（2 个文件 worker），再执行 API 数据库验证（4 个文件 worker）；API 构建仍与历史升级重叠。API-only 使用 4 个 worker，不新增 job。
+  同一 PR 可沿用祖先提交已实际成功执行的检查，但须目标分支 SHA、实际执行合并树的相关 Git 输入及 CI 定义均一致；数据库记录还须覆盖当前测试集合。无法确认执行树、查询超时、失败或跳过时执行未沿用的检查；摘要关联原运行，不把沿用记为本次执行。
 - 每个 job 独立满足自己的构建前置，不借用其他 job 的 `dist/`。`bun run build:packages` 保留 Bun 按依赖拓扑构建共享包，`bun run build` 先包后应用，`bun run build:api` 构建 API 及依赖；开发、类型检查和测试入口同样先满足包依赖。共享包构建成功后，`typecheck` 使用 Bun `--sequential` 串行执行各 workspace 的类型检查，保留全部源码、测试与 Next route typegen。同次 `verify` 仅在 `typecheck` 成功后允许单元步骤复用其共享 packages；失败即停、不消费失败构建。独立单元入口及跳过 typecheck 的 verify 仍真实构建，不通过旧 `dist/` 或跨次运行标记判定准备完成。
-- 测试使用 `bun:test`，保留既有测试集合、断言与文件级状态隔离；文件级并行不能替换成共享状态用例的文件内 concurrent，mock/spy/时钟按原生命周期恢复。只读边界 fixture 最多同时启动两个真实 dependency-cruiser CLI；各红例仍独立检查退出码、规则名与实际解析目标，绿例保留 err/JSON 两种真实扫描，清理前等待已排队及运行中的 CLI 结束。`bun run test:unit` 排除数据库集与正式 native 合同集；`bun run test:contracts` 保留 API healthz 进程内/HTTP 两组及契约包，并运行 §4.2 的正式跨语言合同。`bun run test:integration` 包含真实 PG 集成文件；`bun run test:scheduler` 跑 D9 指定集。DB 测试使用真实 PostgreSQL 16、原迁移和明确测试环境，不以跳过约束断言换绿。
+- 测试使用 `bun:test`，保留既有断言、文件级状态隔离及 mock/spy/时钟恢复，不把文件级并行换成共享状态的用例内 concurrent。只读边界 fixture 最多同时启动两个真实 dependency-cruiser CLI。`bun run test:unit` 排除数据库集与正式 native 合同集；`bun run test:contracts` 运行 §4.2 的合同及 `ci/native-tests.txt` 中的 native 集成文件，CI 数据库入口排除同一清单。`bun run test:integration` 包含真实 PG 集成文件；`bun run test:scheduler` 跑 D9 指定集。DB 使用真实 PG16、原迁移和明确测试环境，不削弱约束换绿。
 - D1 继续由 Bun 下的 dependency-cruiser 执行原出边、契约依赖与环检测规则；D2 仍由 AST 插件及展示投影测试守护，不以独立文本扫描代替。非 D2 lint 规则须显式映射并记录差异，不整体关闭正确性规则或扩大 ignore。
-- Compose 冒烟构建真实 Dockerfile，在镜像内执行固定 Bun 的 fresh frozen install、依赖优先构建并以 Bun 启动服务，不要求宿主机 `dist/`，不引入缓存捷径。两轮全新卷分别检查缺失/显式提供 `TZDB_VERSION`：`/healthz` 200，未登录 `/api/v1/me`、`/api/v1/brief` 401；缺 TZDB 的 `/readyz` 503 + `TZDB_UNAVAILABLE`，提供后 200。
-- 仓颉正式构建与真实消费者验证由 `integration` 调用本地同一根入口；旧 Spike S1–S3 不再是候选第二实现转正门（11），限定合同通过不等于完整 R1。
+- Compose 使用 `infra/compose/ci.yaml` 复用本次镜像，不使用用户的 `local.yaml`；两轮全新卷分别验证缺 TZDB 时 `/readyz` 503 + `TZDB_UNAVAILABLE`、提供版本后 200，以及 `/healthz` 200、未认证业务401。镜像缓存仅复用构建层，检查沿用按上述证据规则判断。
 
 ### 4.1 非 D2 lint 规则映射
 
 旧 `typescript-eslint.configs.recommended` 不包含 `eslint:recommended`。原 20 条 TS 规则与 TS-only 的 4 条 core 规则均保留为 `error`；Oxlint 额外 correctness 规则为 `warn`，不降低下列错误级别。配置只加载 `eslint`、`typescript` 和仓库 D2 插件，不借工具默认值新增其他规则集。
+`require-yield` 仅对明确只抛错、不得产生模型事件的测试提供者作附理由的单行例外；不添加虚假 yield，不关闭全局规则或改变业务断言。
 
 | 原规则                                                   | Oxlint 1.89.0 规则                               |
 | -------------------------------------------------------- | ------------------------------------------------ |
@@ -101,7 +103,7 @@ Observed / Required / Proposed / Deferred 同 01。
 
 ### 4.2 D8 正式 Harness 消费者合同（Required）
 
-`bun run test:contracts` 是本地与 `integration` 的唯一合同入口。执行环境为 Linux x64（Windows 使用 WSL）与 Docker；入口自己建立独立网络和全新 PG16，传入专门测试身份 secret，不继承调用者的数据库或个人模型配置。数据库角色可创建各文件的隔离 schema。缺构建/运行前置即失败，不跳过 native/数据库消费者。
+`bun run test:contracts` 是本地合同命令；CI 经 `scripts/ci/runtime.sh` 运行同一合同并额外执行 Compose。执行环境为 Linux x64（Windows 使用 WSL）与 Docker；合同消费者自建独立网络和全新 PG16，使用测试身份 secret，不继承个人数据库或模型配置。缺前置即失败，必需消费者不得跳过。
 
 入口从当前工作树构建 `infra/docker/Dockerfile` 的生产镜像，在同一固定 Bun/native runtime 中执行合同，避免编译镜像与宿主 ABI 不一致。锁定 SDK/stdx、正式仓颉源与动态库闭包沿用生产构建，不改用旧 `dist/`、预置 ELF 或脚本 Harness。可复用与当前输入完全一致的 Docker 层缓存；这不等于借用另一个 job 的产物。每次使用独立镜像标签、容器及报告目录；成功、失败均清理本次资源，不删除用户数据库或其他镜像标签。
 

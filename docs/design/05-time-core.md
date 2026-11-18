@@ -147,7 +147,7 @@ API 应用装配边界拥有一份不可变规则上下文：实际规则内容�
 
 这不是全站 readiness 中间件：旧冻结 approval/task 的读取、已有快照的按钮确认、task 取消/撤销与 worker 执行按既有权限/有效期/回执/冻结 UTC 继续，不重新 normalize，也不被新规则门拦住。对话读取、只读聊天或仅取消旧任务等不作新时间归一的操作不因规则坏包被统一拒绝。同键同请求重放已存终结帧不需要新归一，不造新 run；同键异体/原 run 仍执行仍为既有409，不能借故障重执行。
 
-D7 兼容要求：保留两轮全新卷、缺版本503含 TZDB_UNAVAILABLE、有真规则且 DB 可达200、healthz200及未认证业务401。Observed `scripts/compose-smoke.sh` 的有版本轮写 `2024a`，与实际 `fixture-v1` 不符；后续实施应改为实际加载版本并同步相关 fixture，不为保留旧假版本而放宽校验，不在本契约 PR 改脚本/CI。五门名称及 D1–D10 不变。
+D7 兼容要求：`scripts/ci/compose-smoke.sh` 保留两轮全新卷，缺版本503含 TZDB_UNAVAILABLE，显式 `fixture-v1` 且 DB 可达时200，healthz200及未认证业务401。
 
 ## 6. 四个基准测例（先路通再钉墙）[Required]
 

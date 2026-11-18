@@ -88,6 +88,7 @@ import {
         maxIterations: 8,
         maxTokens: 8000,
         contextPolicy: createContextPolicy({ completionCap: 512, model: 'routing-pause' }),
+        // oxlint-disable-next-line require-yield -- Failure-only provider intentionally emits no events.
         model: async function* () {
           throw new Error('unexpected model');
         },

@@ -87,6 +87,7 @@ const frame = <T extends HarnessRequest['type']>(
         maxIterations: 8,
         maxTokens: 8000,
         contextPolicy,
+        // oxlint-disable-next-line require-yield -- Failure-only provider intentionally emits no events.
         model: async function* () {
           modelCalls++;
           throw new Error('unexpected model call');

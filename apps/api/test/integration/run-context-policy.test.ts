@@ -78,7 +78,7 @@ maybe('harness frozen admission context', () => {
     );
     await pool.query(
       `INSERT INTO agent_runs(id,owner_id,conversation_id,agent_revision,mode,status,budget_max_iterations,budget_max_tokens,execution,input_message_id,frozen_context,tools_allowlist)
-      VALUES($1,$2,$3,'context/test','chat','running',8,8000,$4,$5,'{}','[\"list_tasks\"]')`,
+      VALUES($1,$2,$3,'context/test','chat','running',8,8000,$4,$5,'{}','["list_tasks"]')`,
       [runId, ownerId, conversationId, execution, userMessageId],
     );
     await pool.query(
