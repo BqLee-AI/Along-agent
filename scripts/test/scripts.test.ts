@@ -59,7 +59,7 @@ describe('governance scripts', () => {
           ? "SELECT 'SERVICE_NOT_READY';\n"
           : 'export const code = "SERVICE_NOT_READY";\n',
       );
-      const result = spawnSync(node, [join(target, 'scripts/ci/checks.mjs'), 'common'], {
+      const result = spawnSync(process.execPath, [join(target, 'scripts/ci/checks.mjs'), 'common'], {
         cwd: target,
         encoding: 'utf8',
       });
