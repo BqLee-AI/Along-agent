@@ -1,4 +1,4 @@
-export { ERROR_CODES } from './errors.js';
+export { ERROR_CODES, httpStatusForError } from './errors.js';
 export type { ErrorEntry, ErrorName } from './errors.js';
 export { EnvelopeSchema, ErrorBodySchema } from './envelope.js';
 export type { Envelope, ErrorBody } from './envelope.js';
