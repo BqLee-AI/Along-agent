@@ -160,7 +160,7 @@ async function startWriters(file, config, directory, artifact, database) {
       config,
       directory,
       ['up', '-d', '--no-build', '--no-deps', '--force-recreate', '--pull', 'never', 'api'],
-      { image: artifact.image, source: artifact.source },
+      { image: artifact.image, source: artifact.source, withFeishu: true },
     );
   }
   await waitFor(async () => {

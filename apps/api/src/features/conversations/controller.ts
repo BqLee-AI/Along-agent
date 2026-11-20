@@ -63,6 +63,7 @@ export function createConversationController(deps: ConversationDeps, access: Htt
           requestId,
           body,
           idempotencyKeyOf(request),
+          actor.sessionId,
         );
         return streamRun(deps, started, actor, requestId);
       },

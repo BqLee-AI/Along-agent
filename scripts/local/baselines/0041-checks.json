@@ -1,0 +1,90 @@
+{
+  "version": "0041",
+  "tables": ["feishu_pending_disclosures"],
+  "columns": [
+    {
+      "table": "messages",
+      "name": "source_run_id",
+      "type": "uuid",
+      "required": false,
+      "default": ""
+    },
+    {
+      "table": "feishu_pending_disclosures",
+      "name": "run_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "feishu_pending_disclosures",
+      "name": "event_seq",
+      "type": "int8",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "feishu_pending_disclosures",
+      "name": "is_terminal",
+      "type": "bool",
+      "required": true,
+      "default": ""
+    }
+  ],
+  "constraints": [
+    {
+      "table": "messages",
+      "name": "messages_source_run_scope_fkey",
+      "type": "f",
+      "columns": ["source_run_id", "owner_id"],
+      "target": "agent_runs",
+      "delete_action": "r",
+      "target_columns": ["id", "owner_id"]
+    },
+    {
+      "table": "feishu_pending_disclosures",
+      "name": "feishu_pending_disclosures_pkey",
+      "type": "p",
+      "columns": ["run_id", "event_seq"]
+    },
+    {
+      "table": "feishu_pending_disclosures",
+      "name": "feishu_pending_disclosures_run_id_fkey",
+      "type": "f",
+      "columns": ["run_id"],
+      "target": "agent_runs",
+      "delete_action": "a",
+      "target_columns": ["id"]
+    }
+  ],
+  "additional_checks": [
+    {
+      "table": "messages",
+      "name": "messages_source_run_role_check",
+      "expression": "((source_run_id IS NULL) OR (role = 'assistant'::text))"
+    }
+  ],
+  "alter_constraints": [
+    {
+      "table": "compact_continuations",
+      "name": "compact_continuations_context_check",
+      "type": "c",
+      "columns": ["context"],
+      "expression": "\nCASE\n    WHEN (context ? 'encoding'::text) THEN ((((context ->> 'encoding'::text) = 'feishu-snapshot-aead/1'::text) AND (jsonb_typeof((context -> 'ciphertext'::text)) = 'string'::text) AND (((context - 'encoding'::text) - 'ciphertext'::text) = '{}'::jsonb) AND ((length((context ->> 'ciphertext'::text)) >= 40) AND (length((context ->> 'ciphertext'::text)) <= 1398140))) IS TRUE)\n    ELSE (octet_length((context)::text) <= 1048576)\nEND"
+    },
+    {
+      "table": "compact_continuations",
+      "name": "compact_continuations_snapshot_check",
+      "type": "c",
+      "columns": ["snapshot"],
+      "expression": "\nCASE\n    WHEN (snapshot ? 'encoding'::text) THEN ((((snapshot ->> 'encoding'::text) = 'feishu-snapshot-aead/1'::text) AND (jsonb_typeof((snapshot -> 'ciphertext'::text)) = 'string'::text) AND (((snapshot - 'encoding'::text) - 'ciphertext'::text) = '{}'::jsonb) AND ((length((snapshot ->> 'ciphertext'::text)) >= 40) AND (length((snapshot ->> 'ciphertext'::text)) <= 1398140))) IS TRUE)\n    ELSE (octet_length((snapshot)::text) <= 1048576)\nEND"
+    }
+  ],
+  "baseline_checks": [
+    {
+      "table": "tool_invocations",
+      "name": "tool_invocations_result_check",
+      "expression": "(((state = ANY (ARRAY['reserved'::text, 'unknown'::text])) AND (outcome_kind IS NULL) AND (result_version IS NULL) AND (accepted_result IS NULL) AND (approval_id IS NULL) AND (accepted_attempt_id IS NULL) AND (accepted_request_id IS NULL) AND (accepted_at IS NULL) AND (evidence_ref IS NULL)) OR ((state = 'completed'::text) AND (outcome_kind IS NOT NULL) AND (result_version = 1) AND (accepted_result IS NOT NULL) AND (jsonb_typeof(accepted_result) = 'object'::text) AND (octet_length((accepted_result)::text) <=\nCASE\n    WHEN ((tool_id = 'feishu_docx_read'::text) AND (outcome_kind = 'success'::text) AND ((accepted_result ->> 'encoding'::text) = 'feishu-aead/2'::text) AND (jsonb_typeof((accepted_result -> 'ciphertext'::text)) = 'string'::text) AND (jsonb_typeof((accepted_result -> 'keyId'::text)) = 'string'::text) AND ((((accepted_result - 'encoding'::text) - 'ciphertext'::text) - 'keyId'::text) = '{}'::jsonb)) THEN 321000\n    ELSE 262144\nEND) AND (accepted_attempt_id IS NOT NULL) AND (accepted_request_id IS NOT NULL) AND (accepted_at IS NOT NULL) AND (((outcome_kind = 'approval_pending'::text) AND (approval_id IS NOT NULL)) OR ((outcome_kind <> 'approval_pending'::text) AND (approval_id IS NULL)))))"
+    }
+  ]
+}

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Window } from 'happy-dom';
-import type { RunView } from '@along/contracts';
+import type { MessageHistoryItem, RunView } from '@along/contracts';
 import {
   useConversationTask,
   type ConversationTask,
@@ -112,6 +112,7 @@ async function fixture(
     setRun: (value: RunView) => void;
     complete: () => void;
     storage: Pick<Storage, 'getItem'>;
+    publishArchive: (message: MessageHistoryItem) => void;
   }) => Promise<void>,
   stored?: string,
   pauseFirst = false,
@@ -148,6 +149,8 @@ async function fixture(
   const storage = browser.sessionStorage;
   if (stored) storage.setItem(`conversation-compact:${cid}`, stored);
   let current: RunView = run;
+  let archived: MessageHistoryItem | undefined;
+  let terminalRunRead = false;
   let eventStream: ReadableStreamDefaultController<Uint8Array> | null = null;
   const complete = () => {
     current = { ...current, status: 'done', pause: null };
@@ -190,9 +193,13 @@ async function fixture(
       current = { ...current, status: 'running', pause: null, attempt_no: 2 };
       return envelope({ status: 'continued', run_id: rid, pause_id: pid });
     }
-    if (url.includes('/runs?') || url.includes('/messages?'))
-      return envelope({ items: [], next_cursor: null });
-    if (url.includes(`/runs/${rid}`)) return envelope(current);
+    if (url.includes('/messages?'))
+      return envelope({ items: terminalRunRead && archived ? [archived] : [], next_cursor: null });
+    if (url.includes('/runs?')) return envelope({ items: [], next_cursor: null });
+    if (url.includes(`/runs/${rid}`)) {
+      if (current.status === 'done') terminalRunRead = true;
+      return envelope(current);
+    }
     throw new Error(`unexpected request: ${url}`);
   }) as typeof fetch;
   let task: HookHost | null = null;
@@ -206,6 +213,9 @@ async function fixture(
       },
       complete,
       storage,
+      publishArchive: (message) => {
+        archived = message;
+      },
     });
   } finally {
     if (task) await task.unmount();
@@ -238,6 +248,50 @@ describe('automatic compact view model', () => {
       expect(calls.filter((call) => call.method !== 'GET')).toHaveLength(0);
       await advance();
       expect(calls.filter((call) => call.url.includes('/events?'))).toHaveLength(1);
+    });
+  });
+
+  it('keeps the released reply visible when the terminal archive is withheld', async () => {
+    const initial: RunView = {
+      ...paused('runtime', 'automatic_compact'),
+      authorization_revision: 'delegation/1',
+      goal_result: null,
+      status: 'running',
+      pause: null,
+    };
+    await fixture(initial, async ({ task, complete }) => {
+      await until(() => task.text === '续跑回复');
+      await act(async () => complete());
+      await until(() => task.value.run?.status === 'done' && !task.value.reading);
+      expect(task.value.messages).toEqual([]);
+      expect(task.text).toBe('续跑回复');
+    });
+  });
+
+  it('does not duplicate a reply when its archive appears after the Run read', async () => {
+    const initial: RunView = {
+      ...paused('runtime', 'automatic_compact'),
+      authorization_revision: 'delegation/1',
+      goal_result: null,
+      status: 'running',
+      pause: null,
+    };
+    await fixture(initial, async ({ task, complete, publishArchive }) => {
+      await until(() => task.text === '续跑回复');
+      await act(async () => {
+        publishArchive({
+          message_id: other,
+          role: 'assistant',
+          content: '续跑回复（归档）',
+          created_at: '2026-11-20T00:00:00.000000Z',
+          source_run_id: rid,
+        });
+        complete();
+      });
+      await until(() => task.value.run?.status === 'done' && !task.value.reading);
+      expect(task.value.run?.goal_result).toBeNull();
+      expect(task.value.messages[0]?.content).toBe('续跑回复（归档）');
+      expect(task.value.liveReply).toBe(false);
     });
   });
 

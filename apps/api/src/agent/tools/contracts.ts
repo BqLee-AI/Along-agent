@@ -1,5 +1,6 @@
 import type { CreatedApproval } from '../../features/approvals/public.js';
 import type { TimeContext, TimeFailure } from '../../features/time/public.js';
+import type { FeishuBotDocxGrant } from '../../features/office-connectors/public.js';
 import type {
   WorkspaceGrant,
   WorkspaceResult,
@@ -56,7 +57,8 @@ export type ToolId =
   | (typeof DELEGATION_WORKSPACE_WRITE_TOOL_IDS)[number]
   | (typeof DELEGATION_WORKSPACE_CREATE_TOOL_IDS)[number]
   | (typeof R3_MEMORY_TOOL_IDS)[number]
-  | typeof R3_MEMORY_SOURCE_TOOL_ID;
+  | typeof R3_MEMORY_SOURCE_TOOL_ID
+  | 'feishu_docx_read';
 
 export const TASK_STATES = [
   'saved',
@@ -84,6 +86,7 @@ export interface ToolContext {
   timeContext: TimeContext;
   workspaceGrant?: WorkspaceGrant | null;
   workspaceGrants?: WorkspaceGrant[];
+  feishuDocx?: { connectionId: string; sessionId: string; url: string } | FeishuBotDocxGrant;
   documentEdit?: {
     base_read_invocation_id: string;
     relative_path: string;
@@ -217,6 +220,16 @@ export interface MemoryRecallPayload {
   completeness: 'complete' | 'degraded' | 'incomplete';
 }
 export type MemorySourcePayload = z.infer<typeof HarnessMemorySourceSchema>;
+export interface FeishuDocxPayload {
+  kind: 'feishu_docx_read';
+  source: { type: 'feishu_docx'; url: string; title: string; identity?: 'bot' };
+  revision: { before: number; after: number };
+  fetched_at: string;
+  content_hash: string;
+  representation: 'plain_text';
+  completeness: 'complete_plain_text';
+  content: string;
+}
 export type ToolPayload =
   | ApprovalPayload
   | DocumentApprovalPayload
@@ -232,6 +245,7 @@ export type ToolPayload =
   | MemorySavedPayload
   | MemoryRecallPayload
   | MemorySourcePayload
+  | FeishuDocxPayload
   | EvidencePayload
   | WorkspaceResult;
 export type ToolResult =

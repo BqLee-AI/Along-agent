@@ -14,6 +14,7 @@ import type { ContextPolicy } from '@along/contracts';
 import type { HarnessProcessServices } from '../harness/harness-process.js';
 import type { RoutingRuntime } from '../routing/index.js';
 import type { RunOwnership } from './run-ownership.js';
+import type { FeishuBotDocxGrant } from '../../features/office-connectors/public.js';
 
 export interface HarnessServices extends HarnessProcessServices {
   maxIterations: number;
@@ -27,6 +28,7 @@ export interface HarnessServices extends HarnessProcessServices {
 
 /** Process execution augments frozen conversation facts, never the reverse. */
 export interface RunContext extends Omit<RunFacts, 'ownership'> {
+  feishuDocx?: { connectionId: string; sessionId: string; url: string } | FeishuBotDocxGrant;
   ownership?: RunOwnership;
 }
 
@@ -57,4 +59,9 @@ export interface StartResult {
   afterSeq?: number | null;
 }
 
-export type EventWriter = (event: ThreadEvent) => Promise<boolean>;
+/** A writer called with authority held must hand off without waiting for demand. */
+export type EventWriter = {
+  (event: ThreadEvent, authority?: 'held'): Promise<boolean>;
+  /** Wait for downstream demand before acquiring delivery authority; false means closed. */
+  ready?: () => Promise<boolean>;
+};

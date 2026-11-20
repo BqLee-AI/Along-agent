@@ -135,7 +135,7 @@ extend Harness {
         keys(reservation, ["invocation_id"])
         let id = uuid(field(reservation, "invocation_id"))
         let result = pipe.request("invoke", obj([("invocation_id", text(id)), ("tool_id", text(name)), ("args", args)]))
-        resultCheck(result, true, id)
+        resultCheck(result, true, id, name)
         let status = ref(field(result.asObject(), "status"))
         if (status == "unknown") { finish("failed", "TOOL_EFFECT_UNKNOWN"); return true }
         nextCall++

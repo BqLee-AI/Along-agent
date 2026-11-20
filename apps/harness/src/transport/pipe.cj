@@ -72,7 +72,7 @@ protected class Pipe {
         payload.put("protocol", text(protocol))
         payload.put("type", text(kind))
         payload.put("request_ref", text(id))
-        let line = payload.toString()
+        let line = wireJson(payload)
         if (line.size > FRAME_LIMIT) { throw RemoteFailure("HARNESS_CONTEXT_LIMIT") }
         getStdOut().write(line + "\n")
         getStdOut().flush()
@@ -90,7 +90,7 @@ protected class Pipe {
         payload.put("protocol", text(protocol))
         payload.put("type", text(kind))
         payload.put("request_ref", text("r${serial + ahead}"))
-        return payload.toString().size <= FRAME_LIMIT
+        return wireJson(payload).size <= FRAME_LIMIT
     }
     protected func ack(kind: String, payload: JsonObject, name: String): Unit {
         let v = request(kind, payload).asObject()

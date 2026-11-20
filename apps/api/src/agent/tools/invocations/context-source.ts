@@ -1,11 +1,16 @@
 import type { PoolClient } from 'pg';
 import { isDeepStrictEqual } from 'node:util';
-import { HarnessObservationSchema, workspaceGrantSchema } from '@along/contracts';
+import {
+  HarnessObservationSchema,
+  workspaceGrantSchema,
+  type HarnessObservation,
+  type HarnessR3Snapshot,
+} from '@along/contracts';
 import { ApplicationError, forbidden } from '../../../platform/errors.js';
 import { assertToolRunBinding } from '../../../features/conversations/public.js';
 import { validateWorkspaceGrant } from '../../../features/workspaces/public.js';
 import { isActiveOwner } from '../../../features/identity/public.js';
-import { hydrateWorkspaceReadResult } from './accepted-result.js';
+import { hydrateWorkspaceReadResult, requireCurrentFeishuBotAuthority } from './accepted-result.js';
 import type { ToolContext } from '../contracts.js';
 
 export function contextSourceCorrupt(): ApplicationError {
@@ -18,7 +23,7 @@ export interface ContextSourceMetadata {
   state: string;
   result_version: number | null;
   outcome_kind: string | null;
-  frozen_context: { workspaceGrant?: unknown };
+  frozen_context: { workspaceGrant?: unknown; feishuDocx?: unknown };
   result_status: string | null;
   kind: string | null;
   source: unknown;
@@ -48,7 +53,8 @@ export async function readContextSourceMetadata(
   if (invocationIds.length === 0) return new Map();
   const { rows } = await client.query<ContextSourceMetadata>(
     `SELECT invocation_id,tool_id,state,result_version,outcome_kind,frozen_context,
-       accepted_result->>'status' AS result_status,p->>'kind' AS kind,
+       CASE WHEN accepted_result->>'encoding' IN ('feishu-aead/1','feishu-aead/2') THEN 'ok' ELSE accepted_result->>'status' END AS result_status,
+       CASE WHEN accepted_result->>'encoding' IN ('feishu-aead/1','feishu-aead/2') THEN 'feishu_docx_read' ELSE p->>'kind' END AS kind,
        CASE p->>'kind'
          WHEN 'read' THEN (p-'content') || jsonb_build_object('content_total',char_length(p->>'content'))
          WHEN 'list' THEN (p-ARRAY['entries','failures']) || jsonb_build_object(
@@ -59,7 +65,8 @@ export async function readContextSourceMetadata(
            'failures_total',CASE WHEN jsonb_typeof(p->'failures')='array' THEN jsonb_array_length(p->'failures') END)
          WHEN 'context_slice' THEN p-ARRAY['content','items']
          ELSE NULL END AS source,
-       CASE WHEN accepted_result ? 'encoding' OR accepted_result ? 'data'
+       CASE WHEN coalesce(accepted_result->>'encoding','') NOT IN ('feishu-aead/1','feishu-aead/2')
+         AND (accepted_result ? 'encoding' OR accepted_result ? 'data')
          THEN accepted_result ELSE NULL END AS encoded_result,
        CASE WHEN p->>'kind'='context_slice' THEN
          CASE WHEN jsonb_typeof(p->'content')='string' THEN char_length(p->>'content')
@@ -260,4 +267,66 @@ export async function assertContextSourceAuthorized(
   if (row.result_version !== 1 || !row.shape_valid) throw contextSourceCorrupt();
   await authorizeSliceOrigin(client, ctx, row);
   return row;
+}
+
+/** Reauthorize already hydrated observations immediately before local disclosure.
+ * The caller holds the attempt/Run or compact eligibility lock. No body reads. */
+export async function assertContextSourcesAuthorized(
+  client: PoolClient,
+  ctx: ToolContext,
+  invocationIds: readonly string[],
+): Promise<void> {
+  if (!(await isActiveOwner(client, ctx.ownerId, { lock: 'share' })))
+    throw forbidden('owner authorization revoked');
+  const metadata = await readContextSourceMetadata(client, ctx, invocationIds);
+  let privateContent = false;
+  for (const id of invocationIds) {
+    const row = metadata.get(id);
+    if (!row || row.state !== 'completed') throw contextSourceCorrupt();
+    authorizeContextSource(ctx, row);
+    if (row.result_version !== 1 || !row.shape_valid) throw contextSourceCorrupt();
+    await authorizeSliceOrigin(client, ctx, row, metadata);
+    if (row.tool_id === 'feishu_docx_read' && row.outcome_kind === 'success') {
+      if (row.kind !== 'feishu_docx_read' || row.result_status !== 'ok')
+        throw contextSourceCorrupt();
+      if (!ctx.feishuDocx || !isDeepStrictEqual(row.frozen_context?.feishuDocx, ctx.feishuDocx))
+        throw forbidden('Feishu observation authorization expired');
+      privateContent = true;
+    }
+  }
+  if (privateContent) await requireCurrentFeishuBotAuthority(client, ctx);
+}
+
+/** Successful Docx receipts have one canonical body in the v8 native units.
+ * Confirm the saved observation against the accepted local receipt before
+ * omitting its duplicate from start.observations. Older protocols keep it. */
+export function omitRetainedDocxObservations(
+  snapshot: HarnessR3Snapshot,
+  observations: HarnessObservation[],
+): HarnessObservation[] {
+  const units = snapshot.native_state.units;
+  if (units.length !== snapshot.tool_refs.length || units.length !== observations.length)
+    throw contextSourceCorrupt();
+  return observations.filter((observation, i) => {
+    const saved = units[i]!;
+    if (
+      observation.invocation_id !== snapshot.tool_refs[i] ||
+      saved.observation.invocation_id !== observation.invocation_id ||
+      saved.observation.tool_id !== observation.tool_id
+    )
+      throw contextSourceCorrupt();
+    if (
+      observation.tool_id !== 'feishu_docx_read' ||
+      observation.view !== 'full' ||
+      observation.result.status !== 'ok'
+    )
+      return true;
+    if (
+      observation.result.result.kind !== 'feishu_docx_read' ||
+      saved.projected ||
+      !isDeepStrictEqual(saved.observation, observation)
+    )
+      throw contextSourceCorrupt();
+    return false;
+  });
 }

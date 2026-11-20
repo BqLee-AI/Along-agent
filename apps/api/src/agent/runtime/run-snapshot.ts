@@ -11,7 +11,15 @@ export async function readSnapshot(
   run: RunRow,
   checkpointId: string,
 ): Promise<HarnessSnapshot | HarnessR3Snapshot> {
-  const payload = await readRunSnapshotPayload(client, run.owner_id, run.id, checkpointId);
+  const payload = await readRunSnapshotPayload(
+    client,
+    {
+      ownerId: run.owner_id,
+      conversationId: run.conversation_id,
+      runId: run.id,
+    },
+    checkpointId,
+  );
   if (run.frozen_context?.execution_profile === 'compact-memory/1')
     return decodeCompactSnapshot(payload);
   const snapshot = decodeHistoricalSnapshot(payload);

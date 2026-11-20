@@ -61,6 +61,8 @@ export async function appendEvent(
 
 export interface TerminalFactOptions {
   preserveAttemptStatus?: boolean;
+  /** The terminal answer may depend on a Run-scoped private receipt. */
+  excludeAssistantFromHistory?: boolean;
   /** Combines other owners' evidence with this transaction's one delta aggregation. */
   prepareGoal?: (client: PoolClient, answer: string) => Promise<GoalResult>;
 }
@@ -75,11 +77,16 @@ export async function commitTerminalFacts(
 ): Promise<ThreadEvent> {
   // The caller holds current attempt -> Run; the message and visible terminal
   // checkpoint are part of that same transaction, including persistence faults.
+  // Failure and cancellation can preserve delivered output, not unpublished
+  // private deltas that the owner stream never received.
   const deltas = await client.query<{ delta: string }>(
     `SELECT c.payload->'payload'->>'delta' AS delta FROM run_checkpoints c
       JOIN run_attempts a ON a.id=c.attempt_id WHERE a.run_id=$1 AND c.kind='message.delta'
+      AND ($2 OR NOT EXISTS (
+        SELECT 1 FROM feishu_pending_disclosures p WHERE p.run_id=a.run_id AND p.event_seq=c.event_seq
+      ))
       ORDER BY c.event_seq`,
-    [context.runId],
+    [context.runId, status === 'done'],
   );
   const answer = deltas.rows.map((row) => row.delta).join('');
   if (options?.prepareGoal) {
@@ -103,6 +110,7 @@ export async function commitTerminalFacts(
       role: 'assistant',
       content: text,
       requestId: null,
+      sourceRunId: options?.excludeAssistantFromHistory ? context.runId : null,
     });
   }
   const type =

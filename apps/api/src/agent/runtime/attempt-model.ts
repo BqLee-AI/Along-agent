@@ -7,6 +7,7 @@ import {
 } from '@along/contracts';
 import { ApplicationError, forbidden, stateConflict } from '../../platform/errors.js';
 import { resolveRunSelection } from '../../features/model-providers/public.js';
+import { requireCurrentFeishuBotAuthority } from '../tools/invocations/accepted-result.js';
 import { readRunInvocationStates } from '../tools/invocations/run-state.js';
 import { toolContext, unavailable } from './context.js';
 import { approvalAuthorizesActions, type AttemptEnvironment } from './attempt-state.js';
@@ -159,11 +160,29 @@ export function createModelHandlers(environment: AttemptEnvironment) {
         )
       )
         throw stateConflict('approval requires suspension before further actions');
+      const privateReceipt = states.some(
+        (row) =>
+          row.tool_id === 'feishu_docx_read' &&
+          row.state === 'completed' &&
+          row.outcome_kind === 'success',
+      );
+      if (privateReceipt) await requireCurrentFeishuBotAuthority(client, context);
+      // Hold the Run and Feishu grant locks through local enqueue, not the provider response.
+      const authorizeDispatch = privateReceipt
+        ? (enqueue: () => void) =>
+            guarded(async (current) => {
+              await assertActionAuthority(current);
+              await requireCurrentFeishuBotAuthority(current, context);
+              enqueue();
+            })
+        : undefined;
       // Establish the model reservation under the same attempt → Run
       // locks used by pause registration, before invoking the transport.
       attemptState.modelStream = {
         ref: request.request_ref,
-        iterator: transport.model(request, tools, modelSignal)[Symbol.asyncIterator](),
+        iterator: transport
+          .model(request, tools, modelSignal, authorizeDispatch)
+          [Symbol.asyncIterator](),
         pendingDelta: null,
         pulling: false,
       };

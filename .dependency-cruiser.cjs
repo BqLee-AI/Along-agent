@@ -29,6 +29,7 @@ const featureAdapters = exactPaths([
   'apps/api/src/features/identity/account/controller.ts',
   'apps/api/src/features/memory/controller.ts',
   'apps/api/src/features/model-providers/http/controller.ts',
+  'apps/api/src/features/office-connectors/controller.ts',
   'apps/api/src/features/tasks/controller.ts',
   'apps/api/src/features/workspaces/http/controller.ts',
 ]);

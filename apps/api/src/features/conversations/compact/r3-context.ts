@@ -95,7 +95,8 @@ async function freezeContext(
      FROM messages m
      LEFT JOIN compact_heads h ON h.owner_id=$1 AND h.conversation_id=$2
      LEFT JOIN compact_summary_sources s ON s.summary_id=h.summary_id AND s.message_id=m.id
-     WHERE m.owner_id=$1 AND m.conversation_id=$2 AND m.role IN ('user','assistant')`,
+     WHERE m.owner_id=$1 AND m.conversation_id=$2 AND m.role IN ('user','assistant')
+       AND m.source_run_id IS NULL`,
       [ownerId, conversationId],
     )
   ).rows[0];
@@ -125,7 +126,8 @@ async function freezeContext(
   // cutoff. A late committed message may sort between covered predecessors.
   const ordered = await client.query<{ id: string }>(
     `SELECT id FROM messages WHERE owner_id=$1 AND conversation_id=$2
-       AND role IN ('user','assistant') AND id=ANY($3::uuid[]) ORDER BY created_at,id`,
+       AND role IN ('user','assistant') AND source_run_id IS NULL
+       AND id=ANY($3::uuid[]) ORDER BY created_at,id`,
     [ownerId, conversationId, selectedIds],
   );
   if (ordered.rows.length !== selectedIds.length)
@@ -139,6 +141,7 @@ async function freezeContext(
     await client.query<Message>(
       `SELECT m.id AS message_id,m.role,m.content FROM unnest($3::uuid[]) WITH ORDINALITY AS refs(id,position)
      JOIN messages m ON m.id=refs.id AND m.owner_id=$1 AND m.conversation_id=$2 AND m.role IN ('user','assistant')
+       AND m.source_run_id IS NULL
      ORDER BY refs.position`,
       [ownerId, conversationId, ids],
     )

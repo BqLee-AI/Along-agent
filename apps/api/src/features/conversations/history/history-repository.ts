@@ -27,7 +27,10 @@ export interface ConversationHistoryRow extends HistoryBoundary {
   title_message_id: string | null;
   title_content: string | null;
 }
-export interface MessageHistoryRow extends MessageHistoryItem, HistoryBoundary {}
+export interface MessageHistoryRow
+  extends Omit<MessageHistoryItem, 'source_run_id'>, HistoryBoundary {
+  source_run_id: string | null;
+}
 export interface RunHistoryRow
   extends Omit<ConversationRunHistoryItem, 'model_selection'>, HistoryBoundary {}
 
@@ -46,7 +49,13 @@ function pageSql(kind: HistoryCursor['kind']): string {
       : `AND x.conversation_id=$2 AND EXISTS (
     SELECT 1 FROM conversations parent WHERE parent.id=x.conversation_id AND parent.owner_id=$1)`
   }
-    ${kind === 'messages' ? "AND x.role IN ('user','assistant')" : ''}
+    ${
+      kind === 'messages'
+        ? `AND x.role IN ('user','assistant') AND NOT EXISTS (
+            SELECT 1 FROM feishu_pending_disclosures p WHERE p.run_id=x.source_run_id AND p.is_terminal
+          )`
+        : ''
+    }
     ${kind === 'runs' ? 'AND ($8::uuid IS NULL OR x.id=$8::uuid)' : ''}`;
   const order = kind === 'conversations' ? 'DESC' : 'ASC';
   const comparison = kind === 'conversations' ? '<' : '>';
@@ -113,7 +122,7 @@ export async function listMessageHistory(
 ): Promise<MessageHistoryRow[]> {
   const result = await db.query<MessageHistoryRow>(
     `${pageSql('messages')}
-    SELECT p.id AS message_id,p.role,p.content,${utc('p.created_at')} AS created_at,${boundaryColumns}
+    SELECT p.id AS message_id,p.role,p.content,p.source_run_id,${utc('p.created_at')} AS created_at,${boundaryColumns}
     FROM page p CROSS JOIN boundary b ORDER BY p.created_at ASC,p.id ASC`,
     values(args),
   );

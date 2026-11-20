@@ -103,10 +103,12 @@ extend Harness {
     }
     func observationCheck(o: JsonObject): Unit {
         let view = str(field(o, "view"), 16)
-        uuid(field(o, "invocation_id")); ref(field(o, "tool_id"))
+        uuid(field(o, "invocation_id"))
+        let toolId = ref(field(o, "tool_id"))
+        if (toolId == "feishu_docx_read") { require(tools.contains(toolId) && view == "full") }
         if (view == "full") {
             keys(o, ["view", "invocation_id", "tool_id", "result"])
-            resultCheck(field(o, "result"), false, "")
+            resultCheck(field(o, "result"), false, "", toolId)
             return
         }
         require(view == "projected" && tools.contains("read_run_observation"))
@@ -149,7 +151,42 @@ extend Harness {
             require(workspaceIds.contains(str(field(s, "workspace_id"), FRAME_LIMIT)))
         }
     }
-    func resultCheck(v: JsonValue, outcome: Bool, id: String): Unit {
+    func feishuDocxCheck(payload: JsonObject): Unit {
+        keys(payload, ["kind", "source", "revision", "fetched_at", "content_hash", "representation", "completeness", "content"])
+        let source = field(payload, "source").asObject()
+        keys(source, ["type", "url", "title", "identity"])
+        require(ref(field(source, "identity")) == "bot")
+        require(ref(field(source, "type")) == "feishu_docx")
+        let url = str(field(source, "url"), 512)
+        let prefix = "https://"
+        let separator = ".feishu.cn/docx/"
+        let documentStart = url.size - 27
+        let hostEnd = documentStart - separator.size
+        require(hostEnd > prefix.size && url.startsWith(prefix) && url[hostEnd..documentStart] == separator)
+        for (i in prefix.size..hostEnd) {
+            let b = url[i]
+            require((b >= b'a' && b <= b'z') || (b >= b'0' && b <= b'9') || b == b'-')
+        }
+        for (i in documentStart..url.size) {
+            let b = url[i]
+            require((b >= b'a' && b <= b'z') || (b >= b'A' && b <= b'Z') || (b >= b'0' && b <= b'9'))
+        }
+        require(str(field(source, "title"), 8192).size <= 8192)
+
+        let revision = field(payload, "revision").asObject()
+        keys(revision, ["before", "after"])
+        require(integer(field(revision, "before"), 1) == integer(field(revision, "after"), 1))
+        let fetched = str(field(payload, "fetched_at"), 24)
+        require(fetched.size == 24 && fetched[19] == b'.' && fetched[23] == b'Z')
+        for (i in 20..23) { require(fetched[i] >= b'0' && fetched[i] <= b'9') }
+        utcCheck(text(fetched[0..19] + "Z"))
+        hash(field(payload, "content_hash"))
+        require(ref(field(payload, "representation")) == "plain_text")
+        require(ref(field(payload, "completeness")) == "complete_plain_text")
+        require(str(field(payload, "content"), 240000).size <= 240000 && wireJson(payload).size <= 240000)
+    }
+    func resultCheck(v: JsonValue, outcome: Bool, id: String, toolId: String): Unit {
+        if (toolId == "feishu_docx_read") { require(delegated) }
         let o = v.asObject()
         let status = str(field(o, "status"), 16)
         require(status == "ok" || status == "denied" || status == "failed" || status == "unknown")
@@ -162,6 +199,12 @@ extend Harness {
         if (status == "ok") {
             let payload = field(o, "result").asObject()
             let kind = ref(field(payload, "kind"))
+            if (kind == "feishu_docx_read") {
+                require(toolId == "feishu_docx_read")
+                feishuDocxCheck(payload)
+                return
+            }
+            require(toolId != "feishu_docx_read")
             if (kind == "timezone_setting") {
                 keys(payload, ["kind", "timezone_id", "previous_timezone_id", "alias_version"])
                 for (name in ["timezone_id", "previous_timezone_id"]) {

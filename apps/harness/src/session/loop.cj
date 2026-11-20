@@ -154,12 +154,13 @@ extend Harness {
             keys(reservation, ["invocation_id"])
             let id = uuid(field(reservation, "invocation_id"))
             let result = pipe.request("invoke", obj([("invocation_id", text(id)), ("tool_id", text(name)), ("args", args)]))
-            resultCheck(result, true, id)
+            resultCheck(result, true, id, name)
             let status = str(field(result.asObject(), "status"), 16)
             if (status == "unknown") { finish("failed", "TOOL_EFFECT_UNKNOWN"); return }
             nextCall++
             toolRefs.add(text(id))
-            if (status != "ok" && (!delegated || status == "failed")) {
+            let deferFailure = name == "feishu_docx_read" && status == "failed" && pipe.protocol == "harness/v8"
+            if (!deferFailure && status != "ok" && (!delegated || status == "failed")) {
                 let code = errorCheck(field(result.asObject(), "error"))
                 checkpoint()
                 finish("failed", code)
@@ -196,9 +197,14 @@ extend Harness {
             let unit = ContextUnit(observation, false, false)
             let historyContent: JsonValue = if (isNull(content)) { text("") } else { content }
             unit.entries.add(obj([("role", text("assistant")), ("content", historyContent), ("tool_calls", calls)]))
-            let receiptContent = if (delegated) { observation.toString() } else { result.toString() }
+            let receiptContent = if (delegated) { modelObservationView(observation).toString() } else { result.toString() }
             unit.entries.add(obj([("role", text("tool")), ("tool_call_id", field(call, "id")), ("content", text(receiptContent))]))
             contextState.units.add(unit)
+            if (deferFailure) {
+                checkpoint()
+                finish("failed", errorCheck(field(result.asObject(), "error")))
+                return
+            }
         }
     }
 }

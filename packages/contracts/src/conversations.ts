@@ -42,6 +42,7 @@ export const MessageHistoryItemSchema = z
     role: z.enum(['user', 'assistant']),
     content: z.string(),
     created_at: utcMicrosecond,
+    source_run_id: uuid.optional(),
   })
   .strict();
 const originalMessage = z

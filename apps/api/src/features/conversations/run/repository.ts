@@ -21,6 +21,7 @@ import {
 } from '@along/stream-protocol';
 import type { ReminderDateSource } from '../lifecycle/reminder-date.js';
 import type { AutoCompactPolicy } from '../compact/auto-compact-policy.js';
+import type { FeishuBotDocxGrant } from '../../office-connectors/public.js';
 
 export interface RunRow {
   id: string;
@@ -52,6 +53,7 @@ export interface FrozenContext {
   workspaceSummary?: WorkspaceSummary | null;
   workspaceGrants?: WorkspaceGrant[];
   createdArtifactReadRevision?: 'owner-created/1';
+  feishuDocx?: { connectionId: string; sessionId: string; url: string } | FeishuBotDocxGrant;
   createResolutionRevision?: 'create-resolution/1' | 'create-resolution/2';
   authorization_revision?: 'delegation/1';
   execution_lifecycle?: 'request-bound' | 'server-owned';
@@ -182,20 +184,28 @@ export async function insertMessage(
     role: 'user' | 'assistant' | 'system';
     content: string;
     requestId: string | null;
+    sourceRunId?: string | null;
   },
 ): Promise<string> {
   const { rows } = await client.query<{ id: string }>(
-    `INSERT INTO messages (id, owner_id, conversation_id, role, content, request_id, created_at)
-     VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, clock_timestamp()) RETURNING id`,
-    [args.ownerId, args.conversationId, args.role, args.content, args.requestId],
+    `INSERT INTO messages (id, owner_id, conversation_id, role, content, request_id, created_at, source_run_id)
+     VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, clock_timestamp(), $6) RETURNING id`,
+    [
+      args.ownerId,
+      args.conversationId,
+      args.role,
+      args.content,
+      args.requestId,
+      args.sourceRunId ?? null,
+    ],
   );
   const id = rows[0]?.id;
   if (!id) throw new Error('message insert returned no row');
   return id;
 }
 
-// Freeze the newest 63 visible predecessors plus the complete accepted input.
-// PostgreSQL preserves microsecond ordering; current input is always last.
+// Freeze the newest 63 prompt-eligible predecessors plus the complete accepted
+// input. PostgreSQL preserves microsecond ordering; current input is always last.
 export async function listHarnessMessageRefs(
   client: Pick<Pool | PoolClient, 'query'>,
   binding: Pick<RunContext, 'ownerId' | 'conversationId' | 'userMessageId'>,
@@ -209,7 +219,7 @@ export async function listHarnessMessageRefs(
      ), history AS (
        SELECT m.id,m.created_at FROM messages m CROSS JOIN accepted a
        WHERE m.owner_id=$1 AND m.conversation_id=$2 AND m.role IN ('user','assistant')
-         AND m.id<>a.id
+         AND m.source_run_id IS NULL AND m.id<>a.id
        ORDER BY m.created_at DESC,m.id DESC LIMIT 63
      )
      SELECT id FROM (
@@ -223,7 +233,7 @@ export async function listHarnessMessageRefs(
 }
 
 // Execution and resume resolve only frozen, ordered references, never reselect
-// later history. Every message is owner/conversation/visible-role scoped.
+// later history. Every message is owner/conversation/eligible-role scoped.
 export async function readHarnessMessages(
   client: Pick<Pool | PoolClient, 'query'>,
   binding: Pick<RunContext, 'ownerId' | 'conversationId' | 'userMessageId'>,
@@ -241,7 +251,7 @@ export async function readHarnessMessages(
     `SELECT m.id AS message_id,m.role,m.content
      FROM unnest($3::uuid[]) WITH ORDINALITY AS refs(id,position)
      JOIN messages m ON m.id=refs.id AND m.owner_id=$1 AND m.conversation_id=$2
-       AND m.role IN ('user','assistant')
+       AND m.role IN ('user','assistant') AND m.source_run_id IS NULL
      WHERE EXISTS (SELECT 1 FROM conversations c WHERE c.id=$2 AND c.owner_id=$1)
      ORDER BY refs.position`,
     [ownerId, conversationId, messageRefs],
@@ -429,6 +439,8 @@ export async function listRunEvents(
      WHERE r.owner_id = $1 AND r.id = $2
        AND c.kind IN ('thread.started','message.delta','card.proposed','approval_required',
          'thread.completed','thread.failed','thread.cancelled')
+       AND NOT EXISTS (SELECT 1 FROM feishu_pending_disclosures p
+                       WHERE p.run_id=r.id AND p.event_seq=c.event_seq)
      ORDER BY c.event_seq ASC`,
     [ownerId, runId],
   );
@@ -443,6 +455,7 @@ export async function listConversationEvents(
     afterSeq: number | null;
     limit: number;
     runId?: string;
+    includePendingDisclosures?: boolean;
   },
 ): Promise<ThreadEvent[]> {
   const { rows } = await client.query<CheckpointRow>(
@@ -457,9 +470,18 @@ export async function listConversationEvents(
        AND c.kind IN ('thread.started','message.delta','card.proposed','approval_required',
          'thread.completed','thread.failed','thread.cancelled')
        AND ($3::bigint IS NULL OR c.event_seq > $3::bigint)
+       AND ($6::boolean OR NOT EXISTS (SELECT 1 FROM feishu_pending_disclosures p
+                       WHERE p.run_id=r.id AND p.event_seq=c.event_seq))
      ORDER BY c.event_seq ASC
      LIMIT $4`,
-    [args.ownerId, args.conversationId, args.afterSeq, args.limit, args.runId ?? null],
+    [
+      args.ownerId,
+      args.conversationId,
+      args.afterSeq,
+      args.limit,
+      args.runId ?? null,
+      args.includePendingDisclosures ?? false,
+    ],
   );
   return rows.map(envelopeOf);
 }

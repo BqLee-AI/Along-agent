@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import {
   HarnessContextMeasurementSchema,
+  HarnessR3SnapshotSchema,
   type HarnessRequest,
   type HarnessSnapshot,
   type HarnessR3Snapshot,
@@ -13,7 +14,12 @@ import {
   readRunContextSource,
 } from '../tools/invocations/context-query.js';
 import type { RunContext } from './contracts.js';
-import { type LockedRun, shouldAutoCompact } from '../../features/conversations/public.js';
+import {
+  decodeRunSnapshot,
+  encodeRunSnapshot,
+  type LockedRun,
+  shouldAutoCompact,
+} from '../../features/conversations/public.js';
 import { buildHarnessStart, toolContext } from './context.js';
 import { routingIdentity } from '../routing/routing-checkpoints.js';
 
@@ -73,16 +79,48 @@ export function createPauseHandlers(
           uncoveredMessageCount: context.r3Context.messages.length,
         })
       ) {
-        const prior = await client.query(
-          `SELECT 1 FROM harness_pauses WHERE owner_id=$1 AND run_id=$2 AND purpose='automatic_compact'
-             AND snapshot->'context'=$3::jsonb LIMIT 1`,
-          [context.ownerId, context.runId, JSON.stringify(context.r3Context)],
+        const prior = await client.query<{ id: string; attempt_id: string; snapshot: unknown }>(
+          `SELECT id,attempt_id,snapshot FROM harness_pauses
+           WHERE owner_id=$1 AND run_id=$2 AND conversation_id=$3 AND purpose='automatic_compact'
+             AND snapshot IS NOT NULL
+             AND (snapshot->'context'=$4::jsonb OR snapshot ? 'encoding')`,
+          [
+            context.ownerId,
+            context.runId,
+            context.conversationId,
+            JSON.stringify(context.r3Context),
+          ],
         );
+        // A plaintext row matched the original coverage predicate in PostgreSQL.
+        // Only encrypted rows need to be opened to compare their context.
+        let alreadyCompacted = false;
+        for (const row of prior.rows) {
+          if (row.snapshot && typeof row.snapshot === 'object' && !('encoding' in row.snapshot)) {
+            alreadyCompacted = true;
+            break;
+          }
+          const previous = HarnessR3SnapshotSchema.parse(
+            await decodeRunSnapshot(
+              client,
+              {
+                ...context,
+                kind: 'pause',
+                id: row.id,
+                attemptId: row.attempt_id,
+              },
+              row.snapshot,
+            ),
+          );
+          if (routingIdentity(previous.context) === routingIdentity(context.r3Context)) {
+            alreadyCompacted = true;
+            break;
+          }
+        }
         const live = await client.query(
           `SELECT 1 FROM harness_pauses WHERE run_id=$1 AND state IN ('pending','paused')`,
           [context.runId],
         );
-        if (!prior.rowCount && !live.rowCount) {
+        if (!alreadyCompacted && !live.rowCount) {
           const id = randomUUID();
           await client.query(
             `INSERT INTO harness_pauses(id,owner_id,conversation_id,run_id,attempt_id,idempotency_key,reason,purpose,resume_source,state)
@@ -177,9 +215,18 @@ export function createPauseHandlers(
         }),
         null,
       );
+      const storedSnapshot = await encodeRunSnapshot(
+        client,
+        {
+          ...context,
+          kind: 'pause',
+          id: pending.id,
+        },
+        snapshot,
+      );
       await client.query(
         `UPDATE harness_pauses SET state='paused',snapshot=$2::jsonb WHERE id=$1`,
-        [pending.id, JSON.stringify(snapshot)],
+        [pending.id, storedSnapshot],
       );
       await client.query(`UPDATE agent_runs SET status='paused' WHERE id=$1`, [context.runId]);
       await client.query(`UPDATE run_attempts SET status='done',ended_at=now() WHERE id=$1`, [

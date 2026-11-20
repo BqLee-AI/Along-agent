@@ -16,11 +16,21 @@ export interface HarnessProcessServices {
   libraryPath?: string;
 }
 
+type EnqueueNativeFrame = () => undefined;
+export type NativeHandoff = (enqueue: EnqueueNativeFrame) => Promise<void>;
+export type NativeReplyHandoff = (
+  request: HarnessRequest,
+  result: unknown,
+  enqueue: EnqueueNativeFrame,
+) => Promise<void>;
+
 export interface NativeHarnessOptions {
   services: HarnessProcessServices;
   start: HarnessStart | HarnessR3ContextStart;
   signal: AbortSignal;
   handleRequest: (request: HarnessRequest) => Promise<unknown>;
+  guardStart?: NativeHandoff;
+  guardReply?: NativeReplyHandoff;
   onExit?: () => void | Promise<void>;
   detachOnAbort?: boolean;
 }
@@ -29,23 +39,43 @@ function protocolError(): ApplicationError {
   return new ApplicationError(502, 'HARNESS_PROTOCOL_ERROR', 'harness protocol rejected');
 }
 
-async function writeFrame(stream: Writable, value: unknown): Promise<void> {
+function encodeFrame(value: unknown): string {
   const json = JSON.stringify(value);
-  if (json === undefined || Buffer.byteLength(json, 'utf8') > HARNESS_MAX_FRAME_BYTES) {
+  if (json === undefined || Buffer.byteLength(json, 'utf8') > HARNESS_MAX_FRAME_BYTES)
     throw protocolError();
-  }
-  await writeLine(stream, json);
+  return json;
 }
 
-async function writeLine(stream: Writable, json: string): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    stream.write(`${json}\n`, (error) => (error ? reject(protocolError()) : resolve()));
-  });
+// Only the synchronous pipe enqueue is under authority; drain outside the transaction.
+async function writeLine(
+  stream: Writable,
+  json: string,
+  signal: AbortSignal,
+  guard?: NativeHandoff,
+): Promise<boolean> {
+  if (signal.aborted) return false;
+  let flushed: Promise<void> | undefined;
+  const enqueue = () => {
+    if (flushed) throw protocolError();
+    if (!signal.aborted) {
+      const { promise, resolve, reject } = Promise.withResolvers<void>();
+      flushed = promise;
+      stream.write(`${json}\n`, (error) => (error ? reject(protocolError()) : resolve()));
+      void flushed.catch(() => {});
+    }
+    return undefined;
+  };
+  if (guard) await guard(enqueue);
+  else enqueue();
+  if (signal.aborted && !flushed) return false;
+  if (!flushed) throw protocolError();
+  await flushed;
+  return !signal.aborted;
 }
 
 /** Transport only. The caller owns qualification and all durable Run decisions. */
 export async function runNativeHarness(options: NativeHarnessOptions): Promise<void> {
-  const { services, signal, handleRequest } = options;
+  const { services, signal, handleRequest, guardStart, guardReply } = options;
   if (signal.aborted) return;
   const initialJson = JSON.stringify(options.start);
   if (Buffer.byteLength(initialJson, 'utf8') > HARNESS_MAX_FRAME_BYTES) {
@@ -62,7 +92,7 @@ export async function runNativeHarness(options: NativeHarnessOptions): Promise<v
       ? HarnessR3ContextStartSchema.safeParse(options.start)
       : HarnessStartSchema.safeParse(options.start);
   if (!parsedStart.success) throw protocolError();
-  const startJson = JSON.stringify(parsedStart.data);
+  const startJson = encodeFrame(parsedStart.data);
   const child = spawn(services.binaryPath, [], {
     shell: false,
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -130,7 +160,7 @@ export async function runNativeHarness(options: NativeHarnessOptions): Promise<v
     parsedStart.data.protocol === 'harness/v8' && parsedStart.data.mode === 'measure_only';
   const seenReferences = new Set<string>();
   try {
-    await writeLine(child.stdin, startJson);
+    if (!(await writeLine(child.stdin, startJson, signal, guardStart))) return;
     for await (const chunk of child.stdout) {
       const bytes: Buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       let offset = 0;
@@ -169,8 +199,9 @@ export async function runNativeHarness(options: NativeHarnessOptions): Promise<v
         if (request.protocol !== parsedStart.data.protocol) throw protocolError();
         seenReferences.add(request.request_ref);
         let reply: unknown;
+        let result: unknown;
+        let succeeded = false;
         try {
-          let result: unknown;
           if (options.detachOnAbort) {
             signal.throwIfAborted();
             const aborted = Promise.withResolvers<never>();
@@ -201,6 +232,7 @@ export async function runNativeHarness(options: NativeHarnessOptions): Promise<v
             reply_to: request.request_ref,
             value: result,
           };
+          succeeded = true;
           terminal =
             (measureOnly && request.type === 'context_preview') ||
             request.type === 'suspend' ||
@@ -225,7 +257,13 @@ export async function runNativeHarness(options: NativeHarnessOptions): Promise<v
           };
         }
         if (signal.aborted) break;
-        await writeFrame(child.stdin, reply);
+        const written = await writeLine(
+          child.stdin,
+          encodeFrame(reply),
+          signal,
+          succeeded && guardReply ? (enqueue) => guardReply(request, result, enqueue) : undefined,
+        );
+        if (!written) break;
         if (terminal) child.stdin.end();
       }
       if (signal.aborted) break;
@@ -250,6 +288,7 @@ export async function runNativeHarness(options: NativeHarnessOptions): Promise<v
     }
   } catch (error) {
     if (signal.aborted) return;
+    if (error instanceof ApplicationError && error.errorCode === 'FORBIDDEN') throw error;
     if (spawnFailed) throw new ApplicationError(503, 'HARNESS_UNAVAILABLE', 'harness unavailable');
     if (transportFailed || exited)
       throw new ApplicationError(502, 'HARNESS_EXITED', 'harness process exited unexpectedly');

@@ -5,11 +5,13 @@ import type {
   HarnessRequest,
   HarnessTool,
 } from '@along/contracts';
+import type { AuthorizeDispatch } from '../outbound/outbound.js';
 
 export type ModelStepTransport = (
   request: Extract<HarnessRequest, { type: 'model' }>,
   tools: readonly HarnessTool[],
   signal: AbortSignal,
+  authorizeDispatch?: AuthorizeDispatch,
 ) => AsyncGenerator<HarnessModelStep, void, unknown>;
 
 export type ModelContextMeasurement = (

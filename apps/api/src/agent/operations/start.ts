@@ -67,13 +67,23 @@ import { ensureRunContextPolicy } from '../../features/conversations/public.js';
 import { insertRoutingPolicy } from '../routing/routing-checkpoints.js';
 import { routingRuntimeOf } from '../runtime/config.js';
 import { acceptTargetContinuation } from './target-continuation.js';
-import { isActiveOwner, readUserPreferences } from '../../features/identity/public.js';
+import {
+  isActiveOwner,
+  lockViewerAccess,
+  readUserPreferences,
+} from '../../features/identity/public.js';
 import { withRunTransaction, type RunOwnership } from '../runtime/run-ownership.js';
 import {
   resolveSelection,
   bindRunSelection,
   lockOwner,
 } from '../../features/model-providers/public.js';
+import {
+  freezeFeishuBotDocxGrant,
+  loadFeishuBotDocxConfiguration,
+  readFeishuBotObservationKey,
+  suppliedFeishuDocxUrl,
+} from '../../features/office-connectors/public.js';
 
 const AGENT_REVISION = 'assistant/r1';
 const BUSINESS_MAX_ITERATIONS = 10;
@@ -354,6 +364,7 @@ export async function startConversationRun(
   requestId: string,
   body: unknown,
   idempotencyKeyHeader: string | null,
+  sessionId: string | null = null,
 ): Promise<StartResult> {
   const parsed = SendMessageBodySchema.safeParse(body);
   if (!parsed.success) throw validationError('invalid message body');
@@ -601,6 +612,31 @@ export async function startConversationRun(
         ];
       }
       if (execution === 'harness') allowlist = [...allowlist, ...R3_MEMORY_TOOL_IDS];
+      const feishuUrl =
+        delegation && execution === 'harness' && sessionId ? suppliedFeishuDocxUrl(text) : null;
+      const feishuConfig = feishuUrl ? loadFeishuBotDocxConfiguration() : null;
+      const feishuDocx =
+        feishuConfig &&
+        feishuUrl &&
+        sessionId &&
+        readFeishuBotObservationKey(feishuConfig) &&
+        (await lockViewerAccess(client, ownerId, sessionId))
+          ? await freezeFeishuBotDocxGrant(client, feishuConfig, { ownerId, sessionId }, feishuUrl)
+          : null;
+      if (feishuDocx) {
+        // Private text is model input, not authorization to publish that text via another tool.
+        const privateReadTools: Partial<Record<string, true>> = {
+          list_tasks: true,
+          get_task: true,
+          read_brief_cards: true,
+          get_user_prefs: true,
+          read_run_observation: true,
+        };
+        allowlist = [
+          ...allowlist.filter((tool) => privateReadTools[tool] === true),
+          'feishu_docx_read',
+        ];
+      }
       if (
         delegation &&
         input.clarification_of_run_id &&
@@ -729,6 +765,7 @@ export async function startConversationRun(
         ...(messageRefs ? { messageRefs } : {}),
         ...(workspaceGrant ? { workspaceGrant, workspaceSummary } : {}),
         ...(delegation ? { workspaceGrants: workspaceSet.grants } : {}),
+        ...(feishuDocx ? { feishuDocx } : {}),
         ...(delegation &&
         (!targetContinuation || targetContinuation.createdArtifactReadAllowed) &&
         workspaceSet.grants.some((grant) => (grant.output_directories?.length ?? 0) > 0)
@@ -790,7 +827,8 @@ export async function startConversationRun(
         attemptNo: 1,
         ...(ownership ? { leaseToken: ownership.token } : {}),
       });
-      const routingPolicy = execution === 'harness' ? routingRuntimeOf(deps).policy() : null;
+      const routingPolicy =
+        execution === 'harness' && !feishuDocx ? routingRuntimeOf(deps).policy() : null;
       if (routingPolicy)
         await insertRoutingPolicy(
           client,
@@ -847,6 +885,7 @@ export async function startConversationRun(
         ...(contextPolicy ? { contextPolicy } : {}),
         ...(workspaceGrant ? { workspaceGrant } : {}),
         ...(delegation ? { workspaceGrants: workspaceSet.grants } : {}),
+        ...(feishuDocx ? { feishuDocx } : {}),
         ...(trustedExecutionContext
           ? { authorizationRevision: 'delegation/1' as const, trustedExecutionContext }
           : {}),
@@ -859,7 +898,8 @@ export async function startConversationRun(
           [],
           null,
           routingPolicy,
-          !trustedExecutionContext?.continuation &&
+          !feishuDocx &&
+            !trustedExecutionContext?.continuation &&
             !r3Context.summary &&
             routingPolicy?.mode !== 'off'
             ? 'fresh_first_step'

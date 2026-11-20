@@ -52,6 +52,7 @@ export async function saveIdleCompactRequest(
          SELECT 1 FROM messages m
          LEFT JOIN compact_heads h ON h.owner_id=c.owner_id AND h.conversation_id=c.id
          WHERE m.owner_id=c.owner_id AND m.conversation_id=c.id AND m.role IN ('user','assistant')
+           AND m.source_run_id IS NULL
            AND NOT EXISTS (SELECT 1 FROM compact_summary_sources s WHERE s.summary_id=h.summary_id AND s.message_id=m.id)
        )) OR ($4::uuid IS NOT NULL AND EXISTS (
          SELECT 1 FROM agent_runs r JOIN r3_context_freezes f ON f.run_id=r.id

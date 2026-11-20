@@ -7,7 +7,7 @@ import {
   type SdkFetch,
 } from './sdk-context.js';
 import { ApplicationError } from '../../../platform/errors.js';
-import { OutboundError } from '../outbound/outbound.js';
+import { OutboundError, type AuthorizeDispatch } from '../outbound/outbound.js';
 import {
   ModelProtocolError,
   contextLimit,
@@ -23,8 +23,10 @@ export interface SdkStepConfig {
   diagnostic?: { runId: string; attemptId: string; operation: 'compact' | 'model' };
 }
 
-/** Returns the live response body; the executor owns destination and redirect policy. */
-export type SdkStepNetwork = SdkFetch;
+/** Network executor that enqueues the serialized request within its dispatch guard, if provided. */
+export type SdkStepNetwork = (
+  ...args: [...Parameters<SdkFetch>, authorizeDispatch?: AuthorizeDispatch]
+) => Promise<Response>;
 
 class ModelUnavailableError extends ApplicationError {
   constructor(
@@ -94,7 +96,7 @@ export function createConfiguredSdkStep(
 function createModelTransport(config: SdkStepConfig, network: SdkStepNetwork): ModelStepTransport {
   const { baseUrl, model, apiKey } = config;
   const diagnostic = config.diagnostic && { ...config.diagnostic };
-  return async function* (request, tools, signal) {
+  return async function* (request, tools, signal, authorizeDispatch) {
     if (request.remaining_tokens === 0)
       throw new ApplicationError(400008, 'BUDGET_EXCEEDED', 'harness token budget exhausted');
     const body = await serializeSdkRequest(model, request, tools);
@@ -105,7 +107,12 @@ function createModelTransport(config: SdkStepConfig, network: SdkStepNetwork): M
     const fetcher: SdkFetch = async (url, init) => {
       try {
         if (init?.body !== body) throw modelProtocolError('request_body_mismatch');
-        const response = await network(url, { ...init, signal: transportSignal });
+        transportSignal.throwIfAborted();
+        const response = await network(
+          url,
+          { ...init, signal: transportSignal },
+          authorizeDispatch,
+        );
         if (!response.ok) {
           const capacity = await isWindowRejection(response);
           await response.body?.cancel().catch(() => undefined);

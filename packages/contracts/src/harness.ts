@@ -162,6 +162,41 @@ export const HarnessMemorySourceSchema = z
     { message: 'invalid memory source slice' },
   );
 
+const feishuDocxPayloadLimit = 240_000;
+const utf8 = new TextEncoder();
+const feishuDocxReadSchema = z
+  .object({
+    kind: z.literal('feishu_docx_read'),
+    source: z
+      .object({
+        type: z.literal('feishu_docx'),
+        url: z
+          .string()
+          .max(512)
+          .regex(/^https:\/\/[a-z0-9-]+\.feishu\.cn\/docx\/[A-Za-z0-9]{27}$/u),
+        title: z.string().max(8192),
+        // The omitted identity decodes historical receipts only; new reads require a bot.
+        identity: z.literal('bot').optional(),
+      })
+      .strict(),
+    revision: z.object({ before: positive, after: positive }).strict(),
+    fetched_at: z.string().datetime({ precision: 3 }),
+    content_hash: z.string().regex(/^[a-f0-9]{64}$/u),
+    representation: z.literal('plain_text'),
+    completeness: z.literal('complete_plain_text'),
+    content: z.string().max(feishuDocxPayloadLimit),
+  })
+  .strict()
+  .refine(
+    (read) =>
+      read.revision.before === read.revision.after &&
+      !/[\uD800-\uDFFF]/u.test(read.source.title) &&
+      !/[\uD800-\uDFFF]/u.test(read.content) &&
+      utf8.encode(read.source.title).byteLength <= 8192 &&
+      utf8.encode(JSON.stringify(read)).byteLength <= feishuDocxPayloadLimit,
+    { message: 'invalid Feishu Docx revision or text bounds' },
+  );
+
 export const HarnessToolPayloadSchema = z.union([
   z
     .object({
@@ -303,6 +338,7 @@ export const HarnessToolPayloadSchema = z.union([
     })
     .strict(),
   HarnessMemorySourceSchema,
+  feishuDocxReadSchema,
   taskCreatedSchema,
   z.object({ kind: z.literal('effect_evidence'), evidence_ref: small }).strict(),
   z

@@ -84,6 +84,159 @@ const base = {
   approval: null,
 };
 
+test('only v8 restores successful Docx bodies from saved units without bootstrap duplicates', async () => {
+  const inputId = randomUUID();
+  const context = {
+    manifest: { message_ids: [] },
+    summary: null,
+    messages: [],
+    input: { type: 'user', message_id: inputId, content: 'Use the retained receipts.' },
+  };
+  const trusted_context = {
+    version: 1,
+    authorization_revision: 'delegation/1',
+    execution_lifecycle: 'request-bound',
+    input_message_id: inputId,
+    received_at_utc: '2026-11-02T12:00:00Z',
+    request_anchor_utc: '2026-11-02T12:00:00Z',
+    continuation: null,
+    timezone: { timezone_id: 'America/New_York', source: 'preference', reference: inputId },
+    time_capabilities: { elapsed_revision: null, wall_rules: null },
+    workspaces: [],
+  };
+  const docx = Array.from({ length: 3 }, (_, i) => ({
+    view: 'full',
+    invocation_id: randomUUID(),
+    tool_id: 'feishu_docx_read',
+    result: {
+      status: 'ok',
+      result: {
+        kind: 'feishu_docx_read',
+        source: {
+          type: 'feishu_docx',
+          identity: 'bot',
+          url: `https://fixture.feishu.cn/docx/${String(i).repeat(27)}`,
+          title: `Fixture ${i}`,
+        },
+        revision: { before: 1, after: 1 },
+        fetched_at: '2026-11-02T12:00:00.000Z',
+        content_hash: 'a'.repeat(64),
+        representation: 'plain_text',
+        completeness: 'complete_plain_text',
+        content: `DOCX_${i}_START${'&'.repeat(180_000)}DOCX_${i}_TAIL`,
+      },
+    },
+  }));
+  const other = {
+    view: 'full',
+    invocation_id: randomUUID(),
+    tool_id: 'set_user_timezone',
+    result: {
+      status: 'ok',
+      result: {
+        kind: 'timezone_setting',
+        timezone_id: 'UTC',
+        previous_timezone_id: null,
+        alias_version: 'fixture',
+      },
+    },
+  };
+  const full = [docx[0]!, other, ...docx.slice(1)];
+  const state = {
+    protected_messages: [{ role: 'user', content: context.input.content }],
+    units: full.map((observation) => ({
+      entries: [
+        { role: 'user', content: 'Reconstruct Docx disclosure from the immutable result.' },
+      ],
+      observation,
+      seen: true,
+      projected: false,
+    })),
+    hard_denied: '',
+    closing_goal: false,
+    pending_model: null,
+  };
+  const snapshot = {
+    version: 4,
+    original_manifest: context.manifest,
+    original_summary: null,
+    context,
+    tool_refs: full.map((observation) => observation.invocation_id),
+    next_call_no: full.length + 1,
+    usage: { iterations: 1, tokens: 5 },
+    waiting: null,
+    native_state: { ...state, history_index: 0 },
+  };
+  const start = {
+    ...base,
+    protocol: 'harness/v8',
+    trusted_context,
+    r3_context: context,
+    tools: ['feishu_docx_read', 'set_user_timezone'].map((name) => ({
+      name,
+      description: 'Fixture',
+      parameters: {},
+      risk: 'low',
+    })),
+    snapshot,
+    observations: [other],
+  };
+  expect(Buffer.byteLength(JSON.stringify(start))).toBeLessThan(1_048_576);
+  expect(Buffer.byteLength(JSON.stringify({ ...start, observations: full }))).toBeGreaterThan(
+    1_048_576,
+  );
+  const resumed = await run(start, (r) => {
+    if (r.type === 'pause_probe') return { value: { pending: true } };
+    if (r.type === 'pause_point') {
+      expect(r.context).toMatchObject({
+        tool_refs: snapshot.tool_refs,
+        native_state: { units: state.units.map(({ observation }) => ({ observation })) },
+      });
+      return { value: { paused: true } };
+    }
+    throw new Error(`unexpected request ${r.type}`);
+  });
+  expect(resumed.map((r) => r.type)).toEqual(['pause_probe', 'pause_point']);
+  const [preview] = await run({ ...start, mode: 'measure_only' }, () => ({
+    value: { accepted: true },
+  }));
+  if (preview?.type !== 'context_preview') throw new Error('missing preview');
+  for (let i = 0; i < docx.length; i++) {
+    expect(JSON.stringify(preview.messages)).toContain(`DOCX_${i}_START`);
+    expect(JSON.stringify(preview.messages)).not.toContain(`DOCX_${i}_TAIL`);
+  }
+
+  const missingBody = structuredClone(start);
+  Object.assign(missingBody.snapshot.native_state.units[0]!.observation.result.result, {
+    content: undefined,
+  });
+  for (const invalid of [missingBody, { ...start, observations: [] }])
+    expect(await run(invalid, () => ({}), 2)).toEqual([]);
+
+  const v7 = {
+    ...base,
+    protocol: 'harness/v7',
+    trusted_context,
+    messages: [{ message_id: inputId, role: 'user', content: context.input.content }],
+    tools: start.tools,
+    snapshot: {
+      version: 3,
+      message_refs: [inputId],
+      tool_refs: [docx[0]!.invocation_id],
+      next_call_no: 2,
+      usage: snapshot.usage,
+      waiting: null,
+      native_state: { ...state, units: state.units.slice(0, 1) },
+    },
+    observations: docx.slice(0, 1),
+  };
+  expect(await run({ ...v7, observations: [] }, () => ({}), 2)).toEqual([]);
+  const old = await run(v7, (r) => ({
+    value: r.type === 'pause_probe' ? { pending: true } : { paused: true },
+  }));
+  expect(old.map((r) => r.type)).toEqual(['pause_probe', 'pause_point']);
+}, 30_000);
+
 test('v8 compact resume replaces only history and retains protected state and unknown usage', async () => {
   const id = randomUUID(),
     inputId = randomUUID();

@@ -1,0 +1,87 @@
+{
+  "version": "0040",
+  "tables": ["feishu_bot_connections"],
+  "columns": [
+    {
+      "table": "feishu_bot_connections",
+      "name": "owner_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "feishu_bot_connections",
+      "name": "session_id",
+      "type": "uuid",
+      "required": false,
+      "default": ""
+    },
+    {
+      "table": "feishu_bot_connections",
+      "name": "attempt_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "feishu_bot_connections",
+      "name": "expires_at",
+      "type": "timestamptz",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "feishu_bot_connections",
+      "name": "app_id",
+      "type": "text",
+      "required": false,
+      "default": ""
+    },
+    {
+      "table": "feishu_bot_connections",
+      "name": "bot_name",
+      "type": "text",
+      "required": false,
+      "default": ""
+    }
+  ],
+  "constraints": [
+    {
+      "table": "feishu_bot_connections",
+      "name": "feishu_bot_connections_app_id_key",
+      "type": "u",
+      "columns": ["app_id"]
+    },
+    {
+      "table": "feishu_bot_connections",
+      "name": "feishu_bot_connections_pkey",
+      "type": "p",
+      "columns": ["owner_id"]
+    },
+    {
+      "table": "feishu_bot_connections",
+      "name": "feishu_bot_connections_owner_id_fkey",
+      "type": "f",
+      "columns": ["owner_id"],
+      "target": "users",
+      "target_columns": ["id"],
+      "delete_action": "c"
+    },
+    {
+      "table": "feishu_bot_connections",
+      "name": "feishu_bot_connections_session_id_fkey",
+      "type": "f",
+      "columns": ["session_id"],
+      "target": "sessions",
+      "target_columns": ["id"],
+      "delete_action": "c"
+    },
+    {
+      "table": "feishu_bot_connections",
+      "name": "feishu_bot_connections_check",
+      "type": "c",
+      "columns": ["app_id", "bot_name", "session_id"],
+      "expression": "(((app_id IS NULL) AND (bot_name IS NULL) AND (session_id IS NOT NULL)) OR ((app_id IS NOT NULL) AND (bot_name IS NOT NULL) AND (session_id IS NULL)))"
+    }
+  ]
+}

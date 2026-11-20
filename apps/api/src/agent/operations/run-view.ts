@@ -2,7 +2,7 @@ import type { PoolClient } from 'pg';
 import { ZodError } from 'zod';
 import { workspaceGrantSchema, type RunView } from '@along/contracts';
 import { ApplicationError } from '../../platform/errors.js';
-import type { LockedRun } from '../../features/conversations/public.js';
+import { hasPendingPrivateTerminal, type LockedRun } from '../../features/conversations/public.js';
 import { getDocumentApproval } from '../../features/approvals/public.js';
 import { validateWorkspaceGrant, WorkspaceDeniedError } from '../../features/workspaces/public.js';
 import {
@@ -190,7 +190,10 @@ export async function viewOf(
       ? {
           authorization_revision: run.frozen_context.authorization_revision,
           execution_lifecycle: run.frozen_context.execution_lifecycle,
-          goal_result: run.goal_result,
+          goal_result:
+            run.goal_result && !(await hasPendingPrivateTerminal(client, run.id))
+              ? run.goal_result
+              : null,
           created_reminders: await readRunCreatedReminders(client, {
             ownerId: run.owner_id,
             conversationId: run.conversation_id,

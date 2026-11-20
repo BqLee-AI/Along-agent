@@ -19,9 +19,11 @@ import {
 import { stateConflict } from '../../platform/errors.js';
 import { readRunInvocationStates } from '../tools/invocations/run-state.js';
 import { readRunContextObservations } from '../tools/invocations/context-query.js';
+import { assertContextSourcesAuthorized } from '../tools/invocations/context-source.js';
+import type { NativeHandoff } from '../harness/harness-process.js';
 import type { ConversationDeps, RunContext } from './contracts.js';
 import { withRunTransaction } from './run-ownership.js';
-import { lockRun } from '../../features/conversations/public.js';
+import { decodeRunSnapshot, lockRun } from '../../features/conversations/public.js';
 import { readSnapshot } from './run-snapshot.js';
 import { readRunApprovalDecision } from '../operations/run-approval-decision.js';
 import {
@@ -41,6 +43,25 @@ export interface LoadedAttempt {
   compact: { snapshot: HarnessR3Snapshot; context: HarnessR3Context } | null;
 }
 
+export async function guardHarnessStart(
+  pool: Pool,
+  context: RunContext,
+  snapshot: LoadedAttempt['snapshot'],
+  signal: AbortSignal,
+  enqueue: Parameters<NativeHandoff>[0],
+): Promise<void> {
+  await withRunTransaction(pool, context.ownership, async (client) => {
+    await lockRun(client, context);
+    await assertContextSourcesAuthorized(
+      client,
+      { ...toolContext(context), signal },
+      snapshot?.tool_refs ?? [],
+    );
+    signal.throwIfAborted();
+    enqueue();
+  });
+}
+
 export async function loadHarnessSession(
   pool: Pool,
   deps: ConversationDeps,
@@ -49,6 +70,8 @@ export async function loadHarnessSession(
   return await withRunTransaction(pool, supplied.ownership, async (client) => {
     const locked = await lockRun(client, supplied);
     if (locked.run.execution !== 'harness') throw stateConflict('not a harness Run');
+    const feishu = locked.run.frozen_context?.feishuDocx;
+    if (feishu && !('kind' in feishu)) throw stateConflict('legacy Feishu Run cannot be restored');
     const resume = (
       await client.query<{ checkpoint_id: string }>(
         'SELECT checkpoint_id FROM harness_resumes WHERE attempt_id=$1 AND run_id=$2 AND owner_id=$3',
@@ -56,10 +79,12 @@ export async function loadHarnessSession(
       )
     ).rows[0];
     const pausedResume = (
-      await client.query<{ snapshot: unknown; source: string }>(
-        `SELECT p.snapshot,r.source FROM harness_pause_resumes r JOIN harness_pauses p ON p.id=r.pause_id
-       WHERE r.attempt_id=$1 AND r.run_id=$2 AND r.owner_id=$3 AND p.state='consumed'`,
-        [supplied.attemptId, supplied.runId, supplied.ownerId],
+      await client.query<{ id: string; attempt_id: string; snapshot: unknown; source: string }>(
+        `SELECT p.id,p.attempt_id,p.snapshot,r.source
+       FROM harness_pause_resumes r JOIN harness_pauses p ON p.id=r.pause_id
+       WHERE r.attempt_id=$1 AND r.run_id=$2 AND r.owner_id=$3 AND p.state='consumed'
+         AND p.run_id=r.run_id AND p.owner_id=r.owner_id AND p.conversation_id=$4`,
+        [supplied.attemptId, supplied.runId, supplied.ownerId, supplied.conversationId],
       )
     ).rows[0];
     if (resume && pausedResume) throw stateConflict('ambiguous continuation');
@@ -76,12 +101,25 @@ export async function loadHarnessSession(
       pausedResume?.source === 'runtime'
         ? await readConsumedCompactContinuation(client, context)
         : null;
+    const pausedPayload =
+      pausedResume && !compact
+        ? await decodeRunSnapshot(
+            client,
+            {
+              ...context,
+              kind: 'pause',
+              id: pausedResume.id,
+              attemptId: pausedResume.attempt_id,
+            },
+            pausedResume.snapshot,
+          )
+        : null;
     const snapshot =
       compact?.snapshot ??
       (pausedResume
         ? locked.run.frozen_context?.execution_profile === 'compact-memory/1'
-          ? HarnessR3SnapshotSchema.parse(pausedResume.snapshot)
-          : HarnessPauseSnapshotSchema.parse(pausedResume.snapshot)
+          ? HarnessR3SnapshotSchema.parse(pausedPayload)
+          : HarnessPauseSnapshotSchema.parse(pausedPayload)
         : resume
           ? await readSnapshot(client, locked.run, resume.checkpoint_id)
           : null);

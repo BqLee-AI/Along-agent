@@ -19,6 +19,10 @@ const usage = `本机生命周期（Bun 1.4.2 / Windows + Docker Linux x64）
   --workspace：明确选择已准入 owner，有限新增工作区，保留全部原登记
   --reset-password：明确选择已准入账户，在本机交互终端重置遗忘的口令；撤销该账户全部会话，不改身份与业务数据
 已有配置时 local:init 只复用，不覆盖；首次 --new/--adopt 通过终端输入。
+可选飞书机器人 Docx 配置仅由启动 API 的进程环境提供，不使用 .env。
+FEISHU_BOT_DOCX_CONFIG 中的 secretEnv / observationKeyEnv 应指向
+FEISHU_BOT_DOCX_APP_SECRET / FEISHU_BOT_DOCX_OBSERVATION_KEY（可带下划线及大写字母数字后缀）。
+修改或移除这些值后需停止并重新启动安装。
 未登录、缺模型或工作区均独立提示；启动不自动发模型请求。`;
 
 function options(args) {

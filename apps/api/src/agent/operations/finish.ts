@@ -8,6 +8,7 @@ import {
   commitTerminalFacts,
   type TerminalFactOptions,
 } from '../../features/conversations/public.js';
+import { hasPrivateOutput } from '../runtime/private-output.js';
 
 export async function commitTerminal(
   client: PoolClient,
@@ -40,5 +41,9 @@ export async function commitTerminal(
       payload = { ...(payload as Record<string, unknown>), goal_result: goal };
     }
   }
-  return commitTerminalFacts(client, context, status, payload, goal, options);
+  const excludeAssistantFromHistory = await hasPrivateOutput(client, context);
+  return commitTerminalFacts(client, context, status, payload, goal, {
+    ...options,
+    excludeAssistantFromHistory,
+  });
 }

@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import type { PoolClient } from 'pg';
 import { forbidden } from '../../../platform/errors.js';
 import { isActiveOwner } from '../../identity/public.js';
@@ -20,6 +21,7 @@ type ToolScope = {
   workspaceGrant?: WorkspaceGrant | null;
   workspaceGrants?: WorkspaceGrant[];
   authorizationRevision?: 'delegation/1';
+  feishuDocx?: unknown;
 };
 
 function validateFrozenWorkspace(
@@ -94,6 +96,7 @@ export async function assertToolRunBinding(
         workspaceGrant?: unknown;
         workspaceGrants?: unknown;
         authorization_revision?: unknown;
+        feishuDocx?: unknown;
       } | null;
     }>(
       `SELECT r.execution,r.tools_allowlist,r.frozen_context FROM agent_runs r JOIN conversations c ON c.id=r.conversation_id
@@ -108,6 +111,11 @@ export async function assertToolRunBinding(
     binding.allowlist?.some((tool) => !row.tools_allowlist.includes(tool))
   )
     throw forbidden('tool scope exceeds frozen Run grant');
+  if (
+    'feishuDocx' in binding &&
+    !isDeepStrictEqual(binding.feishuDocx, row.frozen_context?.feishuDocx)
+  )
+    throw forbidden('Feishu scope differs from frozen Run grant');
   if ('allowlist' in binding || 'workspaceGrant' in binding || 'workspaceGrants' in binding)
     validateFrozenWorkspace(binding.ownerId, row.frozen_context, binding);
 }
@@ -151,6 +159,7 @@ async function lockToolBinding(
       workspaceGrant?: unknown;
       workspaceGrants?: unknown;
       authorization_revision?: unknown;
+      feishuDocx?: unknown;
       execution_lifecycle?: string;
     } | null;
   }>(
@@ -183,6 +192,11 @@ async function lockToolBinding(
       canExecute = false;
     }
   }
+  if (
+    'feishuDocx' in binding &&
+    !isDeepStrictEqual(binding.feishuDocx, run.rows[0].frozen_context?.feishuDocx)
+  )
+    throw forbidden('Feishu scope differs from frozen Run grant');
   const workspaceAuthorized = validateFrozenWorkspace(
     binding.ownerId,
     run.rows[0]!.frozen_context,

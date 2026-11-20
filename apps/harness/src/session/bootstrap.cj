@@ -13,7 +13,7 @@ extend Harness {
         admitPolicyAndTools(start)
         bootstrapPrompts(start, trusted)
         let input = bootstrapInput(start, trusted)
-        let observations = field(start, "observations").asArray()
+        let observations = bootstrapObservations(start)
         let observationIds = HashSet<String>()
         let bootstrapFailure = restoreObservations(start, observations, observationIds)
         restoreSnapshot(start, input, observations)

@@ -14,6 +14,7 @@ import {
   validationError,
 } from '../../platform/errors.js';
 import { readRunContextObservations } from '../tools/invocations/context-query.js';
+import { assertContextSourcesAuthorized } from '../tools/invocations/context-source.js';
 import { readRunInvocationStates } from '../tools/invocations/run-state.js';
 import { validateWorkspaceGrant } from '../../features/workspaces/public.js';
 import { resolveRunSelection } from '../../features/model-providers/public.js';
@@ -23,6 +24,8 @@ import {
   insertAttempt,
   lockRun,
   assertCompactEligibility,
+  decodeRunSnapshot,
+  encodeRunSnapshot,
   failCompact,
   recordCompactUsage,
 } from '../../features/conversations/public.js';
@@ -35,7 +38,7 @@ import {
 } from '../runtime/compact-continuation.js';
 import { executeCompact } from './compact-execution.js';
 import { GOAL_CONTROL_TOOL } from '../tools/goal-control.js';
-import { runNativeHarness } from '../harness/harness-process.js';
+import { runNativeHarness, type NativeHandoff } from '../harness/harness-process.js';
 import { active } from './run.js';
 import {
   buildHarnessStart,
@@ -294,9 +297,26 @@ export async function continueRuntimeCompact(
        VALUES($1,$2,$3,$2,$4,'runtime')`,
         [ownerId, pauseId, runId, attemptId],
       );
+      const continuation = { ownerId, conversationId, runId, attemptId, id: pauseId };
+      const storedSnapshot = await encodeRunSnapshot(
+        client,
+        {
+          ...continuation,
+          kind: 'compact-snapshot',
+        },
+        restored.snapshot,
+      );
+      const storedContext = await encodeRunSnapshot(
+        client,
+        {
+          ...continuation,
+          kind: 'compact-context',
+        },
+        restored.context,
+      );
       await client.query(
         `INSERT INTO compact_continuations(pause_id,attempt_id,snapshot,context) VALUES($1,$2,$3::jsonb,$4::jsonb)`,
-        [pauseId, attemptId, JSON.stringify(restored.snapshot), JSON.stringify(restored.context)],
+        [pauseId, attemptId, storedSnapshot, storedContext],
       );
       await client.query(`UPDATE harness_pauses SET state='consumed' WHERE id=$1`, [pauseId]);
       await client.query(`UPDATE agent_runs SET status='running' WHERE id=$1`, [runId]);
@@ -355,7 +375,17 @@ async function executeRuntimeCompactWork(
       )
     ).rows[0];
     if (!row) return null;
-    const snapshot = HarnessR3SnapshotSchema.parse(row.snapshot);
+    const snapshot = HarnessR3SnapshotSchema.parse(
+      await decodeRunSnapshot(
+        client,
+        {
+          ...context,
+          kind: 'pause',
+          id: row.id,
+        },
+        row.snapshot,
+      ),
+    );
     await validateR3SnapshotContext(client, context, snapshot);
     const selected = await resolveRunSelection(client, context.ownerId, context.runId);
     if (!selected || selected.model_id !== context.contextPolicy!.model_binding.model)
@@ -400,13 +430,25 @@ async function executeRuntimeCompactWork(
           o.usage_recorded,o.usage_tokens::text
         FROM harness_pauses p JOIN compact_operations o ON o.pause_id=p.id
         LEFT JOIN compact_heads h ON h.owner_id=p.owner_id AND h.conversation_id=p.conversation_id
-        WHERE p.id=$1 AND p.owner_id=$2 AND p.run_id=$3`,
-        [pauseId, context.ownerId, context.runId],
+        WHERE p.id=$1 AND p.owner_id=$2 AND p.run_id=$3 AND p.attempt_id=$4 AND p.conversation_id=$5`,
+        [pauseId, context.ownerId, context.runId, context.attemptId, context.conversationId],
       )
     ).rows[0];
     if (
       !row ||
-      JSON.stringify(HarnessR3SnapshotSchema.parse(row.snapshot)) !== JSON.stringify(snapshot) ||
+      JSON.stringify(
+        HarnessR3SnapshotSchema.parse(
+          await decodeRunSnapshot(
+            client,
+            {
+              ...context,
+              kind: 'pause',
+              id: pauseId,
+            },
+            row.snapshot,
+          ),
+        ),
+      ) !== JSON.stringify(snapshot) ||
       ((row.head ?? null) !== (snapshot.context.summary?.id ?? null) && !row.own_head)
     )
       throw stateConflict('compact protected view changed');
@@ -523,11 +565,26 @@ async function executeRuntimeCompactWork(
           );
           if (start.protocol !== HARNESS_CONTEXT_PROTOCOL_VERSION)
             throw stateConflict('compact requires v8');
+          const guardPreview: NativeHandoff = (enqueue) =>
+            tx((client) =>
+              assertCompactEligibility(client, binding, async (current) => {
+                await guard(current, frozen.coverageMessageIds);
+                await assertContextSourcesAuthorized(
+                  current,
+                  { ...toolContext(context), signal },
+                  snapshot.tool_refs,
+                );
+                signal.throwIfAborted();
+                enqueue();
+              }),
+            );
           let seen = false;
           await runNativeHarness({
             services: deps.harness!,
             start: { ...start, mode: 'measure_only' },
             signal,
+            guardStart: guardPreview,
+            guardReply: (_request, _result, enqueue) => guardPreview(enqueue),
             detachOnAbort: true,
             handleRequest: async (request) => {
               if (

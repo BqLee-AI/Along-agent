@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import type { ThreadEvent } from '@along/stream-protocol';
+import { randomUUID } from 'node:crypto';
+import { ThreadEventSchema } from '@along/stream-protocol';
 import { writeAuthorizedEvent } from '../../src/features/conversations/run/stream-authorization.js';
 import {
   createIntegrationDatabase,
@@ -21,7 +22,13 @@ maybe('stream session access', () => {
 
   it('does not deliver after the original session is revoked or expired', async () => {
     const session = await seedAdmittedSession(database.pool);
-    const event = {} as ThreadEvent;
+    const event = ThreadEventSchema.parse({
+      protocol_version: 'v1',
+      seq: 1,
+      request_id: randomUUID(),
+      type: 'message.delta',
+      payload: { conversation_id: randomUUID(), run_id: randomUUID(), delta: 'Synthetic event' },
+    });
     let delivered = 0;
     const deliver = () =>
       writeAuthorizedEvent(

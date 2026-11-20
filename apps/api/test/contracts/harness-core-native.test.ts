@@ -15,6 +15,7 @@ import {
 import type { ToolOutcome } from '../../src/agent/tools/contracts.js';
 import { cancelConversationRun } from '../../src/agent/operations/run.js';
 import { runNativeHarness } from '../../src/agent/harness/harness-process.js';
+import { forbidden } from '../../src/platform/errors.js';
 import { createContextPolicy } from '../../src/features/conversations/public.js';
 import { measureSdkContext } from '../../src/features/model-providers/public.js';
 import {
@@ -569,4 +570,48 @@ test('native terminates boundedly when valid bootstrap observations cannot fit s
     },
   });
   expect(requests).toHaveLength(1);
+});
+
+test('native never receives a reply after its hydrated value loses handoff authority', async () => {
+  const start = HarnessStartSchema.parse({
+    protocol: 'harness/v7',
+    type: 'start',
+    trusted_context: null,
+    routing_policy: { revision: 'r2b/1', mode: 'off' },
+    eligible_phase: 'disabled',
+    context_policy: contextPolicy,
+    messages: [{ message_id: randomUUID(), role: 'user', content: 'Fixture' }],
+    tools: [],
+    budget: { max_iterations: 4, max_tokens: 100 },
+    snapshot: null,
+    observations: [],
+    approval: null,
+  });
+  const requests: string[] = [];
+  let authorized = true;
+  let guarded = false;
+  await expect(
+    runNativeHarness({
+      services: { binaryPath, libraryPath: process.env.HARNESS_LIBRARY_PATH },
+      start,
+      signal: new AbortController().signal,
+      guardStart: async (enqueue) => {
+        expect(enqueue()).toBeUndefined();
+      },
+      handleRequest: async (request) => {
+        requests.push(request.type);
+        authorized = false;
+        return { pending: true };
+      },
+      guardReply: async (request, reply, enqueue) => {
+        guarded = true;
+        expect(request.type).toBe('pause_probe');
+        expect(reply).toEqual({ pending: true });
+        if (!authorized) throw forbidden();
+        enqueue();
+      },
+    }),
+  ).rejects.toMatchObject({ errorCode: 'FORBIDDEN' });
+  expect(guarded).toBe(true);
+  expect(requests).toEqual(['pause_probe']);
 });

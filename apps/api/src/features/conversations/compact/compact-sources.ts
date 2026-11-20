@@ -42,7 +42,8 @@ export async function validateStoredSources(
     const message = (
       await client.query<{ role: string; content: string }>(
         `SELECT role,content FROM messages WHERE id=$1 AND owner_id=$2 AND conversation_id=$3
-       AND role IN ('user','assistant') AND octet_length(content) <= 1048576 FOR SHARE`,
+       AND role IN ('user','assistant') AND source_run_id IS NULL
+       AND octet_length(content) <= 1048576 FOR SHARE`,
         [row.id, ownerId, conversationId],
       )
     ).rows[0];

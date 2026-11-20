@@ -165,6 +165,16 @@ bun --no-env-file run local:start
 
 对话旁可展开今日安排和提醒，账户与模型服务位于设置面板；窄屏使用底部导航切换对话与工作区。各页恢复方式见 [Web 使用说明](../../apps/web/README.md)。提醒任务与活动页不充当资料任务历史，文档批准从原 Run 的修改与结果进入。
 
+### 可选飞书 Docx 只读
+
+在“连接器”扫码绑定飞书机器人。绑定仅验证身份，不授予文档权限；还需在飞书允许机器人读取目标 Docx，并由部署者明确允许该链接。新对话请求须指定单个飞书 Docx 直链；不支持文档搜索、Wiki、修改或发送消息。
+
+缺少部署配置时不开放读取。通过启动命令的私密进程环境传入 `FEISHU_BOT_DOCX_CONFIG`；JSON 包含三个 UUID 字段（`connectionId`、`revision`、`ownerId`）、已扫码绑定的 `appId`、`secretEnv`、`observationKeyEnv` 和 `documents`（允许读取的精确飞书直链数组）。本机默认引用 `FEISHU_BOT_DOCX_APP_SECRET` 和 `FEISHU_BOT_DOCX_OBSERVATION_KEY`，可附加下划线及大写字母数字后缀。回执和私有恢复数据的加密使用标准 base64 编码的独立 32 字节密钥。环境变量值只交给 API，不写入仓库、Compose 文件或 `.env`。
+
+更换绑定、资源或凭据代次时换 `revision`，并使用同一安装配置停止后重启。停用读取时从启动环境移除 `FEISHU_BOT_DOCX_CONFIG`，然后停止并重启；保留数据库和加密密钥，不回退旧写者。停用阻止新读取及不再具备本地资格的私有结果回取，不删除已交付的回答。飞书端文档撤权须另行操作。
+
+已有用户身份加密回执的安装可保留原 `FEISHU_APP_ID`、`FEISHU_REDIRECT_URI` 和 `FEISHU_CREDENTIAL_KEY`，仅供原会话在旧绑定仍有效时核验和解密回执。无需提供旧应用密钥；这些值不会启用用户 OAuth、回调或新的文档读取。
+
 ## 显式升级与失败维护
 
 取得目标源码后，使用同一配置：
