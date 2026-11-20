@@ -455,6 +455,20 @@ run(
                 expect(await (await app.handle(new Request(eventsUrl))).text()).toContain(content);
                 await disconnect();
                 expect(await (await app.handle(new Request(eventsUrl))).text()).toContain(content);
+                const historyUrl = `http://localhost:3000/api/v1/conversations/${context.conversationId}/messages`;
+                const historyResponse = await app.handle(new Request(historyUrl));
+                expect(historyResponse.status).toBe(200);
+                expect(await historyResponse.json()).toMatchObject({
+                  data: {
+                    items: expect.arrayContaining([
+                      expect.objectContaining({
+                        role: 'assistant',
+                        content,
+                        source_run_id: context.runId,
+                      }),
+                    ]),
+                  },
+                });
                 await connect();
                 continue;
               }

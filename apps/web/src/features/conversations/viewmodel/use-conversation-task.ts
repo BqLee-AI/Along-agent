@@ -481,7 +481,14 @@ export function useConversationTask({
           next = page.next_cursor;
         } while (next !== null);
         setMessages(archive);
-        setLiveReply(Boolean(replyPending && target && transcripts.get(target.runId)?.text));
+        setLiveReply(
+          Boolean(
+            replyPending &&
+            target &&
+            transcripts.get(target.runId)?.text &&
+            !archive.some((message) => message.source_run_id === target.runId),
+          ),
+        );
         setLiveOriginal(null);
       }
       setRuns(history);
