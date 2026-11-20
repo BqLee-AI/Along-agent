@@ -48,7 +48,8 @@ export async function readContextSourceMetadata(
   if (invocationIds.length === 0) return new Map();
   const { rows } = await client.query<ContextSourceMetadata>(
     `SELECT invocation_id,tool_id,state,result_version,outcome_kind,frozen_context,
-       accepted_result->>'status' AS result_status,p->>'kind' AS kind,
+       CASE WHEN accepted_result->>'encoding' IN ('feishu-aead/1','feishu-aead/2') THEN 'ok' ELSE accepted_result->>'status' END AS result_status,
+       CASE WHEN accepted_result->>'encoding' IN ('feishu-aead/1','feishu-aead/2') THEN 'feishu_docx_read' ELSE p->>'kind' END AS kind,
        CASE p->>'kind'
          WHEN 'read' THEN (p-'content') || jsonb_build_object('content_total',char_length(p->>'content'))
          WHEN 'list' THEN (p-ARRAY['entries','failures']) || jsonb_build_object(
@@ -59,7 +60,8 @@ export async function readContextSourceMetadata(
            'failures_total',CASE WHEN jsonb_typeof(p->'failures')='array' THEN jsonb_array_length(p->'failures') END)
          WHEN 'context_slice' THEN p-ARRAY['content','items']
          ELSE NULL END AS source,
-       CASE WHEN accepted_result ? 'encoding' OR accepted_result ? 'data'
+       CASE WHEN coalesce(accepted_result->>'encoding','') NOT IN ('feishu-aead/1','feishu-aead/2')
+         AND (accepted_result ? 'encoding' OR accepted_result ? 'data')
          THEN accepted_result ELSE NULL END AS encoded_result,
        CASE WHEN p->>'kind'='context_slice' THEN
          CASE WHEN jsonb_typeof(p->'content')='string' THEN char_length(p->>'content')

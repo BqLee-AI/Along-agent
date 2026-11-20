@@ -125,8 +125,9 @@ const productionTransport: OutboundTransport = {
 export async function outboundFetch(
   input: string | URL | Request,
   init?: RequestInit,
+  authorizeDispatch?: () => Promise<void>,
 ): Promise<Response> {
-  return outboundFetchForTest(input, init, productionTransport);
+  return outboundFetchForTest(input, init, productionTransport, authorizeDispatch);
 }
 
 /** Test-only dependency seam; never select dependencies from external input. */
@@ -134,6 +135,7 @@ export async function outboundFetchForTest(
   input: string | URL | Request,
   init: RequestInit | undefined,
   transport: OutboundTransport,
+  authorizeDispatch?: () => Promise<void>,
 ): Promise<Response> {
   let request: Request;
   let url: URL;
@@ -185,6 +187,13 @@ export async function outboundFetchForTest(
     throw new OutboundError('blocked_address');
   }
   const destination = records[0]!;
+  if (signal.aborted) throw abortError();
+  if (authorizeDispatch) {
+    // The callback's transaction must finish before the socket opens. Keep denial out of
+    // the transport error mapper so the SDK can preserve the typed authorization failure.
+    await authorizeDispatch();
+    if (signal.aborted) throw abortError();
+  }
   return await new Promise<Response>((resolve, reject) => {
     let settled = false;
     let responseEnded = false;

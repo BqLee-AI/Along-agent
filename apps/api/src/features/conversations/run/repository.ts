@@ -21,6 +21,7 @@ import {
 } from '@along/stream-protocol';
 import type { ReminderDateSource } from '../lifecycle/reminder-date.js';
 import type { AutoCompactPolicy } from '../compact/auto-compact-policy.js';
+import type { FeishuBotDocxGrant } from '../../office-connectors/public.js';
 
 export interface RunRow {
   id: string;
@@ -52,6 +53,7 @@ export interface FrozenContext {
   workspaceSummary?: WorkspaceSummary | null;
   workspaceGrants?: WorkspaceGrant[];
   createdArtifactReadRevision?: 'owner-created/1';
+  feishuDocx?: { connectionId: string; sessionId: string; url: string } | FeishuBotDocxGrant;
   createResolutionRevision?: 'create-resolution/1' | 'create-resolution/2';
   authorization_revision?: 'delegation/1';
   execution_lifecycle?: 'request-bound' | 'server-owned';

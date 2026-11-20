@@ -10,6 +10,7 @@ import {
   assertCompactEligibility,
   validateCompactSources,
   type CompactBinding,
+  decodeRunSnapshot,
   readR3Context,
   readR3ControlContext,
 } from '../../features/conversations/public.js';
@@ -144,6 +145,8 @@ export async function readConsumedCompactContinuation(
 ): Promise<{ snapshot: HarnessR3Snapshot; context: HarnessR3Context }> {
   const row = (
     await client.query<{
+      pause_id: string;
+      pause_attempt_id: string;
       pause_snapshot: unknown;
       snapshot: unknown;
       context: unknown;
@@ -154,13 +157,14 @@ export async function readConsumedCompactContinuation(
       usage_tokens: string | null;
       summary_id: string | null;
     }>(
-      `SELECT p.snapshot AS pause_snapshot,p.purpose,c.snapshot,c.context,o.status,o.call_started,o.usage_recorded,
+      `SELECT p.id AS pause_id,p.attempt_id AS pause_attempt_id,p.snapshot AS pause_snapshot,
+             p.purpose,c.snapshot,c.context,o.status,o.call_started,o.usage_recorded,
              o.usage_tokens::text,o.summary_id
       FROM harness_pause_resumes r JOIN harness_pauses p ON p.id=r.pause_id
       JOIN compact_operations o ON o.pause_id=p.id
       JOIN compact_continuations c ON c.pause_id=p.id AND c.attempt_id=r.attempt_id
       WHERE r.attempt_id=$1 AND r.owner_id=$2 AND r.run_id=$3 AND r.source='runtime'
-        AND p.owner_id=$2 AND p.conversation_id=$4 AND p.state='consumed'`,
+        AND p.owner_id=$2 AND p.conversation_id=$4 AND p.run_id=$3 AND p.state='consumed'`,
       [binding.attemptId, binding.ownerId, binding.runId, binding.conversationId],
     )
   ).rows[0];
@@ -172,9 +176,38 @@ export async function readConsumedCompactContinuation(
     (row.call_started && !row.usage_recorded)
   )
     throw stateConflict('compact continuation receipt unavailable');
-  const original = HarnessR3SnapshotSchema.parse(row.pause_snapshot);
-  const snapshot = HarnessR3SnapshotSchema.parse(row.snapshot);
-  const context = HarnessR3ContextSchema.parse(row.context);
+  const pauseBinding = { ...binding, id: row.pause_id };
+  const original = HarnessR3SnapshotSchema.parse(
+    await decodeRunSnapshot(
+      client,
+      {
+        ...pauseBinding,
+        kind: 'pause',
+        attemptId: row.pause_attempt_id,
+      },
+      row.pause_snapshot,
+    ),
+  );
+  const snapshot = HarnessR3SnapshotSchema.parse(
+    await decodeRunSnapshot(
+      client,
+      {
+        ...pauseBinding,
+        kind: 'compact-snapshot',
+      },
+      row.snapshot,
+    ),
+  );
+  const context = HarnessR3ContextSchema.parse(
+    await decodeRunSnapshot(
+      client,
+      {
+        ...pauseBinding,
+        kind: 'compact-context',
+      },
+      row.context,
+    ),
+  );
   const tokens = row.usage_tokens === null ? null : Number(row.usage_tokens);
   if (tokens !== null && (!Number.isSafeInteger(tokens) || tokens < 0))
     throw stateConflict('invalid compact usage');
@@ -241,7 +274,17 @@ export async function readCompactContinuation(
     (row.status === 'published' && !['saved', 'failed'].includes(row.candidate_status))
   )
     throw stateConflict('compact operation is not ready to continue');
-  const snapshot = HarnessR3SnapshotSchema.parse(row.snapshot);
+  const snapshot = HarnessR3SnapshotSchema.parse(
+    await decodeRunSnapshot(
+      client,
+      {
+        ...binding,
+        kind: 'pause',
+        id: binding.pauseId,
+      },
+      row.snapshot,
+    ),
+  );
   if (snapshot.waiting) throw stateConflict('compact cannot consume approval waiting');
   const admission =
     userMessageId === null

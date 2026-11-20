@@ -90,6 +90,14 @@ export async function acceptTargetContinuation(
     goal.data.clarification?.kind !== kind
   )
     return null;
+  // A predecessor can have disclosed private text in its user-visible response or goal result.
+  // Never copy that result or its private receipt into a new Run's frozen continuation.
+  const privateReceipt = await client.query(
+    `SELECT 1 FROM tool_invocations WHERE owner_id=$1 AND conversation_id=$2 AND run_id=$3
+     AND tool_id='feishu_docx_read' AND state='completed' AND outcome_kind='success' LIMIT 1`,
+    [input.ownerId, input.conversationId, run.id],
+  );
+  if (privateReceipt.rowCount) return null;
   const candidates = await client.query<{
     id: string;
     frozen_context: Frozen;
@@ -252,9 +260,12 @@ export async function readContinuationReceipts(
     ).rows[0];
     if (!row || row.frozen_context?.authorization_revision !== 'delegation/1')
       throw stateConflict('invalid continuation receipt source');
-    const own = (await readRunInvocationStates(client, { ...binding, runId: current }))
-      .filter((r) => remaining.has(r.invocation_id))
-      .map((r) => r.invocation_id);
+    const matching = (await readRunInvocationStates(client, { ...binding, runId: current })).filter(
+      (r) => remaining.has(r.invocation_id),
+    );
+    if (matching.some((r) => r.tool_id === 'feishu_docx_read'))
+      throw stateConflict('private Feishu receipts cannot be inherited');
+    const own = matching.map((r) => r.invocation_id);
     if (own.length) {
       const f = row.frozen_context;
       const ctx: ToolContext = {

@@ -54,6 +54,8 @@ import { loadHarnessSession } from './attempt-load.js';
 import { validateRoutingFacts } from './attempt-routing.js';
 import { createSnapshotValidator } from './attempt-snapshot.js';
 import { buildHarnessStart, poolOf, toolContext } from './context.js';
+import { requireCurrentFeishuBotAuthority } from '../tools/invocations/accepted-result.js';
+import { authorizePrivateOutput } from './private-output.js';
 
 export const sessionAborts = new Map<string, Set<AbortController>>();
 
@@ -175,8 +177,18 @@ export async function createHarnessSession(
     )
       throw stateConflict('routing direct requires unique original invocation');
   }
-  async function send(event: ThreadEvent): Promise<void> {
-    if (!(await write(event))) throw stateConflict('client disconnected');
+  async function send(event: ThreadEvent, privateOutput = false): Promise<void> {
+    const open = privateOutput
+      ? await withRunTransaction(pool, context.ownership, async (client) => {
+          // Terminal facts have already committed; a delta still needs a running attempt.
+          await lockRun(client, context, event.type === 'message.delta');
+          await requireCurrentFeishuBotAuthority(client, context);
+          if (sessionSignal.aborted) throw stateConflict('harness attempt stopped');
+          // Hand off to the sink while revocation is still blocked on the grant/session locks.
+          return write(event, 'held');
+        })
+      : await write(event);
+    if (!open) throw stateConflict('client disconnected');
   }
   const validateSnapshot = createSnapshotValidator(context, attemptState);
   const pauseHandlers = createPauseHandlers(
@@ -558,13 +570,15 @@ export async function createHarnessSession(
             request.delta !== attemptState.modelStream.pendingDelta
           )
             throw stateConflict('native answer must match the accepted model delta');
-          const event = await guarded((client) =>
-            appendEvent(client, context, 'message.delta', {
+          const { event, privateOutput } = await guarded(async (client) => {
+            const privateOutput = await authorizePrivateOutput(client, context);
+            const event = await appendEvent(client, context, 'message.delta', {
               ...eventPayload(context),
               delta: request.delta,
-            }),
-          );
-          await send(event);
+            });
+            return { event, privateOutput };
+          });
+          await send(event, privateOutput);
           if (attemptState.modelStream) attemptState.modelStream.pendingDelta = null;
           return { accepted: true };
         }

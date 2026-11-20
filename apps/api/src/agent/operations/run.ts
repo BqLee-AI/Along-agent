@@ -518,12 +518,13 @@ export async function executeHarness(
     const session = await createHarnessSession(
       deps,
       context,
-      async (event) => {
-        const open = await write(event);
+      async (event, authority) => {
+        const open = await write(event, authority);
         if (open && event.type === 'thread.cancelled') cancellationProjected = true;
         if (!open) {
           disconnected();
-          await cancellation;
+          // The private publication transaction must release the Run before cancellation can lock it.
+          if (authority !== 'held') await cancellation;
         }
         return open;
       },

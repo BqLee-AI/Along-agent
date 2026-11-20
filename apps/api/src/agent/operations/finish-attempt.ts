@@ -17,6 +17,7 @@ import {
 } from '../routing/routing-checkpoints.js';
 import { toolContext } from '../runtime/context.js';
 import { approvalAuthorizesActions, type AttemptEnvironment } from '../runtime/attempt-state.js';
+import { authorizePrivateOutput } from '../runtime/private-output.js';
 import { validateGoalResult } from './goal-result.js';
 import { readRunApprovalDecision } from './run-approval-decision.js';
 import { commitTerminal } from './finish.js';
@@ -24,7 +25,7 @@ import { commitTerminal } from './finish.js';
 /** Complete terminal use cases; all evidence and facts use the attempt's guarded client. */
 export function createFinishHandlers(
   environment: AttemptEnvironment,
-  send: (event: ThreadEvent) => Promise<void>,
+  send: (event: ThreadEvent, privateOutput?: boolean) => Promise<void>,
   directInvocation: (client: PoolClient, invocationId: string) => Promise<void>,
 ) {
   const { context, initial, state: attemptState, guarded } = environment;
@@ -63,6 +64,8 @@ export function createFinishHandlers(
           };
         throw error;
       }
+      // A supplied cancellation goal also contains model-controlled text.
+      const privateOutput = await authorizePrivateOutput(client, context);
       const event = await commitTerminal(
         client,
         context,
@@ -75,14 +78,14 @@ export function createFinishHandlers(
           goal_result: goal,
         },
       );
-      return { accepted: true as const, event };
+      return { accepted: true as const, event, privateOutput };
     });
     if (!result.accepted) {
       attemptState.correctingGoal = true;
       return result;
     }
     attemptState.stopped = true;
-    await send(result.event);
+    await send(result.event, result.privateOutput);
     return { accepted: true };
   }
   async function finish(request: Extract<HarnessRequest, { type: 'finish' }>) {
@@ -109,8 +112,13 @@ export function createFinishHandlers(
         request.usage.tokens !== attemptState.cumulative.tokens)
     )
       throw stateConflict('terminal usage must match accepted model steps');
-    const event = await guarded(async (client) => {
-      const previous = await readLatestRunSnapshotPayload(client, context.runId);
+    const { event, privateOutput } = await guarded(async (client) => {
+      // Interruption only accounts for accepted effects and deltas. Use the
+      // already validated in-memory usage baseline instead of reopening private state.
+      const previous =
+        request.outcome !== 'done' && context.feishuDocx
+          ? null
+          : await readLatestRunSnapshotPayload(client, context);
       const baseline = previous
         ? context.executionProfile === 'compact-memory/1'
           ? HarnessR3SnapshotSchema.parse(previous.payload)
@@ -232,10 +240,15 @@ export function createFinishHandlers(
                   http_status: request.error?.code === 'BUDGET_EXCEEDED' ? 429 : 500,
                 },
               };
-      return commitTerminal(client, context, request.outcome, payload, { prepareGoal });
+      const privateOutput =
+        request.outcome === 'done' && (await authorizePrivateOutput(client, context));
+      const event = await commitTerminal(client, context, request.outcome, payload, {
+        prepareGoal,
+      });
+      return { event, privateOutput };
     });
     attemptState.stopped = true;
-    await send(event);
+    await send(event, privateOutput);
     return { accepted: true };
   }
   return { finishGoal, finish };

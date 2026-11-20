@@ -9,6 +9,16 @@ import {
 } from '../../../features/approvals/public.js';
 import { readCreatedTaskReceipt } from '../../../features/tasks/public.js';
 import { hashBytes, strictUtf8 } from '../../../features/workspaces/public.js';
+import {
+  loadFeishuBotDocxConfiguration,
+  loadFeishuConfiguration,
+  matchFeishuBotDocxGrant,
+  openFeishuBotObservation,
+  openFeishuObservation,
+  readActiveFeishuConnection,
+  readFeishuBotObservationKey,
+} from '../../../features/office-connectors/public.js';
+import { lockViewerAccess } from '../../../features/identity/public.js';
 import type { ToolContext, ToolResult } from '../contracts.js';
 import { approvalReceiptSchema, parseResult, resultKind } from '../result-schema.js';
 import {
@@ -185,11 +195,30 @@ export function hydrateWorkspaceReadResult(value: unknown): ToolResult {
   return result;
 }
 
+export async function requireCurrentFeishuBotAuthority(
+  client: PoolClient,
+  ctx: Pick<ToolContext, 'ownerId' | 'feishuDocx'>,
+) {
+  const grant = ctx.feishuDocx;
+  const config = loadFeishuBotDocxConfiguration();
+  if (!config || !grant || !('kind' in grant))
+    throw forbidden('Feishu observation authorization expired');
+  const viewer = { ownerId: ctx.ownerId, sessionId: grant.sessionId };
+  if (
+    !(await lockViewerAccess(client, viewer.ownerId, viewer.sessionId)) ||
+    !(await matchFeishuBotDocxGrant(client, config, viewer, grant))
+  )
+    throw forbidden('Feishu observation authorization expired');
+  const key = readFeishuBotObservationKey(config);
+  if (!key) throw forbidden('Feishu observation key unavailable');
+  return { config, key };
+}
+
 // Callers authorize content reads. Internal terminal accounting may hydrate
 // already-bound facts after revocation, without authorizing any disclosure.
 export async function readAcceptedInvocationResult(
   client: PoolClient,
-  ctx: Pick<ToolContext, 'ownerId' | 'runId'>,
+  ctx: Pick<ToolContext, 'ownerId' | 'runId' | 'feishuDocx'>,
   row: {
     invocation_id: string;
     args_hash?: string;
@@ -220,7 +249,69 @@ export async function readAcceptedInvocationResult(
       result: await readFrozenToolApproval(client, { ownerId: ctx.ownerId, ...receipt }),
     };
   }
+  if (row.tool_id === 'feishu_docx_read' && row.outcome_kind === 'success') {
+    const grant = ctx.feishuDocx;
+    if (
+      !grant ||
+      !row.frozen_context ||
+      typeof row.frozen_context !== 'object' ||
+      !('feishuDocx' in row.frozen_context) ||
+      !isDeepStrictEqual(row.frozen_context.feishuDocx, grant)
+    )
+      throw forbidden('Feishu observation authorization expired');
+    const binding = { ownerId: ctx.ownerId, runId: ctx.runId, invocationId: row.invocation_id };
+    let open: () => unknown;
+    if ('kind' in grant) {
+      const { config, key } = await requireCurrentFeishuBotAuthority(client, ctx);
+      const envelope = z
+        .object({
+          encoding: z.literal('feishu-aead/2'),
+          keyId: z.string(),
+          ciphertext: z.string().max(320_040),
+        })
+        .strict()
+        .safeParse(row.accepted_result);
+      if (!envelope.success || envelope.data.keyId !== config.observationKeyEnv)
+        throw stateConflict('invalid Feishu observation encoding');
+      open = () => openFeishuBotObservation(key, { ...binding, grant }, envelope.data.ciphertext);
+    } else {
+      // Decode previously accepted user-identity receipts only; never obtain a user credential.
+      const config = loadFeishuConfiguration();
+      const viewer = { ownerId: ctx.ownerId, sessionId: grant.sessionId };
+      if (
+        !config ||
+        !(await readActiveFeishuConnection(client, viewer, config, grant.connectionId))
+      )
+        throw forbidden('Feishu observation authorization expired');
+      const envelope = z
+        .object({
+          encoding: z.literal('feishu-aead/1'),
+          ciphertext: z.string().max(320_040),
+        })
+        .strict()
+        .safeParse(row.accepted_result);
+      if (!envelope.success) throw stateConflict('invalid Feishu observation encoding');
+      open = () =>
+        openFeishuObservation(config.key, ctx.ownerId, row.invocation_id, envelope.data.ciphertext);
+    }
+    try {
+      const result = parseResult(open());
+      if (
+        result.status === 'ok' &&
+        result.result.kind === 'feishu_docx_read' &&
+        result.result.source.url === grant.url &&
+        result.result.source.identity === ('kind' in grant ? 'bot' : undefined) &&
+        hashBytes(Buffer.from(result.result.content, 'utf8')) === result.result.content_hash
+      )
+        return result;
+    } catch {
+      throw stateConflict('invalid Feishu observation ciphertext');
+    }
+    throw stateConflict('invalid Feishu observation binding');
+  }
   const result = hydrateWorkspaceReadResult(row.accepted_result);
+  if (result.status === 'ok' && result.result.kind === 'feishu_docx_read')
+    throw stateConflict('unexpected Feishu observation encoding');
   if (result.status === 'unknown' || resultKind(result) !== row.outcome_kind)
     throw stateConflict('invalid accepted tool result');
   if (

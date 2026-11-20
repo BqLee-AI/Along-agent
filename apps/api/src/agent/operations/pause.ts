@@ -8,6 +8,7 @@ import {
   ActionKeySchema,
   ContinueRunBodySchema,
   PauseRunBodySchema,
+  decodeRunSnapshot,
   insertAttempt,
   listRunEvents,
 } from '../../features/conversations/public.js';
@@ -162,10 +163,22 @@ export async function continueConversationPause(
           pause.purpose !== 'none'
         )
           throw stateConflict('Run has no matching user pause');
+        const payload = await decodeRunSnapshot(
+          client,
+          {
+            ownerId,
+            conversationId,
+            runId,
+            attemptId: pause.attempt_id,
+            kind: 'pause',
+            id: pauseId,
+          },
+          pause.snapshot,
+        );
         const snapshot =
           locked.run.frozen_context?.execution_profile === 'compact-memory/1'
-            ? HarnessR3SnapshotSchema.parse(pause.snapshot)
-            : HarnessPauseSnapshotSchema.parse(pause.snapshot);
+            ? HarnessR3SnapshotSchema.parse(payload)
+            : HarnessPauseSnapshotSchema.parse(payload);
         const finalAnswer =
           !locked.run.frozen_context.authorization_revision &&
           snapshot.native_state.pending_model?.tool_calls.length === 0;

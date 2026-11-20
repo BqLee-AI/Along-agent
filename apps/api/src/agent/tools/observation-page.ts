@@ -18,13 +18,14 @@ export async function readObservationPage(
   args: ReadRunObservationInput,
 ): Promise<ToolResult> {
   const metadata = await assertContextSourceAuthorized(client, ctx, args.source_invocation_id);
-  const observation = await readRunContextSource(client, ctx, args.source_invocation_id, 'full');
-  if (observation.view !== 'full') throw contextSourceCorrupt();
-  const accepted = observation.result;
   const unsupported: ToolResult = {
     status: 'ok',
     result: { kind: 'operation_error', path: '', reason: 'unsupported_source' },
   };
+  if (metadata.tool_id === 'feishu_docx_read') return unsupported;
+  const observation = await readRunContextSource(client, ctx, args.source_invocation_id, 'full');
+  if (observation.view !== 'full') throw contextSourceCorrupt();
+  const accepted = observation.result;
   const tooLarge: ToolResult = {
     status: 'ok',
     result: { kind: 'operation_error', path: '', reason: 'range_too_large' },

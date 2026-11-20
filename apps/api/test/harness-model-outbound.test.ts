@@ -1,10 +1,14 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
-import { createServer, type Server } from 'node:http';
+import { createServer, request as httpRequest, type Server } from 'node:http';
 import { HARNESS_PROTOCOL_VERSION, type HarnessRequest } from '@along/contracts';
 import { createConfiguredSdkStep } from '../src/features/model-providers/public.js';
 import { createContextPolicy } from '../src/features/conversations/public.js';
 import { measureSdkContext } from '../src/features/model-providers/public.js';
-import { OutboundError } from '../src/features/model-providers/outbound/outbound.js';
+import {
+  OutboundError,
+  outboundFetchForTest,
+} from '../src/features/model-providers/outbound/outbound.js';
+import { forbidden } from '../src/platform/errors.js';
 
 const servers: Server[] = [];
 afterEach(async () => {
@@ -42,6 +46,78 @@ async function listen(server: Server): Promise<string> {
 
 test('user configuration requires an explicit network boundary', () => {
   expect(() => createConfiguredSdkStep(config, undefined as never)).toThrow();
+});
+
+test.each([false, true])('dispatch rechecks authority after DNS (revoked: %s)', async (revoked) => {
+  const dnsStarted = Promise.withResolvers<void>();
+  const finishDns = Promise.withResolvers<void>();
+  let authorized = true;
+  let opened = 0;
+  let received = '';
+  const local = await listen(
+    createServer((req, res) => {
+      req.setEncoding('utf8');
+      req.on('data', (part: string) => (received += part));
+      req.on('end', () => {
+        res.writeHead(200, { 'content-type': 'text/event-stream' });
+        res.end(chunk({ content: 'accepted' }) + chunk({}, 'stop') + 'data: [DONE]\n\n');
+      });
+    }),
+  );
+  const model = createConfiguredSdkStep(config, (url, init, authorizeDispatch) =>
+    outboundFetchForTest(
+      url,
+      init,
+      {
+        resolve: async () => {
+          dnsStarted.resolve();
+          await finishDns.promise;
+          authorized = !revoked;
+          return [{ address: '8.8.8.8', family: 4 }];
+        },
+        httpRequest: () => {
+          throw new Error('unexpected HTTP destination');
+        },
+        httpsRequest: (_url, options, callback) => {
+          opened++;
+          return httpRequest(local, options, callback);
+        },
+      },
+      authorizeDispatch,
+    ),
+  );
+  const steps = Array.fromAsync(
+    model(request, [], new AbortController().signal, async () => {
+      if (!authorized) throw forbidden('Feishu observation authorization expired');
+    }),
+  );
+  await Promise.race([
+    dnsStarted.promise,
+    steps.then(() => {
+      throw new Error('model finished before DNS started');
+    }),
+  ]);
+  finishDns.resolve();
+
+  const result = await steps;
+  if (revoked) {
+    expect(opened).toBe(0);
+    expect(received).toBe('');
+    expect(result).toEqual([
+      {
+        type: 'failed',
+        error: { code: 'FORBIDDEN', message: 'Feishu observation authorization expired' },
+        usage: null,
+      },
+    ]);
+  } else {
+    expect(opened).toBe(1);
+    expect(JSON.parse(received)).toMatchObject({ messages: request.messages });
+    expect(result.at(-1)).toMatchObject({
+      type: 'complete',
+      reply: { message: { content: 'accepted' } },
+    });
+  }
 });
 
 test('a denied network operation never falls back or exposes the boundary error', async () => {

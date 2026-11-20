@@ -3,37 +3,55 @@ import type { PoolClient } from 'pg';
 import type { HarnessSnapshot, HarnessPauseSnapshot, HarnessR3Snapshot } from '@along/contracts';
 import { stateConflict } from '../../../platform/errors.js';
 import type { RunContext } from '../contracts.js';
+import { decodeRunSnapshot, encodeRunSnapshot } from './snapshot-storage.js';
 
 type AttemptBinding = Pick<RunContext, 'ownerId' | 'conversationId' | 'runId' | 'attemptId'>;
+type RunBinding = Omit<AttemptBinding, 'attemptId'>;
+
+type StoredCheckpoint = { id: string; attempt_id: string; payload: unknown };
+
+function decodeCheckpoint(client: PoolClient, binding: RunBinding, row: StoredCheckpoint) {
+  return decodeRunSnapshot(
+    client,
+    {
+      ...binding,
+      kind: 'checkpoint',
+      attemptId: row.attempt_id,
+      id: row.id,
+    },
+    row.payload,
+  );
+}
 
 export async function readRunSnapshotPayload(
   client: PoolClient,
-  ownerId: string,
-  runId: string,
+  binding: RunBinding,
   checkpointId: string,
 ): Promise<unknown> {
   const checkpoint = (
-    await client.query<{ payload: unknown }>(
-      `SELECT c.payload FROM run_checkpoints c JOIN run_attempts a ON a.id=c.attempt_id
-      WHERE c.id=$1 AND c.owner_id=$2 AND a.run_id=$3 AND c.kind='harness_snapshot'`,
-      [checkpointId, ownerId, runId],
+    await client.query<StoredCheckpoint>(
+      `SELECT c.id,c.attempt_id,c.payload FROM run_checkpoints c JOIN run_attempts a ON a.id=c.attempt_id
+      WHERE c.id=$1 AND c.owner_id=$2 AND a.owner_id=$2 AND a.run_id=$3 AND c.kind='harness_snapshot'`,
+      [checkpointId, binding.ownerId, binding.runId],
     )
   ).rows[0];
   if (!checkpoint) throw stateConflict('invalid harness checkpoint');
-  return checkpoint.payload;
+  return decodeCheckpoint(client, binding, checkpoint);
 }
 
 export async function readLatestRunSnapshotPayload(
   client: PoolClient,
-  runId: string,
-): Promise<{ payload: unknown } | undefined> {
-  return (
-    await client.query<{ payload: unknown }>(
-      `SELECT c.payload FROM run_checkpoints c JOIN run_attempts a ON a.id=c.attempt_id
-          WHERE a.run_id=$1 AND c.kind='harness_snapshot' ORDER BY c.event_seq DESC LIMIT 1`,
-      [runId],
+  binding: RunBinding,
+): Promise<{ payload: unknown } | null> {
+  const row = (
+    await client.query<StoredCheckpoint>(
+      `SELECT c.id,c.attempt_id,c.payload FROM run_checkpoints c JOIN run_attempts a ON a.id=c.attempt_id
+       WHERE a.run_id=$1 AND a.owner_id=$2 AND c.owner_id=$2 AND c.kind='harness_snapshot'
+       ORDER BY c.event_seq DESC LIMIT 1`,
+      [binding.runId, binding.ownerId],
     )
   ).rows[0];
+  return row ? { payload: await decodeCheckpoint(client, binding, row) } : null;
 }
 
 export async function readLatestAttemptSnapshotId(
@@ -62,10 +80,11 @@ export async function writeHarnessSnapshotWithinTransaction(
     )
   ).rows[0]?.seq;
   const id = randomUUID();
+  const payload = await encodeRunSnapshot(client, { ...binding, kind: 'checkpoint', id }, snapshot);
   await client.query(
     `INSERT INTO run_checkpoints(id,owner_id,attempt_id,seq,kind,payload,stream_protocol_version)
           VALUES($1,$2,$3,$4,'harness_snapshot',$5::jsonb,$6)`,
-    [id, binding.ownerId, binding.attemptId, seq, JSON.stringify(snapshot), protocol],
+    [id, binding.ownerId, binding.attemptId, seq, payload, protocol],
   );
   return id;
 }

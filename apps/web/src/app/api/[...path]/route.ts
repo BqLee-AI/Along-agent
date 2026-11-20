@@ -98,7 +98,8 @@ async function proxy(req: NextRequest, context: RouteContext): Promise<Response>
     responseHeaders.delete('set-cookie');
     for (const cookie of cookies) responseHeaders.append('set-cookie', cookie);
   }
-  if (path[0] === 'v1' && (path[1] === 'auth' || path[1] === 'me')) {
+  const feishuBot = path[1] === 'office' && path[2] === 'feishu' && path[3] === 'bot';
+  if (path[0] === 'v1' && (path[1] === 'auth' || path[1] === 'me' || feishuBot)) {
     responseHeaders.set('cache-control', 'no-store');
   }
   if (!upstream.body) {

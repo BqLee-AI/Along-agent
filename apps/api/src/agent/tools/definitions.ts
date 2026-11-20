@@ -27,6 +27,7 @@ import {
 } from './workspace/workspace-handlers.js';
 import { invokeMemorySource, invokeMemoryRecall, runRememberMemory } from './memory-handlers.js';
 import { invokeRunObservation } from './observation-handler.js';
+import { invokeFeishuDocxRead } from './feishu/docx-read.js';
 
 interface ToolDefinition {
   executionKind: ExecutionKind;
@@ -102,6 +103,7 @@ const definitions: Record<ToolId, ToolDefinition> = {
   workspace_list: { executionKind: 'read_only', invoke: invokeWorkspaceRead },
   workspace_grep: { executionKind: 'read_only', invoke: invokeWorkspaceRead },
   workspace_read: { executionKind: 'read_only', invoke: invokeWorkspaceRead },
+  feishu_docx_read: { executionKind: 'read_only', invoke: invokeFeishuDocxRead },
   workspace_propose_replace: {
     executionKind: 'local',
     invoke: local((_pool, client, ctx, input) => runWorkspaceProposal(client, ctx, input.args)),

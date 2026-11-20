@@ -182,6 +182,123 @@ maybe('server-owned native execution', () => {
       await driver.shutdown();
     }
   }, 30000);
+  it('admits a signed HTTP Docx request and checkpoints a native tool failure', async () => {
+    const session = await seedAdmittedSession(database.pool);
+    const model = 'fixture-transport-only';
+    await configureTestModel(database.pool, session.userId, model);
+    const appId = 'cli_testtesttesttest';
+    const url = 'https://test.feishu.cn/docx/TestDocument000000000000000';
+    await database.pool.query(
+      `INSERT INTO feishu_bot_connections(owner_id,attempt_id,expires_at,app_id,bot_name)
+       VALUES($1,$2,now(),$3,'Synthetic Bot')`,
+      [session.userId, randomUUID(), appId],
+    );
+    const env = {
+      FEISHU_BOT_DOCX_CONFIG: JSON.stringify({
+        appId,
+        ownerId: session.userId,
+        connectionId: randomUUID(),
+        revision: randomUUID(),
+        secretEnv: 'FEISHU_BOT_DOCX_APP_SECRET',
+        observationKeyEnv: 'FEISHU_BOT_DOCX_OBSERVATION_KEY',
+        documents: [url],
+      }),
+      FEISHU_BOT_DOCX_APP_SECRET: 'synthetic',
+      FEISHU_BOT_DOCX_OBSERVATION_KEY: Buffer.alloc(32, 9).toString('base64'),
+    };
+    const previous = Object.entries(env).map(([key]) => [key, process.env[key]] as const);
+    const originalFetch = globalThis.fetch;
+    let upstreamCalls = 0;
+    globalThis.fetch = Object.assign(
+      async (...args: Parameters<typeof fetch>) => {
+        const target = String(args[0]);
+        if (!target.startsWith('https://open.feishu.cn/open-apis/')) return originalFetch(...args);
+        upstreamCalls++;
+        return target.endsWith('/tenant_access_token/internal')
+          ? Response.json({ code: 0, tenant_access_token: 'synthetic-token', expire: 3600 })
+          : new Response(null, { status: 503 });
+      },
+      { preconnect: originalFetch.preconnect },
+    );
+    Object.assign(process.env, env);
+    const provider = createServer((_req, res) => {
+      sendModelSse(res, {
+        message: {
+          content: null,
+          tool_calls: [
+            {
+              id: randomUUID(),
+              type: 'function',
+              function: {
+                name: 'feishu_docx_read',
+                arguments: '{}',
+              },
+            },
+          ],
+        },
+        usage: { total_tokens: 5 },
+      });
+    });
+    const driver = createRunDriver(database.pool);
+    let api: Server | undefined;
+    try {
+      const providerBase = await listen(provider);
+      const deps = {
+        pool: database.pool,
+        timeContext: loadTimeContext('fixture-v1'),
+        runDriver: driver,
+        harness: {
+          binaryPath: binaryPath!,
+          libraryPath: process.env.HARNESS_LIBRARY_PATH!,
+          maxIterations: 8,
+          maxTokens: 8_000,
+          contextPolicy: createContextPolicy({ completionCap: 1_024, model }),
+          model: createLocalFixtureModelTransport({ baseUrl: `${providerBase}/v1`, model }),
+        },
+      };
+      controlledModelDeps(deps);
+      api = createServer((req, res) => {
+        void handleRequest(req, res, deps);
+      });
+      const apiBase = await listen(api);
+      const response = await fetch(`${apiBase}/api/v1/conversations/messages`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          cookie: `better-auth.session_token=${session.token}`,
+          'x-csrf-token': session.csrfToken,
+        },
+        body: JSON.stringify({
+          execution: 'harness',
+          authorization_revision: 'delegation/1',
+          raw_text: `读取 ${url}`,
+        }),
+      });
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain('FEISHU_DOCX_READ_FAILED');
+      expect(upstreamCalls).toBe(2);
+      const { rows } = await database.pool.query(
+        `SELECT outcome_kind FROM tool_invocations WHERE owner_id=$1 AND tool_id='feishu_docx_read'`,
+        [session.userId],
+      );
+      expect(rows).toEqual([{ outcome_kind: 'failed' }]);
+    } finally {
+      await driver.shutdown();
+      for (const socket of [api, provider]) {
+        if (!socket?.listening) continue;
+        const closed = once(socket, 'close');
+        socket.closeAllConnections();
+        socket.close();
+        await closed;
+      }
+      globalThis.fetch = originalFetch;
+      for (const [key, value] of previous) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  }, 30000);
+
   for (const mode of ['stop', 'disable'] as const) {
     it(`${mode} from another process revokes the running native attempt`, async () => {
       const ownerId = randomUUID();

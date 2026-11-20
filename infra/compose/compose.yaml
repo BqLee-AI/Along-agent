@@ -20,12 +20,22 @@ services:
     build:
       context: ../..
       dockerfile: infra/docker/Dockerfile
+    command: ['bun', '--no-env-file', 'apps/api/dist/main.js']
     environment:
       ROLE: all
       PORT: '3000'
       TZDB_VERSION: ${TZDB_VERSION:-}
       DATABASE_URL: ${DATABASE_URL:-postgresql://along:along@postgres:5432/along}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-}
+      APP_ORIGIN: ${APP_ORIGIN:-http://localhost:3000}
+      # API-only process environment; run Compose with COMPOSE_DISABLE_ENV_FILE=1.
+      FEISHU_BOT_DOCX_CONFIG:
+      FEISHU_BOT_DOCX_APP_SECRET:
+      FEISHU_BOT_DOCX_OBSERVATION_KEY:
+      # Optional historical receipt verification; no user OAuth flows.
+      FEISHU_APP_ID:
+      FEISHU_REDIRECT_URI:
+      FEISHU_CREDENTIAL_KEY:
       MODEL_PROVIDER_ENCRYPTION_KEY: ${MODEL_PROVIDER_ENCRYPTION_KEY:-}
       MODEL_PROVIDER_ALLOWED_LOCAL_ORIGINS: ${MODEL_PROVIDER_ALLOWED_LOCAL_ORIGINS:-}
       MODEL_PROVIDER_ALLOWED_FAKE_DNS_ORIGINS: ${MODEL_PROVIDER_ALLOWED_FAKE_DNS_ORIGINS:-}

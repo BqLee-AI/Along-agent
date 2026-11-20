@@ -86,7 +86,7 @@ databaseTests('trusted goal schema lifecycle admission against PG16', () => {
     '0028',
   ]) {
     const version = source.slice(0, 4);
-    it(`explicitly upgrades original ${source} to 0038 without rewriting existing identity or Run facts`, async () => {
+    it(`explicitly upgrades original ${source} to 0041 without rewriting existing identity or Run facts`, async () => {
       const directory = await mkdtemp(join(tmpdir(), `goal-${version}-`));
       const migrations = new URL('../../infra/migrations/', import.meta.url);
       try {
@@ -150,7 +150,7 @@ databaseTests('trusted goal schema lifecycle admission against PG16', () => {
             ).rows[0].value;
           });
           await deployment(url, async (database) => {
-            expect(database.targetVersion).toBe('0038');
+            expect(database.targetVersion).toBe('0041');
             expect(await database.classify()).toMatchObject({
               kind: 'supported',
               version,
@@ -159,7 +159,7 @@ databaseTests('trusted goal schema lifecycle admission against PG16', () => {
             await expect(database.initialize()).rejects.toMatchObject({
               code: 'explicit_upgrade_required',
             });
-            expect((await database.upgrade()).version).toBe('0038');
+            expect((await database.upgrade()).version).toBe('0041');
           });
           await sql(url, async (client) => {
             expect(
@@ -179,6 +179,9 @@ databaseTests('trusted goal schema lifecycle admission against PG16', () => {
               '0036',
               '0037',
               '0038',
+              '0039',
+              '0040',
+              '0041',
             ]);
             expect(
               (
@@ -213,10 +216,10 @@ databaseTests('trusted goal schema lifecycle admission against PG16', () => {
             await deployment(url, async (database) => {
               expect(await database.classify()).toMatchObject({
                 kind: 'supported',
-                version: '0038',
+                version: '0041',
               });
-              expect((await database.initialize()).version).toBe('0038');
-              expect((await database.upgrade()).version).toBe('0038');
+              expect((await database.initialize()).version).toBe('0041');
+              expect((await database.upgrade()).version).toBe('0041');
             });
           }
         });
@@ -229,7 +232,7 @@ databaseTests('trusted goal schema lifecycle admission against PG16', () => {
   it('requires true delegated terminal facts rather than SQL NULL from missing legacy or goal keys', async () => {
     await isolated(async (url) => {
       await deployment(url, async (database) => {
-        expect((await database.initialize()).version).toBe('0038');
+        expect((await database.initialize()).version).toBe('0041');
       });
       await sql(url, async (client) => {
         const ownerId = randomUUID();
@@ -379,7 +382,7 @@ databaseTests('trusted goal schema lifecycle admission against PG16', () => {
     async (_name, mutation) => {
       await isolated(async (url) => {
         await deployment(url, async (database) => {
-          expect((await database.initialize()).version).toBe('0038');
+          expect((await database.initialize()).version).toBe('0041');
         });
         await sql(url, async (client) => {
           await client.query(mutation);
@@ -428,7 +431,7 @@ databaseTests('trusted goal schema lifecycle admission against PG16', () => {
     async (_name, mutation) => {
       await isolated(async (url) => {
         await deployment(url, async (database) => {
-          expect((await database.initialize()).version).toBe('0038');
+          expect((await database.initialize()).version).toBe('0041');
         });
         let before: unknown;
         const snapshot = `SELECT jsonb_build_object(

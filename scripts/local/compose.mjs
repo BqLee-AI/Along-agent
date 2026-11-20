@@ -87,13 +87,53 @@ export function installationEnvironment(config, image = 'along-local:unprepared'
   });
 }
 
+function feishuApiEnvironment() {
+  const { FEISHU_APP_ID, FEISHU_REDIRECT_URI, FEISHU_CREDENTIAL_KEY } = process.env;
+  const legacy =
+    FEISHU_APP_ID && FEISHU_REDIRECT_URI && FEISHU_CREDENTIAL_KEY
+      ? { FEISHU_APP_ID, FEISHU_REDIRECT_URI, FEISHU_CREDENTIAL_KEY }
+      : {};
+  const encoded = process.env.FEISHU_BOT_DOCX_CONFIG;
+  if (!encoded) return legacy;
+
+  // Never let policy references disclose arbitrary host values to the container.
+  let policy;
+  try {
+    policy = JSON.parse(encoded);
+  } catch {
+    return legacy;
+  }
+  const { secretEnv, observationKeyEnv } = policy ?? {};
+  if (
+    typeof secretEnv !== 'string' ||
+    secretEnv.length > 128 ||
+    !/^FEISHU_BOT_DOCX_APP_SECRET(?:_[A-Z0-9][A-Z0-9_]*)?$/u.test(secretEnv) ||
+    typeof observationKeyEnv !== 'string' ||
+    observationKeyEnv.length > 128 ||
+    !/^FEISHU_BOT_DOCX_OBSERVATION_KEY(?:_[A-Z0-9][A-Z0-9_]*)?$/u.test(observationKeyEnv)
+  ) {
+    return legacy;
+  }
+  const secret = process.env[secretEnv];
+  const key = process.env[observationKeyEnv];
+  if (!secret || !key) return legacy;
+  return {
+    ...legacy,
+    FEISHU_BOT_DOCX_CONFIG: encoded,
+    [secretEnv]: secret,
+    [observationKeyEnv]: key,
+  };
+}
+
 export async function compose(
   config,
   directory,
   args,
-  { image, source = repositoryRoot, input } = {},
+  { image, source = repositoryRoot, input, withFeishu = false } = {},
 ) {
   const registration = path.join(directory, 'registry.compose.json');
+  const feishu = withFeishu ? feishuApiEnvironment() : {};
+  const feishuNames = Object.keys(feishu);
   await mkdir(directory, { recursive: true, mode: 0o700 });
   let readableRegistration = false;
   if (config.registryFile) {
@@ -111,6 +151,10 @@ export async function compose(
   await writeJson(registration, {
     services: {
       api: {
+        // Compose resolves null references from its process environment, not this file.
+        ...(feishuNames.length
+          ? { environment: Object.fromEntries(feishuNames.map((name) => [name, null])) }
+          : {}),
         ...(config.identityKeyringFile
           ? {
               // Windows ACL-private binds can appear as mode 0777 in Linux.
@@ -118,7 +162,7 @@ export async function compose(
               command: [
                 'sh',
                 '-ec',
-                'umask 077; cp /run/along-identity-keyring-source.json /run/along-identity-keyring.json; chmod 600 /run/along-identity-keyring.json; exec bun apps/api/dist/main.js',
+                'umask 077; cp /run/along-identity-keyring-source.json /run/along-identity-keyring.json; chmod 600 /run/along-identity-keyring.json; exec bun --no-env-file apps/api/dist/main.js',
               ],
             }
           : {}),
@@ -174,7 +218,11 @@ export async function compose(
       registration,
       ...args,
     ],
-    { env: installationEnvironment(config, image), code: 'COMPOSE_FAILED', input },
+    {
+      env: { ...installationEnvironment(config, image), ...feishu },
+      code: 'COMPOSE_FAILED',
+      input,
+    },
   );
 }
 

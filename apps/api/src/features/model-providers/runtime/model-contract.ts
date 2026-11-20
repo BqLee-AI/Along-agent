@@ -10,6 +10,7 @@ export type ModelStepTransport = (
   request: Extract<HarnessRequest, { type: 'model' }>,
   tools: readonly HarnessTool[],
   signal: AbortSignal,
+  authorizeDispatch?: () => Promise<void>,
 ) => AsyncGenerator<HarnessModelStep, void, unknown>;
 
 export type ModelContextMeasurement = (

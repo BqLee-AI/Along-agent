@@ -21,6 +21,12 @@ import {
 import { readRunDocumentEvidence } from '../query.js';
 import { assertDocumentTargetAvailable } from './document-target.js';
 import { isActiveOwner } from '../../../features/identity/public.js';
+import {
+  feishuBotDocxGrantSchema,
+  loadFeishuBotDocxConfiguration,
+  readFeishuBotObservationKey,
+  sealFeishuBotObservation,
+} from '../../../features/office-connectors/public.js';
 import { withTransaction } from '../../../db/transaction.js';
 import { forbidden, notFound, stateConflict, ApplicationError } from '../../../platform/errors.js';
 import {
@@ -65,6 +71,18 @@ const frozenSchema = z
     workspaceGrant: workspaceGrantSchema.nullable().optional(),
     documentApprovalId: z.string().uuid().optional(),
     authorizationRevision: z.literal('delegation/1').optional(),
+    feishuDocx: z
+      .union([
+        z
+          .object({
+            connectionId: z.string().uuid(),
+            sessionId: z.string().uuid(),
+            url: z.string(),
+          })
+          .strict(),
+        feishuBotDocxGrantSchema,
+      ])
+      .optional(),
     documentEdit: z
       .object({
         base_read_invocation_id: z.string().uuid(),
@@ -192,6 +210,7 @@ function freezeContext(ctx: ToolContext): z.infer<typeof frozenSchema> {
     available: ctx.timeContext.available,
     workspaceGrant: ctx.workspaceGrant ?? null,
     ...(ctx.authorizationRevision ? { authorizationRevision: ctx.authorizationRevision } : {}),
+    ...(ctx.feishuDocx ? { feishuDocx: ctx.feishuDocx } : {}),
   };
 }
 function workspaceAuthorized(ctx: ToolContext, row: Invocation): boolean {
@@ -216,6 +235,13 @@ function executionContext(ctx: ToolContext, row: Invocation): ToolContext {
   const frozen = row.frozen_context;
   if (ctx.authorizationRevision !== frozen.authorizationRevision)
     throw forbidden('authorization revision differs from frozen invocation');
+  if (
+    row.tool_id === 'feishu_docx_read' &&
+    (!ctx.feishuDocx ||
+      !frozen.feishuDocx ||
+      canonicalJson(ctx.feishuDocx) !== canonicalJson(frozen.feishuDocx))
+  )
+    throw forbidden('Feishu grant differs from frozen invocation');
   if (
     frozen.workspaceGrant &&
     (ctx.authorizationRevision === 'delegation/1'
@@ -305,6 +331,13 @@ export async function reserveInvocation(
       if (pending.rowCount) return { pauseRequested: true };
     }
     if (input.toolId === 'workspace_create' && ctx.authorizationRevision !== 'delegation/1')
+      throw forbidden();
+    if (
+      input.toolId === 'feishu_docx_read' &&
+      (ctx.authorizationRevision !== 'delegation/1' ||
+        !ctx.feishuDocx ||
+        !('kind' in ctx.feishuDocx))
+    )
       throw forbidden();
     let selected = ctx.workspaceGrant ?? null;
     let documentEdit: ToolContext['documentEdit'];
@@ -641,12 +674,44 @@ async function accept(
     throw stateConflict('context result requires observation reader');
   const logical = JSON.stringify(stored);
   const logicalBytes = Buffer.byteLength(logical, 'utf8');
-  const serialized = logical.includes('\\u0000')
-    ? JSON.stringify({
-        encoding: 'json-base64/1',
-        data: Buffer.from(logical, 'utf8').toString('base64'),
-      })
-    : logical;
+  const docx =
+    result.status === 'ok' && result.result.kind === 'feishu_docx_read' ? result.result : undefined;
+  if (result.status === 'ok' && Boolean(docx) !== (row.tool_id === 'feishu_docx_read'))
+    throw stateConflict('invalid Feishu observation tool');
+  let serialized = logical;
+  if (docx) {
+    const grant = row.frozen_context.feishuDocx;
+    const config = loadFeishuBotDocxConfiguration();
+    const key = config && readFeishuBotObservationKey(config);
+    if (
+      !grant ||
+      !('kind' in grant) ||
+      !config ||
+      !key ||
+      docx.source.identity !== 'bot' ||
+      docx.source.url !== grant.url
+    )
+      throw forbidden('Feishu receipt has no matching frozen bot grant');
+    serialized = JSON.stringify({
+      encoding: 'feishu-aead/2',
+      keyId: config.observationKeyEnv,
+      ciphertext: sealFeishuBotObservation(
+        key,
+        {
+          ownerId: ctx.ownerId,
+          runId: ctx.runId,
+          invocationId: row.invocation_id,
+          grant,
+        },
+        logical,
+      ),
+    });
+  } else if (logical.includes('\\u0000')) {
+    serialized = JSON.stringify({
+      encoding: 'json-base64/1',
+      data: Buffer.from(logical, 'utf8').toString('base64'),
+    });
+  }
   if (logicalBytes > 240000) throw stateConflict('tool result exceeds safe snapshot bound');
   if (result.status === 'ok' && result.result.kind === 'context_slice' && logicalBytes > 16384)
     throw stateConflict('context page exceeds safe snapshot bound');
@@ -739,6 +804,10 @@ async function gate(
     }
   }
   if (row.state === 'completed') {
+    if (row.tool_id === 'feishu_docx_read' && !canExecute) {
+      await audit(client, ctx, row, 'denied', denied);
+      return { ...denied, invocationId: row.invocation_id, replayed: false };
+    }
     const result = await readAcceptedInvocationResult(client, ctx, row);
     if (validateReplay && (!canExecute || !(await validateReplay(client, result)))) {
       await audit(client, ctx, row, 'denied', denied);
@@ -800,7 +869,7 @@ export async function executeReadOnlyInvocation(
   ctx: ToolContext,
   input: InvocationInput,
   execute: (frozenContext: ToolContext) => Promise<ToolResult>,
-  validateBeforeAccept?: (client: PoolClient, observed: ToolResult) => Promise<void>,
+  validateBeforeAccept?: (client: PoolClient, observed: ToolResult) => Promise<void | ToolResult>,
   validateBeforeReplay?: (client: PoolClient, accepted: ToolResult) => Promise<boolean>,
 ): Promise<ToolOutcome> {
   const qualified = await withRunTransaction(pool, ctx.ownership, async (client) => {
@@ -831,8 +900,8 @@ export async function executeReadOnlyInvocation(
     const gated = await gate(client, ctx, row, input, canExecute, validateBeforeReplay);
     if (gated) return gated;
     executionContext(ctx, row);
-    await validateBeforeAccept?.(client, observed);
-    const accepted = await accept(client, ctx, row, observed, 'accepted');
+    const replacement = await validateBeforeAccept?.(client, observed);
+    const accepted = await accept(client, ctx, row, replacement ?? observed, 'accepted');
     return { ...accepted, invocationId: row.invocation_id, replayed: false };
   }).catch((error: unknown) => {
     if (error instanceof ApplicationError && httpStatusForError(error.code) === 403)

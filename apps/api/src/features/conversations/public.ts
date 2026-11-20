@@ -91,6 +91,7 @@ export {
   hasPendingPauseWithinTransaction,
   listPendingApprovalRuns,
 } from './run/attempt-facts.js';
+export { decodeRunSnapshot, encodeRunSnapshot } from './run/snapshot-storage.js';
 export {
   createContextPolicy,
   digestContextPolicy,

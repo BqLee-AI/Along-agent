@@ -7,6 +7,7 @@ import {
   type HarnessR3Snapshot,
 } from '@along/contracts';
 import { stateConflict } from '../../platform/errors.js';
+import { readLatestRunSnapshotPayload } from '../../features/conversations/public.js';
 import { readRunInvocationStates } from '../tools/invocations/run-state.js';
 import {
   readRunContextObservations,
@@ -113,13 +114,7 @@ export function createSnapshotValidator(context: RunContext, state: SnapshotStat
         accepted.length !== 1)
     )
       throw stateConflict('routing snapshot must retain unique result and zero model usage');
-    const previous = (
-      await client.query<{ payload: unknown }>(
-        `SELECT c.payload FROM run_checkpoints c JOIN run_attempts a ON a.id=c.attempt_id
-        WHERE a.run_id=$1 AND c.kind='harness_snapshot' ORDER BY c.event_seq DESC LIMIT 1`,
-        [context.runId],
-      )
-    ).rows[0];
+    const previous = await readLatestRunSnapshotPayload(client, context);
     const baseline = previous
       ? context.executionProfile === 'compact-memory/1'
         ? HarnessR3SnapshotSchema.parse(previous.payload)

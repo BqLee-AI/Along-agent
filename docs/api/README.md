@@ -167,6 +167,16 @@
 | 33  | GET  | `/memories/{id}`                                   | 是                    | 否     | —      | 本人记忆详情及来源                           | §12                                      |
 | 34  | POST | `/memories/{id}/actions/correct`                   | 是                    | 是     | —      | 按修订更正记忆                               | §12                                      |
 | 35  | POST | `/memories/{id}/actions/stop-recall`               | 是                    | 是     | —      | 按修订停止召回                               | §12                                      |
+| 36  | GET  | `/office/feishu/bot`                               | 签名会话              | 否     | —      | 当前部署所配置机器人连接的可见状态           | §7.1                                     |
+| 37  | POST | `/office/feishu/bot/scan`                          | 签名会话 + Origin     | 是     | —      | 开始配对，返回状态，不接受应用凭据           | §7.1                                     |
+| 38  | POST | `/office/feishu/bot/cancel`                        | 签名会话 + Origin     | 是     | —      | 取消当前会话的待完成配对                     | §7.1                                     |
+| 39  | POST | `/office/feishu/bot/disconnect`                    | 签名会话 + Origin     | 是     | —      | 解除连接并使旧绑定代次失效                   | §7.1                                     |
+
+### 7.1 飞书机器人配对
+
+四条路由返回 `Cache-Control: no-store`，POST 无业务请求体。`data.state` 为 `idle`、`preparing`、`waiting`、`other_session`、`connected` 或 `failed`。只有发起配对的会话能收到 `waiting` 的 `scan: { url, qr }`（飞书启动页和 PNG data URL）；`connected` 只附带机器人显示名 `name`。响应不返回应用凭据或文档允许列表。
+
+配对不授予个人身份权限。只有匹配部署配置及已连接绑定的新 Run 能冻结明确指定的 Docx；飞书仍独立检查机器人当时的阅读权限。部署参数见[本地生命周期指南](../guides/local-lifecycle.md)。
 
 ## 8. R1 工作区与文档批准 [Required]
 

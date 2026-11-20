@@ -1,4 +1,4 @@
-import { CapabilityScreen } from '@/features/capabilities/view/capability-screen';
+import { FeishuConnectionScreen } from '@/features/capabilities/view/feishu-connection-screen';
 export default function ConnectorsPage() {
-  return <CapabilityScreen capability="connectors" />;
+  return <FeishuConnectionScreen />;
 }

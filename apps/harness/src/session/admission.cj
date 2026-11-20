@@ -57,16 +57,19 @@ extend Harness {
                     let receipt = value.asObject()
                     keys(receipt, ["invocation_id", "tool_id", "result"])
                     require(receiptIds.add(uuid(field(receipt, "invocation_id"))))
-                    ref(field(receipt, "tool_id"))
-                    resultCheck(field(receipt, "result"), false, "")
+                    let toolId = ref(field(receipt, "tool_id"))
+                    require(toolId != "feishu_docx_read")
+                    resultCheck(field(receipt, "result"), false, "", toolId)
                     require(ref(field(field(receipt, "result").asObject(), "status")) == "ok")
                     acceptedReceipts.add(uuid(field(receipt, "invocation_id")))
                 }
                 if (!isNull(field(continuation, "source_result"))) {
                     let source = field(continuation, "source_result").asObject()
                     keys(source, ["invocation_id", "tool_id", "result"])
-                    uuid(field(source, "invocation_id")); ref(field(source, "tool_id"))
-                    resultCheck(field(source, "result"), false, "")
+                    uuid(field(source, "invocation_id"))
+                    let toolId = ref(field(source, "tool_id"))
+                    require(toolId != "feishu_docx_read")
+                    resultCheck(field(source, "result"), false, "", toolId)
                 }
                 if (!isNull(field(continuation, "goal_result"))) {
                     let previous = field(continuation, "goal_result").asObject()
@@ -105,12 +108,13 @@ extend Harness {
             let name = ref(field(t, "name"))
             if (name == "read_memory_source") { require(pipe.protocol == "harness/v8") }
             if (name == "remember_memory" || name == "recall_memories") { require(pipe.protocol != "harness/v6") }
+            if (name == "feishu_docx_read") { require(delegated) }
             require(delegated || (name != "create_reminder" && name != "get_task" && name != "cancel_reminder" && name != "workspace_replace" && name != "workspace_create"))
             if (delegated) {
                 let workspaceRead = name == "workspace_list" || name == "workspace_grep" || name == "workspace_read"
                 let workspaceWrite = name == "workspace_replace" || name == "workspace_propose_replace" || name == "workspace_apply_replace"
                 let workspaceCreate = name == "workspace_create"
-                require(name == "get_user_prefs" || name == "set_user_timezone" || name == "create_reminder" || name == "get_task" || name == "cancel_reminder" || name == "read_run_observation" || name == "list_tasks" || name == "read_brief_cards" || (pipe.protocol != "harness/v6" && (name == "remember_memory" || name == "recall_memories")) || (pipe.protocol == "harness/v8" && name == "read_memory_source") || workspaceRead || workspaceWrite || workspaceCreate)
+                require(name == "get_user_prefs" || name == "set_user_timezone" || name == "create_reminder" || name == "get_task" || name == "cancel_reminder" || name == "read_run_observation" || name == "list_tasks" || name == "read_brief_cards" || name == "feishu_docx_read" || (pipe.protocol != "harness/v6" && (name == "remember_memory" || name == "recall_memories")) || (pipe.protocol == "harness/v8" && name == "read_memory_source") || workspaceRead || workspaceWrite || workspaceCreate)
                 if (workspaceRead) { require(workspaceIds.size > 0) }
                 if (workspaceWrite) { require(hasWritableWorkspace) }
                 if (workspaceCreate) { require(hasOutputWorkspace) }

@@ -146,7 +146,10 @@ extend Harness {
                     let projected = field(saved, "projected").asBool().getValue()
                     require(projected == (str(field(observation, "view"), 16) == "projected"))
                     let unit = ContextUnit(observation, field(saved, "seen").asBool().getValue(), projected)
-                    unit.entries = field(saved, "entries").asArray()
+                    if (ref(field(observation, "tool_id")) == "feishu_docx_read") {
+                        // Reapply the same model disclosure bound to the accepted result on resume.
+                        unit.entries.add(observationEntry(observation))
+                    } else { unit.entries = field(saved, "entries").asArray() }
                     contextState.units.add(unit)
                 }
                 hardDenied = str(field(state, "hard_denied"), 128)

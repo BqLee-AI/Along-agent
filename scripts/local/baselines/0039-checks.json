@@ -1,0 +1,147 @@
+{
+  "version": "0039",
+  "tables": ["feishu_docx_connections"],
+  "columns": [
+    {
+      "table": "feishu_docx_connections",
+      "name": "owner_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "feishu_docx_connections",
+      "name": "session_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "feishu_docx_connections",
+      "name": "id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "feishu_docx_connections",
+      "name": "app_id",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "feishu_docx_connections",
+      "name": "redirect_uri",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "feishu_docx_connections",
+      "name": "phase",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "feishu_docx_connections",
+      "name": "expires_at",
+      "type": "timestamptz",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "feishu_docx_connections",
+      "name": "token_expires_at",
+      "type": "timestamptz",
+      "required": false,
+      "default": ""
+    },
+    {
+      "table": "feishu_docx_connections",
+      "name": "state_digest",
+      "type": "text",
+      "required": false,
+      "default": ""
+    },
+    {
+      "table": "feishu_docx_connections",
+      "name": "secret_box",
+      "type": "text",
+      "required": false,
+      "default": ""
+    },
+    {
+      "table": "feishu_docx_connections",
+      "name": "open_id",
+      "type": "text",
+      "required": false,
+      "default": ""
+    },
+    {
+      "table": "feishu_docx_connections",
+      "name": "tenant_key",
+      "type": "text",
+      "required": false,
+      "default": ""
+    },
+    {
+      "table": "feishu_docx_connections",
+      "name": "display_name",
+      "type": "text",
+      "required": false,
+      "default": ""
+    }
+  ],
+  "constraints": [
+    {
+      "table": "feishu_docx_connections",
+      "name": "feishu_docx_connections_id_key",
+      "type": "u",
+      "columns": ["id"]
+    },
+    {
+      "table": "feishu_docx_connections",
+      "name": "feishu_docx_connections_pkey",
+      "type": "p",
+      "columns": ["owner_id"]
+    },
+    {
+      "table": "feishu_docx_connections",
+      "name": "feishu_docx_connections_owner_id_fkey",
+      "type": "f",
+      "columns": ["owner_id"],
+      "target": "users",
+      "target_columns": ["id"],
+      "delete_action": "a"
+    },
+    {
+      "table": "feishu_docx_connections",
+      "name": "feishu_docx_connections_session_id_fkey",
+      "type": "f",
+      "columns": ["session_id"],
+      "target": "sessions",
+      "target_columns": ["id"],
+      "delete_action": "c"
+    },
+    {
+      "table": "feishu_docx_connections",
+      "name": "feishu_docx_connections_phase_check",
+      "type": "c",
+      "columns": ["phase"],
+      "expression": "(phase = ANY (ARRAY['authorizing'::text, 'exchanging'::text, 'pending'::text, 'active'::text]))"
+    }
+  ],
+  "indexes": [
+    {
+      "table": "feishu_docx_connections",
+      "name": "feishu_docx_connections_subject_unique",
+      "method": "btree",
+      "unique": true,
+      "keys": ["app_id", "tenant_key", "open_id"],
+      "options": [0, 0, 0],
+      "predicate": "(phase = 'active'::text)"
+    }
+  ]
+}
