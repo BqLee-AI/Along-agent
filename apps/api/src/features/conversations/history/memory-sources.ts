@@ -19,7 +19,7 @@ export const conversationMemorySources: MemorySources = {
     const roles = purpose === 'read' ? ['user', 'assistant'] : ['user'];
     const messages = await client.query<{ id: string }>(
       `SELECT id FROM messages WHERE owner_id=$1 AND conversation_id=$2
-       AND id=ANY($3::uuid[]) AND role=ANY($4::text[]) FOR SHARE`,
+       AND id=ANY($3::uuid[]) AND role=ANY($4::text[]) AND source_run_id IS NULL FOR SHARE`,
       [ownerId, conversationId, messageIds, roles],
     );
     if (messages.rows.length !== new Set(messageIds).size || !messageIds.length)
@@ -27,7 +27,7 @@ export const conversationMemorySources: MemorySources = {
   },
 };
 
-/** Resolve an owner-visible original source within the caller's transaction.
+/** Resolve a memory-eligible original source within the caller's transaction.
  * Share locks keep both ownership and message content stable until commit. */
 export async function readMemorySource(
   client: PoolClient,
@@ -41,7 +41,7 @@ export async function readMemorySource(
   if (!conversation.rowCount) throw notFound('memory source not found');
   const result = await client.query<{ role: 'user' | 'assistant'; content: string }>(
     `SELECT role,content FROM messages WHERE id=$1 AND owner_id=$2 AND conversation_id=$3
-       AND role IN ('user','assistant') FOR SHARE`,
+       AND role IN ('user','assistant') AND source_run_id IS NULL FOR SHARE`,
     [messageId, ownerId, conversationId],
   );
   if (!result.rows[0]) throw notFound('memory source not found');

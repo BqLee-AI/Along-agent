@@ -50,6 +50,24 @@ ALTER TABLE tool_invocations
         OR (outcome_kind <> 'approval_pending' AND approval_id IS NULL)))
   );
 
+-- Assistant replies derived from a Run-scoped receipt remain displayable
+-- but are not eligible sources for a later prompt, summary or memory read.
+-- Older message rows are not rewritten.
+ALTER TABLE messages
+  ADD COLUMN source_run_id uuid,
+  ADD CONSTRAINT messages_source_run_scope_fkey
+    FOREIGN KEY (source_run_id, owner_id) REFERENCES agent_runs (id, owner_id) ON DELETE RESTRICT,
+  ADD CONSTRAINT messages_source_run_role_check
+    CHECK (source_run_id IS NULL OR role = 'assistant');
+
+-- First authorized delivery clears this marker, not the durable source Run.
+CREATE TABLE feishu_pending_disclosures (
+  run_id uuid NOT NULL REFERENCES agent_runs(id),
+  event_seq bigint NOT NULL,
+  is_terminal boolean NOT NULL,
+  PRIMARY KEY (run_id, event_seq)
+);
+
 INSERT INTO schema_migrations(version) VALUES ('0041');
 END;
 $migration$;

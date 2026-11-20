@@ -1,4 +1,7 @@
-import { readLatestRunSnapshotPayload } from '../../features/conversations/public.js';
+import {
+  readLatestRunSnapshotPayload,
+  stagePrivateDisclosure,
+} from '../../features/conversations/public.js';
 import type { PoolClient } from 'pg';
 import {
   HarnessR3SnapshotSchema,
@@ -78,6 +81,7 @@ export function createFinishHandlers(
           goal_result: goal,
         },
       );
+      if (privateOutput) await stagePrivateDisclosure(client, event);
       return { accepted: true as const, event, privateOutput };
     });
     if (!result.accepted) {
@@ -245,6 +249,7 @@ export function createFinishHandlers(
       const event = await commitTerminal(client, context, request.outcome, payload, {
         prepareGoal,
       });
+      if (privateOutput) await stagePrivateDisclosure(client, event);
       return { event, privateOutput };
     });
     attemptState.stopped = true;

@@ -167,13 +167,13 @@ export function createModelHandlers(environment: AttemptEnvironment) {
           row.outcome_kind === 'success',
       );
       if (privateReceipt) await requireCurrentFeishuBotAuthority(client, context);
-      // Serialization in the provider takes place after iterator creation.
-      // Recheck again at the network boundary, without holding a DB transaction open over I/O.
+      // Hold the Run and Feishu grant locks through local enqueue, not the provider response.
       const authorizeDispatch = privateReceipt
-        ? () =>
+        ? (enqueue: () => void) =>
             guarded(async (current) => {
               await assertActionAuthority(current);
               await requireCurrentFeishuBotAuthority(current, context);
+              enqueue();
             })
         : undefined;
       // Establish the model reservation under the same attempt → Run

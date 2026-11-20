@@ -11,6 +11,8 @@ import {
   lockRun,
   type LockedRun,
   appendEvent,
+  stagePrivateDisclosure,
+  releasePrivateDisclosure,
 } from '../../features/conversations/public.js';
 import { createFinishHandlers } from '../operations/finish-attempt.js';
 import { decodeHarnessRequest, decodeCurrentSnapshot } from '../harness/frame-codec.js';
@@ -32,6 +34,7 @@ import { ApplicationError, forbidden, stateConflict } from '../../platform/error
 import { hasRejectedDocumentApproval } from '../../features/approvals/public.js';
 import { readInvocationSnapshots } from '../tools/invocations/invocations.js';
 import { readRunContextSource } from '../tools/invocations/context-query.js';
+import { assertContextSourcesAuthorized } from '../tools/invocations/context-source.js';
 import { GOAL_CONTROL_TOOL } from '../tools/goal-control.js';
 import { validateWorkspaceGrant } from '../../features/workspaces/public.js';
 import type { ConversationDeps, EventWriter, RunContext } from './contracts.js';
@@ -50,17 +53,20 @@ import {
 import { readSnapshot } from './run-snapshot.js';
 import { readRunApprovalDecision } from '../operations/run-approval-decision.js';
 import { createPauseHandlers } from './attempt-pause.js';
-import { loadHarnessSession } from './attempt-load.js';
+import { guardHarnessStart, loadHarnessSession } from './attempt-load.js';
 import { validateRoutingFacts } from './attempt-routing.js';
 import { createSnapshotValidator } from './attempt-snapshot.js';
 import { buildHarnessStart, poolOf, toolContext } from './context.js';
 import { requireCurrentFeishuBotAuthority } from '../tools/invocations/accepted-result.js';
 import { authorizePrivateOutput } from './private-output.js';
+import type { NativeHandoff, NativeReplyHandoff } from '../harness/harness-process.js';
 
 export const sessionAborts = new Map<string, Set<AbortController>>();
 
 export interface HarnessSession {
   start: HarnessStart | HarnessR3ContextStart;
+  guardStart: NativeHandoff;
+  guardReply: NativeReplyHandoff;
   handleRequest(request: HarnessRequest): Promise<unknown>;
   close(): Promise<void>;
 }
@@ -76,6 +82,7 @@ export async function createHarnessSession(
   supplied: RunContext,
   write: EventWriter,
   signal: AbortSignal,
+  privateDelivery: 'inline' | 'subscription' = 'inline',
 ): Promise<HarnessSession> {
   const pool = poolOf(deps);
   const initial = await loadHarnessSession(pool, deps, supplied);
@@ -178,6 +185,7 @@ export async function createHarnessSession(
       throw stateConflict('routing direct requires unique original invocation');
   }
   async function send(event: ThreadEvent, privateOutput = false): Promise<void> {
+    if (privateOutput && privateDelivery === 'subscription') return;
     const open = privateOutput
       ? await withRunTransaction(pool, context.ownership, async (client) => {
           // Terminal facts have already committed; a delta still needs a running attempt.
@@ -185,7 +193,9 @@ export async function createHarnessSession(
           await requireCurrentFeishuBotAuthority(client, context);
           if (sessionSignal.aborted) throw stateConflict('harness attempt stopped');
           // Hand off to the sink while revocation is still blocked on the grant/session locks.
-          return write(event, 'held');
+          const open = await write(event, 'held');
+          if (open) await releasePrivateDisclosure(client, event);
+          return open;
         })
       : await write(event);
     if (!open) throw stateConflict('client disconnected');
@@ -216,6 +226,30 @@ export async function createHarnessSession(
   const finishHandlers = createFinishHandlers(environment, send, directInvocation);
   return {
     start,
+    guardStart: (enqueue) =>
+      guardHarnessStart(pool, context, initial.snapshot, sessionSignal, enqueue),
+    guardReply: async (request, result, enqueue) => {
+      const potentiallyPrivate =
+        request.type === 'invoke' ||
+        request.type === 'context_source' ||
+        request.type === 'model' ||
+        request.type === 'model_next';
+      if (!context.feishuDocx || !potentiallyPrivate || !result) {
+        enqueue();
+        return;
+      }
+      await guarded(async (client) => {
+        if (request.type === 'context_source')
+          await assertContextSourcesAuthorized(
+            client,
+            { ...toolContext(context), signal: sessionSignal },
+            [request.invocation_id],
+          );
+        else await authorizePrivateOutput(client, context);
+        sessionSignal.throwIfAborted();
+        enqueue();
+      });
+    },
     close: async () => {
       attemptState.stopped = true;
       sessionController.abort();
@@ -576,6 +610,7 @@ export async function createHarnessSession(
               ...eventPayload(context),
               delta: request.delta,
             });
+            if (privateOutput) await stagePrivateDisclosure(client, event);
             return { event, privateOutput };
           });
           await send(event, privateOutput);

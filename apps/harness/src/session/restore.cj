@@ -57,6 +57,40 @@ extend Harness {
         }
         return input
     }
+    func bootstrapObservations(start: JsonObject): JsonArray {
+        let supplied = field(start, "observations").asArray()
+        let snap = field(start, "snapshot")
+        if (pipe.protocol != "harness/v8" || isNull(snap)) { return supplied }
+        let snapshot = snap.asObject()
+        let refs = field(snapshot, "tool_refs").asArray()
+        let units = field(field(snapshot, "native_state").asObject(), "units").asArray()
+        require(refs.size() == units.size() && refs.size() <= 64 && supplied.size() <= refs.size())
+        if (supplied.size() == refs.size()) { return supplied }
+        let observations = JsonArray()
+        var next: Int64 = 0
+        for (i in 0..refs.size()) {
+            let id = uuid(refs.get(i).getOrThrow())
+            if (next < supplied.size()) {
+                let candidate = supplied.get(next).getOrThrow().asObject()
+                if (uuid(field(candidate, "invocation_id")) == id) {
+                    observations.add(candidate)
+                    next++
+                    continue
+                }
+            }
+            // Only v8 successful Docx receipts may be supplied exclusively in a saved unit.
+            let observation = field(units.get(i).getOrThrow().asObject(), "observation").asObject()
+            require(uuid(field(observation, "invocation_id")) == id)
+            require(ref(field(observation, "tool_id")) == "feishu_docx_read" &&
+                ref(field(observation, "view")) == "full")
+            let result = field(observation, "result").asObject()
+            require(ref(field(result, "status")) == "ok" &&
+                ref(field(field(result, "result").asObject(), "kind")) == "feishu_docx_read")
+            observations.add(observation)
+        }
+        require(next == supplied.size())
+        return observations
+    }
     func restoreObservations(start: JsonObject, observations: JsonArray, observationIds: HashSet<String>): String {
         require(observations.size() <= 64)
         var bootstrapFailure = ""
@@ -81,9 +115,12 @@ extend Harness {
                 acceptedReceipts.add(id)
             }
             if (bootstrapFailure != "TOOL_EFFECT_UNKNOWN") { toolRefs.add(text(id)) }
-            let unit = ContextUnit(o, true, projected)
-            unit.entries.add(observationEntry(o))
-            contextState.units.add(unit)
+            // A v8 restore rebuilds model entries from the snapshot units.
+            if (pipe.protocol != "harness/v8") {
+                let unit = ContextUnit(o, true, projected)
+                unit.entries.add(observationEntry(o))
+                contextState.units.add(unit)
+            }
         }
         return bootstrapFailure
     }

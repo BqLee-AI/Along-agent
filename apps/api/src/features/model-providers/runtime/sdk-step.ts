@@ -7,7 +7,7 @@ import {
   type SdkFetch,
 } from './sdk-context.js';
 import { ApplicationError } from '../../../platform/errors.js';
-import { OutboundError } from '../outbound/outbound.js';
+import { OutboundError, type AuthorizeDispatch } from '../outbound/outbound.js';
 import {
   ModelProtocolError,
   contextLimit,
@@ -23,9 +23,9 @@ export interface SdkStepConfig {
   diagnostic?: { runId: string; attemptId: string; operation: 'compact' | 'model' };
 }
 
-/** Streaming network executor; rechecks dispatch authority after any awaited destination work. */
+/** Network executor that enqueues the serialized request within its dispatch guard, if provided. */
 export type SdkStepNetwork = (
-  ...args: [...Parameters<SdkFetch>, authorizeDispatch?: () => Promise<void>]
+  ...args: [...Parameters<SdkFetch>, authorizeDispatch?: AuthorizeDispatch]
 ) => Promise<Response>;
 
 class ModelUnavailableError extends ApplicationError {
@@ -107,8 +107,6 @@ function createModelTransport(config: SdkStepConfig, network: SdkStepNetwork): M
     const fetcher: SdkFetch = async (url, init) => {
       try {
         if (init?.body !== body) throw modelProtocolError('request_body_mismatch');
-        // Fail early before destination work; the executor must also check right before opening.
-        await authorizeDispatch?.();
         transportSignal.throwIfAborted();
         const response = await network(
           url,

@@ -1,6 +1,7 @@
 package along_harness.protocol
 
 import stdx.encoding.json.*
+import std.collection.*
 
 public const FRAME_LIMIT: Int64 = 1048576
 public const SAFE_INTEGER: Int64 = 9007199254740991
@@ -57,6 +58,31 @@ public func obj(pairs: Array<(String, JsonValue)>): JsonObject {
     return o
 }
 public func text(s: String): JsonString { JsonString(s) }
+// The pinned serializer expands ampersands. Normalize only real JSON escapes,
+// never literal text such as a backslash followed by "u0026".
+public func wireJson(value: JsonObject): String {
+    let json = value.toString()
+    if (!json.contains("\\u0026") && !json.contains("\\u007f")) { return json }
+    let bytes = json.toArray()
+    let out = ArrayList<UInt8>()
+    var i: Int64 = 0
+    while (i < bytes.size) {
+        let b = bytes[i]
+        if (b == 92 && i + 1 < bytes.size) {
+            if (i + 5 < bytes.size && bytes[i + 1] == 117 && bytes[i + 2] == 48 && bytes[i + 3] == 48) {
+                if (bytes[i + 4] == 50 && bytes[i + 5] == 54) { out.add(38); i += 6; continue }
+                if (bytes[i + 4] == 55 && bytes[i + 5] == 102) { out.add(127); i += 6; continue }
+            }
+            out.add(b)
+            out.add(bytes[i + 1])
+            i += 2
+        } else {
+            out.add(b)
+            i++
+        }
+    }
+    return String.fromUtf8(out.toArray())
+}
 public func isNull(v: JsonValue): Bool {
     match (v.kind()) { case JsNull => true; case _ => false }
 }

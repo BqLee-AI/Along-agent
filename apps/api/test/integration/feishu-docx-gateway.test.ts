@@ -21,6 +21,7 @@ import {
   measureSdkContext,
 } from '../../src/features/model-providers/public.js';
 import { loadTimeContext } from '../../src/features/time/public.js';
+import { createApp } from '../../src/http/app.js';
 import { configureTestModel } from '../helpers/model-selection.js';
 import { createIntegrationDatabase, databaseUrl, seedAdmittedSession } from './setup.js';
 
@@ -81,6 +82,10 @@ run(
           contextPolicy: createContextPolicy({ completionCap: 512, model: 'fixture' }),
         },
       };
+      const app = createApp({
+        ...deps,
+        resolveActor: async () => ({ ...viewer, displayName: 'Synthetic', timezoneId: null }),
+      });
       async function admit(text: string) {
         const { context } = await startConversationRun(
           deps,
@@ -211,8 +216,12 @@ run(
       const modelName = 'fixture';
       const sdk = createConfiguredSdkStep(
         { baseUrl: 'https://model.invalid/v1', model: modelName },
-        async () => {
-          modelCalls++;
+        async (_url, _init, authorizeDispatch) => {
+          const enqueue = () => {
+            modelCalls++;
+          };
+          if (authorizeDispatch) await authorizeDispatch(enqueue);
+          else enqueue();
           return new Response(null, { status: 502 });
         },
       );
@@ -296,7 +305,11 @@ run(
       // ownership transaction provides an exact barrier immediately after commit.
       const delivered = 'Previously delivered synthetic excerpt. ';
       for (const type of ['answer', 'finish_goal'] as const) {
-        for (const afterCommit of [false, true]) {
+        for (const afterCommit of [
+          false,
+          true,
+          ...(type === 'finish_goal' ? (['publish'] as const) : []),
+        ]) {
           const context = await admit(`Read ${url}`);
           const accepted = await reserveToolInvocation(db.pool, context, {
             callKey: 'harness/1',
@@ -316,7 +329,7 @@ run(
                 modelTransport: async () => ({
                   measure: measureSdkContext,
                   model: async function* (_request, _tools, _signal, authorizeDispatch) {
-                    await authorizeDispatch?.();
+                    await authorizeDispatch?.(() => {});
                     yield { type: 'delta', delta: delivered };
                     if (type === 'answer') yield { type: 'delta', delta: content };
                     yield {
@@ -332,6 +345,7 @@ run(
                 return true;
               },
               new AbortController().signal,
+              afterCommit === 'publish' ? 'subscription' : 'inline',
             );
             const frame = () => ({ protocol: session.start.protocol, request_ref: randomUUID() });
             try {
@@ -357,7 +371,7 @@ run(
                   model_ref: model.request_ref,
                 }),
               ).toMatchObject({ type: type === 'answer' ? 'delta' : 'complete' });
-              if (afterCommit) {
+              if (afterCommit === true) {
                 const transaction = ownership.transaction.bind(ownership);
                 ownership.transaction = async (action) => {
                   const committed = await transaction(action);
@@ -367,7 +381,7 @@ run(
                   }
                   return committed;
                 };
-              } else await disconnect();
+              } else if (!afterCommit) await disconnect();
 
               // Omitting the receipt reference must not let the final answer bypass the check.
               const publication =
@@ -386,17 +400,34 @@ run(
                         answer: content,
                       },
                     });
+              if (afterCommit === 'publish') {
+                await expect(publication).resolves.toEqual({ accepted: true });
+                expect(await listRunEvents(db.pool, viewer.ownerId, context.runId)).toEqual([]);
+                const eventsUrl = `http://localhost:3000/api/v1/conversations/${context.conversationId}/runs/${context.runId}/events`;
+                expect(await (await app.handle(new Request(eventsUrl))).text()).toContain(content);
+                await disconnect();
+                expect(await (await app.handle(new Request(eventsUrl))).text()).toContain(content);
+                continue;
+              }
               await expect(publication).rejects.toThrow('Feishu observation authorization expired');
               expect(published).toHaveLength(1);
               expect(JSON.stringify(published)).toContain(delivered);
               expect(JSON.stringify(published)).not.toContain(content);
-              const eventTypes = (await listRunEvents(db.pool, viewer.ownerId, context.runId)).map(
-                ({ type }) => type,
-              );
-              const expectedTypes: typeof eventTypes = ['message.delta'];
-              if (afterCommit)
-                expectedTypes.push(type === 'answer' ? 'message.delta' : 'thread.completed');
-              expect(eventTypes).toEqual(expectedTypes);
+              const history = await listRunEvents(db.pool, viewer.ownerId, context.runId);
+              expect(history.map(({ type }) => type)).toEqual(['message.delta']);
+              expect(JSON.stringify(history)).toContain(delivered);
+              expect(JSON.stringify(history)).not.toContain(content);
+              if (afterCommit && type === 'finish_goal') {
+                const base = `http://localhost:3000/api/v1/conversations/${context.conversationId}`;
+                const runUrl = `${base}/runs/${context.runId}`;
+                for (const path of [runUrl, `${base}/messages`, `${runUrl}/events`]) {
+                  const response = await app.handle(new Request(path));
+                  expect(response.status).toBe(200);
+                  const body = await response.text();
+                  expect(body).not.toContain(content);
+                  if (path.endsWith('/events')) expect(body).toContain(delivered);
+                }
+              }
               if (!afterCommit) {
                 expect(
                   (await getRunView(deps, viewer.ownerId, context.conversationId, context.runId))

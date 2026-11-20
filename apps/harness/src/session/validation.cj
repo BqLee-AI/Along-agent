@@ -183,7 +183,7 @@ extend Harness {
         hash(field(payload, "content_hash"))
         require(ref(field(payload, "representation")) == "plain_text")
         require(ref(field(payload, "completeness")) == "complete_plain_text")
-        require(str(field(payload, "content"), 240000).size <= 240000 && payload.toString().size <= 240000)
+        require(str(field(payload, "content"), 240000).size <= 240000 && wireJson(payload).size <= 240000)
     }
     func resultCheck(v: JsonValue, outcome: Bool, id: String, toolId: String): Unit {
         if (toolId == "feishu_docx_read") { require(delegated) }

@@ -1,8 +1,69 @@
 {
   "version": "0041",
-  "tables": [],
-  "columns": [],
-  "constraints": [],
+  "tables": ["feishu_pending_disclosures"],
+  "columns": [
+    {
+      "table": "messages",
+      "name": "source_run_id",
+      "type": "uuid",
+      "required": false,
+      "default": ""
+    },
+    {
+      "table": "feishu_pending_disclosures",
+      "name": "run_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "feishu_pending_disclosures",
+      "name": "event_seq",
+      "type": "int8",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "feishu_pending_disclosures",
+      "name": "is_terminal",
+      "type": "bool",
+      "required": true,
+      "default": ""
+    }
+  ],
+  "constraints": [
+    {
+      "table": "messages",
+      "name": "messages_source_run_scope_fkey",
+      "type": "f",
+      "columns": ["source_run_id", "owner_id"],
+      "target": "agent_runs",
+      "delete_action": "r",
+      "target_columns": ["id", "owner_id"]
+    },
+    {
+      "table": "feishu_pending_disclosures",
+      "name": "feishu_pending_disclosures_pkey",
+      "type": "p",
+      "columns": ["run_id", "event_seq"]
+    },
+    {
+      "table": "feishu_pending_disclosures",
+      "name": "feishu_pending_disclosures_run_id_fkey",
+      "type": "f",
+      "columns": ["run_id"],
+      "target": "agent_runs",
+      "delete_action": "a",
+      "target_columns": ["id"]
+    }
+  ],
+  "additional_checks": [
+    {
+      "table": "messages",
+      "name": "messages_source_run_role_check",
+      "expression": "((source_run_id IS NULL) OR (role = 'assistant'::text))"
+    }
+  ],
   "alter_constraints": [
     {
       "table": "compact_continuations",

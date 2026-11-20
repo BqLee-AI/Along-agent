@@ -529,6 +529,7 @@ export async function executeHarness(
         return open;
       },
       controller.signal,
+      context.ownership ? 'subscription' : 'inline',
     );
     closeSession = session.close;
     if (session.start.snapshot === null) {
@@ -551,6 +552,8 @@ export async function executeHarness(
       services: deps.harness,
       start: session.start,
       signal: controller.signal,
+      guardStart: session.guardStart,
+      guardReply: session.guardReply,
       detachOnAbort: !!context.ownership,
       onExit: session.close,
       handleRequest: (request) => {

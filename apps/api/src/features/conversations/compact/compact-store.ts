@@ -167,6 +167,7 @@ export async function freezeCompact(
     `SELECT m.id,m.role,octet_length(m.content) AS size
      FROM unnest($3::uuid[]) WITH ORDINALITY AS ids(id,n)
      JOIN messages m ON m.id=ids.id AND m.owner_id=$1 AND m.conversation_id=$2 AND m.role IN ('user','assistant')
+       AND m.source_run_id IS NULL
      ORDER BY ids.n FOR SHARE OF m`,
     [binding.ownerId, binding.conversationId, args.messageIds],
   );
@@ -180,7 +181,8 @@ export async function freezeCompact(
   const messages = (
     await client.query<CompactSource>(
       `SELECT m.id,m.role,m.content AS text FROM unnest($3::uuid[]) WITH ORDINALITY AS ids(id,n)
-      JOIN messages m ON m.id=ids.id AND m.owner_id=$1 AND m.conversation_id=$2 ORDER BY ids.n`,
+      JOIN messages m ON m.id=ids.id AND m.owner_id=$1 AND m.conversation_id=$2
+        AND m.source_run_id IS NULL ORDER BY ids.n`,
       [binding.ownerId, binding.conversationId, args.messageIds],
     )
   ).rows;
@@ -367,6 +369,7 @@ export async function readCompactView(
   const sources = head ? await readSummarySources(client, ownerId, conversationId, head.id) : [];
   const messages = await client.query<{ id: string }>(
     `SELECT m.id FROM messages m WHERE m.owner_id=$1 AND m.conversation_id=$2 AND m.role IN ('user','assistant')
+     AND m.source_run_id IS NULL
      AND NOT EXISTS (SELECT 1 FROM compact_summary_sources s WHERE s.summary_id=$3 AND s.message_id=m.id)
      ORDER BY m.created_at,m.id LIMIT 4097`,
     [ownerId, conversationId, head?.id ?? null],

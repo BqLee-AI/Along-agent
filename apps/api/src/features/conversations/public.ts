@@ -58,6 +58,11 @@ export type { TerminalFactOptions } from './run/run-state.js';
 export { requireHistoryRun } from './history/history-repository.js';
 export { writeAuthorizedEvent } from './run/stream-authorization.js';
 export {
+  hasPendingPrivateTerminal,
+  releasePrivateDisclosure,
+  stagePrivateDisclosure,
+} from './run/private-disclosure.js';
+export {
   freezeR3Context,
   freezeR3ControlContext,
   readR3Context,

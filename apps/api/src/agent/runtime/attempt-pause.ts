@@ -91,8 +91,14 @@ export function createPauseHandlers(
             JSON.stringify(context.r3Context),
           ],
         );
+        // A plaintext row matched the original coverage predicate in PostgreSQL.
+        // Only encrypted rows need to be opened to compare their context.
         let alreadyCompacted = false;
         for (const row of prior.rows) {
+          if (row.snapshot && typeof row.snapshot === 'object' && !('encoding' in row.snapshot)) {
+            alreadyCompacted = true;
+            break;
+          }
           const previous = HarnessR3SnapshotSchema.parse(
             await decodeRunSnapshot(
               client,

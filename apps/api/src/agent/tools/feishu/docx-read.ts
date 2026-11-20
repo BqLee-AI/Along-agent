@@ -67,7 +67,7 @@ export async function invokeFeishuDocxRead(pool: Pool, ctx: ToolContext, input: 
           error: { code: 'FEISHU_DOCX_READ_FAILED', message: `飞书文档未读到：${read.reason}。` },
         };
       }
-      return {
+      const result: ToolResult = {
         status: 'ok',
         result: {
           kind: 'feishu_docx_read',
@@ -85,6 +85,12 @@ export async function invokeFeishuDocxRead(pool: Pool, ctx: ToolContext, input: 
           content: read.content,
         },
       };
+      if (Buffer.byteLength(JSON.stringify(result), 'utf8') > 240_000)
+        return {
+          status: 'failed',
+          error: { code: 'FEISHU_DOCX_READ_FAILED', message: '飞书文档未读到：range_too_large。' },
+        };
+      return result;
     },
     async (client, result) => {
       if (result.status === 'ok' && !(await authorized(client))) return denied;

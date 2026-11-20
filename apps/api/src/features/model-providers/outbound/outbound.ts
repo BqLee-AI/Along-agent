@@ -8,6 +8,9 @@ import {
 } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 
+/** Recheck authority and call enqueue synchronously before releasing the authorization locks. */
+export type AuthorizeDispatch = (enqueue: () => void) => Promise<void>;
+
 /** Conservative public-unicast allowlist; mapped, reserved and transition IPv6 are denied. */
 export function isPublicAddress(address: string): boolean {
   const family = isIP(address);
@@ -116,6 +119,8 @@ const productionTransport: OutboundTransport = {
   httpsRequest,
 };
 
+const abortError = () => new DOMException('The operation was aborted', 'AbortError');
+
 /**
  * Fetch adapter for SDKs. Accepts standard string, URL or Request inputs and
  * RequestInit; URLs with credentials and all redirects are rejected. The
@@ -125,7 +130,7 @@ const productionTransport: OutboundTransport = {
 export async function outboundFetch(
   input: string | URL | Request,
   init?: RequestInit,
-  authorizeDispatch?: () => Promise<void>,
+  authorizeDispatch?: AuthorizeDispatch,
 ): Promise<Response> {
   return outboundFetchForTest(input, init, productionTransport, authorizeDispatch);
 }
@@ -135,7 +140,7 @@ export async function outboundFetchForTest(
   input: string | URL | Request,
   init: RequestInit | undefined,
   transport: OutboundTransport,
-  authorizeDispatch?: () => Promise<void>,
+  authorizeDispatch?: AuthorizeDispatch,
 ): Promise<Response> {
   let request: Request;
   let url: URL;
@@ -150,7 +155,6 @@ export async function outboundFetchForTest(
   }
 
   const signal = request.signal;
-  const abortError = () => new DOMException('The operation was aborted', 'AbortError');
   if (signal.aborted) throw abortError();
   const hostname = url.hostname.replace(/^\[|\]$/g, '');
   // HTTP exposes credentials and prompts; only explicitly approved local targets may use it.
@@ -188,13 +192,55 @@ export async function outboundFetchForTest(
   }
   const destination = records[0]!;
   if (signal.aborted) throw abortError();
-  if (authorizeDispatch) {
-    // The callback's transaction must finish before the socket opens. Keep denial out of
-    // the transport error mapper so the SDK can preserve the typed authorization failure.
-    await authorizeDispatch();
+  if (!authorizeDispatch) return sendRequest(request, url, transport, destination, signal);
+
+  // The SDK supplies a serialized string. Prepare any other guarded body before taking locks.
+  let body: string | Uint8Array | undefined;
+  try {
+    if (request.body) {
+      body =
+        typeof init?.body === 'string'
+          ? init.body
+          : new Uint8Array(
+              await new Response(
+                request.body.pipeThrough(new TransformStream(), { signal }),
+              ).arrayBuffer(),
+            );
+    }
+  } catch {
     if (signal.aborted) throw abortError();
+    throw new OutboundError('connection');
   }
-  return await new Promise<Response>((resolve, reject) => {
+  if (signal.aborted) throw abortError();
+
+  const dispatchAbort = new AbortController();
+  const dispatchSignal = AbortSignal.any([signal, dispatchAbort.signal]);
+  let response: Promise<Response> | undefined;
+  try {
+    await authorizeDispatch(() => {
+      if (dispatchSignal.aborted) throw abortError();
+      response = sendRequest(request, url, transport, destination, dispatchSignal, body);
+      // The network can fail while the guard is still committing.
+      void response.catch(() => undefined);
+    });
+  } catch (error) {
+    dispatchAbort.abort();
+    throw error;
+  }
+  if (!response) throw new OutboundError('connection');
+  return response;
+}
+
+async function sendRequest(
+  request: Request,
+  url: URL,
+  transport: OutboundTransport,
+  destination: { address: string; family: number },
+  signal: AbortSignal,
+  serializedBody?: string | Uint8Array,
+): Promise<Response> {
+  const { promise, resolve, reject } = Promise.withResolvers<Response>();
+  try {
     let settled = false;
     let responseEnded = false;
     let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
@@ -296,7 +342,9 @@ export async function outboundFetchForTest(
       signal.removeEventListener('abort', abort);
       fail(signal.aborted ? abortError() : new OutboundError('connection'));
     });
-    if (!request.body) req.end();
+    // end(body) queues the entire prepared payload locally without awaiting socket I/O.
+    if (serializedBody !== undefined) req.end(serializedBody);
+    else if (!request.body) req.end();
     else {
       const reader = request.body.getReader();
       void (async () => {
@@ -337,11 +385,12 @@ export async function outboundFetchForTest(
         void reader.cancel().catch(() => {});
       });
     }
-  }).catch((error: unknown) => {
+    return await promise;
+  } catch (error) {
     if (signal.aborted) throw abortError();
     if (error instanceof OutboundError) throw error;
     throw new OutboundError('connection');
-  });
+  }
 }
 
 /** JSON calls use the same pinned transport as SDK calls. */

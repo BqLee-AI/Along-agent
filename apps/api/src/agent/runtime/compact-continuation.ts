@@ -41,7 +41,7 @@ export async function validateR3SnapshotContext(
     await client.query<{ id: string; role: string; content: string }>(
       `SELECT m.id,m.role,m.content FROM unnest($3::uuid[]) WITH ORDINALITY ids(id,n)
      JOIN messages m ON m.id=ids.id AND m.owner_id=$1 AND m.conversation_id=$2
-     WHERE m.role IN ('user','assistant') ORDER BY ids.n FOR SHARE OF m`,
+     WHERE m.role IN ('user','assistant') AND m.source_run_id IS NULL ORDER BY ids.n FOR SHARE OF m`,
       [binding.ownerId, binding.conversationId, messages.map((message) => message.message_id)],
     )
   ).rows;

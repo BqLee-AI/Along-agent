@@ -46,7 +46,13 @@ function pageSql(kind: HistoryCursor['kind']): string {
       : `AND x.conversation_id=$2 AND EXISTS (
     SELECT 1 FROM conversations parent WHERE parent.id=x.conversation_id AND parent.owner_id=$1)`
   }
-    ${kind === 'messages' ? "AND x.role IN ('user','assistant')" : ''}
+    ${
+      kind === 'messages'
+        ? `AND x.role IN ('user','assistant') AND NOT EXISTS (
+            SELECT 1 FROM feishu_pending_disclosures p WHERE p.run_id=x.source_run_id AND p.is_terminal
+          )`
+        : ''
+    }
     ${kind === 'runs' ? 'AND ($8::uuid IS NULL OR x.id=$8::uuid)' : ''}`;
   const order = kind === 'conversations' ? 'DESC' : 'ASC';
   const comparison = kind === 'conversations' ? '<' : '>';

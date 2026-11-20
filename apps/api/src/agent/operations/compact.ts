@@ -14,6 +14,7 @@ import {
   validationError,
 } from '../../platform/errors.js';
 import { readRunContextObservations } from '../tools/invocations/context-query.js';
+import { assertContextSourcesAuthorized } from '../tools/invocations/context-source.js';
 import { readRunInvocationStates } from '../tools/invocations/run-state.js';
 import { validateWorkspaceGrant } from '../../features/workspaces/public.js';
 import { resolveRunSelection } from '../../features/model-providers/public.js';
@@ -37,7 +38,7 @@ import {
 } from '../runtime/compact-continuation.js';
 import { executeCompact } from './compact-execution.js';
 import { GOAL_CONTROL_TOOL } from '../tools/goal-control.js';
-import { runNativeHarness } from '../harness/harness-process.js';
+import { runNativeHarness, type NativeHandoff } from '../harness/harness-process.js';
 import { active } from './run.js';
 import {
   buildHarnessStart,
@@ -564,11 +565,26 @@ async function executeRuntimeCompactWork(
           );
           if (start.protocol !== HARNESS_CONTEXT_PROTOCOL_VERSION)
             throw stateConflict('compact requires v8');
+          const guardPreview: NativeHandoff = (enqueue) =>
+            tx((client) =>
+              assertCompactEligibility(client, binding, async (current) => {
+                await guard(current, frozen.coverageMessageIds);
+                await assertContextSourcesAuthorized(
+                  current,
+                  { ...toolContext(context), signal },
+                  snapshot.tool_refs,
+                );
+                signal.throwIfAborted();
+                enqueue();
+              }),
+            );
           let seen = false;
           await runNativeHarness({
             services: deps.harness!,
             start: { ...start, mode: 'measure_only' },
             signal,
+            guardStart: guardPreview,
+            guardReply: (_request, _result, enqueue) => guardPreview(enqueue),
             detachOnAbort: true,
             handleRequest: async (request) => {
               if (

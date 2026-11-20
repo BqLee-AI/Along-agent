@@ -4,7 +4,7 @@ import { unauthorized } from '../../platform/errors.js';
 import { lockViewerAccess, type Actor } from '../identity/public.js';
 import type { ConversationDeps, StartResult } from '../../agent/runtime/contracts.js';
 import { getRunView, executeRun } from '../../agent/operations/public.js';
-import { getConversationDetail } from './public.js';
+import { listConversationEvents } from './run/repository.js';
 import { writeAuthorizedEvent } from './run/stream-authorization.js';
 
 type EventSink = {
@@ -89,12 +89,15 @@ export async function subscribeRun(
   return eventStreamResponse(requestId, conversationId, runId, async (sink) => {
     let finalDrain = false;
     while (!sink.signal.aborted) {
-      const detail = await getConversationDetail(deps, actor.ownerId, conversationId, {
-        run_id: runId,
-        limit: '200',
-        ...(afterSeq === null ? {} : { after_seq: String(afterSeq) }),
+      const events = await listConversationEvents(pool, {
+        ownerId: actor.ownerId,
+        conversationId,
+        runId,
+        limit: 200,
+        afterSeq,
+        includePendingDisclosures: actor.sessionId !== null,
       });
-      for (const event of detail.events) {
+      for (const event of events) {
         const delivered = await writeAuthorizedEvent(
           pool,
           actor.ownerId,
@@ -107,7 +110,7 @@ export async function subscribeRun(
         await sink.ready();
         if (sink.signal.aborted) return;
       }
-      if (detail.events.length === 200) continue;
+      if (events.length === 200) continue;
       if (finalDrain) return;
       const view = await getRunView(deps, actor.ownerId, conversationId, runId);
       if (view.status !== 'running') {

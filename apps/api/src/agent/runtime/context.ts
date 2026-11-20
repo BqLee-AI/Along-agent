@@ -17,6 +17,7 @@ import {
 } from '@along/contracts';
 import { ApplicationError, notReady, stateConflict } from '../../platform/errors.js';
 import type { ToolContext } from '../tools/contracts.js';
+import { omitRetainedDocxObservations } from '../tools/invocations/context-source.js';
 import {
   HARNESS_TOOL_DEFINITIONS,
   DELEGATION_TOOL_DEFINITIONS,
@@ -281,7 +282,7 @@ export function buildHarnessStart(
       tools,
       budget: { max_iterations: context.maxIterations, max_tokens: context.maxTokens },
       snapshot,
-      observations,
+      observations: snapshot ? omitRetainedDocxObservations(snapshot, observations) : observations,
       approval,
       workspace: context.workspaceGrant
         ? validateWorkspaceGrant(context.ownerId, context.workspaceGrant)

@@ -19,6 +19,8 @@ import {
 import { stateConflict } from '../../platform/errors.js';
 import { readRunInvocationStates } from '../tools/invocations/run-state.js';
 import { readRunContextObservations } from '../tools/invocations/context-query.js';
+import { assertContextSourcesAuthorized } from '../tools/invocations/context-source.js';
+import type { NativeHandoff } from '../harness/harness-process.js';
 import type { ConversationDeps, RunContext } from './contracts.js';
 import { withRunTransaction } from './run-ownership.js';
 import { decodeRunSnapshot, lockRun } from '../../features/conversations/public.js';
@@ -39,6 +41,25 @@ export interface LoadedAttempt {
   eligible: boolean;
   decision: RoutingRecord<RoutingDecisionPayload> | null;
   compact: { snapshot: HarnessR3Snapshot; context: HarnessR3Context } | null;
+}
+
+export async function guardHarnessStart(
+  pool: Pool,
+  context: RunContext,
+  snapshot: LoadedAttempt['snapshot'],
+  signal: AbortSignal,
+  enqueue: Parameters<NativeHandoff>[0],
+): Promise<void> {
+  await withRunTransaction(pool, context.ownership, async (client) => {
+    await lockRun(client, context);
+    await assertContextSourcesAuthorized(
+      client,
+      { ...toolContext(context), signal },
+      snapshot?.tool_refs ?? [],
+    );
+    signal.throwIfAborted();
+    enqueue();
+  });
 }
 
 export async function loadHarnessSession(
