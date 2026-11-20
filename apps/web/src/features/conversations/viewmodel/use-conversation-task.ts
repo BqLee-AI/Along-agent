@@ -428,7 +428,10 @@ export function useConversationTask({
         replyPending =
           current.status === 'running' ||
           current.status === 'suspended_approval' ||
-          current.status === 'paused';
+          current.status === 'paused' ||
+          (current.authorization_revision === 'delegation/1' &&
+            (current.status === 'done' || current.status === 'cancelled') &&
+            current.goal_result === null);
         const indexed = history.find((item) => item.run_id === current.run_id);
         if (
           current.authorization_revision === 'delegation/1' &&
@@ -458,8 +461,7 @@ export function useConversationTask({
           if (parsed.success) setRetryResume(parsed.data);
         }
       }
-      // Suspended attempts have accepted deltas but no archived assistant yet.
-      // Only a terminal archive replaces that cumulative run transcript.
+      // Keep released deltas visible unless a visible terminal archive replaces them.
       if (!streamRef.current) {
         const archive: MessageHistoryItem[] = [];
         next = null;

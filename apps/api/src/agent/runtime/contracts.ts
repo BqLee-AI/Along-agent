@@ -59,5 +59,9 @@ export interface StartResult {
   afterSeq?: number | null;
 }
 
-/** With authority held, the writer must hand off without waiting on another DB transaction. */
-export type EventWriter = (event: ThreadEvent, authority?: 'held') => Promise<boolean>;
+/** A writer called with authority held must hand off without waiting for demand. */
+export type EventWriter = {
+  (event: ThreadEvent, authority?: 'held'): Promise<boolean>;
+  /** Wait for downstream demand before acquiring delivery authority; false means closed. */
+  ready?: () => Promise<boolean>;
+};

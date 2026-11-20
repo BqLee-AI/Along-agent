@@ -515,19 +515,21 @@ export async function executeHarness(
       await cancellation;
       return;
     }
+    const sessionWrite: EventWriter = async (event, authority) => {
+      const open = await write(event, authority);
+      if (open && event.type === 'thread.cancelled') cancellationProjected = true;
+      if (!open) {
+        disconnected();
+        // The private publication transaction must release the Run before cancellation can lock it.
+        if (authority !== 'held') await cancellation;
+      }
+      return open;
+    };
+    if (write.ready) sessionWrite.ready = write.ready;
     const session = await createHarnessSession(
       deps,
       context,
-      async (event, authority) => {
-        const open = await write(event, authority);
-        if (open && event.type === 'thread.cancelled') cancellationProjected = true;
-        if (!open) {
-          disconnected();
-          // The private publication transaction must release the Run before cancellation can lock it.
-          if (authority !== 'held') await cancellation;
-        }
-        return open;
-      },
+      sessionWrite,
       controller.signal,
       context.ownership ? 'subscription' : 'inline',
     );

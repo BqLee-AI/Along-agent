@@ -10,7 +10,7 @@ import { writeAuthorizedEvent } from './run/stream-authorization.js';
 type EventSink = {
   signal: AbortSignal;
   write: (event: ThreadEvent) => boolean;
-  ready: () => Promise<void>;
+  ready: () => Promise<boolean>;
 };
 
 function eventStreamResponse(
@@ -22,21 +22,25 @@ function eventStreamResponse(
   const abort = new AbortController();
   const encoder = new TextEncoder();
   let wake: (() => void) | undefined;
+  let demand = false;
   let closed = false;
-  const body = new ReadableStream<Uint8Array>({
-    start(controller) {
+  const source = {
+    start(controller: ReadableStreamDefaultController<Uint8Array>) {
       const sink: EventSink = {
         signal: abort.signal,
         write(event) {
-          if (closed) return false;
+          // A pull grants one handoff; never buffer a disclosure for a future read.
+          if (closed || !demand) return false;
+          demand = false;
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
           return true;
         },
         async ready() {
-          if (closed || (controller.desiredSize ?? 0) > 0) return;
+          if (closed || demand) return !closed;
           const { promise, resolve } = Promise.withResolvers<void>();
           wake = resolve;
           await promise;
+          return !closed;
         },
       };
       void produce(sink)
@@ -51,6 +55,7 @@ function eventStreamResponse(
         });
     },
     pull() {
+      demand = true;
       wake?.();
       wake = undefined;
     },
@@ -60,7 +65,8 @@ function eventStreamResponse(
       wake?.();
       wake = undefined;
     },
-  });
+  };
+  const body = new ReadableStream(source, { highWaterMark: 0 });
   return new Response(body, {
     status: 200,
     headers: {
@@ -98,6 +104,7 @@ export async function subscribeRun(
         includePendingDisclosures: actor.sessionId !== null,
       });
       for (const event of events) {
+        if (!(await sink.ready())) return;
         const delivered = await writeAuthorizedEvent(
           pool,
           actor.ownerId,
@@ -107,8 +114,6 @@ export async function subscribeRun(
         );
         if (!delivered) return;
         afterSeq = event.seq;
-        await sink.ready();
-        if (sink.signal.aborted) return;
       }
       if (events.length === 200) continue;
       if (finalDrain) return;
@@ -150,8 +155,7 @@ export async function streamRun(
       if (!deps.pool) throw new Error('database unavailable');
       for (const event of started.replay) {
         // Wait outside the transaction; authorize again at each handoff.
-        await sink.ready();
-        if (sink.signal.aborted) return;
+        if (!(await sink.ready())) return;
         const delivered = await writeAuthorizedEvent(
           deps.pool,
           actor.ownerId,
@@ -164,6 +168,9 @@ export async function streamRun(
       return;
     }
     if (!started.context) throw new Error('run context missing');
-    await executeRun(deps, started.context, async (event) => sink.write(event), sink.signal);
+    const write = Object.assign(async (event: ThreadEvent) => sink.write(event), {
+      ready: sink.ready,
+    });
+    await executeRun(deps, started.context, write, sink.signal);
   });
 }

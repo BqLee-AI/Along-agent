@@ -186,6 +186,8 @@ export async function createHarnessSession(
   }
   async function send(event: ThreadEvent, privateOutput = false): Promise<void> {
     if (privateOutput && privateDelivery === 'subscription') return;
+    if (privateOutput && write.ready && !(await write.ready()))
+      throw stateConflict('client disconnected');
     const open = privateOutput
       ? await withRunTransaction(pool, context.ownership, async (client) => {
           // Terminal facts have already committed; a delta still needs a running attempt.

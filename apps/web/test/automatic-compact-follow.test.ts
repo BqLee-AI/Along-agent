@@ -241,6 +241,23 @@ describe('automatic compact view model', () => {
     });
   });
 
+  it('keeps the released reply visible when the terminal archive is withheld', async () => {
+    const initial: RunView = {
+      ...paused('runtime', 'automatic_compact'),
+      authorization_revision: 'delegation/1',
+      goal_result: null,
+      status: 'running',
+      pause: null,
+    };
+    await fixture(initial, async ({ task, complete }) => {
+      await until(() => task.text === '续跑回复');
+      await act(async () => complete());
+      await until(() => task.value.run?.status === 'done' && !task.value.reading);
+      expect(task.value.messages).toEqual([]);
+      expect(task.text).toBe('续跑回复');
+    });
+  });
+
   it('reconnects after an already-followed attempt enters automatic compact', async () => {
     const running: RunView = {
       ...paused('runtime', 'automatic_compact'),

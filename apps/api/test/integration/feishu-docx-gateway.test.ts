@@ -1,5 +1,7 @@
 import { expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
+import { setImmediate } from 'node:timers/promises';
+import { Pool } from 'pg';
 import { HARNESS_PROTOCOL_VERSION } from '@along/contracts';
 import { cancelConversationRun, getRunView } from '../../src/agent/operations/run.js';
 import { createHarnessSession } from '../../src/agent/runtime/attempt-session.js';
@@ -82,10 +84,8 @@ run(
           contextPolicy: createContextPolicy({ completionCap: 512, model: 'fixture' }),
         },
       };
-      const app = createApp({
-        ...deps,
-        resolveActor: async () => ({ ...viewer, displayName: 'Synthetic', timezoneId: null }),
-      });
+      const resolveActor = async () => ({ ...viewer, displayName: 'Synthetic', timezoneId: null });
+      const app = createApp({ ...deps, resolveActor });
       async function admit(text: string) {
         const { context } = await startConversationRun(
           deps,
@@ -308,7 +308,7 @@ run(
         for (const afterCommit of [
           false,
           true,
-          ...(type === 'finish_goal' ? (['publish'] as const) : []),
+          ...(type === 'finish_goal' ? (['publish', 'unread'] as const) : []),
         ]) {
           const context = await admit(`Read ${url}`);
           const accepted = await reserveToolInvocation(db.pool, context, {
@@ -345,7 +345,7 @@ run(
                 return true;
               },
               new AbortController().signal,
-              afterCommit === 'publish' ? 'subscription' : 'inline',
+              afterCommit === 'publish' || afterCommit === 'unread' ? 'subscription' : 'inline',
             );
             const frame = () => ({ protocol: session.start.protocol, request_ref: randomUUID() });
             try {
@@ -400,6 +400,54 @@ run(
                         answer: content,
                       },
                     });
+              if (afterCommit === 'unread') {
+                await expect(publication).resolves.toEqual({ accepted: true });
+                expect(await listRunEvents(db.pool, viewer.ownerId, context.runId)).toEqual([]);
+                const { conversationId, runId } = context;
+                const base = `http://localhost:3000/api/v1/conversations/${conversationId}`;
+                const eventsUrl = `${base}/runs/${runId}/events`;
+                const pool = new Pool({ connectionString: db.connectionString, max: 1 });
+                const listed = Promise.withResolvers<void>();
+                const observedPool = new Proxy(pool, {
+                  get(target, property) {
+                    if (property === 'query')
+                      return async (sql: string, parameters?: unknown[]) => {
+                        const result = await target.query(sql, parameters);
+                        if (parameters?.[4] === runId && parameters[5] === true) listed.resolve();
+                        return result;
+                      };
+                    const value = Reflect.get(target, property, target);
+                    return typeof value === 'function' ? value.bind(target) : value;
+                  },
+                });
+                try {
+                  const unreadApp = createApp({ ...deps, pool: observedPool, resolveActor });
+                  const response = await unreadApp.handle(new Request(eventsUrl));
+                  expect(response.status).toBe(200);
+                  const body = response.body;
+                  if (!body) throw new Error('missing SSE body');
+                  try {
+                    await listed.promise;
+                    // Let the producer resume from the listing. A premature authorization
+                    // transaction must finish before the next query on this single-client pool.
+                    await setImmediate();
+                    await pool.query('SELECT 1');
+                  } finally {
+                    await body.cancel();
+                  }
+                } finally {
+                  await pool.end();
+                }
+                await disconnect();
+                expect(await listRunEvents(db.pool, viewer.ownerId, runId)).toEqual([]);
+                for (const path of [`${base}/messages`, eventsUrl]) {
+                  const response = await app.handle(new Request(path));
+                  expect(response.status).toBe(200);
+                  expect(await response.text()).not.toContain(content);
+                }
+                await connect();
+                continue;
+              }
               if (afterCommit === 'publish') {
                 await expect(publication).resolves.toEqual({ accepted: true });
                 expect(await listRunEvents(db.pool, viewer.ownerId, context.runId)).toEqual([]);
@@ -407,6 +455,7 @@ run(
                 expect(await (await app.handle(new Request(eventsUrl))).text()).toContain(content);
                 await disconnect();
                 expect(await (await app.handle(new Request(eventsUrl))).text()).toContain(content);
+                await connect();
                 continue;
               }
               await expect(publication).rejects.toThrow('Feishu observation authorization expired');

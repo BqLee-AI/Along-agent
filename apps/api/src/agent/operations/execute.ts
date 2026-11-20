@@ -361,8 +361,12 @@ export async function executeRun(
   signal?: AbortSignal,
 ): Promise<void> {
   const pool = requirePool(deps);
-  const authorizedWrite: EventWriter = (event, authority) =>
-    authority === 'held' ? write(event) : writeAuthorizedEvent(pool, context.ownerId, write, event);
+  const authorizedWrite: EventWriter = async (event, authority) => {
+    if (authority === 'held') return write(event);
+    if (write.ready && !(await write.ready())) return false;
+    return writeAuthorizedEvent(pool, context.ownerId, write, event);
+  };
+  if (write.ready) authorizedWrite.ready = write.ready;
   const execution = await withTransaction(
     pool,
     async (client) => (await lockRun(client, context, true, false)).run.execution,

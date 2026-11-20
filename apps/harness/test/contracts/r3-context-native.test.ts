@@ -137,7 +137,7 @@ test('only v8 restores successful Docx bodies from saved units without bootstrap
         kind: 'timezone_setting',
         timezone_id: 'UTC',
         previous_timezone_id: null,
-        alias_version: null,
+        alias_version: 'fixture',
       },
     },
   };
