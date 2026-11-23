@@ -8,7 +8,6 @@
 
 > Proposed 用户模型配置与 Run 冻结引用见 [模型接入数据合同](model-provider-schema.md)；旧部署只能明确指定 owner 导入，不自动复制共享。此项不代表已应用迁移。
 > Proposed R3（#144）：通用暂停继续、摘要覆盖、记忆事实及可重建向量索引的目标合同见 [design/23](../design/23-r3-short-term-memory-and-compact.md)；新增状态及迁移尚未实施，不改写原 Run、快照或批准事实。
-> Proposed 原生会话资料的暂存、字节、输入绑定、交付清单及前向迁移边界见 [design/24 §2–§3](../design/24-native-office-delivery.md#2-http暂存和接纳)；不表示表或迁移已部署。
 
 ## 落地顺序
 
