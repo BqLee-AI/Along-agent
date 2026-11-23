@@ -12,6 +12,7 @@
 
 > R3（#144）的用户暂停、显式继续和 compact 见 [conversations API §9–§10](conversations/conversations_routes.md#9-用户安全点暂停和继续)，本人记忆管理见 §12；语义和边界见 [design/23](../design/23-r3-short-term-memory-and-compact.md)。
 > Proposed 资料操作在浏览器中处理 CSV 和下载。可选纪要摘要端点见 [design/24 §3](../design/24-native-office-delivery.md#3-可选纪要摘要)，不计入既有路由总数。
+> Microsoft Learn 的本人公开搜索开关、固定远程工具及断开边界见 [Microsoft Learn API](microsoft-learn.md)。连接状态不是上游健康或 Microsoft 身份证明。
 
 ## 1. Base Path 与路由总数 [Required]
 

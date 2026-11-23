@@ -197,6 +197,59 @@ const feishuDocxReadSchema = z
     { message: 'invalid Feishu Docx revision or text bounds' },
   );
 
+const unpairedSurrogate = /[\uD800-\uDFFF]/u;
+const boundedUtf8 = (max: number) =>
+  z
+    .string()
+    .max(max)
+    .refine((value) => !unpairedSurrogate.test(value) && utf8.encode(value).byteLength <= max, {
+      message: `expected at most ${max} UTF-8 bytes of Unicode text`,
+    });
+
+const learnSourceUrl = boundedUtf8(2048).refine(
+  (value) => {
+    // Match the raw authority so normalization cannot hide empty userinfo.
+    if (!/^https:\/\/learn\.microsoft\.com(?::0*443)?(?=[/?#]|$)/i.test(value)) return false;
+    if (/[\\\s]/u.test(value)) return false;
+    for (let i = 0; i < value.length; i++) {
+      const code = value.charCodeAt(i);
+      if (code < 0x20 || code === 0x7f) return false;
+    }
+    return true;
+  },
+  { message: 'expected an official Microsoft Learn HTTPS source URL' },
+);
+
+export const LearnDocsSearchPayloadSchema = z
+  .object({
+    kind: z.literal('learn_docs_search'),
+    query: z
+      .string()
+      .min(1)
+      .max(500)
+      .refine((value) => value.trim() === value && !unpairedSurrogate.test(value), {
+        message: 'expected a trimmed Unicode query',
+      }),
+    fetched_at: z.string().length(24).datetime({ precision: 3 }),
+    representation: z.literal('search_excerpts'),
+    items: z
+      .array(
+        z
+          .object({
+            title: boundedUtf8(512),
+            url: learnSourceUrl,
+            content: boundedUtf8(4096),
+          })
+          .strict(),
+      )
+      .max(10),
+  })
+  .strict()
+  .refine((payload) => utf8.encode(JSON.stringify(payload)).byteLength <= 65536, {
+    message: 'Microsoft Learn search payload exceeds 65536 UTF-8 bytes',
+  });
+export type LearnDocsSearchPayload = z.infer<typeof LearnDocsSearchPayloadSchema>;
+
 export const HarnessToolPayloadSchema = z.union([
   z
     .object({
@@ -339,6 +392,7 @@ export const HarnessToolPayloadSchema = z.union([
     .strict(),
   HarnessMemorySourceSchema,
   feishuDocxReadSchema,
+  LearnDocsSearchPayloadSchema,
   taskCreatedSchema,
   z.object({ kind: z.literal('effect_evidence'), evidence_ref: small }).strict(),
   z

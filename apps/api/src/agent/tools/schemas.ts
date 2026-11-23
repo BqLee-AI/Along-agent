@@ -159,6 +159,7 @@ export const TOOL_INPUT_SCHEMAS = {
   workspace_grep: WorkspaceGrepInputSchema,
   workspace_read: WorkspaceReadInputSchema,
   feishu_docx_read: z.object({}).strict(),
+  learn_docs_search: z.object({ query: z.string().trim().min(1).max(500) }).strict(),
   workspace_propose_replace: WorkspaceProposeReplaceInputSchema,
   workspace_replace: WorkspaceReplaceInputSchema,
   workspace_create: WorkspaceCreateInputSchema,

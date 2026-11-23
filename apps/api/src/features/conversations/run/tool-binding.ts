@@ -22,6 +22,7 @@ type ToolScope = {
   workspaceGrants?: WorkspaceGrant[];
   authorizationRevision?: 'delegation/1';
   feishuDocx?: unknown;
+  microsoftLearn?: unknown;
 };
 
 function validateFrozenWorkspace(
@@ -97,6 +98,7 @@ export async function assertToolRunBinding(
         workspaceGrants?: unknown;
         authorization_revision?: unknown;
         feishuDocx?: unknown;
+        microsoftLearn?: unknown;
       } | null;
     }>(
       `SELECT r.execution,r.tools_allowlist,r.frozen_context FROM agent_runs r JOIN conversations c ON c.id=r.conversation_id
@@ -116,6 +118,11 @@ export async function assertToolRunBinding(
     !isDeepStrictEqual(binding.feishuDocx, row.frozen_context?.feishuDocx)
   )
     throw forbidden('Feishu scope differs from frozen Run grant');
+  if (
+    'microsoftLearn' in binding &&
+    !isDeepStrictEqual(binding.microsoftLearn, row.frozen_context?.microsoftLearn)
+  )
+    throw forbidden('Microsoft Learn scope differs from frozen Run grant');
   if ('allowlist' in binding || 'workspaceGrant' in binding || 'workspaceGrants' in binding)
     validateFrozenWorkspace(binding.ownerId, row.frozen_context, binding);
 }
@@ -160,6 +167,7 @@ async function lockToolBinding(
       workspaceGrants?: unknown;
       authorization_revision?: unknown;
       feishuDocx?: unknown;
+      microsoftLearn?: unknown;
       execution_lifecycle?: string;
     } | null;
   }>(
@@ -197,6 +205,11 @@ async function lockToolBinding(
     !isDeepStrictEqual(binding.feishuDocx, run.rows[0].frozen_context?.feishuDocx)
   )
     throw forbidden('Feishu scope differs from frozen Run grant');
+  if (
+    'microsoftLearn' in binding &&
+    !isDeepStrictEqual(binding.microsoftLearn, run.rows[0].frozen_context?.microsoftLearn)
+  )
+    throw forbidden('Microsoft Learn scope differs from frozen Run grant');
   const workspaceAuthorized = validateFrozenWorkspace(
     binding.ownerId,
     run.rows[0]!.frozen_context,

@@ -1,0 +1,37 @@
+{
+  "version": "0042",
+  "tables": ["microsoft_learn_connections"],
+  "columns": [
+    {
+      "table": "microsoft_learn_connections",
+      "name": "owner_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "microsoft_learn_connections",
+      "name": "generation",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    }
+  ],
+  "constraints": [
+    {
+      "table": "microsoft_learn_connections",
+      "name": "microsoft_learn_connections_pkey",
+      "type": "p",
+      "columns": ["owner_id"]
+    },
+    {
+      "table": "microsoft_learn_connections",
+      "name": "microsoft_learn_connections_owner_id_fkey",
+      "type": "f",
+      "columns": ["owner_id"],
+      "target": "users",
+      "target_columns": ["id"],
+      "delete_action": "c"
+    }
+  ]
+}

@@ -10,6 +10,7 @@
 原生 Harness 源码分层入口及构建哈希范围见 [Harness README](../apps/harness/README.md)；历史基线的文件路径与证据仍按其原版本理解。
 用户安全点暂停、显式继续和 compact 接口见 [conversations API §9–§10](api/conversations/conversations_routes.md#9-用户安全点暂停和继续)；本人记忆管理见 [API §12](api/README.md#12-本人短期记忆)，R3 边界见 design/23。
 API 将业务能力放在 `features/`，将跨功能操作、Run 执行和仓颉会话放在 `agent/`，由 Elysia 组装唯一业务路由。职责与事务边界见 [design/01 §2](design/01-tech-stack-and-repo-structure.md#2-monorepo-布局observedv0-关键目录)。Web 的 JSON 调用由 Eden 推导类型，SSE 保留独立协议。
+Microsoft Learn 公开资料搜索复用连接页和 Run 工具网关；固定路由、数据表与断开边界见 [Microsoft Learn 合同](api/microsoft-learn.md)，实际结果与未完成项见[验证记录](verification/remote-mcp-verification-2026-11-23.md)。
 
 ## 一、PRD（产品需求，5 篇）
 

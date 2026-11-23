@@ -1,6 +1,8 @@
 import type { CreatedApproval } from '../../features/approvals/public.js';
 import type { TimeContext, TimeFailure } from '../../features/time/public.js';
 import type { FeishuBotDocxGrant } from '../../features/office-connectors/public.js';
+import type { MicrosoftLearnGrant } from '../../features/remote-mcp/public.js';
+import type { LearnDocsSearchPayload } from '@along/contracts';
 import type {
   WorkspaceGrant,
   WorkspaceResult,
@@ -58,7 +60,8 @@ export type ToolId =
   | (typeof DELEGATION_WORKSPACE_CREATE_TOOL_IDS)[number]
   | (typeof R3_MEMORY_TOOL_IDS)[number]
   | typeof R3_MEMORY_SOURCE_TOOL_ID
-  | 'feishu_docx_read';
+  | 'feishu_docx_read'
+  | 'learn_docs_search';
 
 export const TASK_STATES = [
   'saved',
@@ -87,6 +90,7 @@ export interface ToolContext {
   workspaceGrant?: WorkspaceGrant | null;
   workspaceGrants?: WorkspaceGrant[];
   feishuDocx?: { connectionId: string; sessionId: string; url: string } | FeishuBotDocxGrant;
+  microsoftLearn?: MicrosoftLearnGrant;
   documentEdit?: {
     base_read_invocation_id: string;
     relative_path: string;
@@ -246,6 +250,7 @@ export type ToolPayload =
   | MemoryRecallPayload
   | MemorySourcePayload
   | FeishuDocxPayload
+  | LearnDocsSearchPayload
   | EvidencePayload
   | WorkspaceResult;
 export type ToolResult =

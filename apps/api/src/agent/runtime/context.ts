@@ -222,6 +222,7 @@ export async function contextOf(
     ...(frozen.workspaceGrant ? { workspaceGrant: frozen.workspaceGrant } : {}),
     ...(frozen.workspaceGrants ? { workspaceGrants: frozen.workspaceGrants } : {}),
     ...(frozen.feishuDocx ? { feishuDocx: frozen.feishuDocx } : {}),
+    ...(frozen.microsoftLearn ? { microsoftLearn: frozen.microsoftLearn } : {}),
     ...(frozen.authorization_revision
       ? {
           authorizationRevision: frozen.authorization_revision,
