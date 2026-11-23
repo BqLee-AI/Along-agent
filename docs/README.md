@@ -148,6 +148,8 @@ R2-B 的完整目标及多轮自主查询边界见[design/19 §4、§6](design/1
 | 18   | [2026-11-02—03 桌面工作台验证](verification/desktop-experience-verification-2026-11-02.md)       | 工作台构建、真实浏览器与本机实测的分段证据及未覆盖范围                                              |
 | 19   | [2026-11-18 Elysia API 重构验证](verification/elysia-api-modular-refactor-2026-11-18.md)         | 独立工作树的 HTTP/TLS、Eden、浏览器、PostgreSQL 与仓颉验证及未覆盖范围                              |
 
+#169 的合成错误/歧义取消、实际 PG 撤销回执、撞名后精确字节与 MCP 新读见[2026-11-23 核对记录](verification/write-targets-169-verification-2026-11-23.md)；历史归因和真实模型未覆盖边界单列。
+
 ## 十、References（3 篇）
 
 | 序号 | 文档                                                             | 作用                                        |
