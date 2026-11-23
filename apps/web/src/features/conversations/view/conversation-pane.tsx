@@ -20,6 +20,7 @@ import { ConversationContext } from './conversation-context';
 import { MessageRow, StreamingMessage } from './conversation-messages';
 import { RunResults } from './run-results';
 import { LeaveRunDialog, RunStatusPanel, TaskComposer } from './task-views';
+import { OfficeMaterials } from './office-materials';
 
 export interface ConversationPaneProps {
   conversationId?: string | null;
@@ -66,6 +67,10 @@ export default function ConversationPane({
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const sidebarShown = sidebar && sidebarOpen;
   const reduceMotion = useReducedMotion();
+  const prepareOfficeReminder = () => {
+    task.setIntent('reminder');
+    focusComposer();
+  };
   return (
     <div className="flex h-full min-h-0 w-full min-w-0">
       <AnimatePresence initial={false}>
@@ -278,6 +283,7 @@ export default function ConversationPane({
           data-testid="composer-dock"
         >
           <div className="mx-auto w-full max-w-[720px]">
+            <OfficeMaterials onReminder={prepareOfficeReminder} />
             <TaskComposer task={task} />
           </div>
         </div>

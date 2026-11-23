@@ -28,6 +28,36 @@ function upload(path: string, body = 'not JSON', headers: Record<string, string>
   return { request, reads: () => reads };
 }
 describe('Elysia application admission', () => {
+  it('reports office summary disabled by default and requires an actor and CSRF', async () => {
+    const previous = process.env.ALONG_NATIVE_OFFICE_ADMISSION;
+    delete process.env.ALONG_NATIVE_OFFICE_ADMISSION;
+    try {
+      const capability = 'http://localhost/api/v1/model-providers/office-capability';
+      const anonymous = createApp({ pool: null, resolveActor: async () => null });
+      const signed = createApp({ pool: null, resolveActor: async () => actor });
+      expect((await anonymous.handle(new Request(capability))).status).toBe(401);
+
+      const response = await signed.handle(new Request(capability));
+      expect(response.status).toBe(200);
+      expect(response.headers.get('cache-control')).toBe('no-store');
+      expect(EnvelopeSchema.parse(await response.json()).data).toEqual({ enabled: false });
+
+      const path = '/api/v1/model-providers/actions/summarize-notes';
+      const unauthenticated = upload(path);
+      expect((await anonymous.handle(unauthenticated.request)).status).toBe(401);
+      expect(unauthenticated.reads()).toBe(0);
+      const noCsrf = upload(path);
+      const forbidden = await signed.handle(noCsrf.request);
+      expect(forbidden.status).toBe(403);
+      expect(noCsrf.reads()).toBe(0);
+      expect(EnvelopeSchema.parse(await forbidden.json()).error?.details).toMatchObject({
+        reason: 'CSRF_MISMATCH',
+      });
+    } finally {
+      if (previous === undefined) delete process.env.ALONG_NATIVE_OFFICE_ADMISSION;
+      else process.env.ALONG_NATIVE_OFFICE_ADMISSION = previous;
+    }
+  });
   it('uses the actual Request without consuming an unauthenticated upload', async () => {
     const input = upload('/api/v1/model-providers');
     const response = await createApp({ pool: null, resolveActor: async () => null }).handle(

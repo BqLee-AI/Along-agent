@@ -32,6 +32,7 @@ services:
       FEISHU_BOT_DOCX_CONFIG:
       FEISHU_BOT_DOCX_APP_SECRET:
       FEISHU_BOT_DOCX_OBSERVATION_KEY:
+      ALONG_NATIVE_OFFICE_ADMISSION:
       # Optional historical receipt verification; no user OAuth flows.
       FEISHU_APP_ID:
       FEISHU_REDIRECT_URI:
