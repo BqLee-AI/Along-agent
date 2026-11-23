@@ -73,3 +73,13 @@
 证据边界：模型决策及最后排版由受控 OpenAI-compatible endpoint 生成，不证明真实 LLM 自主选工具或回答质量；Microsoft MCP 和来源内容是真实服务。为了观察真实派发，临时只读 Bun preload 仅记录固定 MCP POST 并原样调用原 fetch，没有修改请求或伪造结果；该观察命令与未经插桩启动分别记录。之后已通过正式 stop/start 移除探针，API readiness 200，两个回合仍能展示。没有配置工作区，因此此产品路径不宣称覆盖真实受管文件组合攻击；网关额外参数拒绝、固定冻结值等边界由聚焦测试保护。
 
 脱敏证据：`D:/Temp/along-168/review-e2e-result.json`；截图 `review-e2e-query-before-submit.png`、`review-e2e-learn-answer.png`、`review-e2e-learn-history.png`、`review-e2e-ordinary-follow-up.png`。私有合成凭据与完整模型请求不入库。隔离安装保留供主审，本轮旧安装原状未改；测试库与受控模型仅属于本任务。
+
+## 2026-11-24：CI 生命周期目标版本修正
+
+`88e25b7bc3836776a2de196736c5345fb12ab96e` 的 [Actions 45210009153](https://github.com/BqLee-AI/Along-agent/actions/runs/45210009153)：checks、integration 通过；database 的生命周期阶段 27 pass、60 fail，失败均为旧目标期望 `0041` 与正式发布目标 `0042` 不符。以保存的 CI 日志 `D:/Temp/along-168/review-ci-database-failed.log` 为 Red，不为确认已知失败重复运行旧断言。
+
+只修改 `scripts/test/local-{116-convergence,direct-reminder-database,goal-database,invited-database}.test.ts` 的当前目标版本期望与 goal 升级用例标题；三个完整 ledger 序列保留 `0041` 并追加 `0042`。历史来源版本与迁移目录截断、拒绝结构漂移、前后数据相等、只读重连零 DDL、失败回滚与 ledger 不被重写的断言不变。不修改迁移、baseline、生命周期实现或产品代码，不引入目标版本抽象。
+
+验证按 CI 生命周期命令的 `--no-env-file test --parallel=2` 运行四个文件，使用任务自有 `along-168-ci-lifecycle-pg`（PostgreSQL 16）与 Bun 1.4.2，每个用例仍创建/删除独立数据库，临时迁移目录位于 D 盘。此次仅测试及验证记录变化，沿用上述成功的产品链路与该 CI 的 checks/integration 证据；不重复全量 verify、database 后续集成集或 Web/native/MCP 产品验收，不操作旧安装。
+
+结果：四个文件未按名称过滤，**80 pass、0 fail、619 assertions**，包含原 CI 的全部 60 个失败场景；目标版本断言之后的数据不变、漂移拒绝、ledger 保护和 DDL 回滚检查均执行。PostgreSQL `16.15`，用例清理后除系统库与默认 postgres 库外剩余数据库数为 0，随后删除本任务 PG 容器及卷。完整本地日志 `D:/Temp/along-168/review-ci-lifecycle-fixed.log`；四个文件定向 lint 与五个改动文件（含本记录）的格式检查通过。新提交的远端 CI 由主审等待和最终评审，此处不以本地四文件通过宣称全量 database 或新 CI 已绿。
