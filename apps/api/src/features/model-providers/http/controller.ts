@@ -22,7 +22,6 @@ import {
 } from '../public.js';
 import {
   MAX_OFFICE_NOTES_BYTES,
-  officeSummaryEnabled,
   summarizeOfficeNotes,
 } from '../outbound/summarize-office-notes.js';
 
@@ -54,14 +53,6 @@ export function createModelProviderController(
     },
   });
   return new Elysia({ name: 'model-providers', strictPath: true })
-    .get(
-      '/api/v1/model-providers/office-capability',
-      async ({ request }) => {
-        await access.requireActor(request);
-        return okEnvelope({ enabled: officeSummaryEnabled() }, access.requestId(request));
-      },
-      { response: responses(z.object({ enabled: z.boolean() })) },
-    )
     .resolve({ as: 'local' }, async ({ request }) => {
       const actor = await access.requireActor(request);
       if (!deps.pool) throw notReady();

@@ -15,7 +15,6 @@ import {
   type OfficeAnalysis,
 } from '../model/office-materials';
 
-const capability = z.object({ enabled: z.boolean() });
 const summaryResult = z.object({ summary: z.string() });
 const controlClass =
   'min-h-11 w-full min-w-0 rounded-control border border-separator bg-background p-1.5 focus-visible:outline-2 focus-visible:outline-ring sm:min-h-9';
@@ -32,19 +31,6 @@ function download(filename: string, type: string, text: string) {
 }
 
 export function OfficeMaterials({ onReminder }: { onReminder: () => void }) {
-  const [enabled, setEnabled] = useState(false);
-  useEffect(() => {
-    const request = new AbortController();
-    void api.api.v1['model-providers']['office-capability']
-      .get({ fetch: { signal: request.signal } })
-      .then(readEnvelope)
-      .then((result) => {
-        if (!request.signal.aborted) setEnabled(capability.parse(result).enabled);
-      })
-      .catch(() => {}); // Feature discovery is optional; no capability means no entry point.
-    return () => request.abort();
-  }, []);
-  if (!enabled) return null;
   return (
     <details className="mb-2 text-sm">
       <summary className="w-fit cursor-pointer rounded-control px-2 py-1 text-secondary-foreground focus-visible:outline-2 focus-visible:outline-ring">

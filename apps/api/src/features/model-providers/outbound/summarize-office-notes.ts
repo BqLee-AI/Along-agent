@@ -6,7 +6,7 @@ import {
   type HarnessModelStep,
 } from '@along/contracts';
 import { withTransaction } from '../../../db/transaction.js';
-import { forbidden, notFound, notReady, stateConflict } from '../../../platform/errors.js';
+import { forbidden, notReady, stateConflict } from '../../../platform/errors.js';
 import { lockViewerAccess, type Actor } from '../../identity/public.js';
 import { credentialKey, decryptCredential } from '../configuration/crypto.js';
 import type { ModelTransportFactory } from '../runtime/model-contract.js';
@@ -18,10 +18,6 @@ export const MAX_OFFICE_NOTES_BYTES = 48 * 1024;
 const MAX_SUMMARY_BYTES = 16 * 1024;
 const MAX_OUTPUT_TOKENS = 2048;
 
-export function officeSummaryEnabled(): boolean {
-  return process.env.ALONG_NATIVE_OFFICE_ADMISSION === '1';
-}
-
 /** One stateless, read-only model step using the actor's current default selection. */
 export async function summarizeOfficeNotes(
   pool: Pool,
@@ -30,7 +26,6 @@ export async function summarizeOfficeNotes(
   factory: ModelTransportFactory | undefined,
   requestSignal: AbortSignal,
 ): Promise<{ summary: string }> {
-  if (!officeSummaryEnabled()) throw notFound();
   if (!factory) throw notReady('model transport unavailable');
   const { ownerId, sessionId } = actor;
   const stop = new AbortController();
@@ -87,7 +82,6 @@ export async function summarizeOfficeNotes(
               [selected.version_id, ownerId, selected.provider_id],
             );
             if (!version.rowCount) throw stateConflict('model version unavailable');
-            if (!officeSummaryEnabled()) throw notFound();
             signal.throwIfAborted();
             if (dispatched) throw new OutboundError('incompatible');
             dispatched = true;

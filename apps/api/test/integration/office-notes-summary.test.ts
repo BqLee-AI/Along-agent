@@ -37,14 +37,11 @@ function sse(delta: object, finish: string, done = true) {
 
 suite('stateless office notes summary HTTP contract', () => {
   let db: IntegrationDatabase;
-  let previous: string | undefined;
   let ownerId: string;
   let otherOwnerId: string;
   let providerId: string;
 
   beforeAll(async () => {
-    previous = process.env.ALONG_NATIVE_OFFICE_ADMISSION;
-    process.env.ALONG_NATIVE_OFFICE_ADMISSION = '1';
     db = await createIntegrationDatabase();
     ownerId = randomUUID();
     otherOwnerId = randomUUID();
@@ -63,8 +60,6 @@ suite('stateless office notes summary HTTP contract', () => {
   });
 
   afterAll(async () => {
-    if (previous === undefined) delete process.env.ALONG_NATIVE_OFFICE_ADMISSION;
-    else process.env.ALONG_NATIVE_OFFICE_ADMISSION = previous;
     await db?.close();
   });
 
@@ -98,7 +93,7 @@ suite('stateless office notes summary HTTP contract', () => {
     return app.handle(request);
   }
 
-  test('admits the UTF-8 limit and sends one prompt without tools to the owner default', async () => {
+  test('admits the UTF-8 limit without deployment configuration and calls the owner default once', async () => {
     const notes = '会'.repeat(notesLimit / 3);
     const sent: Array<{ url: string; body: unknown }> = [];
     const app = appFor(async (url, init, authorizeDispatch) => {
@@ -107,8 +102,6 @@ suite('stateless office notes summary HTTP contract', () => {
       });
       return sse({ content: summary }, 'stop');
     });
-    const capability = await app.handle(new Request(`${root}/office-capability`));
-    expect(EnvelopeSchema.parse(await capability.json()).data).toEqual({ enabled: true });
     const result = await post(app, { notes });
     expect(result.status).toBe(200);
     expect(result.headers.get('cache-control')).toBe('no-store');
@@ -128,7 +121,7 @@ suite('stateless office notes summary HTTP contract', () => {
     expect(rows).toHaveLength(0);
   });
 
-  test('rejects disabled admission, foreign defaults, extra fields and oversize notes before dispatch', async () => {
+  test('rejects absent owner defaults, extra fields and oversize notes before dispatch', async () => {
     let dispatches = 0;
     const network: SdkStepNetwork = async () => {
       dispatches++;
@@ -140,12 +133,6 @@ suite('stateless office notes summary HTTP contract', () => {
       400,
     );
     expect((await post(appFor(network, otherOwnerId), { notes: 'notes' })).status).toBe(409);
-    process.env.ALONG_NATIVE_OFFICE_ADMISSION = 'true';
-    try {
-      expect((await post(app, { notes: 'notes' })).status).toBe(404);
-    } finally {
-      process.env.ALONG_NATIVE_OFFICE_ADMISSION = '1';
-    }
     expect(dispatches).toBe(0);
   });
 
