@@ -111,9 +111,9 @@ export async function bindOfficeReminder(
     const {
       rows: [row],
     } = await client.query<{ accepted_result: unknown }>(
-      `SELECT t.accepted_result FROM office_deliveries d JOIN tool_invocations t
-         ON t.run_id=d.run_id AND t.owner_id=d.owner_id AND t.conversation_id=d.conversation_id
-       WHERE d.scope_run_id=$1 AND d.owner_id=$2 AND d.conversation_id=$3
+      `SELECT t.accepted_result FROM office_run_materials d JOIN tool_invocations t
+         ON t.run_id=d.delivery_run_id AND t.owner_id=d.owner_id AND t.conversation_id=d.conversation_id
+       WHERE d.run_id=$1 AND d.owner_id=$2 AND d.conversation_id=$3
          AND t.tool_id='office_create_artifacts' AND t.state='completed' AND t.outcome_kind='success'
          AND t.result_version=1 AND t.approval_id IS NULL
        ORDER BY t.accepted_at,t.invocation_id LIMIT 1`,

@@ -15,27 +15,21 @@ integrationTest(
       const session = await seedAdmittedSession(db.pool);
       const app = createApp({ pool: db.pool, tzdbVersion: 'test' });
       const url = 'http://localhost/api/v1/conversations/office-capabilities';
-      const request = () =>
-        app.handle(
+      const readCapability = async () => {
+        const response = await app.handle(
           new Request(url, { headers: { cookie: `better-auth.session_token=${session.token}` } }),
         );
+        const body: unknown = await response.json();
+        return body;
+      };
       expect((await app.handle(new Request(url))).status).toBe(401);
       delete process.env.ALONG_NATIVE_OFFICE_ADMISSION;
-      expect(
-        ((await (await request()).json()) as { data: { admission_enabled: boolean } }).data
-          .admission_enabled,
-      ).toBe(false);
+      expect(await readCapability()).toMatchObject({ data: { admission_enabled: false } });
       process.env.ALONG_NATIVE_OFFICE_ADMISSION = '1';
       delete process.env.ALONG_OFFICE_OBSERVATION_KEY;
-      expect(
-        ((await (await request()).json()) as { data: { admission_enabled: boolean } }).data
-          .admission_enabled,
-      ).toBe(false);
+      expect(await readCapability()).toMatchObject({ data: { admission_enabled: false } });
       process.env.ALONG_OFFICE_OBSERVATION_KEY = Buffer.alloc(32, 1).toString('base64');
-      expect(
-        ((await (await request()).json()) as { data: { admission_enabled: boolean } }).data
-          .admission_enabled,
-      ).toBe(true);
+      expect(await readCapability()).toMatchObject({ data: { admission_enabled: true } });
     } finally {
       if (previousGate === undefined) delete process.env.ALONG_NATIVE_OFFICE_ADMISSION;
       else process.env.ALONG_NATIVE_OFFICE_ADMISSION = previousGate;
@@ -67,17 +61,7 @@ integrationTest(
       };
       const send = (body: string, extra: Record<string, string> = {}) =>
         app.handle(new Request(path, { method: 'POST', headers: { ...headers, ...extra }, body }));
-      expect(
-        (
-          await app.handle(
-            new Request(path, {
-              method: 'POST',
-              headers: { ...headers, 'x-csrf-token': 'bad' },
-              body: 'test',
-            }),
-          )
-        ).status,
-      ).toBe(403);
+      expect((await send('test', { 'x-csrf-token': 'bad' })).status).toBe(403);
       expect((await send('test', { 'content-encoding': 'gzip' })).status).toBe(400);
       const first = await send('一\r\n二');
       expect(first.status).toBe(200);
@@ -100,10 +84,9 @@ integrationTest(
         ),
       );
       expect(revoked.status).toBe(200);
-      const bytes = await db.pool.query(
-        'SELECT content FROM office_attachment_bytes WHERE attachment_id=$1',
-        [receipt.data.attachment_id],
-      );
+      const bytes = await db.pool.query('SELECT content FROM office_attachments WHERE id=$1', [
+        receipt.data.attachment_id,
+      ]);
       expect(bytes.rows[0].content).toEqual(Buffer.from('一\r\n二'));
     } finally {
       await db.close();

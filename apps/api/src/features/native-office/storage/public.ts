@@ -56,7 +56,7 @@ type HistoryRow = {
   status: OfficeArtifact['status'];
 };
 
-/** Callers page the authorized Run IDs first. This projection never joins bytes. */
+/** Callers page the authorized Run IDs first. This projection never selects bytes. */
 async function listRunMaterials(pool: Pool, ownerId: string, runIds: readonly string[]) {
   const result = new Map<string, OfficeRunMaterials>();
   if (!runIds.length) return result;
@@ -66,16 +66,16 @@ async function listRunMaterials(pool: Pool, ownerId: string, runIds: readonly st
        WHERE m.owner_id = $1 AND m.run_id = ANY($2::uuid[])
      ), artifacts AS (
        SELECT s.run_id AS "requestedRunId", s.scope_run_id AS "scopeRunId", ${artifactView}
-       FROM scope s JOIN office_deliveries d USING (scope_run_id)
-       JOIN office_artifacts a USING (scope_run_id)
+       FROM scope s JOIN office_run_materials d ON d.run_id = s.scope_run_id
+       JOIN office_artifacts a ON a.scope_run_id = d.run_id
+       WHERE d.delivery_run_id IS NOT NULL
      )
-     SELECT s.run_id AS "requestedRunId", s.scope_run_id AS "scopeRunId", u.id, i.role, s.run_id AS "runId", u.filename,
+     SELECT s.run_id AS "requestedRunId", s.scope_run_id AS "scopeRunId", u.id, u.role, s.run_id AS "runId", u.filename,
        u.format, u.size_bytes AS "sizeBytes", u.expires_at AS "expiresAt",
        CASE WHEN u.revoked_at IS NOT NULL THEN 'revoked'
          WHEN u.expires_at <= statement_timestamp() THEN 'expired'
          ELSE 'available' END AS status
-     FROM scope s JOIN office_run_inputs i ON i.run_id = s.scope_run_id
-     JOIN office_attachments u ON u.id = i.attachment_id
+     FROM scope s JOIN office_attachments u ON u.scope_run_id = s.scope_run_id
      UNION ALL
      SELECT "requestedRunId", "scopeRunId", "artifactId", NULL, "runId", filename, format, "sizeBytes",
             "expiresAt", status FROM artifacts
@@ -101,7 +101,7 @@ async function listRunMaterials(pool: Pool, ownerId: string, runIds: readonly st
   return result;
 }
 
-/** Delete only bytes already logically unavailable. Keep receipts and metadata. */
+/** Clear only bytes already logically unavailable. Keep receipts and metadata. */
 async function pruneBytes(pool: Pool, batchSize: number) {
   if (!Number.isSafeInteger(batchSize) || batchSize < 1 || batchSize > 1000) {
     throw validationError('invalid office cleanup batch size');
@@ -109,20 +109,19 @@ async function pruneBytes(pool: Pool, batchSize: number) {
   return withTransaction(pool, async (client) => {
     const attachments = await client.query(
       `WITH batch AS (
-         SELECT b.attachment_id FROM office_attachments u
-         JOIN office_attachment_bytes b ON b.attachment_id = u.id
-         WHERE u.revoked_at IS NOT NULL OR u.expires_at <= statement_timestamp()
-         ORDER BY u.expires_at, u.id LIMIT $1 FOR UPDATE OF b SKIP LOCKED
-       ) DELETE FROM office_attachment_bytes b USING batch
-         WHERE b.attachment_id = batch.attachment_id`,
+         SELECT u.id FROM office_attachments u
+         WHERE u.content IS NOT NULL
+           AND (u.revoked_at IS NOT NULL OR u.expires_at <= statement_timestamp())
+         ORDER BY u.expires_at, u.id LIMIT $1 FOR UPDATE OF u SKIP LOCKED
+       ) UPDATE office_attachments u SET content = NULL FROM batch WHERE u.id = batch.id`,
       [batchSize],
     );
     const artifacts = await client.query(
       `WITH batch AS (
-         SELECT b.artifact_id FROM office_artifacts a JOIN office_artifact_bytes b ON b.artifact_id = a.id
-         WHERE a.expires_at <= statement_timestamp() OR ${artifactRevoked}
-         ORDER BY a.expires_at, a.id LIMIT $1 FOR UPDATE OF b SKIP LOCKED
-       ) DELETE FROM office_artifact_bytes b USING batch WHERE b.artifact_id = batch.artifact_id`,
+         SELECT a.id FROM office_artifacts a
+         WHERE a.content IS NOT NULL AND (a.expires_at <= statement_timestamp() OR ${artifactRevoked})
+         ORDER BY a.expires_at, a.id LIMIT $1 FOR UPDATE OF a SKIP LOCKED
+       ) UPDATE office_artifacts a SET content = NULL FROM batch WHERE a.id = batch.id`,
       [batchSize],
     );
     return { attachments: attachments.rowCount ?? 0, artifacts: artifacts.rowCount ?? 0 };

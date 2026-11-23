@@ -29,7 +29,7 @@ export async function writeOfficeDelivery(
   client: PoolClient,
   input: WriteOfficeDelivery,
 ): Promise<OfficeArtifact[]> {
-  const { runId, ownerId, conversationId, paramsSha256, artifacts } = input;
+  const { runId, ownerId, paramsSha256, artifacts } = input;
   if (
     !/^[0-9a-f]{64}$/u.test(paramsSha256) ||
     artifacts.length < 1 ||
@@ -39,54 +39,72 @@ export async function writeOfficeDelivery(
     throw validationError('invalid office delivery manifest');
   }
   const { scopeRunId } = await lockOfficeExecution(client, input);
-  const prior = await client.query<{ paramsSha256: string }>(
-    'SELECT params_sha256 AS "paramsSha256" FROM office_deliveries WHERE scope_run_id = $1',
+  const {
+    rows: [prior],
+  } = await client.query<{ paramsSha256: string | null }>(
+    `SELECT delivery_params_sha256 AS "paramsSha256" FROM office_run_materials WHERE run_id = $1`,
     [scopeRunId],
   );
-  if (prior.rows.length) {
-    if (prior.rows[0]!.paramsSha256 !== paramsSha256) throw idempotencyConflict();
+  if (prior && prior.paramsSha256 !== null) {
+    if (prior.paramsSha256 !== paramsSha256) throw idempotencyConflict();
   } else {
     const inputs = await requireActiveInputs(client, scopeRunId);
-    const selected = new Set(inputs.map(({ attachmentId }) => attachmentId));
+    const notesId = inputs.find(({ role }) => role === 'notes')?.attachmentId;
+    const tasksId = inputs.find(({ role }) => role === 'tasks')?.attachmentId;
     let bytesRequired = 0;
-    for (const { filename, format, bytes, sourceAttachmentIds } of artifacts) {
+    const writes = artifacts.map(({ filename, format, bytes, sourceAttachmentIds }) => {
       validateFilename(filename);
       validateContent(bytes, MAX_ARTIFACT_BYTES);
       if (format !== 'markdown' && format !== 'csv')
         throw validationError('invalid artifact format');
-      if (sourceAttachmentIds?.some((id) => !selected.has(id.toLowerCase()))) {
-        throw validationError('artifact source is outside the frozen inputs');
+      let usesNotes = false;
+      let usesTasks = false;
+      for (const id of sourceAttachmentIds ?? []) {
+        const sourceId = id.toLowerCase();
+        if (sourceId === notesId) usesNotes = true;
+        else if (sourceId === tasksId) usesTasks = true;
+        else throw validationError('artifact source is outside the frozen inputs');
       }
       bytesRequired += bytes.length;
-    }
+      return {
+        filename,
+        format,
+        bytes,
+        sourcesKnown: sourceAttachmentIds !== null,
+        usesNotes,
+        usesTasks,
+      };
+    });
     await requireOfficeQuota(client, ownerId, bytesRequired);
     await client.query(
-      `INSERT INTO office_deliveries (scope_run_id, run_id, owner_id, conversation_id, params_sha256)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [scopeRunId, runId, ownerId, conversationId, paramsSha256],
+      `UPDATE office_run_materials SET delivery_run_id = $2, delivery_params_sha256 = $3
+       WHERE run_id = $1`,
+      [scopeRunId, runId, paramsSha256],
     );
-    for (const { filename, format, bytes, sourceAttachmentIds } of artifacts) {
+    for (const { filename, format, bytes, sourcesKnown, usesNotes, usesTasks } of writes) {
       await client.query(
-        `WITH artifact AS (
-           INSERT INTO office_artifacts
-             (id, scope_run_id, filename, format, size_bytes, sources_known, created_at, expires_at)
-           VALUES ($1, $2, $3, $4, $5, $6::uuid[] IS NOT NULL,
-                   statement_timestamp(), statement_timestamp() + interval '720 hours')
-           RETURNING id, scope_run_id, size_bytes
-         ), sources AS (
-           INSERT INTO office_artifact_sources (artifact_id, scope_run_id, attachment_id)
-           SELECT DISTINCT a.id, a.scope_run_id, s.id FROM artifact a
-           CROSS JOIN unnest($6::uuid[]) AS s(id)
-         )
-         INSERT INTO office_artifact_bytes (artifact_id, size_bytes, content)
-         SELECT id, size_bytes, $7::bytea FROM artifact`,
-        [randomUUID(), scopeRunId, filename, format, bytes.length, sourceAttachmentIds, bytes],
+        `INSERT INTO office_artifacts
+          (id, scope_run_id, filename, format, size_bytes, sources_known, uses_notes, uses_tasks,
+           content, created_at, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,
+                 statement_timestamp(), statement_timestamp() + interval '720 hours')`,
+        [
+          randomUUID(),
+          scopeRunId,
+          filename,
+          format,
+          bytes.length,
+          sourcesKnown,
+          usesNotes,
+          usesTasks,
+          bytes,
+        ],
       );
     }
   }
   const { rows } = await client.query<ArtifactRow>(
-    `SELECT ${artifactView} FROM office_deliveries d JOIN office_artifacts a USING (scope_run_id)
-     WHERE d.scope_run_id = $1 ORDER BY a.format`,
+    `SELECT ${artifactView} FROM office_run_materials d JOIN office_artifacts a ON a.scope_run_id = d.run_id
+     WHERE d.run_id = $1 ORDER BY a.format`,
     [scopeRunId],
   );
   return rows.map(project);
@@ -102,11 +120,12 @@ export async function downloadArtifact(
   await lockOfficeOwner(client, ownerId, true);
   const { rows } = await client.query<ArtifactRow & { bytes: Buffer }>(
     `WITH authorized AS MATERIALIZED (
-       SELECT ${artifactView} FROM office_deliveries d JOIN office_artifacts a USING (scope_run_id)
-       WHERE d.owner_id = $1 AND d.conversation_id = $2 AND d.run_id = $3 AND a.id = $4
+       SELECT ${artifactView}, a.content AS bytes
+       FROM office_run_materials d JOIN office_artifacts a ON a.scope_run_id = d.run_id
+       WHERE d.owner_id = $1 AND d.conversation_id = $2 AND d.delivery_run_id = $3
+         AND a.id = $4 AND a.content IS NOT NULL
      )
-     SELECT a.*, b.content AS bytes FROM authorized a
-     JOIN office_artifact_bytes b ON b.artifact_id = a."artifactId" AND a.status = 'available'`,
+     SELECT * FROM authorized WHERE status = 'available'`,
     [ownerId, conversationId, runId, artifactId],
   );
   if (!rows[0]) throw notFound();

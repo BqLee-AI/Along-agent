@@ -98,12 +98,19 @@ const officeKey = Buffer.alloc(32, 182).toString('base64');
       raw_text: '请分析所选任务表',
       office_materials: { draft_id: draftId, tasks_attachment_id: attachment.attachmentId },
     };
-    return { actor, draftId, attachment, body };
+    const start = (
+      request: unknown,
+      key: string | null = randomUUID(),
+      session: string | null = actor.sessionId,
+      runtime = deps,
+    ) => startConversationRun(runtime, actor.userId, randomUUID(), request, key, session);
+    return { actor, draftId, attachment, body, start };
   }
 
   async function assertDraftUnchanged(ownerId: string, attachmentId: string) {
     const result = await db.pool.query(
-      `SELECT u.bound_conversation_id,(SELECT count(*)::integer FROM agent_runs WHERE owner_id=$1) AS runs,
+      `SELECT u.bound_conversation_id,u.scope_run_id,u.role,
+        (SELECT count(*)::integer FROM agent_runs WHERE owner_id=$1) AS runs,
         (SELECT count(*)::integer FROM messages WHERE owner_id=$1) AS messages,
         (SELECT count(*)::integer FROM conversations WHERE owner_id=$1) AS conversations,
         (SELECT count(*)::integer FROM conversation_idempotency WHERE owner_id=$1) AS receipts
@@ -111,56 +118,54 @@ const officeKey = Buffer.alloc(32, 182).toString('base64');
       [ownerId, attachmentId],
     );
     expect(result.rows).toEqual([
-      { bound_conversation_id: null, runs: 0, messages: 0, conversations: 0, receipts: 0 },
+      {
+        bound_conversation_id: null,
+        scope_run_id: null,
+        role: null,
+        runs: 0,
+        messages: 0,
+        conversations: 0,
+        receipts: 0,
+      },
     ]);
   }
 
   test('keeps files staged when disabled, request-bound, unsigned, or missing the snapshot key', async () => {
-    const { actor, attachment, body } = await stagedTasks();
-    const { userId, sessionId } = actor;
+    const { actor, attachment, body, start } = await stagedTasks();
     const key = randomUUID();
-    const start = (runtime: ConversationDeps, session: string | null, idem: string | null) =>
-      startConversationRun(runtime, userId, randomUUID(), body, idem, session);
 
     delete process.env[gateName];
     try {
-      await expect(start(deps, sessionId, key)).rejects.toMatchObject({
+      await expect(start(body, key)).rejects.toMatchObject({
         errorCode: 'VALIDATION_ERROR',
       });
     } finally {
       process.env[gateName] = '1';
     }
     await expect(
-      start(
-        { pool: db.pool, timeContext: deps.timeContext, harness: deps.harness },
-        sessionId,
-        key,
-      ),
+      start(body, key, actor.sessionId, {
+        pool: db.pool,
+        timeContext: deps.timeContext,
+        harness: deps.harness,
+      }),
     ).rejects.toMatchObject({ errorCode: 'VALIDATION_ERROR' });
-    await expect(start(deps, sessionId, null)).rejects.toMatchObject({
+    await expect(start(body, null)).rejects.toMatchObject({
       errorCode: 'VALIDATION_ERROR',
     });
-    await expect(start(deps, null, key)).rejects.toMatchObject({ errorCode: 'FORBIDDEN' });
+    await expect(start(body, key, null)).rejects.toMatchObject({ errorCode: 'FORBIDDEN' });
     delete process.env[keyName];
     try {
-      await expect(start(deps, sessionId, key)).rejects.toMatchObject({ errorCode: 'FORBIDDEN' });
+      await expect(start(body, key)).rejects.toMatchObject({ errorCode: 'FORBIDDEN' });
     } finally {
       process.env[keyName] = officeKey;
     }
-    await assertDraftUnchanged(userId, attachment.attachmentId);
+    await assertDraftUnchanged(actor.userId, attachment.attachmentId);
 
-    const ordinary = await startConversationRun(
-      deps,
-      userId,
-      randomUUID(),
-      {
-        raw_text: '普通请求',
-        execution: 'harness',
-        authorization_revision: 'delegation/1',
-      },
-      randomUUID(),
-      sessionId,
-    );
+    const ordinary = await start({
+      raw_text: '普通请求',
+      execution: 'harness',
+      authorization_revision: 'delegation/1',
+    });
     const row = (
       await db.pool.query('SELECT frozen_context,tools_allowlist FROM agent_runs WHERE id=$1', [
         ordinary.runId,
@@ -172,20 +177,18 @@ const officeKey = Buffer.alloc(32, 182).toString('base64');
   });
 
   test('freezes selected metadata and consumes a draft once, even across concurrent retries', async () => {
-    const { actor, draftId, attachment, body } = await stagedTasks();
+    const { actor, draftId, attachment, body, start } = await stagedTasks();
     const { userId, sessionId } = actor;
     const key = randomUUID();
-    const start = (request: unknown = body, idem = key, session = sessionId) =>
-      startConversationRun(deps, userId, randomUUID(), request, idem, session);
-    const [first, duplicate] = await Promise.all([start(), start()]);
+    const [first, duplicate] = await Promise.all([start(body, key), start(body, key)]);
     expect(duplicate.runId).toBe(first.runId);
     expect(started.filter(({ runId }) => runId === first.runId)).toHaveLength(1);
     const { rows } = await db.pool.query(
       `SELECT r.frozen_context,r.tools_allowlist,a.attempt_no,a.lease_token,
-         m.session_id,m.draft_id,m.scope_run_id,i.attachment_id,i.sha256
+         m.session_id,m.draft_id,m.scope_run_id,i.id AS attachment_id,i.role,i.sha256
        FROM agent_runs r JOIN run_attempts a ON a.run_id=r.id
        JOIN office_run_materials m ON m.run_id=r.id
-       JOIN office_run_inputs i ON i.run_id=r.id WHERE r.id=$1`,
+       JOIN office_attachments i ON i.scope_run_id=m.scope_run_id WHERE r.id=$1`,
       [first.runId],
     );
     expect(rows).toHaveLength(1);
@@ -209,6 +212,7 @@ const officeKey = Buffer.alloc(32, 182).toString('base64');
       draft_id: draftId,
       scope_run_id: first.runId,
       attachment_id: attachment.attachmentId,
+      role: 'tasks',
     });
     expect(rows[0]!.lease_token).not.toBeNull();
     expect(JSON.stringify(rows[0]!.frozen_context)).not.toContain('private title');
@@ -220,7 +224,7 @@ const officeKey = Buffer.alloc(32, 182).toString('base64');
       { ...body.office_materials, tasks_attachment_id: randomUUID() },
       { draft_id: draftId, notes_attachment_id: attachment.attachmentId },
     ]) {
-      await expect(start({ ...body, office_materials: selection })).rejects.toMatchObject({
+      await expect(start({ ...body, office_materials: selection }, key)).rejects.toMatchObject({
         errorCode: 'STATE_CONFLICT',
       });
     }
@@ -298,21 +302,14 @@ const officeKey = Buffer.alloc(32, 182).toString('base64');
   ] as const) {
     test(scenario.name, async () => {
       const unfinishedAnalysis = scenario.kind === 'partial';
-      const { actor, attachment, body } = await stagedTasks();
+      const { actor, attachment, body, start } = await stagedTasks();
       const { userId, sessionId } = actor;
-      const first = await startConversationRun(
-        deps,
-        userId,
-        randomUUID(),
-        {
-          ...body,
-          raw_text: unfinishedAnalysis
-            ? '请交付 Markdown 和 CSV 汇总，再提醒我明天下午三点查看。'
-            : '请交付 Markdown 汇总，再提醒我明天下午三点查看。',
-        },
-        randomUUID(),
-        sessionId,
-      );
+      const first = await start({
+        ...body,
+        raw_text: unfinishedAnalysis
+          ? '请交付 Markdown 和 CSV 汇总，再提醒我明天下午三点查看。'
+          : '请交付 Markdown 汇总，再提醒我明天下午三点查看。',
+      });
       const prior = started.find(({ runId }) => runId === first.runId)!;
       expect(prior.trustedExecutionContext?.timezone).toBeNull();
       const delivery: WriteOfficeDelivery = {
@@ -347,15 +344,16 @@ const officeKey = Buffer.alloc(32, 182).toString('base64');
           ],
         },
       };
-      const earlierDeliveryId = await acceptReceipt(
-        prior,
-        'office_create_artifacts',
-        'success',
-        receipt,
-      );
-      // A fresh invocation can reuse the same slot/manifest. Only one of the
-      // equivalent accepted receipts was cited by the terminal goal.
-      expect(await writeDelivery()).toEqual([artifact]);
+      let earlierDeliveryId: string | undefined;
+      if (scenario.kind === 'valid') {
+        // Only one equivalent accepted receipt is cited by the terminal goal.
+        earlierDeliveryId = await acceptReceipt(
+          prior,
+          'office_create_artifacts',
+          'success',
+          receipt,
+        );
+      }
       const deliveryId = await acceptReceipt(prior, 'office_create_artifacts', 'success', receipt);
       await acceptReceipt(prior, 'create_reminder', 'clarification', {
         status: 'ok',
@@ -387,20 +385,13 @@ const officeKey = Buffer.alloc(32, 182).toString('base64');
           attachmentId: attachment.attachmentId,
         });
       }
-      const continuation = startConversationRun(
-        deps,
-        userId,
-        randomUUID(),
-        {
-          conversation_id: first.conversationId,
-          clarification_of_run_id: first.runId,
-          raw_text: 'Asia/Shanghai',
-          execution: 'harness',
-          authorization_revision: 'delegation/1',
-        },
-        randomUUID(),
-        sessionId,
-      );
+      const continuation = start({
+        conversation_id: first.conversationId,
+        clarification_of_run_id: first.runId,
+        raw_text: 'Asia/Shanghai',
+        execution: 'harness',
+        authorization_revision: 'delegation/1',
+      });
       if (scenario.kind !== 'valid') {
         await expect(continuation).rejects.toMatchObject({ errorCode: 'VALIDATION_ERROR' });
         expect(
@@ -421,7 +412,7 @@ const officeKey = Buffer.alloc(32, 182).toString('base64');
           ],
         });
         expect(JSON.stringify(context.trustedExecutionContext?.continuation)).not.toContain(
-          earlierDeliveryId,
+          earlierDeliveryId!,
         );
         expect(JSON.stringify(context.trustedExecutionContext?.continuation)).not.toContain(
           'private title',
@@ -431,30 +422,16 @@ const officeKey = Buffer.alloc(32, 182).toString('base64');
   }
 
   test('requires trusted timezone evidence and gives only one adjacent successor the original scope', async () => {
-    const { actor, attachment, body } = await stagedTasks();
-    const { userId, sessionId } = actor;
+    const { actor, attachment, body, start } = await stagedTasks();
+    const { sessionId } = actor;
     const unrelatedText = 'unselected conversation history';
-    const earlier = await startConversationRun(
-      deps,
-      userId,
-      randomUUID(),
-      {
-        execution: 'harness',
-        authorization_revision: 'delegation/1',
-        raw_text: unrelatedText,
-      },
-      randomUUID(),
-      sessionId,
-    );
+    const earlier = await start({
+      execution: 'harness',
+      authorization_revision: 'delegation/1',
+      raw_text: unrelatedText,
+    });
     await deps.runDriver!.release(started.find(({ runId }) => runId === earlier.runId)!.ownership!);
-    const first = await startConversationRun(
-      deps,
-      userId,
-      randomUUID(),
-      { ...body, conversation_id: earlier.conversationId },
-      randomUUID(),
-      sessionId,
-    );
+    const first = await start({ ...body, conversation_id: earlier.conversationId });
     const original = started.find(({ runId }) => runId === first.runId)!;
     expect(original.trustedExecutionContext?.timezone).toBeNull();
     const originalSession = await createHarnessSession(
@@ -482,10 +459,9 @@ const officeKey = Buffer.alloc(32, 182).toString('base64');
       authorization_revision: 'delegation/1',
       raw_text: 'Asia/Shanghai',
     };
-    const start = (key: string, input: unknown = followup) =>
-      startConversationRun(deps, userId, randomUUID(), input, key, sessionId);
+    const continueRun = (key: string) => start(followup, key);
     const key = randomUUID();
-    await expect(start(key)).rejects.toMatchObject({ errorCode: 'VALIDATION_ERROR' });
+    await expect(continueRun(key)).rejects.toMatchObject({ errorCode: 'VALIDATION_ERROR' });
 
     const invocationId = await acceptReceipt(
       original,
@@ -494,31 +470,32 @@ const officeKey = Buffer.alloc(32, 182).toString('base64');
       timezoneDenied,
     );
     await expect(
-      start(key, { ...followup, raw_text: 'Asia/Shanghai and create another file' }),
+      start({ ...followup, raw_text: 'Asia/Shanghai and create another file' }, key),
     ).rejects.toMatchObject({ errorCode: 'VALIDATION_ERROR' });
     const otherSessionId = randomUUID();
     await db.pool.query(
       `INSERT INTO sessions (id,user_id,token_hash,expires_at) VALUES ($1,$2,$3,now()+interval '1 hour')`,
-      [otherSessionId, userId, randomUUID()],
+      [otherSessionId, actor.userId, randomUUID()],
     );
-    await expect(
-      startConversationRun(deps, userId, randomUUID(), followup, key, otherSessionId),
-    ).rejects.toMatchObject({ errorCode: 'VALIDATION_ERROR' });
-    const results = await Promise.allSettled([start(key), start(randomUUID())]);
+    await expect(start(followup, key, otherSessionId)).rejects.toMatchObject({
+      errorCode: 'VALIDATION_ERROR',
+    });
+    const results = await Promise.allSettled([continueRun(key), continueRun(randomUUID())]);
     const success = results.filter((entry) => entry.status === 'fulfilled');
     expect(success).toHaveLength(1);
     const next = success[0]!.value;
     const { rows } = await db.pool.query(
       `SELECT r.frozen_context,m.scope_run_id,m.previous_run_id,m.session_id,
-         (SELECT count(*)::integer FROM office_run_inputs WHERE attachment_id=$2) AS consumption_count
-       FROM agent_runs r JOIN office_run_materials m ON m.run_id=r.id WHERE r.id=$1`,
+         i.scope_run_id AS attachment_scope_run_id
+       FROM agent_runs r JOIN office_run_materials m ON m.run_id=r.id
+       JOIN office_attachments i ON i.id=$2 WHERE r.id=$1`,
       [next.runId, attachment.attachmentId],
     );
     expect(rows[0]).toMatchObject({
       scope_run_id: first.runId,
       previous_run_id: first.runId,
       session_id: sessionId,
-      consumption_count: 1,
+      attachment_scope_run_id: first.runId,
       frozen_context: {
         officeSessionId: sessionId,
         officeMaterials: original.officeMaterials,

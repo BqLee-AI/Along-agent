@@ -38,7 +38,7 @@ const attachmentReceipt = z.object({
 
 export type OfficeAttachment = z.infer<typeof attachmentReceipt>;
 
-export function officeFileFormat(role: OfficeRole, filename: string) {
+function officeFileFormat(role: OfficeRole, filename: string) {
   const extension = /\.([^.]+)$/.exec(filename.toLowerCase())?.[1];
   if (role === 'tasks') return extension === 'csv' ? 'csv' : null;
   return extension === 'txt'
@@ -48,9 +48,9 @@ export function officeFileFormat(role: OfficeRole, filename: string) {
       : null;
 }
 
-export function officeDraftQuery(draftId: string, conversationId: string | null) {
+function officeDraftQuery(conversationId: string | null, draftId?: string) {
   return new URLSearchParams({
-    draft_id: draftId,
+    ...(draftId ? { draft_id: draftId } : {}),
     ...(conversationId ? { conversation_id: conversationId } : {}),
   });
 }
@@ -77,7 +77,7 @@ export async function stageOfficeAttachment({
     throw new Error(role === 'notes' ? '请选择 TXT 或 Markdown 文件。' : '请选择 CSV 文件。');
   const options = writeOptions(csrfToken, signal, key);
   const response = await fetch(
-    `/api/v1/conversations/attachments?${officeDraftQuery(draftId, conversationId)}`,
+    `/api/v1/conversations/attachments?${officeDraftQuery(conversationId, draftId)}`,
     {
       method: 'POST',
       headers: {
@@ -118,9 +118,7 @@ export async function revokeOfficeAttachment({
   signal: AbortSignal;
 }) {
   const options = writeOptions(csrfToken, signal);
-  const query = draftId
-    ? officeDraftQuery(draftId, conversationId)
-    : new URLSearchParams(conversationId ? { conversation_id: conversationId } : {});
+  const query = officeDraftQuery(conversationId, draftId);
   const response = await fetch(
     `/api/v1/conversations/attachments/${id}/actions/revoke${query.size ? `?${query}` : ''}`,
     { method: 'POST', headers: options.headers, ...options.fetch },

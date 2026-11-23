@@ -1,11 +1,9 @@
 import type { PoolClient } from 'pg';
 import { requireCurrentFeishuBotAuthority } from '../tools/invocations/accepted-result.js';
-import {
-  assertOfficeSources,
-  readOfficeObservationKey,
-} from '../../features/native-office/public.js';
+import { assertOfficeSources } from '../../features/native-office/public.js';
 import { lockViewerAccess } from '../../features/identity/public.js';
 import { forbidden } from '../../platform/errors.js';
+import { requireOfficeKey } from '../tools/office/authority.js';
 import type { RunContext } from './contracts.js';
 
 export async function hasPrivateOutput(
@@ -31,7 +29,7 @@ export async function authorizePrivateOutput(client: PoolClient, context: RunCon
     [context.ownerId, context.conversationId, context.runId],
   );
   if (office.rowCount) {
-    if (!readOfficeObservationKey()) throw forbidden('office observation key unavailable');
+    requireOfficeKey();
     if (
       !context.officeSessionId ||
       !(await lockViewerAccess(client, context.ownerId, context.officeSessionId))

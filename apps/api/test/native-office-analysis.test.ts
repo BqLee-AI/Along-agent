@@ -36,9 +36,11 @@ function accepted(csv: string) {
 }
 
 function expectInvalid(input: string | Uint8Array, issue: TaskCsvIssue) {
-  const result = parseTaskCsv(typeof input === 'string' ? Buffer.from(input) : input);
-  expect(result).toMatchObject({ kind: 'error', issue, template: TASK_CSV_TEMPLATE });
-  expect(result).not.toHaveProperty('records');
+  expect(parseTaskCsv(typeof input === 'string' ? Buffer.from(input) : input)).toEqual({
+    kind: 'error',
+    issue,
+    template: TASK_CSV_TEMPLATE,
+  });
 }
 
 const goldenTotals = {
@@ -67,11 +69,8 @@ describe('native office task CSV', () => {
       [null, 1, 0],
     ]);
     expect(analysis.records[0]).toMatchObject({
-      recordNumber: 1,
-      taskId: '001',
       title: 'first, "quoted"\r\nsecond line 🍵',
       owner: ' 甲 ',
-      overdue: true,
     });
     expect(
       analysis.records.map(({ recordNumber, taskId, overdue, anomalies }) => [
@@ -120,8 +119,9 @@ describe('native office task CSV', () => {
   });
 
   it('returns the precise template problem without exposing user fields or partial success', () => {
-    expectInvalid('', { code: 'missing_header', recordNumber: 0 });
-    expectInvalid('\uFEFF', { code: 'missing_header', recordNumber: 0 });
+    for (const input of ['', '\uFEFF']) {
+      expectInvalid(input, { code: 'missing_header', recordNumber: 0 });
+    }
     expectInvalid('task_id,,owner,due_date,status', {
       code: 'empty_header',
       recordNumber: 0,
@@ -161,34 +161,26 @@ describe('native office task CSV', () => {
     expectInvalid(TASK_CSV_TEMPLATE + first + '\r\n003,Private,甲,2026-11-22,todo', {
       code: 'record_width',
       recordNumber: 2,
+      columnNumber: 2,
     });
     expectInvalid(TASK_CSV_TEMPLATE + first + '002,"Private\nunfinished', {
       code: 'malformed_csv',
       recordNumber: 2,
       columnNumber: 2,
     });
-    expectInvalid(TASK_CSV_TEMPLATE + '001,in"fix,甲,2026-11-22,todo', {
-      code: 'malformed_csv',
-      recordNumber: 1,
-      columnNumber: 2,
-    });
-    expectInvalid(TASK_CSV_TEMPLATE + '001,"closed" trailing,甲,2026-11-22,todo', {
-      code: 'malformed_csv',
-      recordNumber: 1,
-      columnNumber: 2,
-    });
-    expectInvalid(TASK_CSV_TEMPLATE + '001,"closed"\u0000,甲,2026-11-22,todo', {
-      code: 'malformed_csv',
-      recordNumber: 1,
-      columnNumber: 2,
-    });
-    expectInvalid(
+    for (const title of ['in"fix', '"closed" trailing', '"closed"\u0000']) {
+      expectInvalid(TASK_CSV_TEMPLATE + `001,${title},甲,2026-11-22,todo`, {
+        code: 'malformed_csv',
+        recordNumber: 1,
+        columnNumber: 2,
+      });
+    }
+    for (const bytes of [
       Buffer.concat([Buffer.from(TASK_CSV_TEMPLATE), Buffer.from([0xed, 0xa0, 0x80])]),
-      {
-        code: 'invalid_utf8',
-      },
-    );
-    expectInvalid(Buffer.from([0xff, 0xfe, 0x74, 0]), { code: 'invalid_utf8' });
+      Buffer.from([0xff, 0xfe, 0x74, 0]),
+    ]) {
+      expectInvalid(bytes, { code: 'invalid_utf8' });
+    }
     expectInvalid('\uFEFF\uFEFF' + TASK_CSV_TEMPLATE, {
       code: 'missing_columns',
       recordNumber: 0,
@@ -328,7 +320,6 @@ describe('native office artifacts', () => {
     expect(markdown).toContain('## 模型解读（非统计依据）\n\n    ## 任务统计\n    | 总数 | 999 |');
     expect(markdown).not.toMatch(/^\| 总数 \| 999 \|/m);
     const output = renderOwnerSummaryCsv(analysis);
-    expect(output).not.toContain('999');
     const rows = parse(output, { bom: true });
     expect(rows).toEqual([
       [

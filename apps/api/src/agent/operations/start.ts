@@ -229,31 +229,29 @@ async function readOfficeDelivery(
     invocation_id: string | null;
     accepted_result: unknown;
     manifest: unknown;
-    available: boolean;
+    available: boolean | null;
   }>(
     `SELECT t.invocation_id,t.accepted_result,m.manifest,m.available
-       FROM office_deliveries d
+       FROM office_run_materials d
        CROSS JOIN LATERAL (
          SELECT jsonb_agg(jsonb_build_object('artifact_id',a.id,'filename',a.filename,
                   'format',a.format,'size_bytes',a.size_bytes) ORDER BY a.id) AS manifest,
-                bool_and(a.expires_at > statement_timestamp() AND b.artifact_id IS NOT NULL
+                bool_and(a.expires_at > statement_timestamp() AND a.content IS NOT NULL
                   AND NOT EXISTS (
-                    SELECT 1 FROM office_run_inputs i JOIN office_attachments u ON u.id=i.attachment_id
-                    WHERE i.run_id=d.scope_run_id AND u.revoked_at IS NOT NULL
-                      AND (NOT a.sources_known OR EXISTS (
-                        SELECT 1 FROM office_artifact_sources s
-                        WHERE s.artifact_id=a.id AND s.attachment_id=i.attachment_id
-                      ))
+                    SELECT 1 FROM office_attachments u
+                    WHERE u.scope_run_id=a.scope_run_id AND u.revoked_at IS NOT NULL
+                      AND (NOT a.sources_known OR (u.role='notes' AND a.uses_notes)
+                        OR (u.role='tasks' AND a.uses_tasks))
                   )) AS available
-         FROM office_artifacts a LEFT JOIN office_artifact_bytes b ON b.artifact_id=a.id
-         WHERE a.scope_run_id=d.scope_run_id
+         FROM office_artifacts a
+         WHERE a.scope_run_id=d.run_id
        ) m
-       LEFT JOIN tool_invocations t ON t.run_id=d.run_id AND t.owner_id=d.owner_id
+       LEFT JOIN tool_invocations t ON t.run_id=d.delivery_run_id AND t.owner_id=d.owner_id
          AND t.conversation_id=d.conversation_id AND t.tool_id='office_create_artifacts'
          AND t.state='completed' AND t.outcome_kind='success' AND t.result_version=1
          AND t.approval_id IS NULL
          AND t.invocation_id=ANY($4::uuid[])
-       WHERE d.scope_run_id=$3 AND d.run_id=$3 AND d.owner_id=$1 AND d.conversation_id=$2
+       WHERE d.run_id=$3 AND d.delivery_run_id=d.run_id AND d.owner_id=$1 AND d.conversation_id=$2
        ORDER BY t.accepted_at,t.invocation_id`,
     [binding.ownerId, binding.conversationId, sourceRunId, achievedReceipts],
   );
@@ -815,12 +813,8 @@ export async function startConversationRun(
           ? {
               ...officeBinding,
               draftId: input.office_materials.draft_id,
-              ...(input.office_materials.notes_attachment_id
-                ? { notesAttachmentId: input.office_materials.notes_attachment_id }
-                : {}),
-              ...(input.office_materials.tasks_attachment_id
-                ? { tasksAttachmentId: input.office_materials.tasks_attachment_id }
-                : {}),
+              notesAttachmentId: input.office_materials.notes_attachment_id,
+              tasksAttachmentId: input.office_materials.tasks_attachment_id,
             }
           : null;
       const officeContinuation =
@@ -855,12 +849,11 @@ export async function startConversationRun(
         ].filter((tool) => !priorTools || priorTools.includes(tool));
       }
 
-      const preferences = delegation ? await readUserPreferences(client, ownerId) : null;
-      let confirmedTimezone = officeContinuation
-        ? officeContinuation.timezone
-        : delegation
-          ? (timezone ?? preferences?.timezone_id ?? null)
-          : (timezone ?? conversation.confirmed_timezone_id);
+      const preferences =
+        delegation && !officeContinuation ? await readUserPreferences(client, ownerId) : null;
+      let confirmedTimezone = delegation
+        ? (timezone ?? preferences?.timezone_id ?? null)
+        : (timezone ?? conversation.confirmed_timezone_id);
       if (!delegation && !conversation.confirmed_timezone_id && timezone) {
         await freezeConversationTimezone(client, conversation.id, timezone);
         confirmedTimezone = timezone;
@@ -896,24 +889,18 @@ export async function startConversationRun(
               kind: 'destination',
             })))
           : null;
-      const reminderDate = office
+      const reminderDate = officeContinuation
         ? {
-            anchor: officeContinuation?.anchor ?? receivedAtUtc,
-            source: officeContinuation
-              ? {
-                  version: 1 as const,
-                  kind: 'clarification' as const,
-                  inputMessageId: officeContinuation.continuation.original_input_message_id,
-                  sourceRunId: officeContinuation.continuation.run_id,
-                  sourceInvocationId: officeContinuation.continuation.invocation_id,
-                }
-              : {
-                  version: 1 as const,
-                  kind: 'new' as const,
-                  inputMessageId: userMessageId,
-                },
-            originalText: officeContinuation?.continuation.original_text,
-            timezone: officeContinuation?.timezone,
+            anchor: officeContinuation.anchor,
+            source: {
+              version: 1 as const,
+              kind: 'clarification' as const,
+              inputMessageId: officeContinuation.continuation.original_input_message_id,
+              sourceRunId: officeContinuation.continuation.run_id,
+              sourceInvocationId: officeContinuation.continuation.invocation_id,
+            },
+            originalText: officeContinuation.continuation.original_text,
+            timezone: officeContinuation.timezone,
           }
         : await acceptReminderDate(
             client,
@@ -925,7 +912,7 @@ export async function startConversationRun(
               receivedAtUtc,
               foldChoice: input.fold_choice,
               confirmedTimezone,
-              directCreation: delegation && allowlist.includes('create_reminder'),
+              directCreation: office || (delegation && allowlist.includes('create_reminder')),
               ...(clarificationRunId ? { clarificationOfRunId: clarificationRunId } : {}),
             },
             { listReminderClarifications, readReminderTimeErrors },
@@ -1127,6 +1114,10 @@ export async function startConversationRun(
             workspaces: workspaceSet.summaries,
           })
         : undefined;
+      const officeContext =
+        officeMaterials && officeBinding
+          ? { officeMaterials, officeSessionId: officeBinding.sessionId }
+          : {};
       const frozenContext = {
         ...(execution === 'harness'
           ? {
@@ -1152,9 +1143,7 @@ export async function startConversationRun(
         ...(workspaceGrant ? { workspaceGrant, workspaceSummary } : {}),
         ...(delegation ? { workspaceGrants: workspaceSet.grants } : {}),
         ...(feishuDocx ? { feishuDocx } : {}),
-        ...(officeMaterials && officeBinding
-          ? { officeMaterials, officeSessionId: officeBinding.sessionId }
-          : {}),
+        ...officeContext,
         ...(delegation &&
         (!targetContinuation || targetContinuation.createdArtifactReadAllowed) &&
         workspaceSet.grants.some((grant) => (grant.output_directories?.length ?? 0) > 0)
@@ -1299,9 +1288,7 @@ export async function startConversationRun(
         ...(workspaceGrant ? { workspaceGrant } : {}),
         ...(delegation ? { workspaceGrants: workspaceSet.grants } : {}),
         ...(feishuDocx ? { feishuDocx } : {}),
-        ...(officeMaterials && officeBinding
-          ? { officeMaterials, officeSessionId: officeBinding.sessionId }
-          : {}),
+        ...officeContext,
         ...(trustedExecutionContext
           ? { authorizationRevision: 'delegation/1' as const, trustedExecutionContext }
           : {}),

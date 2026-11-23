@@ -4,7 +4,6 @@ import Link from '@/shell/view/workspace-link';
 import { memo, useMemo } from 'react';
 import { conversationHref, modelSelectionLabel, runStatusLabel } from '../model/conversation-run';
 import type { RunTranscript } from '../model/conversation-run';
-import { projectOfficeRunResults } from '../model/office-results';
 import { runApprovalReferences } from '../model/presentation';
 import type { RunHistoryEntry } from '../model/presentation';
 import type { ConversationTask } from '../viewmodel/use-conversation-task';
@@ -108,7 +107,7 @@ const RunHistoryRow = memo(function RunHistoryRow({
             />
             <OfficeRunResultsPanel
               conversationId={conversationId}
-              results={projectOfficeRunResults(materials)}
+              results={materials}
               retryRead={refreshOfficeResults}
               projectionStale={projectionStale}
             />

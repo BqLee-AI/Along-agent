@@ -11,9 +11,7 @@ import type {
 import {
   officeAdmissionSession,
   officeViewer,
-  revokeOfficeAttachment,
 } from '../src/features/conversations/model/office-materials';
-import type { OfficeArtifact } from '../src/features/conversations/model/office-results';
 import { AssistantMarkdown } from '../src/features/conversations/view/assistant-markdown';
 import { OfficeRunResultsPanel } from '../src/features/conversations/view/office-run-results';
 import { RunResults } from '../src/features/conversations/view/run-results';
@@ -72,6 +70,7 @@ type Selection = {
   runId?: string;
   officeSession?: OfficeSession;
   initialIntent: 'chat' | 'office';
+  showResults?: boolean;
 };
 type RequestCall = {
   url: URL;
@@ -82,6 +81,7 @@ type RequestCall = {
 type Fixture = {
   readonly task: ConversationTask;
   readonly calls: RequestCall[];
+  readonly container: HTMLDivElement;
   select: (selection: Selection) => Promise<void>;
   reload: (selection: Selection) => Promise<void>;
 };
@@ -107,6 +107,7 @@ async function fixture(
     document: browser.document,
     navigator: browser.navigator,
     location: browser.location,
+    HTMLElement: browser.HTMLElement,
     sessionStorage: browser.sessionStorage,
     IS_REACT_ACT_ENVIRONMENT: true,
   };
@@ -123,7 +124,7 @@ async function fixture(
   let task!: ConversationTask;
   function Consumer(props: Selection) {
     task = useConversationTask(props);
-    return null;
+    return props.showResults ? runResults(task) : null;
   }
   const select = async (props: Selection) => {
     await act(async () => {
@@ -152,19 +153,7 @@ async function fixture(
     if (override) return override;
     if (url.pathname === '/api/v1/me') return envelope(identity);
     if (url.pathname === `/api/v1/conversations/${cid}/runs/${rid}`)
-      return envelope({
-        run_id: rid,
-        conversation_id: cid,
-        execution: 'harness',
-        model_selection: { state: 'legacy_unavailable' },
-        status: 'failed',
-        attempt_id: tasksId,
-        attempt_no: 1,
-        waiting: null,
-        can_resume: false,
-        authorization_revision: 'delegation/1',
-        execution_lifecycle: 'server-owned',
-      });
+      return envelope({ ...runView(rid), status: 'failed' });
     if (url.pathname === `/api/v1/conversations/${cid}`)
       return envelope({
         conversation_id: cid,
@@ -184,6 +173,7 @@ async function fixture(
       get task() {
         return task;
       },
+      container,
       calls,
       select,
       async reload(props) {
@@ -203,6 +193,34 @@ async function fixture(
 
 function composer(task: ConversationTask) {
   return renderToStaticMarkup(createElement(TaskComposer, { task }));
+}
+
+function runView(runId: string, goalResult: RunView['goal_result'] = null): RunView {
+  return {
+    run_id: runId,
+    conversation_id: cid,
+    execution: 'harness',
+    model_selection: { state: 'legacy_unavailable' },
+    status: 'done',
+    attempt_id: tasksId,
+    attempt_no: 1,
+    waiting: null,
+    can_resume: false,
+    authorization_revision: 'delegation/1',
+    execution_lifecycle: 'server-owned',
+    goal_result: goalResult,
+  };
+}
+
+function runResults(task: ConversationTask) {
+  return createElement(RunResults, {
+    task,
+    entries: conversationRunEntries(task.runs, task.selected),
+    conversationId: cid,
+    needsAction: false,
+    showReminderResult: false,
+    officeHistoryCsrf: officeSession.csrfToken,
+  });
 }
 
 function canSend(task: ConversationTask) {
@@ -448,14 +466,16 @@ describe('native office composer', () => {
 
 describe('native office results', () => {
   const href = `/api/v1/conversations/${cid}/runs/${rid}/artifacts/${notesId}/content`;
-  const artifact: OfficeArtifact = {
-    id: notesId,
-    runId: rid,
+  const artifact = {
+    artifact_id: notesId,
+    run_id: rid,
     filename: '已核验报告.md',
     format: 'markdown',
     status: 'available',
-    downloadUrl: href,
-  };
+    download_url: href,
+    byte_length: 100,
+    expires_at: time,
+  } as const;
 
   function history(runId: string, reminder: 'created' | 'unconfirmed'): ConversationRunHistoryItem {
     return {
@@ -472,24 +492,12 @@ describe('native office results', () => {
           { ...receipt(notesId, notesFile, 'markdown'), role: 'notes', status: 'available' },
         ],
         artifacts: [
+          artifact,
           {
-            artifact_id: notesId,
-            run_id: rid,
-            filename: artifact.filename,
-            format: artifact.format,
-            byte_length: 100,
-            expires_at: '2099-01-01T00:00:00.000Z',
-            status: 'available',
-            download_url: href,
-          },
-          {
+            ...artifact,
             artifact_id: tasksId,
-            run_id: rid,
             filename: '汇总.csv',
             format: 'csv',
-            byte_length: 50,
-            expires_at: '2099-01-01T00:00:00.000Z',
-            status: 'available',
             download_url: href.replace(notesId, tasksId),
           },
         ],
@@ -501,42 +509,12 @@ describe('native office results', () => {
     };
   }
 
-  function runView(runId: string, goalResult?: NonNullable<RunView['goal_result']>): RunView {
-    return {
-      run_id: runId,
-      conversation_id: cid,
-      execution: 'harness',
-      model_selection: { state: 'legacy_unavailable' },
-      status: 'done',
-      attempt_id: tasksId,
-      attempt_no: 1,
-      waiting: null,
-      can_resume: false,
-      authorization_revision: 'delegation/1',
-      execution_lifecycle: 'server-owned',
-      goal_result: goalResult ?? null,
-    };
-  }
-
-  function runResults(task: ConversationTask) {
-    return renderToStaticMarkup(
-      createElement(RunResults, {
-        task,
-        entries: conversationRunEntries(task.runs, task.selected),
-        conversationId: cid,
-        needsAction: false,
-        showReminderResult: false,
-        officeHistoryCsrf: officeSession.csrfToken,
-      }),
-    );
-  }
-
-  it('reads the continuation history with admission off and uses the actual file and reminder owners', async () => {
+  it('reads continuation outputs and revokes a bound source without new admission', async () => {
     await fixture(
       async (f) => {
         await until(() => !f.task.reading);
         expect(f.task.readError).toBeNull();
-        const markup = runResults(f.task);
+        const markup = f.container.innerHTML;
         expect(f.task.office).toBeUndefined();
         expect(markup).toContain(`href="${href}"`);
         expect(markup).toContain(`href="${href.replace(notesId, tasksId)}"`);
@@ -547,8 +525,24 @@ describe('native office results', () => {
         expect(markup).toContain(notesFile.name);
         expect(markup).toContain('撤销');
         expect(f.calls).toHaveLength(0);
+        window.confirm = () => false;
+        const revoke = Array.from(f.container.querySelectorAll('button')).find(
+          (button) => button.textContent === `撤销 ${notesFile.name}`,
+        )!;
+        await act(async () => revoke.click());
+        expect(f.calls).toHaveLength(0);
+        window.confirm = () => true;
+        await act(async () => revoke.click());
+        const request = f.calls[0]!;
+        expect(request.url.pathname).toBe(
+          `/api/v1/conversations/attachments/${notesId}/actions/revoke`,
+        );
+        expect(request.url.search).toBe(`?conversation_id=${cid}`);
+        expect(headers(request).get('x-csrf-token')).toBe(officeSession.csrfToken);
+        await reply(request, envelope({ revoked: true }));
+        expect(f.container.textContent).toContain('已撤销');
       },
-      { conversationId: cid, runId: successRunId, initialIntent: 'chat' },
+      { conversationId: cid, runId: successRunId, initialIntent: 'chat', showResults: true },
       (url) => {
         if (url.pathname.endsWith('/runs'))
           return envelope({ items: [history(successRunId, 'created')], next_cursor: null });
@@ -556,37 +550,12 @@ describe('native office results', () => {
       },
     );
   });
-
-  it('revokes an already bound source as the current signed viewer without a draft or new-admission session', async () => {
-    await fixture(
-      async (f) => {
-        const result = revokeOfficeAttachment({
-          id: notesId,
-          conversationId: cid,
-          csrfToken: officeSession.csrfToken,
-          signal: new AbortController().signal,
-        });
-        const request = f.calls[0]!;
-        expect(request.url.pathname).toBe(
-          `/api/v1/conversations/attachments/${notesId}/actions/revoke`,
-        );
-        expect(request.url.searchParams.get('conversation_id')).toBe(cid);
-        expect(request.url.searchParams.has('draft_id')).toBe(false);
-        expect(headers(request).get('x-csrf-token')).toBe(officeSession.csrfToken);
-        await reply(request, envelope({ revoked: true }));
-        await result;
-        expect(f.task.office).toBeUndefined();
-      },
-      { initialIntent: 'chat' },
-    );
-  });
-
   it('preserves files independently of an unconfirmed reminder and keeps known facts on failed history reload', async () => {
     let failHistory = false;
     await fixture(
       async (f) => {
         await until(() => !f.task.reading);
-        const complete = runResults(f.task);
+        const complete = renderToStaticMarkup(runResults(f.task));
         expect(complete).toContain('提醒状态未确认。');
         expect(complete).toContain(`href="${href}"`);
         expect(complete).not.toContain('提醒未创建');
@@ -594,7 +563,7 @@ describe('native office results', () => {
         await act(async () => f.task.refresh());
         expect(f.task.readError).toBeTruthy();
         expect(f.task.messages[0]?.content).toBe('原话仍可读取');
-        const incomplete = runResults(f.task);
+        const incomplete = renderToStaticMarkup(runResults(f.task));
         expect(incomplete).toContain('已核验报告.md');
         expect(incomplete).toContain('当前可用性未能确认');
         expect(incomplete).not.toContain(`href="${href}"`);
@@ -675,10 +644,10 @@ describe('native office results', () => {
         conversationId: cid,
         retryRead() {},
         results: {
-          files: [
+          artifacts: [
             { ...artifact, status: 'expired' },
-            { ...artifact, id: tasksId, downloadUrl: href },
-            { ...artifact, id: rid, downloadUrl: `https://example.invalid${href}` },
+            { ...artifact, artifact_id: tasksId },
+            { ...artifact, download_url: `https://example.invalid${href}` },
           ],
           reminder: { state: 'unconfirmed' },
         },

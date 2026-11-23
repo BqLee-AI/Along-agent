@@ -15,9 +15,11 @@ const integrationTest = databaseUrl ? test : test.skip;
 integrationTest(
   'revocation blocks a persisted office event that has not been delivered',
   async () => {
-    const oldKey = process.env.ALONG_OFFICE_OBSERVATION_KEY;
-    process.env.ALONG_OFFICE_OBSERVATION_KEY = Buffer.alloc(32, 1).toString('base64');
+    const keyName = 'ALONG_OFFICE_OBSERVATION_KEY';
+    const officeKey = Buffer.alloc(32, 1).toString('base64');
+    const oldKey = process.env[keyName];
     const db = await createIntegrationDatabase();
+    process.env[keyName] = officeKey;
     try {
       const user = await seedAdmittedSession(db.pool);
       const ownerId = user.userId;
@@ -70,14 +72,12 @@ integrationTest(
         }),
       );
       const context = { ownerId, conversationId, runId, officeSessionId: sessionId } as never;
-      expect(
-        await withTransaction(db.pool, (client) => authorizePrivateOutput(client, context)),
-      ).toBe(true);
-      delete process.env.ALONG_OFFICE_OBSERVATION_KEY;
-      await expect(
-        withTransaction(db.pool, (client) => authorizePrivateOutput(client, context)),
-      ).rejects.toMatchObject({ errorCode: 'FORBIDDEN' });
-      process.env.ALONG_OFFICE_OBSERVATION_KEY = Buffer.alloc(32, 1).toString('base64');
+      const authorize = () =>
+        withTransaction(db.pool, (client) => authorizePrivateOutput(client, context));
+      await expect(authorize()).resolves.toBe(true);
+      delete process.env[keyName];
+      await expect(authorize()).rejects.toMatchObject({ errorCode: 'FORBIDDEN' });
+      process.env[keyName] = officeKey;
       const event = ThreadEventSchema.parse({
         protocol_version: 'v1',
         seq: 1,
@@ -85,66 +85,41 @@ integrationTest(
         type: 'message.delta',
         payload: { conversation_id: conversationId, run_id: runId, delta: 'private source' },
       });
-      await withTransaction(db.pool, (client) => stagePrivateDisclosure(client, event));
-      delete process.env.ALONG_OFFICE_OBSERVATION_KEY;
-      let missingKeyDelivered = false;
-      expect(
-        await writeAuthorizedEvent(
-          db.pool,
-          ownerId,
-          async () => {
-            missingKeyDelivered = true;
-            return true;
-          },
-          event,
-          sessionId,
-        ),
-      ).toBe(true);
-      expect(missingKeyDelivered).toBe(false);
-      process.env.ALONG_OFFICE_OBSERVATION_KEY = Buffer.alloc(32, 1).toString('base64');
-      const earlier = { ...event, seq: 2 };
-      await withTransaction(db.pool, (client) => stagePrivateDisclosure(client, earlier));
-      let firstDelivered = false;
-      await writeAuthorizedEvent(
-        db.pool,
-        ownerId,
-        async () => {
-          firstDelivered = true;
-          return true;
-        },
-        earlier,
-        sessionId,
-      );
-      expect(firstDelivered).toBe(true);
-      await createOfficeStorage(db.pool).revokeAttachment({
-        ownerId,
-        sessionId,
-        attachmentId: attachment.attachmentId,
-      });
-      await expect(
-        withTransaction(db.pool, (client) => authorizePrivateOutput(client, context)),
-      ).rejects.toMatchObject({ errorCode: 'NOT_FOUND' });
-      let delivered = false;
-      expect(
-        await writeAuthorizedEvent(
+      const attemptDelivery = async (pending: typeof event) => {
+        let delivered = false;
+        const open = await writeAuthorizedEvent(
           db.pool,
           ownerId,
           async () => {
             delivered = true;
             return true;
           },
-          event,
+          pending,
           sessionId,
-        ),
-      ).toBe(true);
-      expect(delivered).toBe(false);
+        );
+        return { open, delivered };
+      };
+      await withTransaction(db.pool, (client) => stagePrivateDisclosure(client, event));
+      delete process.env[keyName];
+      expect(await attemptDelivery(event)).toEqual({ open: true, delivered: false });
+      process.env[keyName] = officeKey;
+      const earlier = { ...event, seq: 2 };
+      await withTransaction(db.pool, (client) => stagePrivateDisclosure(client, earlier));
+      expect(await attemptDelivery(earlier)).toMatchObject({ delivered: true });
+      await createOfficeStorage(db.pool).revokeAttachment({
+        ownerId,
+        sessionId,
+        attachmentId: attachment.attachmentId,
+      });
+      await expect(authorize()).rejects.toMatchObject({ errorCode: 'NOT_FOUND' });
+      expect(await attemptDelivery(event)).toEqual({ open: true, delivered: false });
       expect(
         (await db.pool.query('SELECT 1 FROM feishu_pending_disclosures WHERE run_id=$1', [runId]))
           .rowCount,
       ).toBe(1);
     } finally {
-      if (oldKey === undefined) delete process.env.ALONG_OFFICE_OBSERVATION_KEY;
-      else process.env.ALONG_OFFICE_OBSERVATION_KEY = oldKey;
+      if (oldKey === undefined) delete process.env[keyName];
+      else process.env[keyName] = oldKey;
       await db.close();
     }
   },

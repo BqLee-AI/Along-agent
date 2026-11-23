@@ -3,14 +3,12 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ConversationRunHistoryItem } from '@along/contracts';
 import { Button } from '@lorelum/lumen-ui/components/button';
-import { z } from 'zod';
 import Link from '@/shell/view/workspace-link';
 import { revokeOfficeAttachment } from '../model/office-materials';
-import { officeDownloadHref, type OfficeRunResults } from '../model/office-results';
+import { officeDownloadHref } from '../model/office-results';
 
-const uuid = z.string().uuid();
-
-type OfficeInput = NonNullable<ConversationRunHistoryItem['office_materials']>['inputs'][number];
+type OfficeResults = NonNullable<ConversationRunHistoryItem['office_materials']>;
+type OfficeInput = OfficeResults['inputs'][number];
 
 export function OfficeRunInputs({
   conversationId,
@@ -80,6 +78,7 @@ function OfficeRunInput({
     const request = new AbortController();
     inFlight.current = request;
     setState('revoking');
+    let confirmed = false;
     try {
       await revokeOfficeAttachment({
         id: input.attachment_id,
@@ -87,17 +86,14 @@ function OfficeRunInput({
         csrfToken,
         signal: request.signal,
       });
-      if (request.signal.aborted) return;
-      setState('confirmed');
-      refresh();
+      confirmed = true;
     } catch {
-      if (!request.signal.aborted) {
-        setState('unconfirmed');
-        refresh();
-      }
-    } finally {
-      if (inFlight.current === request) inFlight.current = null;
+      // A failed request can still have committed; refresh either way.
     }
+    if (request.signal.aborted) return;
+    inFlight.current = null;
+    setState(confirmed ? 'confirmed' : 'unconfirmed');
+    refresh();
   }
 
   const revoked = state === 'confirmed' || input.status === 'revoked';
@@ -140,11 +136,11 @@ export function OfficeRunResultsPanel({
   projectionStale = false,
 }: {
   conversationId: string;
-  results: OfficeRunResults;
+  results: Pick<OfficeResults, 'artifacts' | 'reminder'>;
   retryRead: () => void;
   projectionStale?: boolean;
 }) {
-  const { files, reminder } = results;
+  const { artifacts, reminder } = results;
   return (
     <section
       aria-label="资料交付与提醒"
@@ -152,12 +148,12 @@ export function OfficeRunResultsPanel({
     >
       <div className="space-y-2">
         <h3 className="font-medium">文件交付</h3>
-        {files.length ? (
+        {artifacts.length ? (
           <ul className="space-y-2">
-            {files.map((artifact) => {
+            {artifacts.map((artifact) => {
               const href = projectionStale ? null : officeDownloadHref(conversationId, artifact);
               return (
-                <li key={artifact.id}>
+                <li key={artifact.artifact_id}>
                   <p>
                     {artifact.filename} · {artifact.format === 'markdown' ? 'Markdown' : 'CSV'}
                   </p>
@@ -194,16 +190,14 @@ export function OfficeRunResultsPanel({
           <>
             <p>
               提醒已创建。
-              {projectionStale ? '当前状态未能读取。' : `当前状态：${reminder.currentStatus}。`}
+              {projectionStale ? '当前状态未能读取。' : `当前状态：${reminder.current_status}。`}
             </p>
-            {uuid.safeParse(reminder.taskId).success ? (
-              <Link
-                className="inline-flex min-h-11 items-center text-brand-ink underline"
-                href={`/tasks/${reminder.taskId}`}
-              >
-                查看提醒记录
-              </Link>
-            ) : null}
+            <Link
+              className="inline-flex min-h-11 items-center text-brand-ink underline"
+              href={`/tasks/${reminder.task_id}`}
+            >
+              查看提醒记录
+            </Link>
           </>
         ) : (
           <p>{projectionStale ? '未能读取提醒状态。' : '提醒状态未确认。'}</p>

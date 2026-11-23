@@ -161,6 +161,19 @@ const nativeBinary = process.env.HARNESS_BINARY;
     return invokeTool(db.pool, ctx, { invocationId, toolId, args });
   }
 
+  async function expectIncompleteDeliveryDenied(ctx: RunContext, notesInvocationId: string) {
+    const outcome = await call(ctx, 'office_create_artifacts', {
+      formats: ['markdown'],
+      notes_invocation_ids: [notesInvocationId],
+    });
+    expect(outcome).toMatchObject({ status: 'denied', error: { code: 'OFFICE_DELIVERY_SCOPE' } });
+    const { rowCount } = await db.pool.query(
+      'SELECT 1 FROM office_run_materials WHERE run_id=$1 AND delivery_run_id IS NOT NULL',
+      [ctx.runId],
+    );
+    expect(rowCount).toBe(0);
+  }
+
   test('checks fresh start, reply and provider enqueue after admission', async () => {
     const { ctx, binding, notesId, storage } = await officeRun('请总结选中的纪要。', true, true);
     let dispatched = false;
@@ -470,15 +483,7 @@ const nativeBinary = process.env.HARNESS_BINARY;
       },
     ]);
 
-    const docsOnly = await call(ctx, 'office_create_artifacts', {
-      formats: ['markdown'],
-      notes_invocation_ids: [notes.invocationId],
-    });
-    expect(docsOnly).toMatchObject({ status: 'denied', error: { code: 'OFFICE_DELIVERY_SCOPE' } });
-    expect(
-      (await db.pool.query('SELECT 1 FROM office_deliveries WHERE scope_run_id=$1', [ctx.runId]))
-        .rowCount,
-    ).toBe(0);
+    await expectIncompleteDeliveryDenied(ctx, notes.invocationId);
     const args = {
       formats: ['markdown', 'csv'],
       analysis_invocation_id: accepted.invocationId,
@@ -586,12 +591,7 @@ const nativeBinary = process.env.HARNESS_BINARY;
       status: 'denied',
       error: { code: 'OFFICE_TIMEZONE_REQUIRED' },
     });
-    expect(
-      await call(ctx, 'office_create_artifacts', {
-        formats: ['markdown'],
-        notes_invocation_ids: [notes.invocationId],
-      }),
-    ).toMatchObject({ status: 'denied', error: { code: 'OFFICE_DELIVERY_SCOPE' } });
+    await expectIncompleteDeliveryDenied(ctx, notes.invocationId);
     expect(
       await call(ctx, 'create_reminder', {
         raw_time_text: '明天下午3点',
@@ -599,10 +599,11 @@ const nativeBinary = process.env.HARNESS_BINARY;
         occurrence: 'once',
       }),
     ).toMatchObject({ status: 'denied', error: { code: 'OFFICE_DELIVERY_REQUIRED' } });
-    expect(
-      (await db.pool.query('SELECT 1 FROM office_deliveries WHERE scope_run_id=$1', [ctx.runId]))
-        .rowCount,
-    ).toBe(0);
+    const pendingDelivery = await db.pool.query(
+      'SELECT 1 FROM office_run_materials WHERE run_id=$1 AND delivery_run_id IS NOT NULL',
+      [ctx.runId],
+    );
+    expect(pendingDelivery.rowCount).toBe(0);
     expect(
       (await db.pool.query('SELECT 1 FROM tasks WHERE owner_id=$1', [ctx.ownerId])).rowCount,
     ).toBe(0);
@@ -622,14 +623,12 @@ const nativeBinary = process.env.HARNESS_BINARY;
       }),
     ).toMatchObject({ status: 'ok', result: { kind: 'office_create_artifacts' } });
     const args = { raw_time_text: '明天下午3点', note: '复查任务', occurrence: 'once' };
-    expect(await call(ctx, 'create_reminder', args)).toMatchObject({
-      status: 'ok',
-      result: { kind: 'clarify', reason: 'TIMEZONE_MISSING' },
-    });
-    expect(await call(ctx, 'create_reminder', args)).toMatchObject({
-      status: 'ok',
-      result: { kind: 'clarify', reason: 'TIMEZONE_MISSING' },
-    });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      expect(await call(ctx, 'create_reminder', args)).toMatchObject({
+        status: 'ok',
+        result: { kind: 'clarify', reason: 'TIMEZONE_MISSING' },
+      });
+    }
     expect(
       (await db.pool.query('SELECT 1 FROM tasks WHERE owner_id=$1', [ctx.ownerId])).rowCount,
     ).toBe(0);
@@ -650,6 +649,9 @@ const nativeBinary = process.env.HARNESS_BINARY;
       toolId,
       args,
     });
+    const before = await db.pool.query<{ count: number }>(
+      'SELECT count(*)::integer AS count FROM office_artifacts WHERE content IS NOT NULL',
+    );
     await db.pool.query(`
       CREATE FUNCTION reject_office_receipt_test() RETURNS trigger LANGUAGE plpgsql AS $$
       BEGIN RAISE EXCEPTION 'injected receipt failure'; END; $$;
@@ -660,14 +662,21 @@ const nativeBinary = process.env.HARNESS_BINARY;
     const create = () => invokeTool(db.pool, ctx, { toolId, invocationId, args });
     try {
       await expect(create()).rejects.toThrow('injected receipt failure');
-      expect(
-        (await db.pool.query('SELECT 1 FROM office_deliveries WHERE scope_run_id=$1', [ctx.runId]))
-          .rowCount,
-      ).toBe(0);
-      expect(
-        (await db.pool.query('SELECT 1 FROM office_artifacts WHERE scope_run_id=$1', [ctx.runId]))
-          .rowCount,
-      ).toBe(0);
+      const { rows } = await db.pool.query(
+        `SELECT delivery_run_id,delivery_params_sha256,
+           (SELECT count(*)::integer FROM office_artifacts WHERE scope_run_id=$1) AS artifacts,
+           (SELECT count(*)::integer FROM office_artifacts WHERE content IS NOT NULL) AS artifact_bytes
+         FROM office_run_materials WHERE run_id=$1`,
+        [ctx.runId],
+      );
+      expect(rows).toEqual([
+        {
+          delivery_run_id: null,
+          delivery_params_sha256: null,
+          artifacts: 0,
+          artifact_bytes: before.rows[0]!.count,
+        },
+      ]);
       expect(
         (
           await db.pool.query(

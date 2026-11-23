@@ -86,19 +86,12 @@ export async function stageAttachment(
 
   await requireOfficeQuota(client, ownerId, bytes.length);
   const { rows } = await client.query<AttachmentRow>(
-    `WITH staged AS (
-       INSERT INTO office_attachments
-        (id, owner_id, session_id, draft_id, upload_conversation_id, idempotency_key,
-         filename, format, size_bytes, sha256, created_at, expires_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-               statement_timestamp(), statement_timestamp() + interval '24 hours')
-       RETURNING *
-     ), stored AS (
-       INSERT INTO office_attachment_bytes (attachment_id, size_bytes, content)
-       SELECT id, size_bytes, $11::bytea FROM staged RETURNING attachment_id
-     )
-     SELECT ${attachmentView}, 'available' AS status
-     FROM staged u JOIN stored b ON b.attachment_id = u.id`,
+    `INSERT INTO office_attachments AS u
+      (id, owner_id, session_id, draft_id, upload_conversation_id, idempotency_key,
+       filename, format, size_bytes, sha256, content, created_at, expires_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+             statement_timestamp(), statement_timestamp() + interval '24 hours')
+     RETURNING ${attachmentView}, 'available' AS status`,
     [
       randomUUID(),
       ownerId,

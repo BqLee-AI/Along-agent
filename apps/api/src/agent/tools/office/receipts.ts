@@ -91,22 +91,31 @@ export async function assertOfficeManifest(
 ): Promise<void> {
   // No bytes in this projection: require their existence and match the entire
   // immutable manifest, not individual plausible UUIDs supplied by the model.
-  const { rows } = await client.query<{
-    artifact_id: string;
-    filename: string;
-    format: string;
-    size_bytes: number;
-  }>(
-    `SELECT a.id AS artifact_id,a.filename,a.format,a.size_bytes
-       FROM office_run_materials m JOIN office_deliveries d USING (scope_run_id)
-       JOIN office_artifacts a USING (scope_run_id)
-       JOIN office_artifact_bytes b ON b.artifact_id=a.id AND b.size_bytes=a.size_bytes
-       WHERE m.owner_id=$1 AND m.conversation_id=$2 AND m.run_id=$3
+  const {
+    rows: [delivery],
+  } = await client.query<{ manifest: unknown }>(
+    `SELECT jsonb_agg(jsonb_build_object('artifact_id',a.id,'filename',a.filename,
+                'format',a.format,'size_bytes',a.size_bytes) ORDER BY a.format) AS manifest
+       FROM office_run_materials m
+       JOIN office_run_materials d ON d.run_id=m.scope_run_id
          AND d.owner_id=m.owner_id AND d.conversation_id=m.conversation_id
-         AND a.expires_at > statement_timestamp()
-       ORDER BY a.format`,
+       JOIN office_artifacts a ON a.scope_run_id=d.run_id
+       WHERE m.owner_id=$1 AND m.conversation_id=$2 AND m.run_id=$3
+         AND d.delivery_run_id IS NOT NULL
+       HAVING bool_and(a.expires_at > statement_timestamp() AND a.content IS NOT NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM office_attachments u
+           WHERE u.scope_run_id=a.scope_run_id AND u.revoked_at IS NOT NULL
+             AND (NOT a.sources_known OR (u.role='notes' AND a.uses_notes)
+               OR (u.role='tasks' AND a.uses_tasks))
+         ))`,
     [ctx.ownerId, ctx.conversationId, ctx.runId],
   );
-  if (!isDeepStrictEqual(OfficeCreateArtifactsResultSchema.parse(manifest).artifacts, rows))
+  if (
+    !isDeepStrictEqual(
+      OfficeCreateArtifactsResultSchema.parse(manifest).artifacts,
+      delivery?.manifest,
+    )
+  )
     throw stateConflict('office delivery receipt has no available matching manifest');
 }

@@ -123,17 +123,14 @@ export function parseTaskCsv(bytes: Uint8Array): TaskCsvParseResult {
   const records: TaskCsvRecord[] = [];
   const ids = new Set<string>();
   let header: Record<TaskCsvColumn, number> | undefined;
-  const currentRecord = () => (header ? records.length + 1 : 0);
   try {
     parse(bytes, {
       bom: true,
-      delimiter: ',',
       record_delimiter: ['\r\n', '\n', '\r'],
       // The fixed template checks row width below, so limit and shape errors have separate locators.
       raw: bytes.includes(0),
       relax_column_count: true,
-      cast(value, { index }) {
-        const recordNumber = currentRecord();
+      cast(value, { index, records: recordNumber }) {
         const columnNumber = index + 1;
         if (recordNumber > TASK_CSV_LIMITS.records) {
           throw new RejectedTaskCsv({ code: 'record_limit', recordNumber });
@@ -149,8 +146,8 @@ export function parseTaskCsv(bytes: Uint8Array): TaskCsvParseResult {
         }
         return value;
       },
-      on_record(input: string[] | { record: string[]; raw: string }) {
-        const recordNumber = currentRecord();
+      on_record(input: string[] | { record: string[]; raw: string }, { records: parsedCount }) {
+        const recordNumber = parsedCount - 1; // The callback count already includes this row.
         const row = Array.isArray(input) ? input : input.record;
         if (!Array.isArray(input)) rejectNulAfterClosingQuote(input.raw, recordNumber);
         if (!header) {
@@ -185,11 +182,12 @@ export function parseTaskCsv(bytes: Uint8Array): TaskCsvParseResult {
         return null;
       },
     });
+    return header ? { kind: 'ok', records } : invalid({ code: 'missing_header', recordNumber: 0 });
   } catch (error) {
     if (error instanceof RejectedTaskCsv) return invalid(error.issue);
     if (!(error instanceof CsvError)) throw error;
     const columnNumber = typeof error.index === 'number' ? error.index + 1 : undefined;
-    return invalid({ code: 'malformed_csv', recordNumber: currentRecord(), columnNumber });
+    const recordNumber = header ? records.length + 1 : 0;
+    return invalid({ code: 'malformed_csv', recordNumber, columnNumber });
   }
-  return header ? { kind: 'ok', records } : invalid({ code: 'missing_header', recordNumber: 0 });
 }

@@ -27,6 +27,14 @@ function OfficeSlotField({
   const slot = draft.slots[role];
   const receipt = slot && 'receipt' in slot ? slot.receipt : null;
   const filename = slot && 'upload' in slot ? slot.upload.file.name : receipt?.filename;
+  const retryUpload = slot?.state === 'failed';
+  const removeLabel = retryUpload
+    ? '从草稿移除'
+    : slot?.state === 'ready'
+      ? '撤销暂存并移除'
+      : slot?.state === 'revoke_failed'
+        ? '重试撤销'
+        : null;
   return (
     <fieldset
       className="min-w-0 space-y-2 rounded-lg border border-separator px-3 pb-3"
@@ -37,8 +45,7 @@ function OfficeSlotField({
         {filename ? <p className="text-foreground">{filename}</p> : null}
         {!slot ? <p>未选择</p> : null}
         {slot?.state === 'uploading' ? <p>正在上传…</p> : null}
-        {slot?.state === 'failed' ? <p>上传未确认：{slot.message}</p> : null}
-        {slot?.state === 'cancelled' ? <p>{slot.message}</p> : null}
+        {slot?.state === 'failed' ? <p>{slot.message}</p> : null}
         {slot?.state === 'revoking' ? <p>正在撤销暂存…</p> : null}
         {slot?.state === 'revoke_failed' ? <p>撤销结果尚未确认，请重试。</p> : null}
         {slot?.state === 'ready' ? (
@@ -83,40 +90,18 @@ function OfficeSlotField({
             </Button>
           </>
         ) : null}
-        {slot?.state === 'uploading' ? (
+        {slot?.state === 'uploading' || retryUpload ? (
           <Button
             type="button"
             variant="glass"
             color="default"
             className="min-h-11"
-            onClick={() => draft.cancel(role)}
+            onClick={() => (retryUpload ? draft.retry(role) : draft.cancel(role))}
           >
-            取消上传
+            {retryUpload ? '重试原上传' : '取消上传'}
           </Button>
         ) : null}
-        {slot?.state === 'failed' || slot?.state === 'cancelled' ? (
-          <>
-            <Button
-              type="button"
-              variant="glass"
-              color="default"
-              className="min-h-11"
-              onClick={() => draft.retry(role)}
-            >
-              重试原上传
-            </Button>
-            <Button
-              type="button"
-              variant="clear"
-              color="default"
-              className="min-h-11"
-              onClick={() => void draft.remove(role)}
-            >
-              从草稿移除
-            </Button>
-          </>
-        ) : null}
-        {slot?.state === 'ready' || slot?.state === 'revoke_failed' ? (
+        {removeLabel ? (
           <Button
             type="button"
             variant="clear"
@@ -124,7 +109,7 @@ function OfficeSlotField({
             className="min-h-11"
             onClick={() => void draft.remove(role)}
           >
-            {slot.state === 'ready' ? '撤销暂存并移除' : '重试撤销'}
+            {removeLabel}
           </Button>
         ) : null}
       </div>

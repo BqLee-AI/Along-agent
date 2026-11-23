@@ -12,9 +12,9 @@ import {
 } from '../model/office-materials';
 
 type Upload = { file: File; key: string };
-export type OfficeSlot =
+type OfficeSlot =
   | { state: 'uploading'; upload: Upload; request: AbortController }
-  | { state: 'failed' | 'cancelled'; upload: Upload; message: string }
+  | { state: 'failed'; upload: Upload; message: string }
   | { state: 'ready'; receipt: OfficeAttachment }
   | { state: 'revoking'; receipt: OfficeAttachment; request: AbortController }
   | { state: 'revoke_failed'; receipt: OfficeAttachment };
@@ -32,6 +32,12 @@ export interface OfficeDraft {
   submission: () => OfficeMaterials | null;
 }
 const emptySlots: Draft['slots'] = {};
+
+function abortDraft(draft: Draft | null) {
+  for (const slot of Object.values(draft?.slots ?? emptySlots)) {
+    if ('request' in slot) slot.request.abort();
+  }
+}
 
 function blockedReason(slots: Draft['slots']): string | null {
   const selected = Object.values(slots);
@@ -65,30 +71,34 @@ export function useOfficeMaterials({
     setDraft(null);
     return () => {
       committedScope.current = null;
-      for (const slot of Object.values(current.current?.slots ?? emptySlots)) {
-        if ('request' in slot) slot.request.abort();
-      }
+      abortDraft(current.current);
       current.current = null;
     };
   }, [scope]);
 
   function reset() {
-    for (const slot of Object.values(current.current?.slots ?? emptySlots)) {
-      if ('request' in slot) slot.request.abort();
-    }
+    abortDraft(current.current);
     current.current = null;
     setDraft(null);
   }
 
+  function activeDraft() {
+    const draft = current.current;
+    return draft?.scope === scope ? draft : null;
+  }
+
   function update(draft: Draft, role: OfficeRole, slot?: OfficeSlot) {
-    if (current.current !== draft || committedScope.current !== draft.scope) return;
-    if (slot) draft.slots[role] = slot;
-    else delete draft.slots[role];
-    setDraft({ ...draft, slots: { ...draft.slots } });
+    const latest = current.current;
+    if (latest?.id !== draft.id) return;
+    const slots = { ...latest.slots };
+    if (slot) slots[role] = slot;
+    else delete slots[role];
+    current.current = { ...latest, slots };
+    setDraft(current.current);
   }
 
   async function upload(draft: Draft, role: OfficeRole, intent: Upload) {
-    if (!session || committedScope.current !== draft.scope) return;
+    if (!session) return;
     const request = new AbortController();
     update(draft, role, { state: 'uploading', upload: intent, request });
     try {
@@ -104,7 +114,11 @@ export function useOfficeMaterials({
       if (!request.signal.aborted) update(draft, role, { state: 'ready', receipt });
     } catch (error) {
       if (!request.signal.aborted)
-        update(draft, role, { state: 'failed', upload: intent, message: officeUploadError(error) });
+        update(draft, role, {
+          state: 'failed',
+          upload: intent,
+          message: `上传未确认：${officeUploadError(error)}`,
+        });
     }
   }
 
@@ -115,34 +129,28 @@ export function useOfficeMaterials({
   }
 
   function retry(role: OfficeRole) {
-    const draft = current.current;
+    const draft = activeDraft();
     const slot = draft?.slots[role];
-    if (
-      draft &&
-      draft.scope === scope &&
-      slot &&
-      (slot.state === 'failed' || slot.state === 'cancelled')
-    )
-      void upload(draft, role, slot.upload);
+    if (draft && slot?.state === 'failed') void upload(draft, role, slot.upload);
   }
 
   function cancel(role: OfficeRole) {
-    const draft = current.current;
+    const draft = activeDraft();
     const slot = draft?.slots[role];
-    if (!draft || draft.scope !== scope || slot?.state !== 'uploading') return;
+    if (!draft || slot?.state !== 'uploading') return;
     slot.request.abort();
     update(draft, role, {
-      state: 'cancelled',
+      state: 'failed',
       upload: slot.upload,
       message: '已中止等待；未确认是否暂存。',
     });
   }
 
   async function remove(role: OfficeRole) {
-    const draft = current.current;
+    const draft = activeDraft();
     const slot = draft?.slots[role];
-    if (!session || !draft || draft.scope !== scope || !slot) return;
-    if (slot.state === 'failed' || slot.state === 'cancelled') {
+    if (!session || !draft || !slot) return;
+    if (slot.state === 'failed') {
       update(draft, role);
       return;
     }
@@ -165,8 +173,8 @@ export function useOfficeMaterials({
   }
 
   function submission(): OfficeMaterials | null {
-    const draft = current.current;
-    if (!scope || draft?.scope !== scope || blockedReason(draft.slots)) return null;
+    const draft = activeDraft();
+    if (!draft || blockedReason(draft.slots)) return null;
     const { notes, tasks } = draft.slots;
     return {
       draft_id: draft.id,

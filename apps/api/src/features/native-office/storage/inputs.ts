@@ -52,7 +52,7 @@ async function selectOfficeAttachments(
   const { rows } = await client.query<InputRow & { eligible: boolean }>(
     `SELECT ${attachmentView}, chosen.role, u.sha256,
        u.revoked_at IS NULL AND u.expires_at > statement_timestamp()
-         AND u.bound_conversation_id IS NULL AS eligible
+         AND u.scope_run_id IS NULL AND u.content IS NOT NULL AS eligible
      FROM unnest($1::uuid[], $2::text[]) AS chosen(attachment_id, role)
      JOIN office_attachments u ON u.id = chosen.attachment_id
      WHERE u.owner_id = $3 AND u.session_id = $4 AND u.draft_id = $5
@@ -96,18 +96,14 @@ export async function consumeOfficeAttachments(
     [runId, ownerId, conversationId, sessionId, draftId],
   );
   if (run.rowCount !== 1) throw notFound();
-  await client.query(
-    'UPDATE office_attachments SET bound_conversation_id = $2 WHERE id = ANY($1::uuid[])',
-    [ids, conversationId],
+  const bound = await client.query(
+    `UPDATE office_attachments u SET scope_run_id = $1, bound_conversation_id = $2, role = chosen.role
+     FROM unnest($3::uuid[], $4::text[]) AS chosen(id, role)
+     WHERE u.id = chosen.id AND u.scope_run_id IS NULL AND u.content IS NOT NULL
+       AND u.revoked_at IS NULL AND u.expires_at > statement_timestamp()`,
+    [runId, conversationId, ids, roles],
   );
-  await client.query(
-    `INSERT INTO office_run_inputs (run_id, owner_id, conversation_id, session_id, draft_id, role,
-                                    attachment_id, format, sha256)
-     SELECT $1, $2, $3, $4, $5, chosen.role, u.id, u.format, u.sha256
-     FROM unnest($6::uuid[], $7::text[]) AS chosen(attachment_id, role)
-     JOIN office_attachments u ON u.id = chosen.attachment_id`,
-    [runId, ownerId, conversationId, sessionId, draftId, ids, roles],
-  );
+  if (bound.rowCount !== ids.length) throw unavailableMaterials();
   return inputs;
 }
 
@@ -130,10 +126,9 @@ export async function lockOfficeExecution(
 
 export async function requireActiveInputs(client: PoolClient, scopeRunId: string) {
   const { rows } = await client.query<InputRow & { eligible: boolean }>(
-    `SELECT ${attachmentView}, i.role, i.sha256,
-       u.revoked_at IS NULL AND u.expires_at > statement_timestamp() AS eligible
-     FROM office_run_inputs i JOIN office_attachments u ON u.id = i.attachment_id
-     WHERE i.run_id = $1 ORDER BY i.role`,
+    `SELECT ${attachmentView}, u.role, u.sha256,
+       u.revoked_at IS NULL AND u.expires_at > statement_timestamp() AND u.content IS NOT NULL AS eligible
+     FROM office_attachments u WHERE u.scope_run_id = $1 ORDER BY u.role`,
     [scopeRunId],
   );
   if (!rows.length || rows.some((row) => !row.eligible)) throw unavailableMaterials();
@@ -187,14 +182,10 @@ export async function readOfficeAttachment(
 ): Promise<OfficeFrozenInput & { bytes: Buffer }> {
   const { scopeRunId } = await lockOfficeExecution(client, input);
   const { rows } = await client.query<InputRow & { bytes: Buffer }>(
-    `WITH authorized AS MATERIALIZED (
-       SELECT ${attachmentView}, i.role, i.sha256
-       FROM office_run_inputs i JOIN office_attachments u ON u.id = i.attachment_id
-       WHERE i.run_id = $1 AND i.role = $2 AND u.revoked_at IS NULL
-         AND u.expires_at > statement_timestamp()
-     )
-     SELECT a.*, b.content AS bytes FROM authorized a
-     JOIN office_attachment_bytes b ON b.attachment_id = a."attachmentId"`,
+    `SELECT ${attachmentView}, u.role, u.sha256, u.content AS bytes
+     FROM office_attachments u
+     WHERE u.scope_run_id = $1 AND u.role = $2 AND u.revoked_at IS NULL
+       AND u.expires_at > statement_timestamp() AND u.content IS NOT NULL`,
     [scopeRunId, input.role],
   );
   if (!rows[0]) throw unavailableMaterials();
@@ -209,15 +200,15 @@ export async function assertOfficeSources(
 ): Promise<void> {
   await lockOfficeOwner(client, input.ownerId, true);
   const { rows } = await client.query<{ allowed: boolean }>(
-    `SELECT EXISTS (SELECT 1 FROM office_run_inputs i WHERE i.run_id = m.scope_run_id)
+    `SELECT EXISTS (SELECT 1 FROM office_attachments u WHERE u.scope_run_id = m.scope_run_id)
      AND NOT EXISTS (
-       SELECT 1 FROM office_run_inputs i JOIN office_attachments u ON u.id = i.attachment_id
-       WHERE i.run_id = m.scope_run_id AND u.revoked_at IS NOT NULL
-         AND ($4::uuid[] IS NULL OR i.attachment_id = ANY($4::uuid[]))
+       SELECT 1 FROM office_attachments u
+       WHERE u.scope_run_id = m.scope_run_id AND u.revoked_at IS NOT NULL
+         AND ($4::uuid[] IS NULL OR u.id = ANY($4::uuid[]))
      ) AND NOT EXISTS (
        SELECT 1 FROM unnest($4::uuid[]) AS source(id)
-       WHERE NOT EXISTS (SELECT 1 FROM office_run_inputs i
-                         WHERE i.run_id = m.scope_run_id AND i.attachment_id = source.id)
+       WHERE NOT EXISTS (SELECT 1 FROM office_attachments u
+                         WHERE u.scope_run_id = m.scope_run_id AND u.id = source.id)
      ) AS allowed
      FROM office_run_materials m WHERE m.run_id = $1 AND m.owner_id = $2 AND m.conversation_id = $3`,
     [input.runId, input.ownerId, input.conversationId, input.sourceAttachmentIds],

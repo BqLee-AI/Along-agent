@@ -77,98 +77,92 @@ async function freezeContext(
   );
   const admitted = run.rows[0];
   if (!admitted) throw stateConflict('R3 Run binding unavailable');
-  if (admitted.office) {
-    if (!userMessageId) throw stateConflict('office Run requires an accepted user message');
-    const {
-      rows: [input],
-    } = await client.query<{ content: string; bytes: number }>(
-      `SELECT content,octet_length(content) AS bytes FROM messages
-       WHERE id=$1 AND owner_id=$2 AND conversation_id=$3 AND role='user' AND source_run_id IS NULL`,
-      [userMessageId, ownerId, conversationId],
-    );
-    if (!input) throw stateConflict('R3 message binding unavailable');
-    if (input.bytes > HARNESS_MAX_FRAME_BYTES) capacity();
-    // An office Run opts in to selected files, never to conversation history.
-    // Trusted continuations are frozen on the Run separately from this view.
-    const context: R3Context = {
-      manifest: { message_ids: [] },
-      summary: null,
-      messages: [],
-      input: { type: 'user', message_id: userMessageId, content: input.content },
-    };
-    await persistContext(client, binding, userMessageId, context);
-    return context;
-  }
+  if (admitted.office && !userMessageId)
+    throw stateConflict('office Run requires an accepted user message');
 
-  // Counts and byte sums are evaluated in PostgreSQL before readCompactView can
-  // materialize its source closure or any original message content in Node.
-  const sizes = (
-    await client.query<{
-      count: string;
-      bytes: string;
-      max_bytes: number;
-      uncovered: string;
-      uncovered_bytes: string;
-      sources: string;
-    }>(
-      `SELECT count(*)::text AS count, coalesce(sum(octet_length(m.content)),0)::text AS bytes,
-       coalesce(max(octet_length(m.content)),0) AS max_bytes,
-       count(*) FILTER (WHERE s.message_id IS NULL)::text AS uncovered,
-       coalesce(sum(octet_length(m.content)) FILTER (WHERE s.message_id IS NULL),0)::text AS uncovered_bytes,
-       (SELECT count(*)::text FROM compact_heads h JOIN compact_summary_sources cs ON cs.summary_id=h.summary_id
-         WHERE h.owner_id=$1 AND h.conversation_id=$2) AS sources
-     FROM messages m
-     LEFT JOIN compact_heads h ON h.owner_id=$1 AND h.conversation_id=$2
-     LEFT JOIN compact_summary_sources s ON s.summary_id=h.summary_id AND s.message_id=m.id
-     WHERE m.owner_id=$1 AND m.conversation_id=$2 AND m.role IN ('user','assistant')
-       AND m.source_run_id IS NULL`,
-      [ownerId, conversationId],
+  let manifestIds: string[] = [];
+  let historyIds: string[] = [];
+  let summary: R3Context['summary'] = null;
+  // Office Runs opt in to selected files, never to conversation history.
+  // Their trusted continuation is separately frozen on the Run.
+  if (!admitted.office) {
+    // Bound the compact view before it materializes any original message content.
+    const sizes = (
+      await client.query<{
+        count: string;
+        bytes: string;
+        max_bytes: number;
+        uncovered: string;
+        uncovered_bytes: string;
+        sources: string;
+      }>(
+        `SELECT count(*)::text AS count, coalesce(sum(octet_length(m.content)),0)::text AS bytes,
+         coalesce(max(octet_length(m.content)),0) AS max_bytes,
+         count(*) FILTER (WHERE s.message_id IS NULL)::text AS uncovered,
+         coalesce(sum(octet_length(m.content)) FILTER (WHERE s.message_id IS NULL),0)::text AS uncovered_bytes,
+         (SELECT count(*)::text FROM compact_heads h JOIN compact_summary_sources cs ON cs.summary_id=h.summary_id
+           WHERE h.owner_id=$1 AND h.conversation_id=$2) AS sources
+       FROM messages m
+       LEFT JOIN compact_heads h ON h.owner_id=$1 AND h.conversation_id=$2
+       LEFT JOIN compact_summary_sources s ON s.summary_id=h.summary_id AND s.message_id=m.id
+       WHERE m.owner_id=$1 AND m.conversation_id=$2 AND m.role IN ('user','assistant')
+         AND m.source_run_id IS NULL`,
+        [ownerId, conversationId],
+      )
+    ).rows[0];
+    if (
+      !sizes ||
+      Number(sizes.count) > MAX_MANIFEST_MESSAGES + 1 ||
+      Number(sizes.sources) > MAX_MANIFEST_MESSAGES ||
+      Number(sizes.uncovered) > MAX_MANIFEST_MESSAGES ||
+      Number(sizes.bytes) > MAX_SOURCE_BYTES ||
+      sizes.max_bytes > HARNESS_MAX_FRAME_BYTES ||
+      Number(sizes.uncovered_bytes) > HARNESS_MAX_FRAME_BYTES
     )
-  ).rows[0];
-  if (
-    !sizes ||
-    Number(sizes.count) > MAX_MANIFEST_MESSAGES + 1 ||
-    Number(sizes.sources) > MAX_MANIFEST_MESSAGES ||
-    Number(sizes.uncovered) > MAX_MANIFEST_MESSAGES ||
-    Number(sizes.bytes) > MAX_SOURCE_BYTES ||
-    sizes.max_bytes > HARNESS_MAX_FRAME_BYTES ||
-    Number(sizes.uncovered_bytes) > HARNESS_MAX_FRAME_BYTES
-  )
-    capacity();
+      capacity();
 
-  const view = await readCompactView(client, ownerId, conversationId);
-  if (
-    userMessageId &&
-    (view.summary?.messageIds.includes(userMessageId) || !view.uncoveredIds.includes(userMessageId))
-  )
-    throw stateConflict('R3 accepted message is not uncovered');
-  const historyIds = view.uncoveredIds.filter((id) => id !== userMessageId);
-  const sourceIds = view.summary?.messageIds ?? [];
-  const selectedIds = [...sourceIds, ...historyIds];
-  if (selectedIds.length > MAX_MANIFEST_MESSAGES) capacity();
-  if (new Set(selectedIds).size !== selectedIds.length) throw stateConflict('R3 coverage conflict');
-  // The membership comes only from the validated compact view, not a time
-  // cutoff. A late committed message may sort between covered predecessors.
-  const ordered = await client.query<{ id: string }>(
-    `SELECT id FROM messages WHERE owner_id=$1 AND conversation_id=$2
-       AND role IN ('user','assistant') AND source_run_id IS NULL
-       AND id=ANY($3::uuid[]) ORDER BY created_at,id`,
-    [ownerId, conversationId, selectedIds],
-  );
-  if (ordered.rows.length !== selectedIds.length)
-    throw stateConflict('R3 manifest source unavailable');
-  const manifestIds = ordered.rows.map((row) => row.id);
-  const covered = new Set(sourceIds);
-  const summaryIds = manifestIds.filter((id) => covered.has(id));
+    const view = await readCompactView(client, ownerId, conversationId);
+    if (
+      userMessageId &&
+      (view.summary?.messageIds.includes(userMessageId) ||
+        !view.uncoveredIds.includes(userMessageId))
+    )
+      throw stateConflict('R3 accepted message is not uncovered');
+    historyIds = view.uncoveredIds.filter((id) => id !== userMessageId);
+    const sourceIds = view.summary?.messageIds ?? [];
+    const selectedIds = [...sourceIds, ...historyIds];
+    if (selectedIds.length > MAX_MANIFEST_MESSAGES) capacity();
+    if (new Set(selectedIds).size !== selectedIds.length)
+      throw stateConflict('R3 coverage conflict');
+    // Membership comes from the validated compact view, not a time cutoff.
+    const ordered = await client.query<{ id: string }>(
+      `SELECT id FROM messages WHERE owner_id=$1 AND conversation_id=$2
+         AND role IN ('user','assistant') AND source_run_id IS NULL
+         AND id=ANY($3::uuid[]) ORDER BY created_at,id`,
+      [ownerId, conversationId, selectedIds],
+    );
+    if (ordered.rows.length !== selectedIds.length)
+      throw stateConflict('R3 manifest source unavailable');
+    manifestIds = ordered.rows.map((row) => row.id);
+    if (view.summary) {
+      const covered = new Set(sourceIds);
+      summary = {
+        id: view.summary.id,
+        revision: view.summary.revision,
+        text: view.summary.text,
+        message_ids: manifestIds.filter((id) => covered.has(id)),
+      };
+    }
+  }
 
   const ids = userMessageId ? [...historyIds, userMessageId] : historyIds;
   const messages = (
     await client.query<Message>(
       `SELECT m.id AS message_id,m.role,m.content FROM unnest($3::uuid[]) WITH ORDINALITY AS refs(id,position)
      JOIN messages m ON m.id=refs.id AND m.owner_id=$1 AND m.conversation_id=$2 AND m.role IN ('user','assistant')
-       AND m.source_run_id IS NULL
+       AND m.source_run_id IS NULL AND (NOT $4::boolean OR m.role='user')
      ORDER BY refs.position`,
-      [ownerId, conversationId, ids],
+      [ownerId, conversationId, ids, admitted.office],
     )
   ).rows;
   const input = userMessageId ? messages.pop() : undefined;
@@ -179,29 +173,12 @@ async function freezeContext(
     throw stateConflict('R3 message binding unavailable');
   const shared = {
     manifest: { message_ids: manifestIds },
-    summary: view.summary
-      ? {
-          id: view.summary.id,
-          revision: view.summary.revision,
-          text: view.summary.text,
-          message_ids: summaryIds,
-        }
-      : null,
+    summary,
     messages,
   };
   const context: R3Context | R3ControlContext = input
     ? { ...shared, input: { type: 'user', message_id: input.message_id, content: input.content } }
     : { ...shared, input: { type: 'compact_control' } };
-  await persistContext(client, binding, userMessageId, context);
-  return context;
-}
-
-async function persistContext(
-  client: PoolClient,
-  { ownerId, conversationId, runId }: R3ControlBinding,
-  userMessageId: string | null,
-  context: R3Context | R3ControlContext,
-): Promise<void> {
   const json = JSON.stringify(context);
   if (Buffer.byteLength(json, 'utf8') > HARNESS_MAX_FRAME_BYTES) capacity();
   const storedSize = (
@@ -213,6 +190,7 @@ async function persistContext(
      VALUES ($1,$2,$3,$4,$5::jsonb)`,
     [runId, ownerId, conversationId, userMessageId, json],
   );
+  return context;
 }
 
 /** Resolve only the immutable admission snapshot; never select the current head. */

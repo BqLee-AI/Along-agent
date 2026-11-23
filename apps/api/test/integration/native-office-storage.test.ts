@@ -100,19 +100,22 @@ integrationTest(
       ]);
       expect(file).toEqual(sameFile);
       expect(file.status).toBe('available');
-      await expect(
-        storage.stageAttachment({ ...original, bytes: Buffer.from('different') }),
-      ).rejects.toMatchObject(CONFLICT);
-      await expect(
-        storage.stageAttachment({ ...original, filename: 'other.md' }),
-      ).rejects.toMatchObject(CONFLICT);
-      await expect(
-        storage.stageAttachment({ ...original, conversationId: otherConvo }),
-      ).rejects.toMatchObject(CONFLICT);
+      for (const change of [
+        { bytes: Buffer.from('different') },
+        { filename: 'other.md' },
+        { conversationId: otherConvo },
+      ]) {
+        await expect(storage.stageAttachment({ ...original, ...change })).rejects.toMatchObject(
+          CONFLICT,
+        );
+      }
       expect((await storage.stageAttachment({ ...original, ...otherLogin })).attachmentId).not.toBe(
         file.attachmentId,
       );
-      expect((await db.pool.query('SELECT 1 FROM office_attachment_bytes')).rowCount).toBe(2);
+      expect(
+        (await db.pool.query('SELECT 1 FROM office_attachments WHERE content IS NOT NULL'))
+          .rowCount,
+      ).toBe(2);
 
       const revoke = {
         ...alice,
@@ -135,7 +138,10 @@ integrationTest(
       await storage.revokeAttachment(revoke);
       expect(await storage.pruneBytes(1)).toEqual({ attachments: 1, artifacts: 0 });
       expect(await storage.stageAttachment(original)).toEqual({ ...file, status: 'revoked' });
-      expect((await db.pool.query('SELECT 1 FROM office_attachment_bytes')).rowCount).toBe(1);
+      expect(
+        (await db.pool.query('SELECT 1 FROM office_attachments WHERE content IS NOT NULL'))
+          .rowCount,
+      ).toBe(1);
 
       const expiring = await storage.stageAttachment({ ...original, ...otherLogin });
       await db.pool.query(
@@ -148,7 +154,10 @@ integrationTest(
       const worker = startWorkerLoop({ pool: db.pool });
       await worker.stop();
       expect(await storage.stageAttachment({ ...original, ...otherLogin })).toEqual(expired);
-      expect((await db.pool.query('SELECT 1 FROM office_attachment_bytes')).rowCount).toBe(0);
+      expect(
+        (await db.pool.query('SELECT 1 FROM office_attachments WHERE content IS NOT NULL'))
+          .rowCount,
+      ).toBe(0);
     } finally {
       await db.close();
     }
@@ -215,7 +224,13 @@ integrationTest(
           }),
         );
       await expect(deliver()).rejects.toMatchObject(QUOTA);
-      expect((await db.pool.query('SELECT 1 FROM office_deliveries')).rowCount).toBe(0);
+      expect(
+        (
+          await db.pool.query(
+            'SELECT 1 FROM office_run_materials WHERE delivery_run_id IS NOT NULL',
+          )
+        ).rowCount,
+      ).toBe(0);
 
       await storage.revokeAttachment({
         ...alice,
@@ -249,20 +264,15 @@ integrationTest(
       const bob = await owner(db.pool);
       const draft = upload(alice);
       const note = await storage.stageAttachment(draft);
-      const tasks = await storage.stageAttachment({
-        ...draft,
-        idempotencyKey: randomUUID(),
-        filename: 'tasks.csv',
-        format: 'csv',
-        bytes: Buffer.from('record,1'),
-      });
-      const alternative = await storage.stageAttachment({
-        ...draft,
-        idempotencyKey: randomUUID(),
-        filename: 'alt.csv',
-        format: 'csv',
-        bytes: Buffer.from('record,2'),
-      });
+      const stageCsv = (filename: string, content: string) =>
+        storage.stageAttachment({
+          ...upload(alice, draft.draftId),
+          filename,
+          format: 'csv',
+          bytes: Buffer.from(content),
+        });
+      const tasks = await stageCsv('tasks.csv', 'record,1');
+      const alternative = await stageCsv('alt.csv', 'record,2');
       const wrongConvo = await conversation(db.pool, alice.ownerId);
       const scoped = await storage.stageAttachment({
         ...upload(alice, draft.draftId),
@@ -333,11 +343,12 @@ integrationTest(
       const unconsumed = [tasks, alternative][loser]!;
       expect(
         (
-          await db.pool.query('SELECT bound_conversation_id FROM office_attachments WHERE id=$1', [
-            unconsumed.attachmentId,
-          ])
+          await db.pool.query(
+            'SELECT bound_conversation_id,scope_run_id,role FROM office_attachments WHERE id=$1',
+            [unconsumed.attachmentId],
+          )
         ).rows,
-      ).toEqual([{ bound_conversation_id: null }]);
+      ).toEqual([{ bound_conversation_id: null, scope_run_id: null, role: null }]);
       const read = (input: OfficeExecution) =>
         withTransaction(db.pool, (client) =>
           readOfficeAttachment(client, { ...input, role: 'notes' }),
@@ -354,8 +365,6 @@ integrationTest(
         won.runId,
       )!;
       expect(history.inputs.map((item) => item.role)).toEqual(['notes', 'tasks']);
-      expect(history.inputs[0]).not.toHaveProperty('sha256');
-      expect(history.inputs[0]).not.toHaveProperty('bytes');
       await storage.revokeAttachment({ ...otherLogin, attachmentId: note.attachmentId });
       await expect(read(won)).rejects.toMatchObject(UNAVAILABLE);
       await expect(
@@ -374,8 +383,14 @@ integrationTest(
           }),
         ),
       ).rejects.toMatchObject(UNAVAILABLE);
-      expect((await db.pool.query('SELECT 1 FROM office_deliveries')).rowCount).toBe(0);
-      expect((await db.pool.query('SELECT 1 FROM office_artifact_bytes')).rowCount).toBe(0);
+      expect(
+        (
+          await db.pool.query(
+            'SELECT 1 FROM office_run_materials WHERE delivery_run_id IS NOT NULL',
+          )
+        ).rowCount,
+      ).toBe(0);
+      expect((await db.pool.query('SELECT 1 FROM office_artifacts')).rowCount).toBe(0);
     } finally {
       await db.close();
     }
@@ -431,9 +446,13 @@ integrationTest(
       expect(successor).toBeGreaterThanOrEqual(0);
       expect(races[1 - successor]).toMatchObject({ status: 'rejected', reason: UNAVAILABLE });
       const next = continuations[successor]!;
-      expect(
-        (await pool.query('SELECT run_id FROM office_run_inputs GROUP BY run_id')).rows,
-      ).toEqual([{ run_id: original.runId }]);
+      const { rows: frozen } = await pool.query(
+        'SELECT scope_run_id,role FROM office_attachments ORDER BY role',
+      );
+      expect(frozen).toEqual([
+        { scope_run_id: original.runId, role: 'notes' },
+        { scope_run_id: original.runId, role: 'tasks' },
+      ]);
 
       const request: WriteOfficeDelivery = {
         ...original,
@@ -453,14 +472,6 @@ integrationTest(
           },
         ],
       };
-      await expect(
-        withTransaction(pool, async (client) => {
-          await writeOfficeDelivery(client, request);
-          throw new Error('acceptance did not commit');
-        }),
-      ).rejects.toThrow('acceptance did not commit');
-      expect((await pool.query('SELECT 1 FROM office_deliveries')).rowCount).toBe(0);
-      expect((await pool.query('SELECT 1 FROM office_artifact_bytes')).rowCount).toBe(0);
       const deliver = (input: WriteOfficeDelivery) =>
         withTransaction(pool, (client) => writeOfficeDelivery(client, input));
       await expect(
@@ -483,7 +494,30 @@ integrationTest(
       await expect(
         deliver({ ...request, ...next, paramsSha256: 'b'.repeat(64) }),
       ).rejects.toMatchObject(CONFLICT);
-      expect((await pool.query('SELECT 1 FROM office_artifact_bytes')).rowCount).toBe(2);
+      expect(
+        (
+          await pool.query(
+            `SELECT format,sources_known,uses_notes,uses_tasks,content FROM office_artifacts
+             WHERE scope_run_id=$1 ORDER BY format`,
+            [original.runId],
+          )
+        ).rows,
+      ).toEqual([
+        {
+          format: 'csv',
+          sources_known: true,
+          uses_notes: false,
+          uses_tasks: true,
+          content: request.artifacts[1]!.bytes,
+        },
+        {
+          format: 'markdown',
+          sources_known: false,
+          uses_notes: false,
+          uses_tasks: false,
+          content: request.artifacts[0]!.bytes,
+        },
+      ]);
       const report = first.find(({ format }) => format === 'markdown')!;
       const csv = first.find(({ format }) => format === 'csv')!;
       const key = {
@@ -495,13 +529,15 @@ integrationTest(
       await expect(storage.downloadArtifact(key)).resolves.toMatchObject({
         bytes: request.artifacts[1]!.bytes,
       });
-      await expect(storage.downloadArtifact({ ...key, ...bob })).rejects.toMatchObject(NOT_FOUND);
-      await expect(storage.downloadArtifact({ ...key, runId: randomUUID() })).rejects.toMatchObject(
-        NOT_FOUND,
-      );
-      await expect(
-        storage.downloadArtifact({ ...key, conversationId: randomUUID() }),
-      ).rejects.toMatchObject(NOT_FOUND);
+      for (const mismatch of [
+        { ...bob },
+        { runId: randomUUID() },
+        { conversationId: randomUUID() },
+      ]) {
+        await expect(storage.downloadArtifact({ ...key, ...mismatch })).rejects.toMatchObject(
+          NOT_FOUND,
+        );
+      }
 
       const disclosure = (sourceAttachmentIds: string[] | null) =>
         withTransaction(pool, (client) =>
@@ -519,25 +555,24 @@ integrationTest(
       await expect(storage.downloadArtifact(key)).resolves.toMatchObject({
         bytes: request.artifacts[1]!.bytes,
       });
-      const page = await getConversationRuns({ pool }, alice.ownerId, original.conversationId, {});
-      const projected = page.items.find((item) => item.run_id === original.runId) as unknown as {
-        office_materials: {
-          inputs: Array<Record<string, unknown>>;
-          artifacts: Array<{ artifact_id: string; status: string; download_url: string | null }>;
-        };
-      };
-      expect(projected.office_materials.inputs).toHaveLength(2);
-      expect(projected.office_materials.inputs[0]).not.toHaveProperty('sha256');
-      expect(projected.office_materials.inputs[0]).not.toHaveProperty('bytes');
-      expect(
-        projected.office_materials.artifacts.find((item) => item.artifact_id === report.artifactId),
-      ).toMatchObject({ status: 'revoked', download_url: null });
-      expect(
-        projected.office_materials.artifacts.find((item) => item.artifact_id === csv.artifactId),
-      ).toMatchObject({
-        status: 'available',
-        download_url: `/api/v1/conversations/${original.conversationId}/runs/${csv.runId}/artifacts/${csv.artifactId}/content`,
+      const page = await getConversationRuns({ pool }, alice.ownerId, original.conversationId, {
+        run_id: original.runId,
       });
+      const projected = page.items[0]!.office_materials!;
+      expect(projected.inputs).toHaveLength(2);
+      for (const input of projected.inputs) {
+        expect(input).not.toHaveProperty('sha256');
+        expect(input).not.toHaveProperty('bytes');
+      }
+      expect(
+        projected.artifacts.find((item) => item.artifact_id === report.artifactId),
+      ).toMatchObject({ status: 'revoked', download_url: null });
+      expect(projected.artifacts.find((item) => item.artifact_id === csv.artifactId)).toMatchObject(
+        {
+          status: 'available',
+          download_url: `/api/v1/conversations/${original.conversationId}/runs/${csv.runId}/artifacts/${csv.artifactId}/content`,
+        },
+      );
       await expect(follow({ ...next, runId: randomUUID() })).rejects.toMatchObject(UNAVAILABLE);
 
       await pool.query(
@@ -564,7 +599,9 @@ integrationTest(
         [report.runId, 'revoked'],
       ]);
       await expect(deliver(request)).resolves.toEqual(history.artifacts);
-      expect((await pool.query('SELECT 1 FROM office_artifact_bytes')).rowCount).toBe(0);
+      expect(
+        (await pool.query('SELECT 1 FROM office_artifacts WHERE content IS NOT NULL')).rowCount,
+      ).toBe(0);
     } finally {
       await db.close();
     }

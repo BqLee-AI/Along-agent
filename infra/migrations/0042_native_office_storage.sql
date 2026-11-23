@@ -12,6 +12,38 @@ ALTER TABLE conversations ADD CONSTRAINT conversations_id_owner_unique UNIQUE (i
 ALTER TABLE agent_runs ADD CONSTRAINT agent_runs_id_owner_conversation_unique
   UNIQUE (id, owner_id, conversation_id);
 
+-- A continuation references the original frozen material scope, not the draft.
+CREATE TABLE office_run_materials (
+  run_id uuid PRIMARY KEY,
+  owner_id uuid NOT NULL,
+  conversation_id uuid NOT NULL,
+  session_id uuid NOT NULL,
+  draft_id uuid NOT NULL,
+  scope_run_id uuid NOT NULL,
+  previous_run_id uuid UNIQUE,
+  delivery_run_id uuid UNIQUE,
+  delivery_params_sha256 text CHECK (delivery_params_sha256 ~ '^[0-9a-f]{64}$'),
+  UNIQUE (run_id, owner_id, conversation_id),
+  UNIQUE (run_id, owner_id, conversation_id, session_id, draft_id),
+  UNIQUE (run_id, owner_id, conversation_id, scope_run_id, draft_id),
+  UNIQUE (run_id, owner_id, conversation_id, scope_run_id),
+  FOREIGN KEY (conversation_id, owner_id) REFERENCES conversations (id, owner_id),
+  FOREIGN KEY (run_id, owner_id, conversation_id) REFERENCES agent_runs (id, owner_id, conversation_id),
+  FOREIGN KEY (scope_run_id, owner_id, conversation_id)
+    REFERENCES office_run_materials (run_id, owner_id, conversation_id),
+  FOREIGN KEY (previous_run_id, owner_id, conversation_id, scope_run_id, draft_id)
+    REFERENCES office_run_materials (run_id, owner_id, conversation_id, scope_run_id, draft_id),
+  FOREIGN KEY (delivery_run_id, owner_id, conversation_id, scope_run_id)
+    REFERENCES office_run_materials (run_id, owner_id, conversation_id, scope_run_id),
+  CHECK ((scope_run_id = run_id AND previous_run_id IS NULL)
+    OR (scope_run_id <> run_id AND previous_run_id <> run_id AND previous_run_id IS NOT NULL)),
+  CHECK ((delivery_run_id IS NULL AND delivery_params_sha256 IS NULL)
+    OR (scope_run_id = run_id AND delivery_run_id IS NOT NULL AND delivery_params_sha256 IS NOT NULL))
+);
+CREATE INDEX office_run_materials_scope_idx ON office_run_materials (scope_run_id);
+CREATE INDEX office_run_materials_delivery_owner_idx ON office_run_materials (owner_id)
+  WHERE delivery_run_id IS NOT NULL;
+
 CREATE TABLE office_attachments (
   id uuid PRIMARY KEY,
   owner_id uuid NOT NULL,
@@ -28,109 +60,42 @@ CREATE TABLE office_attachments (
   created_at timestamptz NOT NULL,
   expires_at timestamptz NOT NULL CHECK (expires_at > created_at),
   revoked_at timestamptz,
+  content bytea CHECK (octet_length(content) = size_bytes),
+  scope_run_id uuid,
+  role text,
   FOREIGN KEY (upload_conversation_id, owner_id) REFERENCES conversations (id, owner_id),
-  FOREIGN KEY (bound_conversation_id, owner_id) REFERENCES conversations (id, owner_id),
+  FOREIGN KEY (scope_run_id, owner_id, bound_conversation_id, session_id, draft_id)
+    REFERENCES office_run_materials (run_id, owner_id, conversation_id, session_id, draft_id),
   CHECK (bound_conversation_id IS NULL OR upload_conversation_id IS NULL
     OR bound_conversation_id = upload_conversation_id),
+  CHECK ((scope_run_id IS NULL AND bound_conversation_id IS NULL AND role IS NULL)
+    OR (scope_run_id IS NOT NULL AND bound_conversation_id IS NOT NULL AND role IS NOT NULL
+      AND ((role = 'notes' AND format IN ('txt', 'markdown')) OR (role = 'tasks' AND format = 'csv')))),
   UNIQUE (owner_id, session_id, draft_id, idempotency_key),
-  UNIQUE (id, size_bytes),
-  UNIQUE (id, owner_id, bound_conversation_id, session_id, draft_id, format, sha256)
+  UNIQUE (scope_run_id, role)
 );
 CREATE INDEX office_attachments_active_owner_idx ON office_attachments (owner_id, expires_at)
   WHERE revoked_at IS NULL;
-CREATE INDEX office_attachments_expiry_idx ON office_attachments (expires_at, id);
-
-CREATE TABLE office_attachment_bytes (
-  attachment_id uuid PRIMARY KEY,
-  size_bytes integer NOT NULL,
-  content bytea NOT NULL CHECK (octet_length(content) = size_bytes),
-  FOREIGN KEY (attachment_id, size_bytes) REFERENCES office_attachments (id, size_bytes)
-);
-
--- A continuation references the original frozen material scope, not the draft.
-CREATE TABLE office_run_materials (
-  run_id uuid PRIMARY KEY,
-  owner_id uuid NOT NULL,
-  conversation_id uuid NOT NULL,
-  session_id uuid NOT NULL,
-  draft_id uuid NOT NULL,
-  scope_run_id uuid NOT NULL,
-  previous_run_id uuid UNIQUE,
-  UNIQUE (run_id, owner_id, conversation_id),
-  UNIQUE (run_id, owner_id, conversation_id, session_id, draft_id),
-  UNIQUE (run_id, owner_id, conversation_id, scope_run_id, draft_id),
-  UNIQUE (run_id, owner_id, conversation_id, scope_run_id),
-  FOREIGN KEY (conversation_id, owner_id) REFERENCES conversations (id, owner_id),
-  FOREIGN KEY (run_id, owner_id, conversation_id) REFERENCES agent_runs (id, owner_id, conversation_id),
-  FOREIGN KEY (scope_run_id, owner_id, conversation_id)
-    REFERENCES office_run_materials (run_id, owner_id, conversation_id),
-  FOREIGN KEY (previous_run_id, owner_id, conversation_id, scope_run_id, draft_id)
-    REFERENCES office_run_materials (run_id, owner_id, conversation_id, scope_run_id, draft_id),
-  CHECK ((scope_run_id = run_id AND previous_run_id IS NULL)
-    OR (scope_run_id <> run_id AND previous_run_id <> run_id AND previous_run_id IS NOT NULL))
-);
-CREATE INDEX office_run_materials_scope_idx ON office_run_materials (scope_run_id);
-
-CREATE TABLE office_run_inputs (
-  run_id uuid NOT NULL,
-  owner_id uuid NOT NULL,
-  conversation_id uuid NOT NULL,
-  session_id uuid NOT NULL,
-  draft_id uuid NOT NULL,
-  role text NOT NULL,
-  attachment_id uuid NOT NULL UNIQUE,
-  format text NOT NULL,
-  sha256 text NOT NULL,
-  PRIMARY KEY (run_id, role),
-  UNIQUE (run_id, attachment_id),
-  FOREIGN KEY (run_id, owner_id, conversation_id, session_id, draft_id)
-    REFERENCES office_run_materials (run_id, owner_id, conversation_id, session_id, draft_id),
-  FOREIGN KEY (attachment_id, owner_id, conversation_id, session_id, draft_id, format, sha256)
-    REFERENCES office_attachments (id, owner_id, bound_conversation_id, session_id, draft_id, format, sha256),
-  CHECK ((role = 'notes' AND format IN ('txt', 'markdown')) OR (role = 'tasks' AND format = 'csv'))
-);
-
-CREATE TABLE office_deliveries (
-  scope_run_id uuid PRIMARY KEY,
-  run_id uuid NOT NULL UNIQUE,
-  owner_id uuid NOT NULL,
-  conversation_id uuid NOT NULL,
-  params_sha256 text NOT NULL CHECK (params_sha256 ~ '^[0-9a-f]{64}$'),
-  FOREIGN KEY (run_id, owner_id, conversation_id, scope_run_id)
-    REFERENCES office_run_materials (run_id, owner_id, conversation_id, scope_run_id)
-);
-CREATE INDEX office_deliveries_owner_idx ON office_deliveries (owner_id, scope_run_id);
+CREATE INDEX office_attachments_expiry_idx ON office_attachments (expires_at, id)
+  WHERE content IS NOT NULL;
 
 CREATE TABLE office_artifacts (
   id uuid PRIMARY KEY,
-  scope_run_id uuid NOT NULL REFERENCES office_deliveries (scope_run_id),
+  scope_run_id uuid NOT NULL REFERENCES office_run_materials (run_id),
   filename text NOT NULL CHECK (length(filename) BETWEEN 1 AND 255),
   format text NOT NULL CHECK (format IN ('markdown', 'csv')),
   size_bytes integer NOT NULL CHECK (size_bytes BETWEEN 1 AND 2097152),
   sources_known boolean NOT NULL,
+  uses_notes boolean NOT NULL,
+  uses_tasks boolean NOT NULL,
   created_at timestamptz NOT NULL,
   expires_at timestamptz NOT NULL CHECK (expires_at > created_at),
-  UNIQUE (scope_run_id, format),
-  UNIQUE (id, size_bytes),
-  UNIQUE (id, scope_run_id)
+  content bytea CHECK (octet_length(content) = size_bytes),
+  CHECK (sources_known OR NOT (uses_notes OR uses_tasks)),
+  UNIQUE (scope_run_id, format)
 );
-CREATE INDEX office_artifacts_expiry_idx ON office_artifacts (expires_at, id);
-
-CREATE TABLE office_artifact_bytes (
-  artifact_id uuid PRIMARY KEY,
-  size_bytes integer NOT NULL,
-  content bytea NOT NULL CHECK (octet_length(content) = size_bytes),
-  FOREIGN KEY (artifact_id, size_bytes) REFERENCES office_artifacts (id, size_bytes)
-);
-
-CREATE TABLE office_artifact_sources (
-  artifact_id uuid NOT NULL,
-  scope_run_id uuid NOT NULL,
-  attachment_id uuid NOT NULL,
-  PRIMARY KEY (artifact_id, attachment_id),
-  FOREIGN KEY (artifact_id, scope_run_id) REFERENCES office_artifacts (id, scope_run_id),
-  FOREIGN KEY (scope_run_id, attachment_id) REFERENCES office_run_inputs (run_id, attachment_id)
-);
+CREATE INDEX office_artifacts_expiry_idx ON office_artifacts (expires_at, id)
+  WHERE content IS NOT NULL;
 
 -- Office recovery envelopes have the same bounded shape as the existing Feishu envelope.
 ALTER TABLE compact_continuations
