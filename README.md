@@ -1,84 +1,108 @@
 # Along-agent
 
-云端多租户 personal agent：Web 先行，后期再做桌面常驻壳。
+Along-agent 是一个可自托管的 Web 个人助理。你可以在对话里安排提醒、查询今天的安排，或让助理整理你明确开放的项目资料；之后回到原会话或活动页，核对系统实际做了什么。
 
-## 这是什么
+例如，在对话里发「10 分钟后提醒我检查构建结果」。指令明确且在授权范围内时，助理可以创建提醒；如果时间有歧义，它会先澄清。**已创建、已排期、已触发和已生成站内通知是不同的状态**，助理不会把一句回复当成投递回执。
 
-v0 范围一段：用户说清一件事和一个时间 → 服务端算出唯一的触发瞬间 → 用户点头 → 到点私下响一次；任何一步没把握就停下来说明白，绝不报成功。
+## 快速开始
 
-诚实口径：只报告系统记录到的步骤，不承诺到点一定响；取消后触发数 = 0 为一级指标。
+### 环境要求
 
-许可证：Apache-2.0（见 [#6](https://github.com/BqLee-AI/Along-agent/issues/6)）。
+- 仓库访问权限、Git、Bun **1.4.2**。
+- 正式本机安装：Windows、Docker Desktop 的 **Linux x64** 引擎、Docker Compose **2.24.4+**。首次安装需要联网下载依赖、镜像和构建工具。
 
-## Spec 入口
+### 首次安装与体验
 
-- [文档中心](docs/README.md)：`docs/design/` 为真源，`docs/prd/` 跟随；[OpenSpec 行为契约](openspec/README.md)管 SHALL + Scenario。
-- [本人目标内委托与授权](docs/design/20-goal-scoped-delegation.md)（#104/#105，Proposed）：正常步骤自主，只问实质缺口或新增影响；授权与冻结执行生命周期独立，早期可request-bound，最终须server-owned，规范不启用权限或更改安装。
-- 必读：[v0 垂直切片](docs/design/03-v0-vertical-slice.md)、[P0 开工与 CI 死规矩](docs/design/13-p0-bootstrap-and-ci-rules.md)、[验收与待决](docs/prd/04-acceptance-open-questions.md)、[Schema 索引](docs/schema/README.md)。
+在 PowerShell 中克隆仓库并安装依赖：
 
-## 任务与进度
-
-- [Issues](https://github.com/BqLee-AI/Along-agent/issues)：中文，spec-driven + issue-driven。
-- 里程碑：M0 P0 准出（#1、#6、#2、#3 四基准）、M1 v0/P1 准出（#7、#4、#8、#9、#10、#5、#3 五十表达）、M2 P2 Spike 结案。
-- 当前阻塞已解除：[#1 P0 决策](https://github.com/BqLee-AI/Along-agent/issues/1)已定（Better Auth 自建 + Next.js）；待办见 [#6](https://github.com/BqLee-AI/Along-agent/issues/6)（许可证文件替换 + 中文名）。
-
-issue → Spec 章节 → OpenSpec change（如需）→ 分支 → PR → CI 六步：
-
-1. 从 issue 领任务，Spec 字段的路径 + 章节号必填；有行为契约再建 change（OpenSpec-only PR 先于实现 PR）。
-2. 分支名 `<type>/<N>-<slug>`，如 `feat/7-commitments-migrations`；OpenSpec-only 用 `docs/<N>-spec-<slug>`；禁止直推 main（约定式，私有免费版无强制保护）。
-3. 提交信息与 PR 标题统一用英文，格式 type(area): description（如 docs(governance): add repo AGENTS (#16)）；issue/PR 正文用中文并套用 .github/ 模板。
-4. 改 design 的 PR 同步 prd 和 docs/README 索引；一个 issue 可多 PR，只有收口 PR 写 `Closes #N`（收口含 `openspec archive`），其余一律 `Refs #N`。
-5. D1-D10 是合并门槛，见 [CI 死规矩](docs/design/13-p0-bootstrap-and-ci-rules.md#3-ci-死规矩required每条必有变红测试)。
-
-模板：[issue 模板](.github/ISSUE_TEMPLATE/)、[PR 模板](.github/PULL_REQUEST_TEMPLATE.md)。
-
-## 仓库布局
-
-`apps/api`（服务端：api|worker|all 三角色入口）、`apps/web`（Next.js App Router）；`packages/time-core|scheduler-core|notifier-core|stream-protocol|contracts`；详见 [design/01 §2](docs/design/01-tech-stack-and-repo-structure.md#2-monorepo-布局observedv0-关键目录)。
-
-## 本地运行
-
-- 工具链：Bun `1.4.2`（workspaces + 单一 `bun.lock`），Oxlint `1.89.0`、Oxfmt `0.74.0`；安装依赖：`bun install --frozen-lockfile`。
-- 开发启动：`bun run dev`（先构建依赖包；`apps/api` 3000 `ROLE=all`、`apps/web` 3100），不等同正式 native 本机安装。
-- 构建：`bun run build:packages` 构建共享包；`bun run build` 先包后应用；`bun run build:api` 构建 API 及其依赖。
-- 检查：`bun run verify`；类型与 lint 可分别运行 `bun run typecheck`、`bun run lint`；格式修复/阻塞检查为 `bun run format` / `bun run format:check`。
-- 测试：`bun run test:unit`（非数据库与非 native 合同）、`bun run test:contracts`（Linux x64/WSL + Docker，当前生产 native 构建、自带隔离 PG、本地/签名 HTTP 消费者、原 healthz/契约包）、`bun run test:integration`（全部真实数据库文件）、`bun run test:scheduler`（D9 指定集）。契约入口不使用已有数据库或个人模型配置；其余数据库测试需 PostgreSQL 16 与明确测试环境，详见 [贡献指南](CONTRIBUTING.md)。
-- 契约校验：`openspec validate <name> --strict`（如 `openspec validate v0-safety-contract --strict`）
-- 环境变量：`DATABASE_URL`、`TZDB_VERSION`（缺失则 `/readyz` 503 `TZDB_UNAVAILABLE`，属预期行为）。
-- 正式本机安装：按[本机生命周期指南](docs/guides/local-lifecycle.md)在交互终端执行 `bun --no-env-file run local:init --new`（原部署用 `--adopt`），随后用 `local:start`、`local:stop` 和显式 `local:upgrade`。四入口共用 checkout 外私有配置；不依赖仓库 `.env`，不自动开户。合同与验收边界见[本地生命周期设计](docs/design/15-r1-local-lifecycle.md)。
-
-## 受管项目资料与文档批准
-
-- 用正式 Linux x64 镜像运行 API/native/MCP。部署者通过 `WORKSPACE_REGISTRY_FILE` 指定 JSON 登记文件；未配置、无效或相互重叠的工作区不开放，不影响无工作区的业务。
-- 登记按登录用户隔离，只开放逐项列出的相对文件路径。`writable_paths` 必须是 `readable_paths` 的子集；文件必须为普通、非链接、严格 UTF-8 文本。模型、Web 和 MCP 不取得宿主绝对路径。
-- Compose 的 `workspace_data` 卷挂载到 `/var/lib/along/workspaces`。先在卷中放置有权使用的资料和目标文件、设置受控目录权限，再通过进程环境传入登记文件位置；登记在 API 启动时加载，不提供 Web 新增目录或热更新接口。
-
-登记文件示例；将 `owner_id` 换成实际登录用户 ID，目录及文件须已存在：
-
-```json
-[
-  {
-    "workspace_id": "project-brief",
-    "label": "项目资料",
-    "owner_id": "<owner-id>",
-    "root": "/var/lib/along/workspaces/project-brief",
-    "readable_paths": ["sources/decision.md", "brief.md"],
-    "writable_paths": ["brief.md"]
-  }
-]
+```powershell
+git clone https://github.com/BqLee-AI/Along-agent.git
+cd Along-agent
+bun install --frozen-lockfile
 ```
 
-- 部署者配置 `HARNESS_MODEL_BASE_URL`、`HARNESS_MODEL` 和需要时的 `HARNESS_MODEL_API_KEY`；用户在 Web 选择工作区，不填写 provider/key。`HARNESS_MAX_ITERATIONS` 默认 `24`、`HARNESS_MAX_TOKENS` 默认 `64000`；两者须为正安全整数，在 Run 接受时冻结，批准后继续不重置累计使用量。
-- 身份认证仍使用既有 `BETTER_AUTH_SECRET`，由部署者传入 API。模型 transport 显式关闭并行工具提议；provider 若仍返回多个调用则明确失败，不截取第一项继续执行。
-- Web 中的完整预览冻结原始版本和确切新内容。确认只授权，不立即写文件；返回原会话点“继续”，由原 Run 执行唯一写调用，再以新读取核对结果。拒绝、版本冲突和结果未知不是保存成功；文件系统与 PostgreSQL 不构成原子事务，未知结果不自动重写。
-- 发布时先停旧写者、应用迁移 `0016`，再成套发布 TS/native/Web；只执行 `harness/v2`。旧 task 快照仅作受限读取迁移，不给历史 Run 增加工作区。详情见 [R1 设计](docs/design/14-r1-document-task-loop.md)、[HTTP 合同](docs/api/README.md#8-r1-工作区与文档批准-required)。
-- 目录边界依赖受管部署和协作写者；不把任意非协作外部写入者描述成受操作系统原子 CAS 保护。发布失败停写前滚，不降回不理解文档结果的旧写者。
+只有确认没有需要保留的原安装时，才在交互终端运行：
 
-## 安全
+```powershell
+bun --no-env-file run local:init --new
+bun --no-env-file run local:start
+```
 
-- 不提交 secret、`.env`、用户数据；配置走 `.env.example` 占位。
-- 不复制外部产物原文、token、DSN。
+1. 打开启动命令输出的 Web 地址（默认端口 `3100`），按「首次建号」创建管理员。使用输出的地址，不要自行互换 `localhost` 与 `127.0.0.1`。
+2. 登录后，在「设置 → 模型服务」添加接入并保存，设置默认模型，或在发送时显式选模。能够登录不代表模型已经可用。
+3. 打开「对话」，发送上面的十分钟提醒示例。去「提醒」看任务，在活动页核对已记录的状态。试用普通对话或提醒不需要先登记资料；要处理文件，再按[本机使用指南](docs/guides/local-lifecycle.md)登记受管工作区。
+
+**已有安装不要用 `--new`。** 按[本机使用指南](docs/guides/local-lifecycle.md)接入原部署，保留原身份、配置与数据。日常仍用 `bun --no-env-file run local:start` 启动，用 `bun --no-env-file run local:stop` 停止；升级时用同一份私有配置执行 `bun --no-env-file run local:upgrade`。
+
+## 配置与环境变量
+
+正式本机安装从仓库外的私有 JSON 读取配置，默认是 `%LOCALAPPDATA%\Along-agent\local.json`，不依赖仓库 `.env`。若用 `--config` 指定路径，初始化、启停、账户维护和升级都要使用同一个文件。模型接入由登录用户在 Web 中设置；资料范围由本机维护登记。不要提交私有配置、真实凭据、备份或用户资料。
+
+直接运行开发进程时，按需在进程环境中设置以下变量；正式本机安装不需要照着这份清单手填。
+
+- `DATABASE_URL`：API 的 PostgreSQL 16 连接串，开发时请指向专用开发库。
+- `TZDB_VERSION`：必须匹配[随仓库提供的时间资源](apps/api/resources/time/fixture-v1.json)中的 `tzdb_version`（`fixture-v1`）。缺失、版本不匹配或资源不可用时，`/readyz` 返回 `503 TZDB_UNAVAILABLE`。
+- `BETTER_AUTH_SECRET`、`APP_ORIGIN`：登录使用的认证密钥和 Web 来源。用开发专用密钥，来源要与浏览器访问地址一致。
+- `API_BASE`：Web 服务端连接 API 的地址，默认 `http://127.0.0.1:3000`。浏览器通过 Web 同源代理访问 API。
+- `MODEL_PROVIDER_ENCRYPTION_KEY`、`WORKSPACE_REGISTRY_FILE`：分别用于加密模型凭据和加载受管资料登记。正式本机安装由私有配置管理。
+
+## 核心功能与边界
+
+- **对话与历史**：流式对话，支持在同一会话追问、查看原消息和各次运行的结果。刷新或重登只读取记录，不会重新发送、批准或继续。
+- **今日与提醒**：查看今日简报，用自然语言创建一次性提醒，在提醒与活动页追踪状态、取消任务。时间由服务端归一，通知走站内，不承诺必达，也不是系统推送。
+- **受管项目资料**：在本人已登记范围内检索、修改或创建获准的文件，不访问任意宿主路径。需要校样批准时，批准只授予权限，不保存文件；回原会话明确继续后，再核对实际写入和回读结果。
+- **本人偏好与记忆**：保存或清除默认时区，查看、更正或停止使用本人的记忆。能查看旧会话，不代表所有历史都会提供给模型。
+- **可选连接**：部署者启用并授权后，飞书机器人可读取单篇获准的 Docx，不支持搜索、修改或发送消息。[对话附件与私有产物](docs/design/24-native-office-delivery.md)另行受控，不是默认安装功能。
+
+普通对话可在本人委托范围内执行明确动作，无需逐项点批准；信息不足或影响超出授权时才停下来询问。保留原审批流程的提醒、资料快捷入口仍按该流程操作。无论走哪条路径，**运行结束不等于任务已完成**：以任务记录、文件效果或其他实际回执为准；结果未知时先查原记录，不要盲目重做。
+
+## 技术栈与项目结构
+
+Web 使用 **Next.js App Router、React、Tailwind CSS 与 LumenUI**；API 使用 **TypeScript、Bun、Elysia 与 Better Auth**，JSON 合同用 Zod 校验，实时对话走 SSE。**仓颉原生 Harness**负责模型与工具的执行循环；授权、业务动作、调度和持久化由 TypeScript 服务负责。**PostgreSQL 16** 是业务事实源；同一个服务镜像可按 `api`、`worker` 或 `all` 运行。
+
+```text
+apps/
+  web/              Web 工作台、会话与提醒页面
+  api/              HTTP API、业务模块、调度和后台投递
+  harness/          仓颉原生执行循环与恢复
+  embedding/        可选的只读意图路由编码服务
+packages/
+  contracts/        API 与执行协议的共享定义
+  stream-protocol/  SSE 事件协议
+  time-core/        确定性的时间归一
+  scheduler-core/   调度规则
+  notifier-core/    通知与回执规则
+infra/              PostgreSQL 迁移、Docker 与 Compose
+scripts/            本机安装、构建和验证入口
+openspec/           行为规范与变更
+docs/               设计、使用指南与验收记录
+```
+
+## 开发指南
+
+**日常使用走 `local:start`，改代码走 `dev`。** 开发启动不会初始化数据库，也不能用来证明正式仓颉、真实模型或资料链路可用。先确认 `psql` 可用，准备独立的 PostgreSQL 16 开发库，并在终端进程环境中设置 `DATABASE_URL` 和 `TZDB_VERSION`。确认 `DATABASE_URL` 指向空的开发库后，应用迁移并启动 Web 和 API：
+
+```bash
+bash scripts/db/apply.sh
+bun run dev
+```
+
+默认 Web 在 `http://localhost:3100`，API 在 `http://127.0.0.1:3000`。`/healthz` 用于确认进程可响应，`/readyz` 用于检查服务依赖是否就绪；两者都不证明模型可用。分进程调试见 [Web 说明](apps/web/README.md)，正式原生构建见 [Harness 说明](apps/harness/README.md)。
+
+- **构建**：`bun run build`；只构建 API 与依赖用 `bun run build:api`。
+- **本地检查**：`bun run verify`；也可单独运行 `bun run typecheck`、`bun run lint`、`bun run format:check`。
+- **单元测试**：`bun run test:unit`。
+- **正式契约测试**：`bun run test:contracts`，需 Linux x64 / WSL 与 Docker，从源码构建正式 Harness 并使用隔离数据库。
+- **数据库与调度测试**：`bun run test:integration` 或 `bun run test:scheduler`，使用明确指定的测试数据库。
+
+修改业务前（包括 AI 辅助修改），先读 [OpenSpec 行为规范](openspec/README.md) 和对应的 [设计、API 与 Schema](docs/README.md)。提醒时间由 `time-core` 归一，Web 只展示服务端冻结结果；确认、取消和文件写入的成功状态必须来自真实回执，不能由界面或模型补造。跨模块通过公开用例或只读投影协作，不直接读取对方私有表。
+
+## 贡献
+
+从 [Issue](https://github.com/BqLee-AI/Along-agent/issues) 开始，写明对应规范章节；改变行为时先提交 OpenSpec-only PR，再提交实现。一个 PR 只做一件事，不直推 `main`。提交信息与 PR 标题统一用英文，格式 type(area): description（如 docs(governance): add repo AGENTS (#16)）；issue/PR 正文用中文并套用 .github/ 模板。
+
+分支命名、验证要求和 PR 模板见 [贡献指南](CONTRIBUTING.md)；安全问题按 [安全报告流程](SECURITY.md) 处理。
 
 ## 许可证
 
-见 [LICENSE](LICENSE)。
+项目采用 [Apache License 2.0](LICENSE)。第三方组件及随附分发物按各自的许可声明使用。
