@@ -1,9 +1,13 @@
 ---
 name: 通用任务
-description: spec-driven + issue-driven 通用模板
-title: '[Task] '
-labels: ['task']
+description: 标题按 type(area) 填写，按改动类型与领域加标签
+labels: []
 ---
+
+<!--
+标题示例：feat(reminders): 支持指定日期提醒；chore(deps): 更新开发依赖。
+按 CONTRIBUTING.md 的「Issue 标题与标签」选择标签，不用 task 代替分类。
+-->
 
 ## 背景
 

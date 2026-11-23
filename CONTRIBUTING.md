@@ -34,10 +34,20 @@
 
 ## 2. 工作流：issue → 分支 → PR
 
-1. 从 issue 领任务：issue 正文用 `.github/ISSUE_TEMPLATE/` 官方模板（`task.md` 通用任务或 `decision.md` 方案拍板），Spec 路径 + 章节号必填。
+1. 从 issue 领任务：标题和标签按下文填写，正文用 [通用任务模板](.github/ISSUE_TEMPLATE/task.md) 或 [决策事项模板](.github/ISSUE_TEMPLATE/decision.md)，Spec 路径 + 章节号必填。
 2. `main` 禁止直推，一律走 issue → 分支 → PR。
 3. 一个 PR 只做一件事；有行为契约先建 OpenSpec-only PR，再提实现 PR。
 4. #44 为规范基线对齐，不改变有效业务行为：仓颉唯一 Harness、TS 长期能力/业务/存储；同步公共用例、只读投影、确认创建/取消单事务与异步 outbox 的适用范围见 [design/02 §1–§2](docs/design/02-modular-monolith-and-split-triggers.md) 与 [design/09](docs/design/09-agent-runtime-and-checkpoint.md)。历史 ADR/验收不冒充新目标已实现；行为变化仍先独立 OpenSpec-only。
+
+### Issue 标题与标签
+
+标题统一用 `type(area): description`：`type` 和 `area` 用英文小写，描述说清具体改动或待决定的问题，可用中文。不要加 `[Task]`、`[Decision]` 或把标签拼进标题。
+
+- **类型**：`feat` → `enhancement`，`fix` → `bug`，`docs` → `documentation`，`refactor` → `refactor`，`decision` → `decision`。维护用 `chore`，CI 改动用 `ci`；没有对应类型标签时不以 `task` 代替。
+- **领域**：从仓库现有的 `area:*` 标签里选择适用项，如 `area:api`、`area:governance`、`area:ci`；有明确优先级时再加 `priority:*`。
+- **示例**：`docs(readme): 重写项目说明和快速开始`，标签用 `documentation`、`area:governance`。
+
+用 `gh issue create` 等 CLI 创建时，仍按模板填写中文正文，并用 `--title` 和 `--label` 显式传入标题和标签。
 
 ## 3. 分支命名
 
