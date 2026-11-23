@@ -106,9 +106,10 @@ export function createModelHandlers(environment: AttemptEnvironment) {
     if (attemptState.cumulative.iterations >= context.maxIterations)
       throw new ApplicationError(429, 'BUDGET_EXCEEDED', '本轮推理预算用完，已停下。');
     if (!deps.modelTransport) throw unavailable();
-    const selected = await guarded((client) =>
-      resolveRunSelection(client, context.ownerId, context.runId),
-    );
+    const selected = await guarded(async (client) => {
+      if (context.officeMaterials) await assertActionAuthority(client);
+      return resolveRunSelection(client, context.ownerId, context.runId);
+    });
     if (!selected) throw stateConflict('legacy Run model binding unavailable');
     if (selected.model_id !== context.contextPolicy.model_binding.model) throw unavailable();
     const transport = await deps.modelTransport(selected, {
@@ -167,15 +168,17 @@ export function createModelHandlers(environment: AttemptEnvironment) {
           row.outcome_kind === 'success',
       );
       if (privateReceipt) await requireCurrentFeishuBotAuthority(client, context);
-      // Hold the Run and Feishu grant locks through local enqueue, not the provider response.
-      const authorizeDispatch = privateReceipt
-        ? (enqueue: () => void) =>
-            guarded(async (current) => {
-              await assertActionAuthority(current);
-              await requireCurrentFeishuBotAuthority(current, context);
-              enqueue();
-            })
-        : undefined;
+      // Hold the Run and private grant locks through outbound enqueue, not the response.
+      const authorizeDispatch =
+        privateReceipt || context.officeMaterials
+          ? (enqueue: () => void) =>
+              guarded(async (current) => {
+                await assertActionAuthority(current);
+                if (privateReceipt) await requireCurrentFeishuBotAuthority(current, context);
+                modelSignal.throwIfAborted();
+                enqueue();
+              })
+          : undefined;
       // Establish the model reservation under the same attempt → Run
       // locks used by pause registration, before invoking the transport.
       attemptState.modelStream = {

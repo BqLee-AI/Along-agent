@@ -1,12 +1,16 @@
 import type { CreatedApproval } from '../../features/approvals/public.js';
 import type { TimeContext, TimeFailure } from '../../features/time/public.js';
 import type { FeishuBotDocxGrant } from '../../features/office-connectors/public.js';
+import type { OfficeFrozenInput } from '../../features/native-office/public.js';
 import type {
   WorkspaceGrant,
   WorkspaceResult,
   DocumentApprovalReceipt,
   ElapsedTimeBasis,
   HarnessMemorySourceSchema,
+  OfficeReadNotesResultSchema,
+  OfficeAnalyzeTasksResultSchema,
+  OfficeCreateArtifactsResultSchema,
 } from '@along/contracts';
 import type { RunOwnership } from '../runtime/run-ownership.js';
 import type { z } from 'zod';
@@ -39,6 +43,15 @@ export const DELEGATION_WORKSPACE_CREATE_TOOL_IDS = ['workspace_create'] as cons
 export const CONTEXT_TOOL_IDS = ['read_run_observation'] as const;
 export const R3_MEMORY_TOOL_IDS = ['remember_memory', 'recall_memories'] as const;
 export const R3_MEMORY_SOURCE_TOOL_ID = 'read_memory_source' as const;
+export const OFFICE_TOOL_IDS = [
+  'office_read_notes',
+  'office_analyze_tasks',
+  'office_create_artifacts',
+] as const;
+export type OfficeToolId = (typeof OFFICE_TOOL_IDS)[number];
+export function isOfficeToolId(tool: string): tool is OfficeToolId {
+  return OFFICE_TOOL_IDS.some((id) => id === tool);
+}
 export const HARNESS_BASE_TOOL_IDS = [...BUSINESS_TOOL_IDS, ...CONTEXT_TOOL_IDS] as const;
 export const DELEGATION_TOOL_IDS = [
   'get_user_prefs',
@@ -58,6 +71,7 @@ export type ToolId =
   | (typeof DELEGATION_WORKSPACE_CREATE_TOOL_IDS)[number]
   | (typeof R3_MEMORY_TOOL_IDS)[number]
   | typeof R3_MEMORY_SOURCE_TOOL_ID
+  | OfficeToolId
   | 'feishu_docx_read';
 
 export const TASK_STATES = [
@@ -87,6 +101,8 @@ export interface ToolContext {
   workspaceGrant?: WorkspaceGrant | null;
   workspaceGrants?: WorkspaceGrant[];
   feishuDocx?: { connectionId: string; sessionId: string; url: string } | FeishuBotDocxGrant;
+  officeMaterials?: readonly OfficeFrozenInput[];
+  officeSessionId?: string;
   documentEdit?: {
     base_read_invocation_id: string;
     relative_path: string;
@@ -246,6 +262,9 @@ export type ToolPayload =
   | MemoryRecallPayload
   | MemorySourcePayload
   | FeishuDocxPayload
+  | z.infer<typeof OfficeReadNotesResultSchema>
+  | z.infer<typeof OfficeAnalyzeTasksResultSchema>
+  | z.infer<typeof OfficeCreateArtifactsResultSchema>
   | EvidencePayload
   | WorkspaceResult;
 export type ToolResult =

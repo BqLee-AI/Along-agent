@@ -46,7 +46,9 @@ export const api: ApiClient = createBrowserApi();
 export type ApiError = Treaty.Error<ApiClient['api']['v1']['me']['get']>;
 export type JsonResult<T> = {
   data: { data: T } | null;
-  error: ApiError | null;
+  // The envelope readers validate this value themselves. Some routes have no
+  // declared error responses, so Eden cannot give their errors a status type.
+  error: { value: unknown } | null;
   response: Response;
 };
 export type JsonCall<T> = (client: ApiClient) => Promise<JsonResult<T>>;

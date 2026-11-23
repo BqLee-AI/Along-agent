@@ -53,14 +53,27 @@ extend Harness {
                 let receipts = field(continuation, "receipts").asArray()
                 require(receipts.size() <= 4096)
                 let receiptIds = HashSet<String>()
+                var officeReceipt = ""
                 for (value in receipts.getItems()) {
                     let receipt = value.asObject()
                     keys(receipt, ["invocation_id", "tool_id", "result"])
                     require(receiptIds.add(uuid(field(receipt, "invocation_id"))))
                     let toolId = ref(field(receipt, "tool_id"))
                     require(toolId != "feishu_docx_read")
-                    resultCheck(field(receipt, "result"), false, "", toolId)
-                    require(ref(field(field(receipt, "result").asObject(), "status")) == "ok")
+                    let result = field(receipt, "result").asObject()
+                    require(ref(field(result, "status")) == "ok")
+                    if (isOfficeTool(toolId)) {
+                        // The server has verified this effect in the original office scope.
+                        // Never put original notes or analysis in cross-Run continuation.
+                        require(toolId == "office_create_artifacts" && officeReceipt == "" &&
+                            pipe.protocol == "harness/v8" &&
+                            ref(field(trusted.asObject(), "execution_lifecycle")) == "server-owned")
+                        keys(result, ["status", "result"])
+                        let payload = field(result, "result").asObject()
+                        require(ref(field(payload, "kind")) == toolId)
+                        officeArtifactsCheck(payload)
+                        officeReceipt = uuid(field(receipt, "invocation_id"))
+                    } else { resultCheck(result, false, "", toolId) }
                     acceptedReceipts.add(uuid(field(receipt, "invocation_id")))
                 }
                 if (!isNull(field(continuation, "source_result"))) {
@@ -68,7 +81,7 @@ extend Harness {
                     keys(source, ["invocation_id", "tool_id", "result"])
                     uuid(field(source, "invocation_id"))
                     let toolId = ref(field(source, "tool_id"))
-                    require(toolId != "feishu_docx_read")
+                    require(toolId != "feishu_docx_read" && !isOfficeTool(toolId))
                     resultCheck(field(source, "result"), false, "", toolId)
                 }
                 if (!isNull(field(continuation, "goal_result"))) {
@@ -81,10 +94,12 @@ extend Harness {
                                 let id = uuid(receipt)
                                 require(receiptIds.contains(id))
                                 acceptedReceipts.add(id)
+                                if (officeReceipt == id) { officeContinuation = true }
                             }
                         }
                     }
                 }
+                require(officeReceipt == "" || officeContinuation)
             }
         }
     }
@@ -109,12 +124,17 @@ extend Harness {
             if (name == "read_memory_source") { require(pipe.protocol == "harness/v8") }
             if (name == "remember_memory" || name == "recall_memories") { require(pipe.protocol != "harness/v6") }
             if (name == "feishu_docx_read") { require(delegated) }
+            if (isOfficeTool(name)) {
+                require(pipe.protocol == "harness/v8" && delegated)
+                let trust = field(start, "trusted_context").asObject()
+                require(ref(field(trust, "execution_lifecycle")) == "server-owned")
+            }
             require(delegated || (name != "create_reminder" && name != "get_task" && name != "cancel_reminder" && name != "workspace_replace" && name != "workspace_create"))
             if (delegated) {
                 let workspaceRead = name == "workspace_list" || name == "workspace_grep" || name == "workspace_read"
                 let workspaceWrite = name == "workspace_replace" || name == "workspace_propose_replace" || name == "workspace_apply_replace"
                 let workspaceCreate = name == "workspace_create"
-                require(name == "get_user_prefs" || name == "set_user_timezone" || name == "create_reminder" || name == "get_task" || name == "cancel_reminder" || name == "read_run_observation" || name == "list_tasks" || name == "read_brief_cards" || name == "feishu_docx_read" || (pipe.protocol != "harness/v6" && (name == "remember_memory" || name == "recall_memories")) || (pipe.protocol == "harness/v8" && name == "read_memory_source") || workspaceRead || workspaceWrite || workspaceCreate)
+                require(name == "get_user_prefs" || name == "set_user_timezone" || name == "create_reminder" || name == "get_task" || name == "cancel_reminder" || name == "read_run_observation" || name == "list_tasks" || name == "read_brief_cards" || name == "feishu_docx_read" || isOfficeTool(name) || (pipe.protocol != "harness/v6" && (name == "remember_memory" || name == "recall_memories")) || (pipe.protocol == "harness/v8" && name == "read_memory_source") || workspaceRead || workspaceWrite || workspaceCreate)
                 if (workspaceRead) { require(workspaceIds.size > 0) }
                 if (workspaceWrite) { require(hasWritableWorkspace) }
                 if (workspaceCreate) { require(hasOutputWorkspace) }
@@ -123,6 +143,19 @@ extend Harness {
             field(t, "parameters").asObject()
             let risk = str(field(t, "risk"), 8)
             require(risk == "low" || risk == "medium" || risk == "high")
+        }
+        if (officeContinuation || tools.contains("office_read_notes") || tools.contains("office_analyze_tasks") || tools.contains("office_create_artifacts")) {
+            officeRun = true
+            require(officeContinuation || tools.contains("office_read_notes") || tools.contains("office_analyze_tasks"))
+            require(workspaceIds.size == 0 && (!start.containsKey("workspace") || isNull(field(start, "workspace"))))
+            require(isNull(field(start, "approval")))
+            let snapshot = field(start, "snapshot")
+            require(isNull(snapshot) || isNull(field(snapshot.asObject(), "waiting")))
+            for (name in tools) {
+                require(isOfficeTool(name) || name == "get_user_prefs" || name == "create_reminder")
+                require(!officeContinuation || !isOfficeTool(name))
+            }
+            routingEligible = false
         }
     }
 }

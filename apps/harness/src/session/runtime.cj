@@ -72,6 +72,8 @@ protected class Harness {
     var routingPolicy: JsonValue = JsonNull()
     var routingEligible: Bool = false
     var delegated: Bool = false
+    var officeContinuation: Bool = false
+    var officeRun: Bool = false
     var trustedWorkspaces = JsonArray()
     let workspaceIds = HashSet<String>()
     var hasWritableWorkspace: Bool = false

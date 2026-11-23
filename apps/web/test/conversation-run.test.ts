@@ -516,14 +516,26 @@ describe('actual HTTP session response consumers', () => {
   );
 });
 
-describe('same-origin Run proxy', () => {
+describe('same-origin conversation proxy', () => {
   let server: Server;
   let proxyGet: typeof ProxyGet;
   const closed = new Map<string, { promise: Promise<boolean>; resolve(value: boolean): void }>();
+  const officeBytes = Buffer.from([0xef, 0xbb, 0xbf, 0x61, 0, 0xff, 0x0d, 0x0a]);
+  const uploadPath = ['v1', 'conversations', 'attachments'];
+  const downloadPath = ['v1', 'conversations', cid, 'runs', rid, 'artifacts', cid, 'content'];
+  const downloadHeaders = {
+    'content-type': 'text/csv; charset=utf-8',
+    'content-disposition': "attachment; filename*=UTF-8''%E6%B1%87%E6%80%BB.csv",
+    'content-length': String(officeBytes.length),
+    'x-content-type-options': 'nosniff',
+    'cache-control': 'private, no-store, no-transform',
+    'x-request-id': 'artifact-request',
+  };
 
   beforeAll(async () => {
     server = createServer((req, res) => {
-      const kind = new URL(req.url!, 'http://upstream.test').searchParams.get('kind')!;
+      const query = new URL(req.url!, 'http://upstream.test').searchParams;
+      const kind = query.get('kind')!;
       if (kind === 'auth') {
         res.writeHead(503, {
           'content-type': 'application/json',
@@ -539,7 +551,38 @@ describe('same-origin Run proxy', () => {
         );
         return;
       }
+      if (kind === 'office-upload') {
+        const chunks: Buffer[] = [];
+        req.on('data', (chunk: Buffer) => chunks.push(chunk));
+        req.once('end', () => {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(
+            JSON.stringify({
+              filename: req.headers['x-along-filename'] ?? null,
+              encoding: req.headers['content-encoding'] ?? null,
+              idempotency: req.headers['idempotency-key'] ?? null,
+              length: req.headers['content-length'] ?? null,
+              draft: query.get('draft_id'),
+              bytes: [...Buffer.concat(chunks)],
+            }),
+          );
+        });
+        return;
+      }
+      if (kind === 'office-download') {
+        res.writeHead(200, downloadHeaders);
+        res.end(officeBytes);
+        return;
+      }
       res.once('close', () => closed.get(kind)?.resolve(!res.writableEnded && res.destroyed));
+      if (kind.startsWith('office-download-')) {
+        res.writeHead(200, {
+          ...downloadHeaders,
+          'content-length': String(officeBytes.length + 1),
+        });
+        res.write(officeBytes);
+        return;
+      }
       res.writeHead(200, { 'content-type': 'text/event-stream' });
       res.write('data: waiting\n\n');
     });
@@ -593,20 +636,94 @@ describe('same-origin Run proxy', () => {
     },
   );
 
-  it.each(['request', 'reader'] as const)(
-    'closes the actual unfinished upstream HTTP response on %s cancellation',
-    async (kind) => {
+  it.each([
+    ['POST', uploadPath, true],
+    ['PUT', uploadPath, false],
+    ['POST', [...uploadPath, cid], false],
+    ['POST', ['v1', 'conversations', 'messages'], false],
+  ] as const)(
+    'forwards office upload metadata only on the exact POST route (%s %j)',
+    async (method, path, officeUpload) => {
+      const result = await proxyGet(
+        new NextRequest(
+          `http://web.test/api/${path.join('/')}?kind=office-upload&draft_id=${cid}`,
+          {
+            method,
+            body: officeBytes,
+            headers: {
+              'content-type': 'application/octet-stream',
+              'x-along-filename': '%E7%BA%AA%E8%A6%81.txt',
+              'content-encoding': 'gzip',
+              'content-length': '9876',
+              'idempotency-key': 'upload-request',
+            },
+          },
+        ),
+        { params: Promise.resolve({ path: [...path] }) },
+      );
+      expect(result.status).toBe(200);
+      const received = await result.json();
+      expect(received).toMatchObject({
+        filename: officeUpload ? '%E7%BA%AA%E8%A6%81.txt' : null,
+        encoding: officeUpload ? 'gzip' : null,
+        idempotency: 'upload-request',
+        draft: cid,
+        bytes: [...officeBytes],
+      });
+      expect(received.length).not.toBe('9876');
+    },
+  );
+
+  it.each([
+    ['GET', downloadPath, true],
+    ['POST', downloadPath, false],
+    ['GET', [...downloadPath, 'extra'], false],
+    ['GET', ['v1', 'conversations', cid], false],
+  ] as const)(
+    'preserves binary response bytes but scopes download metadata (%s %j)',
+    async (method, path, officeDownload) => {
+      const result = await proxyGet(
+        new NextRequest(`http://web.test/api/${path.join('/')}?kind=office-download`, { method }),
+        { params: Promise.resolve({ path: [...path] }) },
+      );
+      expect(result.status).toBe(200);
+      expect(Buffer.from(await result.arrayBuffer())).toEqual(officeBytes);
+      expect(result.headers.get('content-type')).toBe(downloadHeaders['content-type']);
+      expect(result.headers.get('cache-control')).toBe(downloadHeaders['cache-control']);
+      expect(result.headers.get('x-request-id')).toBe('artifact-request');
+      for (const name of [
+        'content-disposition',
+        'content-length',
+        'x-content-type-options',
+      ] as const)
+        expect(result.headers.get(name)).toBe(officeDownload ? downloadHeaders[name] : null);
+    },
+  );
+
+  it.each([
+    ['sse', 'request'],
+    ['sse', 'reader'],
+    ['office-download', 'request'],
+    ['office-download', 'reader'],
+  ] as const)(
+    'closes the actual unfinished upstream %s response on %s cancellation',
+    async (protocol, cancellation) => {
+      const kind = `${protocol}-${cancellation}`;
+      const path = protocol === 'sse' ? ['v1', 'conversations'] : downloadPath;
       const receipt = Promise.withResolvers<boolean>();
       closed.set(kind, receipt);
       const controller = new AbortController();
       const response = await proxyGet(
-        request(`v1/conversations?kind=${kind}`, { signal: controller.signal }),
-        { params: Promise.resolve({ path: ['v1', 'conversations'] }) },
+        request(`${path.join('/')}?kind=${kind}`, { signal: controller.signal }),
+        { params: Promise.resolve({ path }) },
       );
       const reader = response.body!.getReader();
       try {
-        expect(new TextDecoder().decode((await reader.read()).value)).toBe('data: waiting\n\n');
-        if (kind === 'request') controller.abort('client disconnected');
+        const { value } = await reader.read();
+        expect(Buffer.from(value!)).toEqual(
+          protocol === 'sse' ? Buffer.from('data: waiting\n\n') : officeBytes,
+        );
+        if (cancellation === 'request') controller.abort('client disconnected');
         else await reader.cancel('page closed');
         expect(await receipt.promise).toBe(true);
       } finally {

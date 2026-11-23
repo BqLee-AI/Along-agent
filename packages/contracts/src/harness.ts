@@ -197,6 +197,302 @@ const feishuDocxReadSchema = z
     { message: 'invalid Feishu Docx revision or text bounds' },
   );
 
+const officeVersion = z.string().regex(/^[a-f0-9]{64}$/u);
+const officeText = (max: number, min = 0) =>
+  z
+    .string()
+    .min(min)
+    .max(max)
+    .refine((value) => !/[\uD800-\uDFFF]/u.test(value) && utf8.encode(value).byteLength <= max, {
+      message: 'invalid office UTF-8 text bounds',
+    });
+const officeName = officeText(512, 1);
+const officeSource = z.object({ display_name: officeName, version: officeVersion }).strict();
+const officeFormat = z.enum(['markdown', 'csv']);
+const officeRecordCount = safe.max(5000);
+const officePageOffset = positive.max(4999);
+const officeByteOffset = safe.max(HARNESS_MAX_FRAME_BYTES);
+const officeLine = positive.max(HARNESS_MAX_FRAME_BYTES + 1);
+const officeFormats = z
+  .array(officeFormat)
+  .min(1)
+  .max(2)
+  .refine((formats) => new Set(formats).size === formats.length);
+
+export const OfficeReadNotesInputSchema = z
+  .object({ offset: officeByteOffset.optional() })
+  .strict();
+export const OfficeAnalyzeTasksInputSchema = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('preview') }).strict(),
+  z.object({ action: z.literal('analyze') }).strict(),
+  z
+    .object({
+      action: z.literal('page'),
+      analysis_invocation_id: uuid,
+      after_record: officePageOffset,
+    })
+    .strict(),
+]);
+export const OfficeCreateArtifactsInputSchema = z
+  .object({
+    formats: officeFormats,
+    notes_invocation_ids: z
+      .array(uuid)
+      .min(1)
+      .max(64)
+      .refine((ids) => new Set(ids.map((id) => id.toLowerCase())).size === ids.length)
+      .optional(),
+    analysis_invocation_id: uuid.optional(),
+    interpretation: officeText(8192).optional(),
+  })
+  .strict()
+  .refine(
+    (input) =>
+      (input.notes_invocation_ids !== undefined || input.analysis_invocation_id !== undefined) &&
+      (!input.formats.includes('csv') || input.analysis_invocation_id !== undefined) &&
+      (input.interpretation === undefined ||
+        (input.formats.includes('markdown') && input.notes_invocation_ids !== undefined)),
+    { message: 'invalid sources for office delivery' },
+  );
+
+export const OfficeReadNotesResultSchema = z
+  .object({
+    kind: z.literal('office_read_notes'),
+    source: officeSource,
+    offset: officeByteOffset,
+    start_line: officeLine,
+    end_line: officeLine,
+    total_lines: officeLine,
+    content: officeText(4096),
+    next_offset: officeByteOffset.nullable(),
+  })
+  .strict()
+  .refine(
+    (page) => {
+      const end = page.offset + utf8.encode(page.content).byteLength;
+      return (
+        end <= HARNESS_MAX_FRAME_BYTES &&
+        page.start_line <= page.end_line &&
+        page.end_line <= page.total_lines &&
+        (page.offset !== 0 || page.start_line === 1) &&
+        (page.content.length > 0 || (page.offset === 0 && page.total_lines === 1)) &&
+        (page.next_offset === null
+          ? page.end_line === page.total_lines
+          : page.next_offset === end &&
+            page.next_offset > page.offset &&
+            page.next_offset < HARNESS_MAX_FRAME_BYTES)
+      );
+    },
+    { message: 'invalid office notes coverage' },
+  );
+
+const officeCounts = z
+  .object({
+    total: officeRecordCount,
+    todo: officeRecordCount,
+    in_progress: officeRecordCount,
+    done: officeRecordCount,
+    canceled: officeRecordCount,
+    overdue: officeRecordCount,
+    anomaly_rows: officeRecordCount,
+    missing_owner: officeRecordCount,
+    missing_due_date: officeRecordCount,
+    invalid_due_date: officeRecordCount,
+    invalid_status: officeRecordCount,
+  })
+  .strict()
+  .refine(
+    (counts) =>
+      counts.todo + counts.in_progress + counts.done + counts.canceled + counts.invalid_status ===
+        counts.total &&
+      counts.overdue <= counts.todo + counts.in_progress &&
+      counts.anomaly_rows <= counts.total &&
+      counts.missing_owner <= counts.anomaly_rows &&
+      counts.invalid_status <= counts.anomaly_rows &&
+      counts.missing_due_date + counts.invalid_due_date <= counts.anomaly_rows &&
+      counts.anomaly_rows <=
+        counts.missing_owner +
+          counts.missing_due_date +
+          counts.invalid_due_date +
+          counts.invalid_status,
+  );
+const officeColumns = z.enum(['task_id', 'title', 'owner', 'due_date', 'status']);
+const officeIssue = z
+  .object({
+    code: z.enum([
+      'invalid_utf8',
+      'input_byte_limit',
+      'missing_header',
+      'empty_header',
+      'duplicate_header',
+      'missing_columns',
+      'unexpected_column',
+      'malformed_csv',
+      'record_width',
+      'column_limit',
+      'record_limit',
+      'field_byte_limit',
+      'empty_task_id',
+      'duplicate_task_id',
+    ]),
+    record_number: safe.max(5001).optional(),
+    column_number: positive.max(33).optional(),
+    missing_columns: z
+      .array(officeColumns)
+      .min(1)
+      .max(5)
+      .refine((columns) => new Set(columns).size === columns.length)
+      .optional(),
+  })
+  .strict()
+  .refine((issue) => (issue.code === 'missing_columns') === !!issue.missing_columns);
+const officeAnomaly = z.enum([
+  'missing_owner',
+  'missing_due_date',
+  'invalid_due_date',
+  'invalid_status',
+]);
+const officeField = officeText(192);
+const officeRecord = z
+  .object({
+    record_number: positive.max(5000),
+    task_id: officeText(192, 1),
+    title: officeField,
+    owner: officeField,
+    due_date: officeField,
+    status: officeField,
+    overdue: z.boolean(),
+    anomalies: z
+      .array(officeAnomaly)
+      .max(4)
+      .refine((tags) => new Set(tags).size === tags.length),
+    truncated_fields: z
+      .array(officeColumns)
+      .max(5)
+      .refine((fields) => new Set(fields).size === fields.length),
+  })
+  .strict();
+const officeAnalysisFields = {
+  kind: z.literal('office_analyze_tasks'),
+  source: officeSource,
+  as_of: z
+    .string()
+    .date()
+    .refine((date) => !date.startsWith('0000-')),
+  total_records: officeRecordCount,
+  total_groups: officeRecordCount,
+  totals: officeCounts,
+  groups: z
+    .array(
+      z
+        .object({
+          owner: officeText(192, 1).nullable(),
+          owner_truncated: z.boolean(),
+          totals: officeCounts,
+        })
+        .strict(),
+    )
+    .max(5),
+  records: z.array(officeRecord).max(5),
+  next_after_record: officePageOffset.nullable(),
+};
+export const OfficeAnalyzeTasksResultSchema = z
+  .discriminatedUnion('action', [
+    z
+      .object({
+        kind: z.literal('office_analyze_tasks'),
+        action: z.literal('preview'),
+        source: officeSource,
+        result: z.discriminatedUnion('valid', [
+          z.object({ valid: z.literal(true), total_records: officeRecordCount }).strict(),
+          z
+            .object({
+              valid: z.literal(false),
+              issue: officeIssue,
+              template: z.literal('task_id,title,owner,due_date,status\r\n'),
+            })
+            .strict(),
+        ]),
+      })
+      .strict(),
+    z
+      .object({ ...officeAnalysisFields, action: z.literal('analyze'), after_record: z.literal(0) })
+      .strict(),
+    z
+      .object({
+        ...officeAnalysisFields,
+        action: z.literal('page'),
+        after_record: officePageOffset,
+      })
+      .strict(),
+  ])
+  .refine(
+    (page) => {
+      if (page.action === 'preview') return true;
+      const end = page.after_record + page.records.length;
+      return (
+        page.total_groups <= page.total_records &&
+        (page.total_records === 0 || page.total_groups > 0) &&
+        page.total_records === page.totals.total &&
+        end <= page.total_records &&
+        (page.total_records === 0 || page.records.length > 0) &&
+        page.groups.length === Math.max(0, Math.min(end, page.total_groups) - page.after_record) &&
+        page.groups.every(
+          ({ owner, owner_truncated, totals }) =>
+            totals.total > 0 &&
+            totals.total <= page.total_records &&
+            (owner !== null || !owner_truncated),
+        ) &&
+        page.records.every(
+          (record, index) => record.record_number === page.after_record + index + 1,
+        ) &&
+        page.next_after_record === (end < page.total_records ? end : null)
+      );
+    },
+    { message: 'invalid office analysis coverage' },
+  );
+
+export const OfficeCreateArtifactsResultSchema = z
+  .object({
+    kind: z.literal('office_create_artifacts'),
+    artifacts: z
+      .array(
+        z
+          .object({
+            artifact_id: uuid,
+            format: officeFormat,
+            filename: officeName,
+            size_bytes: positive.max(2 * HARNESS_MAX_FRAME_BYTES),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(2),
+  })
+  .strict()
+  .refine(
+    ({ artifacts }) =>
+      new Set(artifacts.map(({ artifact_id }) => artifact_id.toLowerCase())).size ===
+        artifacts.length &&
+      new Set(artifacts.map(({ format }) => format)).size === artifacts.length,
+    { message: 'duplicate office artifact ID or format' },
+  );
+const officeDeliveryReceipt = z
+  .object({
+    status: z.literal('ok'),
+    result: OfficeCreateArtifactsResultSchema,
+  })
+  .strict();
+
+const officeInputs = {
+  office_read_notes: OfficeReadNotesInputSchema,
+  office_analyze_tasks: OfficeAnalyzeTasksInputSchema,
+  office_create_artifacts: OfficeCreateArtifactsInputSchema,
+} as const;
+function isOfficeTool(name: string): name is keyof typeof officeInputs {
+  return Object.hasOwn(officeInputs, name);
+}
+
 export const HarnessToolPayloadSchema = z.union([
   z
     .object({
@@ -339,6 +635,9 @@ export const HarnessToolPayloadSchema = z.union([
     .strict(),
   HarnessMemorySourceSchema,
   feishuDocxReadSchema,
+  OfficeReadNotesResultSchema,
+  OfficeAnalyzeTasksResultSchema,
+  OfficeCreateArtifactsResultSchema,
   taskCreatedSchema,
   z.object({ kind: z.literal('effect_evidence'), evidence_ref: small }).strict(),
   z
@@ -433,25 +732,36 @@ const projectedSource = z
     },
     { message: 'invalid projected source range or provenance' },
   );
-export const HarnessObservationSchema = z.discriminatedUnion('view', [
-  z
-    .object({
-      view: z.literal('full'),
-      invocation_id: uuid,
-      tool_id: reference,
-      result: HarnessToolResultSchema,
-    })
-    .strict(),
-  z
-    .object({
-      view: z.literal('projected'),
-      invocation_id: uuid,
-      tool_id: reference,
-      outcome: z.literal('ok'),
-      source: projectedSource,
-    })
-    .strict(),
-]);
+export const HarnessObservationSchema = z
+  .discriminatedUnion('view', [
+    z
+      .object({
+        view: z.literal('full'),
+        invocation_id: uuid,
+        tool_id: reference,
+        result: HarnessToolResultSchema,
+      })
+      .strict(),
+    z
+      .object({
+        view: z.literal('projected'),
+        invocation_id: uuid,
+        tool_id: reference,
+        outcome: z.literal('ok'),
+        source: projectedSource,
+      })
+      .strict(),
+  ])
+  .refine(
+    (observation) => {
+      const officeTool = isOfficeTool(observation.tool_id);
+      if (observation.view === 'projected') return !officeTool;
+      if (observation.result.status !== 'ok') return true;
+      const kind = observation.result.result.kind;
+      return (!officeTool && !isOfficeTool(kind)) || kind === observation.tool_id;
+    },
+    { message: 'office observations require a full result from the matching tool' },
+  );
 export const ExecutionKindSchema = z.enum(['business', 'harness']);
 export const RunStatusSchema = z.enum([
   'running',
@@ -799,6 +1109,14 @@ export const HarnessRequestSchema = z
       .strict(),
   ])
   .superRefine((value, context) => {
+    if (
+      (value.type === 'reserve' || value.type === 'invoke') &&
+      isOfficeTool(value.tool_id) &&
+      (value.protocol !== HARNESS_CONTEXT_PROTOCOL_VERSION ||
+        !officeInputs[value.tool_id].safeParse(value.args).success)
+    ) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: 'invalid office invocation frame' });
+    }
     if (value.type === 'context_preview' && value.protocol !== HARNESS_CONTEXT_PROTOCOL_VERSION) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
@@ -899,6 +1217,22 @@ export const HarnessStartSchema = z
   )
   .refine(
     (start) =>
+      start.tools.every((tool) => !isOfficeTool(tool.name)) &&
+      start.observations.every((observation) => !isOfficeTool(observation.tool_id)) &&
+      (!start.trusted_context?.continuation ||
+        !('receipts' in start.trusted_context.continuation) ||
+        (start.trusted_context.continuation.receipts.every(
+          ({ tool_id }) => !isOfficeTool(tool_id),
+        ) &&
+          !isOfficeTool(start.trusted_context.continuation.source_result?.tool_id ?? ''))) &&
+      (start.snapshot?.version !== 3 ||
+        start.snapshot.native_state.units.every(
+          ({ observation }) => !isOfficeTool(observation.tool_id),
+        )),
+    { message: 'office tools and observations require harness/v8' },
+  )
+  .refine(
+    (start) =>
       start.tools.every((tool) => tool.name !== 'read_memory_source') &&
       start.observations.every(
         (observation) =>
@@ -938,6 +1272,71 @@ export const HarnessR3ContextStartSchema = z
   })
   .strict()
   .superRefine((start, ctx) => {
+    const continuation = start.trusted_context?.continuation;
+    const prior = continuation && 'receipts' in continuation ? continuation : null;
+    const carried = prior?.receipts.filter(({ tool_id }) => isOfficeTool(tool_id)) ?? [];
+    const receipt = carried[0];
+    const carriedDelivery =
+      carried.length === 1 &&
+      receipt?.tool_id === 'office_create_artifacts' &&
+      officeDeliveryReceipt.safeParse(receipt.result).success &&
+      prior?.goal_result?.outcomes.some(
+        ({ status, receipt_refs }) =>
+          status === 'achieved' && receipt_refs.includes(receipt.invocation_id),
+      ) === true;
+    if (
+      (carried.length !== 0 && !carriedDelivery) ||
+      isOfficeTool(prior?.source_result?.tool_id ?? '')
+    ) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'invalid continued office receipt' });
+    }
+    const officeNames = new Set(start.tools.map(({ name }) => name).filter(isOfficeTool));
+    const officeRun = officeNames.size > 0 || carriedDelivery;
+    if (
+      officeRun &&
+      (start.trusted_context?.execution_lifecycle !== 'server-owned' ||
+        start.trusted_context.workspaces.length !== 0 ||
+        start.workspace != null ||
+        start.approval !== null ||
+        start.snapshot?.waiting != null ||
+        (carriedDelivery
+          ? officeNames.size !== 0
+          : !officeNames.has('office_read_notes') && !officeNames.has('office_analyze_tasks')) ||
+        start.tools.some(
+          ({ name }) =>
+            !isOfficeTool(name) && name !== 'get_user_prefs' && name !== 'create_reminder',
+        ))
+    ) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'invalid frozen office tool scope' });
+    }
+    const savedUnits = start.snapshot?.native_state.units ?? [];
+    if (officeRun) {
+      const frozenTools = new Set(start.tools.map(({ name }) => name));
+      if (
+        frozenTools.size !== start.tools.length ||
+        start.observations.some(
+          ({ tool_id, view }) => !frozenTools.has(tool_id) || view !== 'full',
+        ) ||
+        start.observations.length !== savedUnits.length ||
+        savedUnits.some(
+          ({ observation }, index) =>
+            JSON.stringify(observation) !== JSON.stringify(start.observations[index]),
+        )
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'missing or changed frozen office observation',
+        });
+      }
+    } else if (
+      start.observations.some(({ tool_id }) => isOfficeTool(tool_id)) ||
+      savedUnits.some(({ observation }) => isOfficeTool(observation.tool_id))
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'office observation has no frozen tool scope',
+      });
+    }
     if (
       start.mode === 'measure_only' &&
       (!start.snapshot || start.snapshot.waiting !== null || start.approval !== null)

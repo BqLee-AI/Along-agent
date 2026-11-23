@@ -8,6 +8,7 @@ import { ArrowDown, Bell, Files, Info, MessageSquareText, PanelLeftOpen, Plus } 
 import { Button } from '@lorelum/lumen-ui/components/button';
 import { AnimatePresence, m, useReducedMotion } from 'motion/react';
 import type { TaskIntent } from '../model/task';
+import type { OfficeSession } from '../model/office-materials';
 import { conversationHref, runStatusLabel } from '../model/conversation-run';
 import { useConversationTask } from '../viewmodel/use-conversation-task';
 import { useConversationPresentation } from '../viewmodel/use-conversation-presentation';
@@ -25,6 +26,8 @@ export interface ConversationPaneProps {
   conversationId?: string | null;
   runId?: string | null;
   initialIntent?: TaskIntent | null;
+  officeSession?: OfficeSession;
+  officeHistoryCsrf?: string | null;
   headerActions?: ReactNode;
   /** Shows the persistent conversation list on wide screens. */
   sidebar?: boolean;
@@ -34,10 +37,17 @@ export default function ConversationPane({
   conversationId = null,
   runId = null,
   initialIntent = 'chat',
+  officeSession,
+  officeHistoryCsrf = null,
   headerActions,
   sidebar = false,
 }: ConversationPaneProps) {
-  const task = useConversationTask({ conversationId, runId, initialIntent });
+  const task = useConversationTask({
+    conversationId,
+    runId,
+    initialIntent,
+    ...(officeSession ? { officeSession } : {}),
+  });
   const history = useConversationHistory();
   const { entries, blockedRuns, context, needsAction, showReminderResult } =
     useConversationPresentation(task);
@@ -190,6 +200,9 @@ export default function ConversationPane({
                         },
                         { intent: 'reminder', title: '安排提醒', input: '', icon: Bell },
                         { intent: 'document', title: '处理资料', input: '', icon: Files },
+                        ...(task.office
+                          ? [{ intent: 'office', title: '上传会话资料', input: '', icon: Files }]
+                          : []),
                       ].map(({ intent, title, input, icon: Icon }) => (
                         <button
                           key={intent}
@@ -255,6 +268,7 @@ export default function ConversationPane({
                 entries={entries}
                 needsAction={needsAction}
                 showReminderResult={showReminderResult}
+                officeHistoryCsrf={officeHistoryCsrf}
               />
             </div>
           </div>

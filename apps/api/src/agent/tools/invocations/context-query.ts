@@ -4,8 +4,9 @@ import {
   type HarnessObservation,
 } from '@along/contracts';
 import type { PoolClient } from 'pg';
-import { ApplicationError } from '../../../platform/errors.js';
+import { ApplicationError, forbidden } from '../../../platform/errors.js';
 import type { ToolContext } from '../contracts.js';
+import { isOfficeToolId } from '../contracts.js';
 import { resultKind } from '../result-schema.js';
 import {
   readAcceptedInvocationResult,
@@ -27,10 +28,18 @@ export async function readRunContextObservations(
   options: { project: boolean },
 ): Promise<HarnessObservation[]> {
   const metadata = await readContextSourceMetadata(client, ctx, invocationIds);
+  let officeLeaseVerified = false;
   const observations: HarnessObservation[] = [];
   for (const invocationId of invocationIds) {
     const row = metadata.get(invocationId);
     if (!row || row.state !== 'completed') throw contextSourceCorrupt();
+    if (isOfficeToolId(row.tool_id) && !officeLeaseVerified) {
+      if (!ctx.ownership) throw forbidden('office Run ownership required');
+      // Resume admission validates the snapshot before inserting its next
+      // attempt. The transaction already owns the Run's advisory lease.
+      await ctx.ownership.assert(client, ctx.runId);
+      officeLeaseVerified = true;
+    }
     authorizeContextSource(ctx, row);
     if (row.result_version !== 1 || !row.shape_valid) throw contextSourceCorrupt();
     await authorizeSliceOrigin(client, ctx, row, metadata);
@@ -53,8 +62,12 @@ export async function readRunContextObservations(
     } else {
       try {
         const accepted = (
-          await client.query<{ accepted_result: unknown; approval_id: string | null }>(
-            `SELECT accepted_result,approval_id FROM tool_invocations
+          await client.query<{
+            accepted_result: unknown;
+            approval_id: string | null;
+            accepted_attempt_id: string | null;
+          }>(
+            `SELECT accepted_result,approval_id,accepted_attempt_id FROM tool_invocations
            WHERE invocation_id=$1 AND owner_id=$2 AND conversation_id=$3 AND run_id=$4
              AND state='completed'`,
             [invocationId, ctx.ownerId, ctx.conversationId, ctx.runId],

@@ -20,7 +20,7 @@ export function selectResumeRequest(
   return previous && ['running', 'suspended_approval'].includes(run.status) ? previous : null;
 }
 
-export type TaskIntent = 'chat' | 'reminder' | 'document';
+export type TaskIntent = 'chat' | 'reminder' | 'document' | 'office';
 /** Compact is a control command, including malformed arguments, never a message. */
 export function compactCommand(text: string): 'compact' | 'invalid' | null {
   const value = text.trim();
@@ -41,7 +41,7 @@ export function taskAdmission(intent: TaskIntent): {
   execution: ExecutionKind;
   authorization_revision?: 'delegation/1';
 } {
-  return intent === 'chat'
+  return intent === 'chat' || intent === 'office'
     ? { execution: 'harness', authorization_revision: 'delegation/1' }
     : { execution: intent === 'reminder' ? 'business' : 'harness' };
 }

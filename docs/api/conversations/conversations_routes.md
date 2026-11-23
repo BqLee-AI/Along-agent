@@ -14,14 +14,20 @@
 
 ## 1. 路由
 
-| 方法 | 路径                                             | 鉴权 | CSRF | 幂等键      | 说明                             |
-| ---- | ------------------------------------------------ | ---- | ---- | ----------- | -------------------------------- |
-| POST | `/conversations/messages`                        | 是   | 是   | body 或头部 | 默认 business，显式 harness；SSE |
-| GET  | `/conversations/{id}`                            | 是   | 否   | —           | 只读已存外部事件                 |
-| GET  | `/conversations/{cid}/runs/{rid}`                | 是   | 否   | —           | 当前 Run/attempt/等待引用        |
-| GET  | `/conversations/{cid}/runs/{rid}/events`         | 是   | 否   | —           | 按游标只读跟随已持久事件         |
-| POST | `/conversations/{cid}/runs/{rid}/actions/cancel` | 是   | 是   | strict body | 先持久取消，再收回执行           |
-| POST | `/conversations/{cid}/runs/{rid}/actions/resume` | 是   | 是   | strict body | 仅显式继续有效批准等待点；SSE    |
+| 方法 | 路径                                                     | 鉴权 | CSRF | 幂等键      | 说明                               |
+| ---- | -------------------------------------------------------- | ---- | ---- | ----------- | ---------------------------------- |
+| POST | `/conversations/messages`                                | 是   | 是   | body 或头部 | 默认 business，显式 harness；SSE   |
+| GET  | `/conversations/{id}`                                    | 是   | 否   | —           | 只读已存外部事件                   |
+| GET  | `/conversations/{cid}/runs/{rid}`                        | 是   | 否   | —           | 当前 Run/attempt/等待引用          |
+| GET  | `/conversations/{cid}/runs/{rid}/events`                 | 是   | 否   | —           | 按游标只读跟随已持久事件           |
+| POST | `/conversations/{cid}/runs/{rid}/actions/cancel`         | 是   | 是   | strict body | 先持久取消，再收回执行             |
+| POST | `/conversations/{cid}/runs/{rid}/actions/resume`         | 是   | 是   | strict body | 仅显式继续有效批准等待点；SSE      |
+| GET  | `/conversations/office-capabilities`                     | 是   | 否   | —           | 当前服务是否允许新办公资料接纳     |
+| POST | `/conversations/attachments`                             | 是   | 是   | 头部        | 按草稿暂存一份办公文件             |
+| POST | `/conversations/attachments/{id}/actions/revoke`         | 是   | 是   | —           | 撤销办公原件及受影响产物的后续读取 |
+| GET  | `/conversations/{cid}/runs/{rid}/artifacts/{id}/content` | 是   | 否   | —           | 下载真实可用产物                   |
+
+办公接纳默认关闭。`office-capabilities` 返回 `admission_enabled`：仅当服务端启用 `ALONG_NATIVE_OFFICE_ADMISSION=1`、配置有效的 32 字节 Base64 `ALONG_OFFICE_OBSERVATION_KEY` 且数据库池可用时为 true。此字段不是 Run 接纳承诺；发送时仍重新校验身份、会话、材料和密钥。关闭接纳不关闭已有历史、下载或撤销。Run 历史的 `office_materials` 包含授权的资料与产物元数据；`reminder` 仅在实际创建记录存在时返回任务及当前状态，否则为 `unconfirmed`，不从缺少记录推断用户未请求。细节见 [design/24](../../design/24-native-office-delivery.md)。
 
 ## 2. POST /conversations/messages [Required]
 

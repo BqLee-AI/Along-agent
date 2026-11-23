@@ -24,6 +24,7 @@ import type { ConversationTask } from '@/features/conversations/viewmodel/use-co
 import { composerBlockedReason } from '../model/presentation';
 import { useComposerDisplay } from '../viewmodel/use-composer-display';
 import { AssistantMarkdown } from './assistant-markdown';
+import { OfficeMaterialsFields } from './office-materials-fields';
 
 export function ScopePaths({ title, paths }: { title: string; paths: readonly string[] }) {
   return (
@@ -512,7 +513,8 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
     ? task.compactAvailable
       ? null
       : '当前压缩请求尚不可提交。'
-    : composerBlockedReason({
+    : ((task.intent === 'office' && !task.active ? task.eligibility.reason : null) ??
+      composerBlockedReason({
         effectsUnknown: task.effectsUnknown,
         reading: task.reading,
         run: task.run,
@@ -520,7 +522,7 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
         ambiguous: Boolean(task.ambiguousProposal && !task.foldChoice),
         active: task.active,
         eligibilityReason: task.eligibility.reason,
-      });
+      }));
   return (
     <section
       className="flex max-h-[min(460px,calc(100dvh-14rem))] min-h-0 min-w-0 flex-col gap-2 overflow-y-auto p-1 text-sm leading-[22px]"
@@ -625,6 +627,9 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
         }}
       >
         <div className="max-h-[32dvh] min-h-0 space-y-3 overflow-y-auto overscroll-contain">
+          {task.intent === 'office' && task.office ? (
+            <OfficeMaterialsFields draft={task.office} disabled={task.active} />
+          ) : null}
           {task.intent !== 'chat' ? (
             <div className="flex flex-wrap items-center gap-2">
               <span
@@ -636,7 +641,11 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
                 ) : (
                   <Files className="size-4" aria-hidden="true" />
                 )}
-                {task.intent === 'reminder' ? '创建提醒' : '处理资料'}
+                {task.intent === 'reminder'
+                  ? '创建提醒'
+                  : task.intent === 'office'
+                    ? '上传会话资料'
+                    : '处理资料'}
                 <Button
                   type="button"
                   variant="clear"
@@ -789,7 +798,7 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
           submitOnEnter={false}
           className="max-h-48 min-h-14 resize-none border-0 bg-transparent! px-2 py-1.5 text-[15px] leading-6 shadow-none! outline-none ring-0! focus-visible:ring-0 md:text-[15px]"
           placeholder={
-            task.intent === 'document'
+            task.intent === 'document' || task.intent === 'office'
               ? '你希望如何处理这些资料？'
               : task.intent === 'reminder'
                 ? '你希望什么时候提醒什么？'
@@ -797,7 +806,7 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
           }
           value={task.input}
           disabled={task.sendUncertain}
-          aria-describedby={`task-send-reason${task.intent === 'reminder' ? ' task-help' : ''}${task.error ? ' task-form-error' : ''}`}
+          aria-describedby={`task-send-reason${task.intent === 'reminder' ? ' task-help' : ''}${task.intent === 'office' && task.office ? ' office-materials-help' : ''}${task.error ? ' task-form-error' : ''}`}
           onChange={(event) => task.setInput(event.target.value)}
           onCompositionStart={() => {
             composing.current = true;
@@ -848,6 +857,9 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
                 [
                   { value: 'reminder', label: '创建提醒', icon: Bell },
                   { value: 'document', label: '处理资料', icon: Files },
+                  ...(task.office
+                    ? ([{ value: 'office', label: '上传会话资料', icon: Files }] as const)
+                    : []),
                   { value: 'chat', label: '普通对话', icon: MessageSquare },
                 ] as const
               ).map(({ value, label, icon: Icon }) => (

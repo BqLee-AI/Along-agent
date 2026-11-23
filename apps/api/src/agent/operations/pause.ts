@@ -163,6 +163,9 @@ export async function continueConversationPause(
           pause.purpose !== 'none'
         )
           throw stateConflict('Run has no matching user pause');
+        const attemptId = randomUUID();
+        const context = await contextOf(client, deps, locked.run, attemptId, requestId);
+        if (ownership) context.ownership = ownership;
         const payload = await decodeRunSnapshot(
           client,
           {
@@ -199,9 +202,6 @@ export async function continueConversationPause(
           throw new ApplicationError(429, 'BUDGET_EXCEEDED', '原运行预算已用完，不能继续。');
         for (const grant of locked.run.frozen_context.workspaceGrants ?? [])
           validateWorkspaceGrant(ownerId, grant);
-        const attemptId = randomUUID();
-        const context = await contextOf(client, deps, locked.run, attemptId, requestId);
-        if (ownership) context.ownership = ownership;
         if (snapshot.version === 4) {
           await validateR3SnapshotContext(client, context, snapshot);
           context.r3Context = snapshot.context;

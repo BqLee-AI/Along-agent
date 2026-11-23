@@ -27,6 +27,8 @@ import {
 import { isActiveOwner } from '../../identity/public.js';
 import { withClient } from '../../../db/transaction.js';
 import { getRunSelections } from '../../model-providers/public.js';
+import { createOfficeStorage } from '../../native-office/public.js';
+import { readOfficeReminderStatuses } from '../../tasks/public.js';
 
 async function requireEligibleHistoryOwner(pool: Pool, ownerId: string): Promise<void> {
   const client = await pool.connect();
@@ -205,6 +207,13 @@ export async function getConversationRuns(
       rows.slice(0, limit).map((row) => row.run_id),
     ),
   );
+  const materials = await createOfficeStorage(pool).listRunMaterials(
+    ownerId,
+    rows.slice(0, limit).map((row) => row.run_id),
+  );
+  const reminders = await readOfficeReminderStatuses(pool, ownerId, [
+    ...new Set([...materials.values()].map((material) => material.scopeRunId)),
+  ]);
   const items = rows.slice(0, limit).map((row) => ({
     run_id: row.run_id,
     conversation_id: row.conversation_id,
@@ -217,6 +226,41 @@ export async function getConversationRuns(
         : { state: 'legacy_unavailable' as const }),
     created_at: row.created_at,
     ended_at: row.ended_at,
+    ...(materials.has(row.run_id)
+      ? {
+          office_materials: {
+            inputs: materials.get(row.run_id)!.inputs.map((input) => ({
+              role: input.role,
+              attachment_id: input.attachmentId,
+              filename: input.filename,
+              format: input.format,
+              byte_length: input.sizeBytes,
+              expires_at: input.expiresAt,
+              status: input.status,
+            })),
+            artifacts: materials.get(row.run_id)!.artifacts.map((artifact) => ({
+              artifact_id: artifact.artifactId,
+              run_id: artifact.runId,
+              filename: artifact.filename,
+              format: artifact.format,
+              byte_length: artifact.sizeBytes,
+              expires_at: artifact.expiresAt,
+              status: artifact.status,
+              download_url:
+                artifact.status === 'available'
+                  ? `/api/v1/conversations/${conversationId}/runs/${artifact.runId}/artifacts/${artifact.artifactId}/content`
+                  : null,
+            })),
+            reminder: reminders.has(materials.get(row.run_id)!.scopeRunId)
+              ? {
+                  state: 'created' as const,
+                  task_id: reminders.get(materials.get(row.run_id)!.scopeRunId)!.taskId,
+                  current_status: reminders.get(materials.get(row.run_id)!.scopeRunId)!.state,
+                }
+              : { state: 'unconfirmed' as const },
+          },
+        }
+      : {}),
     original: row.original,
   }));
   const last = items.at(-1);

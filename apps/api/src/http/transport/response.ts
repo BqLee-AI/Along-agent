@@ -42,7 +42,7 @@ export async function writeWebResponse(response: Response, res: ServerResponse):
     await pipeEventStream(response, res);
     return;
   }
-  const payload = await response.text();
+  const payload = Buffer.from(await response.arrayBuffer());
   const headers: Record<string, string | string[]> = Object.fromEntries(response.headers.entries());
   const cookies = response.headers.getSetCookie();
   if (cookies.length) headers['set-cookie'] = cookies;

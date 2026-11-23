@@ -9,6 +9,13 @@ import {
   HarnessPauseSnapshotSchema,
   HarnessR3ContextStartSchema,
   HarnessStartSchema,
+  HarnessObservationSchema,
+  OfficeAnalyzeTasksInputSchema,
+  OfficeAnalyzeTasksResultSchema,
+  OfficeCreateArtifactsInputSchema,
+  OfficeCreateArtifactsResultSchema,
+  OfficeReadNotesInputSchema,
+  OfficeReadNotesResultSchema,
   HarnessToolPayloadSchema,
   RunViewSchema,
 } from '../src/harness.js';
@@ -505,5 +512,192 @@ describe('v8 memory source compatibility', () => {
         HarnessStartSchema.safeParse({ ...start, protocol, observations: [observation] }).success,
       ).toBe(false);
     }
+  });
+});
+
+describe('native office tool wire', () => {
+  const source = { display_name: '纪要.txt', version: 'a'.repeat(64) };
+  const notes = {
+    kind: 'office_read_notes',
+    source,
+    offset: 0,
+    start_line: 1,
+    end_line: 1,
+    total_lines: 2,
+    content: '甲',
+    next_offset: 3,
+  };
+  const notesArgs = { offset: 3 };
+  const artifact = {
+    artifact_id: approvalId,
+    format: 'markdown',
+    filename: 'report.md',
+    size_bytes: 42,
+  };
+  const result = { kind: 'office_create_artifacts', artifacts: [artifact] };
+  const totals = {
+    total: 1,
+    todo: 1,
+    in_progress: 0,
+    done: 0,
+    canceled: 0,
+    overdue: 1,
+    anomaly_rows: 0,
+    missing_owner: 0,
+    missing_due_date: 0,
+    invalid_due_date: 0,
+    invalid_status: 0,
+  };
+  const analysis = {
+    kind: 'office_analyze_tasks',
+    action: 'analyze',
+    source,
+    as_of: '2028-02-29',
+    after_record: 0,
+    total_records: 1,
+    total_groups: 1,
+    totals,
+    groups: [{ owner: '甲', owner_truncated: false, totals }],
+    records: [
+      {
+        record_number: 1,
+        task_id: '001',
+        title: 'review',
+        owner: '甲',
+        due_date: '2028-02-28',
+        status: 'todo',
+        overdue: true,
+        anomalies: [],
+        truncated_fields: [],
+      },
+    ],
+    next_after_record: null,
+  };
+
+  it('admits only bounded inputs for the selected action and source roles', () => {
+    expect(OfficeReadNotesInputSchema.safeParse({}).success).toBe(true);
+    expect(OfficeReadNotesInputSchema.safeParse(notesArgs).success).toBe(true);
+    for (const args of [
+      { ...notesArgs, attachment_id: taskId },
+      { offset: -1 },
+      { offset: 1_048_577 },
+    ]) {
+      expect(OfficeReadNotesInputSchema.safeParse(args).success).toBe(false);
+    }
+    const page = { action: 'page', analysis_invocation_id: invocationId, after_record: 1 };
+    expect(OfficeAnalyzeTasksInputSchema.safeParse(page).success).toBe(true);
+    for (const args of [
+      { ...page, as_of: '2028-02-29' },
+      { ...page, after_record: 0 },
+      { action: 'page' },
+    ]) {
+      expect(OfficeAnalyzeTasksInputSchema.safeParse(args).success).toBe(false);
+    }
+    const delivery = {
+      formats: ['markdown', 'csv'],
+      notes_invocation_ids: [approvalId],
+      analysis_invocation_id: invocationId,
+    };
+    expect(
+      OfficeCreateArtifactsInputSchema.safeParse({ ...delivery, interpretation: '观察' }).success,
+    ).toBe(true);
+    for (const args of [
+      { formats: ['csv'], notes_invocation_ids: [taskId] },
+      { ...delivery, formats: ['markdown', 'markdown'] },
+      { ...delivery, notes_invocation_ids: [taskId, taskId] },
+      { ...delivery, notes_invocation_ids: [], interpretation: 'text' },
+      { ...delivery, interpretation: '甲'.repeat(3000) },
+      { ...delivery, content: 'raw artifact' },
+    ]) {
+      expect(OfficeCreateArtifactsInputSchema.safeParse(args).success).toBe(false);
+    }
+  });
+
+  it('validates byte bounds, coverage, sources and artifact metadata without accepting raw bytes', () => {
+    for (const payload of [notes, result, analysis]) {
+      expect(HarnessToolPayloadSchema.safeParse(payload).success).toBe(true);
+    }
+    for (const payload of [
+      { ...notes, next_offset: 1 },
+      { ...notes, next_offset: null },
+      { ...notes, source: { ...source, path: '/host/secret.txt' } },
+      { ...notes, content: '甲'.repeat(1500), next_offset: 4500 },
+      { ...notes, content: '\ud800', next_offset: 3 },
+    ]) {
+      expect(OfficeReadNotesResultSchema.safeParse(payload).success).toBe(false);
+    }
+    const preview = {
+      kind: 'office_analyze_tasks',
+      action: 'preview',
+      source,
+      result: {
+        valid: false,
+        issue: { code: 'missing_columns', record_number: 0, missing_columns: ['due_date'] },
+        template: 'task_id,title,owner,due_date,status\r\n',
+      },
+    };
+    expect(OfficeAnalyzeTasksResultSchema.safeParse(preview).success).toBe(true);
+    const page = {
+      ...analysis,
+      action: 'page',
+      after_record: 1,
+      total_records: 2,
+      totals: { ...totals, total: 2, todo: 2 },
+      groups: [],
+      records: [{ ...analysis.records[0], record_number: 2 }],
+    };
+    expect(OfficeAnalyzeTasksResultSchema.safeParse(page).success).toBe(true);
+    for (const payload of [
+      { ...analysis, as_of: '2026-02-29' },
+      { ...analysis, total_records: 2 },
+      { ...analysis, totals: { ...totals, invalid_status: 1 } },
+      { ...analysis, records: [{ ...analysis.records[0], record_number: 2 }] },
+      { ...analysis, records: [{ ...analysis.records[0], status: '甲'.repeat(65) }] },
+      { ...analysis, next_after_record: 1 },
+      { ...preview, result: { ...preview.result, raw: 'source bytes' } },
+    ]) {
+      expect(OfficeAnalyzeTasksResultSchema.safeParse(payload).success).toBe(false);
+    }
+    for (const artifacts of [
+      [{ ...artifact, bytes: 'YWJj' }],
+      [{ ...artifact, url: 'https://invalid.example/report' }],
+      [artifact, { ...artifact, format: 'csv' }],
+      [artifact, { ...artifact, artifact_id: taskId }],
+    ]) {
+      expect(OfficeCreateArtifactsResultSchema.safeParse({ ...result, artifacts }).success).toBe(
+        false,
+      );
+    }
+    expect(
+      HarnessObservationSchema.safeParse({
+        view: 'full',
+        invocation_id: invocationId,
+        tool_id: 'get_user_prefs',
+        result: { status: 'ok', result: notes },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('does not add office authority to old wire versions or arbitrary reserve frames', () => {
+    const tool_id = 'office_read_notes';
+    const tools = [{ name: tool_id, description: 'read', parameters: {}, risk: 'low' }];
+    for (const protocol of ['harness/v6', 'harness/v7']) {
+      expect(HarnessStartSchema.safeParse({ ...start, protocol, tools }).success).toBe(false);
+    }
+    const request = {
+      protocol: 'harness/v8',
+      type: 'reserve',
+      request_ref: 'r1',
+      call_key: 'harness/1',
+      tool_id,
+      args: notesArgs,
+    };
+    expect(HarnessRequestSchema.safeParse(request).success).toBe(true);
+    expect(HarnessRequestSchema.safeParse({ ...request, protocol: 'harness/v7' }).success).toBe(
+      false,
+    );
+    expect(
+      HarnessRequestSchema.safeParse({ ...request, args: { url: 'file:///tmp/private' } }).success,
+    ).toBe(false);
   });
 });

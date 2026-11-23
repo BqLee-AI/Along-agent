@@ -15,6 +15,7 @@ import type { HarnessProcessServices } from '../harness/harness-process.js';
 import type { RoutingRuntime } from '../routing/index.js';
 import type { RunOwnership } from './run-ownership.js';
 import type { FeishuBotDocxGrant } from '../../features/office-connectors/public.js';
+import type { OfficeFrozenInput } from '../../features/native-office/public.js';
 
 export interface HarnessServices extends HarnessProcessServices {
   maxIterations: number;
@@ -29,6 +30,8 @@ export interface HarnessServices extends HarnessProcessServices {
 /** Process execution augments frozen conversation facts, never the reverse. */
 export interface RunContext extends Omit<RunFacts, 'ownership'> {
   feishuDocx?: { connectionId: string; sessionId: string; url: string } | FeishuBotDocxGrant;
+  officeMaterials?: OfficeFrozenInput[];
+  officeSessionId?: string;
   ownership?: RunOwnership;
 }
 

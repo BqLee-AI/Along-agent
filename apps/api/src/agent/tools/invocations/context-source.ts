@@ -12,6 +12,9 @@ import { validateWorkspaceGrant } from '../../../features/workspaces/public.js';
 import { isActiveOwner } from '../../../features/identity/public.js';
 import { hydrateWorkspaceReadResult, requireCurrentFeishuBotAuthority } from './accepted-result.js';
 import type { ToolContext } from '../contracts.js';
+import { isOfficeToolId } from '../contracts.js';
+import { assertOfficeToolAuthority } from '../office/authority.js';
+import { OFFICE_OBSERVATION_ENCODING } from '../office/observations.js';
 
 export function contextSourceCorrupt(): ApplicationError {
   return new ApplicationError(422, 'HARNESS_PROTOCOL_ERROR', '原接受工具来源缺失或损坏。');
@@ -53,8 +56,12 @@ export async function readContextSourceMetadata(
   if (invocationIds.length === 0) return new Map();
   const { rows } = await client.query<ContextSourceMetadata>(
     `SELECT invocation_id,tool_id,state,result_version,outcome_kind,frozen_context,
-       CASE WHEN accepted_result->>'encoding' IN ('feishu-aead/1','feishu-aead/2') THEN 'ok' ELSE accepted_result->>'status' END AS result_status,
-       CASE WHEN accepted_result->>'encoding' IN ('feishu-aead/1','feishu-aead/2') THEN 'feishu_docx_read' ELSE p->>'kind' END AS kind,
+       CASE WHEN accepted_result->>'encoding' IN ('feishu-aead/1','feishu-aead/2','${OFFICE_OBSERVATION_ENCODING}')
+         THEN 'ok' ELSE accepted_result->>'status' END AS result_status,
+       CASE
+         WHEN accepted_result->>'encoding' IN ('feishu-aead/1','feishu-aead/2') THEN 'feishu_docx_read'
+         WHEN accepted_result->>'encoding'='${OFFICE_OBSERVATION_ENCODING}' THEN tool_id
+         ELSE p->>'kind' END AS kind,
        CASE p->>'kind'
          WHEN 'read' THEN (p-'content') || jsonb_build_object('content_total',char_length(p->>'content'))
          WHEN 'list' THEN (p-ARRAY['entries','failures']) || jsonb_build_object(
@@ -65,14 +72,20 @@ export async function readContextSourceMetadata(
            'failures_total',CASE WHEN jsonb_typeof(p->'failures')='array' THEN jsonb_array_length(p->'failures') END)
          WHEN 'context_slice' THEN p-ARRAY['content','items']
          ELSE NULL END AS source,
-       CASE WHEN coalesce(accepted_result->>'encoding','') NOT IN ('feishu-aead/1','feishu-aead/2')
+       CASE WHEN coalesce(accepted_result->>'encoding','') NOT IN ('feishu-aead/1','feishu-aead/2','${OFFICE_OBSERVATION_ENCODING}')
          AND (accepted_result ? 'encoding' OR accepted_result ? 'data')
          THEN accepted_result ELSE NULL END AS encoded_result,
        CASE WHEN p->>'kind'='context_slice' THEN
          CASE WHEN jsonb_typeof(p->'content')='string' THEN char_length(p->>'content')
            WHEN jsonb_typeof(p->'items')='array' THEN jsonb_array_length(p->'items') END END AS slice_length,
-       coalesce((CASE WHEN p->>'kind' IN ('read','list','search','context_slice')
-         THEN (accepted_result - ARRAY['status','result'])='{}'::jsonb ELSE true END) AND CASE p->>'kind'
+       coalesce((CASE
+         WHEN accepted_result->>'encoding'='${OFFICE_OBSERVATION_ENCODING}' THEN
+           tool_id IN ('office_read_notes','office_analyze_tasks') AND outcome_kind='success'
+           AND jsonb_typeof(accepted_result->'ciphertext')='string'
+           AND (accepted_result - ARRAY['encoding','ciphertext'])='{}'::jsonb
+         WHEN tool_id IN ('office_read_notes','office_analyze_tasks') AND outcome_kind='success' THEN false
+         WHEN p->>'kind' IN ('read','list','search','context_slice')
+           THEN (accepted_result - ARRAY['status','result'])='{}'::jsonb ELSE true END) AND CASE p->>'kind'
          WHEN 'read' THEN jsonb_typeof(p->'content')='string'
          WHEN 'list' THEN jsonb_typeof(p->'entries')='array' AND jsonb_typeof(p->'failures')='array'
            AND ${validFailures}
@@ -280,6 +293,7 @@ export async function assertContextSourcesAuthorized(
     throw forbidden('owner authorization revoked');
   const metadata = await readContextSourceMetadata(client, ctx, invocationIds);
   let privateContent = false;
+  let officeContent = false;
   for (const id of invocationIds) {
     const row = metadata.get(id);
     if (!row || row.state !== 'completed') throw contextSourceCorrupt();
@@ -293,8 +307,10 @@ export async function assertContextSourcesAuthorized(
         throw forbidden('Feishu observation authorization expired');
       privateContent = true;
     }
+    if (isOfficeToolId(row.tool_id)) officeContent = true;
   }
   if (privateContent) await requireCurrentFeishuBotAuthority(client, ctx);
+  if (officeContent) await assertOfficeToolAuthority(client, ctx);
 }
 
 /** Successful Docx receipts have one canonical body in the v8 native units.

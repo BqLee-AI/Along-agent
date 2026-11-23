@@ -20,6 +20,8 @@ import {
 } from '../../../features/office-connectors/public.js';
 import { lockViewerAccess } from '../../../features/identity/public.js';
 import type { ToolContext, ToolResult } from '../contracts.js';
+import { isOfficeToolId } from '../contracts.js';
+import { readAcceptedOfficeResult } from '../office/receipts.js';
 import { approvalReceiptSchema, parseResult, resultKind } from '../result-schema.js';
 import {
   conversationMemorySources,
@@ -218,9 +220,16 @@ export async function requireCurrentFeishuBotAuthority(
 // already-bound facts after revocation, without authorizing any disclosure.
 export async function readAcceptedInvocationResult(
   client: PoolClient,
-  ctx: Pick<ToolContext, 'ownerId' | 'runId' | 'feishuDocx'>,
+  ctx: Pick<ToolContext, 'ownerId' | 'runId' | 'feishuDocx'> &
+    Partial<
+      Pick<
+        ToolContext,
+        'conversationId' | 'officeMaterials' | 'officeSessionId' | 'authorizationRevision'
+      >
+    >,
   row: {
     invocation_id: string;
+    accepted_attempt_id?: string | null;
     args_hash?: string;
     frozen_context?: unknown;
     result_version: number | null;
@@ -231,6 +240,7 @@ export async function readAcceptedInvocationResult(
   },
 ): Promise<ToolResult> {
   if (row.result_version !== 1) throw stateConflict('unsupported tool result version');
+  if (isOfficeToolId(row.tool_id)) return readAcceptedOfficeResult(client, ctx, row.tool_id, row);
   if (row.approval_id && row.tool_id === 'workspace_propose_replace') {
     const receipt = documentReceiptSchema.parse(row.accepted_result);
     if (receipt.approval_id !== row.approval_id)
@@ -312,6 +322,8 @@ export async function readAcceptedInvocationResult(
   const result = hydrateWorkspaceReadResult(row.accepted_result);
   if (result.status === 'ok' && result.result.kind === 'feishu_docx_read')
     throw stateConflict('unexpected Feishu observation encoding');
+  if (result.status === 'ok' && isOfficeToolId(result.result.kind))
+    throw stateConflict('unexpected office tool result');
   if (result.status === 'unknown' || resultKind(result) !== row.outcome_kind)
     throw stateConflict('invalid accepted tool result');
   if (

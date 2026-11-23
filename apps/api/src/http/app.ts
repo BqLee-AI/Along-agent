@@ -19,6 +19,7 @@ import { createApprovalController, approvalWriteScopes } from '../features/appro
 import { createTaskController, taskWriteScopes } from '../features/tasks/controller.js';
 import { createMemoryController, memoryWriteScopes } from '../features/memory/controller.js';
 import { createFeishuController } from '../features/office-connectors/controller.js';
+import { createOfficeMaterialsController } from '../features/native-office/controller.js';
 import {
   createConversationController,
   conversationWriteScopes,
@@ -92,6 +93,7 @@ export function createApp(deps: AppDeps) {
       .use(createTaskController({ pool: deps.pool }, access))
       .use(createMemoryController(deps.memoryService, access))
       .use(createFeishuController(deps.pool, access))
+      .use(createOfficeMaterialsController(deps.pool, access))
       .use(
         createConversationController(
           {

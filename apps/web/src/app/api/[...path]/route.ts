@@ -21,6 +21,14 @@ const FORWARD_RESPONSE = [
   'set-cookie',
   'retry-after',
 ];
+const OFFICE_UPLOAD_REQUEST = ['x-along-filename', 'content-encoding'];
+const OFFICE_DOWNLOAD_RESPONSE = [
+  'content-disposition',
+  'content-length',
+  'x-content-type-options',
+];
+const OFFICE_DOWNLOAD_PATH =
+  /^\/api\/v1\/conversations\/[^/]+\/runs\/[^/]+\/artifacts\/[^/]+\/content$/;
 
 interface RouteContext {
   params: Promise<{ path: string[] }>;
@@ -35,6 +43,12 @@ async function proxy(req: NextRequest, context: RouteContext): Promise<Response>
   for (const name of FORWARD_REQUEST) {
     const value = req.headers.get(name);
     if (value) headers.set(name, value);
+  }
+  if (req.method === 'POST' && target.pathname === '/api/v1/conversations/attachments') {
+    for (const name of OFFICE_UPLOAD_REQUEST) {
+      const value = req.headers.get(name);
+      if (value !== null) headers.set(name, value);
+    }
   }
   // Only the loopback-only local lifecycle injects this server-side capability.
   // It is never accepted from the browser or exposed in a response.
@@ -92,6 +106,12 @@ async function proxy(req: NextRequest, context: RouteContext): Promise<Response>
   for (const name of FORWARD_RESPONSE) {
     const value = upstream.headers.get(name);
     if (value) responseHeaders.set(name, value);
+  }
+  if (req.method === 'GET' && OFFICE_DOWNLOAD_PATH.test(target.pathname)) {
+    for (const name of OFFICE_DOWNLOAD_RESPONSE) {
+      const value = upstream.headers.get(name);
+      if (value !== null) responseHeaders.set(name, value);
+    }
   }
   const cookies = upstream.headers.getSetCookie();
   if (cookies.length > 0) {

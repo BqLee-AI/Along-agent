@@ -68,6 +68,8 @@ import {
 import { useConversationApprovalResults } from '@/features/approvals/viewmodel/use-conversation-approval-results';
 import { useModelCatalog } from '@/features/model-settings/viewmodel/model-catalog-context';
 import { useConversationComposer } from './use-conversation-composer';
+import { useOfficeMaterials, type OfficeDraft } from './use-office-materials';
+import type { OfficeSession } from '../model/office-materials';
 import { useConversationNavigationGuard } from './use-conversation-navigation-guard';
 import { useWorkspaceRegistration } from './use-workspace-registration';
 import { useConversationFollow } from './use-conversation-follow';
@@ -77,13 +79,20 @@ type AmbiguousProposal = z.infer<typeof AmbiguousTimeDetailsSchema> & {
   source_run_id: string;
 };
 type Identity = { conversationId: string; runId: string };
-const PendingSendSchema = z.object({ text: z.string(), body: z.record(z.unknown()) }).strict();
+const PendingSendSchema = z
+  .object({
+    text: z.string(),
+    body: z.record(z.unknown()),
+    officeOwnerId: z.string().uuid().optional(),
+  })
+  .strict();
 
 export interface ConversationTask {
   input: string;
   setInput: (value: string) => void;
   intent: TaskIntent;
   setIntent: (value: TaskIntent) => void;
+  office?: OfficeDraft;
   workspaces: WorkspaceSummary[];
   workspaceId: string;
   setWorkspaceId: (value: string) => void;
@@ -100,6 +109,7 @@ export interface ConversationTask {
   events: ThreadEvent[];
   messages: MessageHistoryItem[];
   runs: ConversationRunHistoryItem[];
+  officeHistoryReadError?: boolean;
   liveReply: boolean;
   liveOriginal: string | null;
   run: RunView | null;
@@ -155,10 +165,12 @@ export function useConversationTask({
   conversationId = null,
   runId = null,
   initialIntent = 'chat',
+  officeSession,
 }: {
   conversationId?: string | null;
   runId?: string | null;
   initialIntent?: TaskIntent | null;
+  officeSession?: OfficeSession;
 }): ConversationTask {
   const {
     input,
@@ -170,6 +182,11 @@ export function useConversationTask({
     modelSelection,
     setModelSelection,
   } = useConversationComposer(initialIntent);
+  const office = useOfficeMaterials({
+    session: intent === 'office' ? officeSession : undefined,
+    conversationId,
+    runId,
+  });
   const { workspaces, workspaceState, workspaceError, readWorkspaces } = useWorkspaceRegistration(
     intent,
     setWorkspaceId,
@@ -185,6 +202,7 @@ export function useConversationTask({
   const [events, setEvents] = useState<ThreadEvent[]>([]);
   const [messages, setMessages] = useState<MessageHistoryItem[]>([]);
   const [runs, setRuns] = useState<ConversationRunHistoryItem[]>([]);
+  const [officeHistoryReadError, setOfficeHistoryReadError] = useState(false);
   const [historyReady, setHistoryReady] = useState(!conversationId);
   const [liveReply, setLiveReply] = useState(false);
   const [liveOriginal, setLiveOriginal] = useState<string | null>(null);
@@ -271,6 +289,10 @@ export function useConversationTask({
       selectedRef.current = { conversationId: cid, runId: rid };
       conversationRef.current = cid;
       setSelected(selectedRef.current);
+      if (pendingSend.current?.body.office_materials) {
+        office.reset();
+        setIntent('chat');
+      }
       pendingSend.current = null;
       if (pendingStorage.current) sessionStorage.removeItem(pendingStorage.current);
       pendingStorage.current = null;
@@ -339,8 +361,45 @@ export function useConversationTask({
       mounted.current && !request.signal.aborted && version === selectionVersion.current;
     setReading(true);
     if (clearError) setError(null);
+    const history: ConversationRunHistoryItem[] = [];
+    let historyLoaded = false;
+    const archiveRead = streamRef.current ? null : readArchive(cid);
+    async function readArchive(conversation: string) {
+      const items: MessageHistoryItem[] = [];
+      try {
+        let next: string | null = null;
+        do {
+          const query: { limit: string; cursor?: string } = {
+            limit: '50',
+            ...(next !== null ? { cursor: next } : {}),
+          };
+          const page = await readHistoryCollectionPage(
+            api.api.v1
+              .conversations({ id: encodeURIComponent(conversation) })
+              .messages.get({ query, fetch: { signal: request.signal } }),
+            ConversationMessagePageSchema,
+          );
+          if (!valid()) return null;
+          items.push(...page.items);
+          next = page.next_cursor;
+        } while (next !== null);
+        setMessages(items);
+        return { items, error: null };
+      } catch (failure) {
+        if (valid() && items.length) {
+          const readIds = new Set(items.map((item) => item.message_id));
+          setMessages((known) => [
+            ...items,
+            ...known.filter((item) => !readIds.has(item.message_id)),
+          ]);
+        }
+        return {
+          items,
+          error: failure instanceof Error ? failure.message : '无法完整读取会话消息。',
+        };
+      }
+    }
     try {
-      const history: ConversationRunHistoryItem[] = [];
       let next: string | null = null;
       do {
         const query: { limit: string; cursor?: string } = {
@@ -359,6 +418,10 @@ export function useConversationTask({
         history.push(...page.items);
         next = page.next_cursor;
       } while (next !== null);
+      // Keep independently verified file results even if a later event read fails.
+      setRuns(history);
+      historyLoaded = true;
+      setOfficeHistoryReadError(false);
       let target = selectedRef.current;
       if (!target && history.length && !pendingSend.current) {
         target = { conversationId: cid, runId: history[history.length - 1]!.run_id };
@@ -437,6 +500,7 @@ export function useConversationTask({
           current.authorization_revision === 'delegation/1' &&
           ['blocked', 'partial'].includes(current.goal_result?.status ?? '') &&
           current.goal_result?.clarification?.kind === 'time' &&
+          !indexed?.office_materials &&
           indexed?.original.state === 'available'
         ) {
           const ambiguities = new Map(
@@ -454,7 +518,13 @@ export function useConversationTask({
               });
           }
         }
-        if (indexed) indexed.status = current.status;
+        if (indexed && indexed.status !== current.status) {
+          setRuns(
+            history.map((item) =>
+              item.run_id === current.run_id ? { ...item, status: current.status } : item,
+            ),
+          );
+        }
         const stored = sessionStorage.getItem(`run-resume:${cid}:${target.runId}`);
         if (stored) {
           const parsed = ResumeRequestSchema.safeParse(JSON.parse(stored));
@@ -462,47 +532,46 @@ export function useConversationTask({
         }
       }
       // Keep released deltas visible unless a visible terminal archive replaces them.
-      if (!streamRef.current) {
-        const archive: MessageHistoryItem[] = [];
-        next = null;
-        do {
-          const query: { limit: string; cursor?: string } = {
-            limit: '50',
-            ...(next !== null ? { cursor: next } : {}),
-          };
-          const page = await readHistoryCollectionPage(
-            api.api.v1
-              .conversations({ id: encodeURIComponent(cid) })
-              .messages.get({ query, fetch: { signal: request.signal } }),
-            ConversationMessagePageSchema,
-          );
-          if (!valid()) return;
-          archive.push(...page.items);
-          next = page.next_cursor;
-        } while (next !== null);
-        setMessages(archive);
+      const archive = await archiveRead;
+      if (!valid()) return;
+      if (archive?.error) throw new Error(archive.error);
+      if (archive && !streamRef.current) {
         setLiveReply(
           Boolean(
             replyPending &&
             target &&
             transcripts.get(target.runId)?.text &&
-            !archive.some((message) => message.source_run_id === target.runId),
+            !archive.items.some((message) => message.source_run_id === target.runId),
           ),
         );
         setLiveOriginal(null);
       }
-      setRuns(history);
       setHistoryReady(true);
       setReadError(null);
     } catch (failure) {
-      if (valid())
+      if (valid()) {
+        if (!historyLoaded) {
+          setOfficeHistoryReadError(true);
+          if (history.length) {
+            const readIds = new Set(history.map((item) => item.run_id));
+            setRuns((known) => [...history, ...known.filter((item) => !readIds.has(item.run_id))]);
+          }
+        }
         setReadError(failure instanceof Error ? failure.message : '无法读取会话与运行状态。');
+      }
     } finally {
+      await archiveRead;
       if (valid()) setReading(false);
     }
   }
 
-  async function stream(url: string, body: object, text?: string, idempotencyKey?: string) {
+  async function stream(
+    url: string,
+    body: object,
+    text?: string,
+    idempotencyKey?: string,
+    officeAdmission?: { csrfToken: string; key: string },
+  ) {
     const request = new AbortController();
     followRef.current?.abort();
     followed.current = null;
@@ -516,15 +585,15 @@ export function useConversationTask({
     let expectedEof = false;
     leaveAllowed.current = false;
     try {
-      const me = await loadMe(request.signal);
+      const csrf = officeAdmission?.csrfToken ?? (await loadMe(request.signal)).csrf_token;
       if (!mounted.current || request.signal.aborted || version !== selectionVersion.current)
         return false;
       const response = await postRunStream(
         url,
         body,
-        me.csrf_token,
+        csrf,
         request.signal,
-        idempotencyKey,
+        officeAdmission?.key ?? idempotencyKey,
       );
       if (idempotencyKey && response.ok && selectedRef.current) {
         const target = selectedRef.current;
@@ -551,6 +620,7 @@ export function useConversationTask({
           )
             expectedEof = true;
           acceptEvent(event, text);
+          if (officeAdmission && event.type === 'thread.started') accepted = true;
         }
       });
       if (!request.signal.aborted && !expectedEof) {
@@ -565,7 +635,7 @@ export function useConversationTask({
         )
           throw new Error('执行连接提前结束，未收到终态或挂起状态。');
       }
-      accepted = !failedEvent;
+      accepted ||= !failedEvent;
     } catch (failure) {
       if (mounted.current && !request.signal.aborted && version === selectionVersion.current) {
         const rejected =
@@ -608,7 +678,7 @@ export function useConversationTask({
     sendUncertain,
     effectsUnknown,
   });
-  const eligibility = taskSendEligibility({
+  const baseEligibility = taskSendEligibility({
     intent,
     text: ambiguousProposal?.raw_text ?? input,
     busy: active,
@@ -616,7 +686,29 @@ export function useConversationTask({
     workspaceId,
     workspaces,
   });
-  const canReplyToClarification = Boolean(clarificationReplyReference(run, intent, true));
+  const officeBlockedReason =
+    intent === 'office'
+      ? officeSession
+        ? office.blockedReason
+        : '当前会话未开启上传资料处理。'
+      : null;
+  const eligibility =
+    baseEligibility.allowed && officeBlockedReason
+      ? { allowed: false, reason: officeBlockedReason }
+      : baseEligibility;
+  const officeSource = runs.find((item) => item.run_id === run?.run_id)?.office_materials;
+  const clarificationRunId = clarificationReplyReference(run, intent, true);
+  const canReplyToClarification = Boolean(
+    historyReady &&
+    clarificationRunId &&
+    (!officeSource ||
+      (officeSession &&
+        !officeHistoryReadError &&
+        run?.goal_result?.clarification?.kind === 'timezone' &&
+        runs.at(-1)?.run_id === clarificationRunId &&
+        officeSource.inputs.length > 0 &&
+        officeSource.inputs.every((input) => input.status === 'available'))),
+  );
 
   function finishCompact(request: CompactRequest, receipt: CompactReceipt) {
     if (request.runId && request.runId !== receipt.run_id)
@@ -727,6 +819,17 @@ export function useConversationTask({
       (ambiguousProposal && !foldChoice)
     )
       return;
+    if (!retry && clarificationReply && !canReplyToClarification) {
+      setError('原澄清暂不可续办，请重新读取原运行。');
+      return;
+    }
+    const officeContinuation =
+      !retry && Boolean(officeSource && clarificationReply && clarificationRunId);
+    const officeSelection = !retry && intent === 'office' ? office.submission() : null;
+    if (!retry && intent === 'office' && !officeSelection) {
+      setError('所选资料暂不可提交，请检查暂存状态。');
+      return;
+    }
     busyRef.current = true;
     setBusy(true);
     setError(null);
@@ -734,13 +837,43 @@ export function useConversationTask({
     sendRef.current = authentication;
     try {
       let pending = retry ? pendingSend.current : null;
+      let officeAdmission: { csrfToken: string; key: string } | undefined;
+      const newOfficeAdmission = officeSelection !== null || officeContinuation;
+      const officeOwnerId = newOfficeAdmission ? officeSession?.ownerId : pending?.officeOwnerId;
+      let officeActor: Me | null = null;
+      if (officeOwnerId || pending?.body.office_materials) {
+        const actor = MeSchema.parse(
+          await readEnvelope(await api.api.v1.me.get({ fetch: { signal: authentication.signal } })),
+        );
+        if (!mounted.current || authentication.signal.aborted) return;
+        if (officeSelection) {
+          const current = office.submission();
+          if (
+            !current ||
+            current.draft_id !== officeSelection.draft_id ||
+            current.notes_attachment_id !== officeSelection.notes_attachment_id ||
+            current.tasks_attachment_id !== officeSelection.tasks_attachment_id
+          )
+            throw new Error('原资料草稿已切换或失效，未发送。');
+        }
+        if (
+          !actor.csrf_token ||
+          actor.user.id !== officeOwnerId ||
+          (newOfficeAdmission && actor.csrf_token !== officeSession?.csrfToken)
+        ) {
+          if (officeSelection) office.reset();
+          throw new Error('当前登录与原资料请求不匹配，请核实登录后重新选择资料。');
+        }
+        officeActor = actor;
+      }
       if (!pending) {
-        const me = await loadMe(authentication.signal);
+        const me = officeActor ?? (await loadMe(authentication.signal));
         if (!mounted.current || authentication.signal.aborted) return;
         const proposal = ambiguousProposal;
         const text = proposal?.raw_text ?? input;
         pending = {
           text,
+          ...(officeOwnerId ? { officeOwnerId } : {}),
           body: {
             raw_text: text,
             conversation_id: conversationRef.current ?? undefined,
@@ -749,9 +882,10 @@ export function useConversationTask({
             fold_choice: proposal ? foldChoice : undefined,
             clarification_of_run_id:
               proposal?.source_run_id ??
-              (clarificationReply && canReplyToClarification ? run?.run_id : undefined),
+              (clarificationReply && canReplyToClarification ? clarificationRunId : undefined),
             ...taskAdmission(intent),
             ...(intent === 'document' ? { workspace_id: workspaceId } : {}),
+            ...(officeSelection ? { office_materials: officeSelection } : {}),
             ...(intent !== 'reminder' && modelSelection
               ? {
                   model_selection: {
@@ -764,6 +898,12 @@ export function useConversationTask({
           },
         };
         pendingSend.current = pending;
+      }
+      if (officeActor?.csrf_token) {
+        officeAdmission = {
+          csrfToken: officeActor.csrf_token,
+          key: z.string().uuid().parse(pending.body.idempotency_key),
+        };
       }
       const storageKey =
         pendingStorage.current ?? `conversation-send:${conversationRef.current ?? 'new'}`;
@@ -783,10 +923,24 @@ export function useConversationTask({
       const submittedText = pending.text;
       // The message is shown and persisted as pending, so the composer is free for the next draft.
       setInput((draft) => (draft === submittedText ? '' : draft));
-      const accepted = await stream('/api/v1/conversations/messages', pending.body, pending.text);
+      const accepted = await stream(
+        '/api/v1/conversations/messages',
+        pending.body,
+        pending.text,
+        undefined,
+        officeAdmission,
+      );
       // A request the server rejected was never sent: give the draft back instead of losing it.
-      if (mounted.current && !authentication.signal.aborted && !accepted && !pendingSend.current)
+      if (
+        mounted.current &&
+        !authentication.signal.aborted &&
+        !accepted &&
+        !pendingSend.current &&
+        (!pending.body.office_materials || officeSession)
+      ) {
+        if (pending.body.office_materials) setIntent('office');
         setInput((draft) => (draft === '' ? submittedText : draft));
+      }
     } catch (failure) {
       if (mounted.current && !authentication.signal.aborted)
         setError(failure instanceof Error ? failure.message : '发送失败，请核实身份。');
@@ -1168,7 +1322,8 @@ export function useConversationTask({
       if (pending.body.conversation_id !== (id ?? undefined))
         throw new Error('原发送的会话身份不匹配。');
       pendingSend.current = pending;
-      setInput(pending.text);
+      // A recovered office request needs fresh owner verification before showing its original text.
+      if (!pending.officeOwnerId && !pending.body.office_materials) setInput(pending.text);
     } catch (failure) {
       setError(
         `原发送结果未知，不能创建另一条消息。${failure instanceof Error ? failure.message : '原请求记录无法读取。'}`,
@@ -1226,6 +1381,7 @@ export function useConversationTask({
     setEvents([]);
     setMessages([]);
     setRuns([]);
+    setOfficeHistoryReadError(false);
     setRun(null);
     setInput('');
     setIntent(initialIntent ?? 'chat');
@@ -1458,7 +1614,9 @@ export function useConversationTask({
       setFoldChoice('');
     },
     intent,
+    ...(officeSession ? { office } : {}),
     setIntent: (next) => {
+      if (next === 'office' && !officeSession) return;
       setIntent(next);
       setAmbiguousProposal(null);
       setFoldChoice('');
@@ -1479,6 +1637,7 @@ export function useConversationTask({
     events,
     messages,
     runs,
+    officeHistoryReadError,
     liveReply,
     liveOriginal,
     run,

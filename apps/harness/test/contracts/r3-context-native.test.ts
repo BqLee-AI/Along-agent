@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import {
+  HarnessR3ContextStartSchema,
   HarnessRequestSchema,
   HarnessR3SnapshotSchema,
   type HarnessRequest,
@@ -53,8 +54,9 @@ async function run(
   child.stdin.write(JSON.stringify(start) + '\n');
   const requests: HarnessRequest[] = [];
   let buffer = '';
+  const decoder = new TextDecoder();
   for await (const bytes of child.stdout) {
-    buffer += new TextDecoder().decode(bytes);
+    buffer += decoder.decode(bytes, { stream: true });
     while (buffer.includes('\n')) {
       const at = buffer.indexOf('\n');
       const request = HarnessRequestSchema.parse(JSON.parse(buffer.slice(0, at)));
@@ -235,6 +237,369 @@ test('only v8 restores successful Docx bodies from saved units without bootstrap
     value: r.type === 'pause_probe' ? { pending: true } : { paused: true },
   }));
   expect(old.map((r) => r.type)).toEqual(['pause_probe', 'pause_point']);
+}, 30_000);
+
+test('native office resumes the exact accepted source and receipt pairs without resetting budget', async () => {
+  const inputId = randomUUID();
+  const artifactsId = randomUUID();
+  const ids = [randomUUID(), randomUUID(), randomUUID()];
+  const source = { display_name: 'fixture', version: 'a'.repeat(64) };
+  const totals = {
+    total: 1,
+    todo: 1,
+    in_progress: 0,
+    done: 0,
+    canceled: 0,
+    overdue: 1,
+    anomaly_rows: 0,
+    missing_owner: 0,
+    missing_due_date: 0,
+    invalid_due_date: 0,
+    invalid_status: 0,
+  };
+  const payloads = [
+    {
+      kind: 'office_read_notes',
+      source,
+      offset: 0,
+      start_line: 1,
+      end_line: 1,
+      total_lines: 2,
+      content: '私有纪要片段',
+      next_offset: Buffer.byteLength('私有纪要片段'),
+    },
+    {
+      kind: 'office_analyze_tasks',
+      action: 'analyze',
+      source,
+      as_of: '2028-02-29',
+      after_record: 0,
+      total_records: 1,
+      total_groups: 1,
+      totals,
+      groups: [{ owner: '甲', owner_truncated: false, totals }],
+      records: [
+        {
+          record_number: 1,
+          task_id: '001',
+          title: 'review',
+          owner: '甲',
+          due_date: '2028-02-28',
+          status: 'todo',
+          overdue: true,
+          anomalies: [],
+          truncated_fields: [],
+        },
+      ],
+      next_after_record: null,
+    },
+    {
+      kind: 'office_create_artifacts',
+      artifacts: [
+        { artifact_id: artifactsId, format: 'markdown', filename: 'report.md', size_bytes: 35 },
+      ],
+    },
+  ];
+  const tools = payloads.map(({ kind: name }) => ({
+    name,
+    description: 'Office fixture',
+    risk: 'low',
+    parameters: {},
+  }));
+  const start = {
+    ...base,
+    protocol: 'harness/v8',
+    tools,
+    budget: { max_iterations: 8, max_tokens: 1000 },
+    r3_context: {
+      manifest: { message_ids: [] },
+      messages: [],
+      summary: null,
+      input: {
+        type: 'user',
+        message_id: inputId,
+        content: 'Use the notes and task analysis to make a report.',
+      },
+    },
+    trusted_context: {
+      version: 1,
+      authorization_revision: 'delegation/1',
+      execution_lifecycle: 'server-owned',
+      input_message_id: inputId,
+      received_at_utc: '2028-02-29T12:00:00Z',
+      request_anchor_utc: '2028-02-29T12:00:00Z',
+      continuation: null,
+      timezone: null,
+      time_capabilities: { elapsed_revision: null, wall_rules: null },
+      workspaces: [],
+    },
+  };
+  expect(HarnessR3ContextStartSchema.safeParse(start).success).toBe(true);
+  expect(await run({ ...start, trusted_context: null }, () => ({}), 2)).toEqual([]);
+  expect(
+    await run(
+      {
+        ...start,
+        tools: [
+          ...tools,
+          { name: 'remember_memory', description: 'remember', risk: 'low', parameters: {} },
+        ],
+      },
+      () => ({}),
+      2,
+    ),
+  ).toEqual([]);
+  const calls = [
+    { name: tools[0]!.name, arguments: '{"attachment_id":"not-an-authorized-argument"}' },
+    { name: tools[0]!.name, arguments: '{}' },
+    { name: tools[1]!.name, arguments: '{"action":"analyze"}' },
+    {
+      name: tools[2]!.name,
+      arguments: JSON.stringify({
+        formats: ['markdown'],
+        notes_invocation_ids: [ids[0]],
+        analysis_invocation_id: ids[1],
+      }),
+    },
+  ];
+  const measurement = {
+    wire_bytes: 1,
+    http_bytes: 1,
+    input_meter: { quality: 'unavailable', input_tokens: null, meter_revision: 'unavailable/1' },
+    output_ceiling: 37,
+    limit_reason: null,
+  };
+  const malformed = await run(
+    start,
+    (r) => {
+      if (r.type === 'pause_probe') return { value: { pending: false } };
+      if (r.type === 'measure_context') return { value: measurement };
+      if (r.type === 'model')
+        return {
+          value: {
+            type: 'complete',
+            reply: {
+              message: {
+                content: null,
+                tool_calls: [{ id: 'malformed', type: 'function', function: calls[1] }],
+              },
+              usage: { total_tokens: 1 },
+            },
+          },
+        };
+      if (r.type === 'reserve') return { value: { invocation_id: ids[0] } };
+      if (r.type === 'invoke')
+        return {
+          value: {
+            status: 'ok',
+            invocationId: ids[0],
+            replayed: false,
+            result: { ...payloads[0], bytes: 'private-file-bytes' },
+          },
+        };
+      throw new Error(`malformed tool result crossed the native boundary at ${r.type}`);
+    },
+    2,
+  );
+  expect(malformed.at(-1)?.type).toBe('invoke');
+
+  let modelRound = 0;
+  let pending = false;
+  const first = await run(start, (r) => {
+    if (r.type === 'pause_probe') return { value: { pending } };
+    if (r.type === 'pause_point') return { value: { paused: true } };
+    if (r.type === 'measure_context') return { value: measurement };
+    if (r.type === 'model') {
+      const fn = calls[modelRound++];
+      if (!fn) throw new Error('unexpected extra model round');
+      return {
+        value: {
+          type: 'complete',
+          reply: {
+            message: {
+              content: null,
+              tool_calls: [{ id: `call-${modelRound}`, type: 'function', function: fn }],
+            },
+            usage: { total_tokens: 7 },
+          },
+        },
+      };
+    }
+    if (r.type === 'reserve') {
+      expect(r.call_key).toBe(`harness/${modelRound - 1}`);
+      expect(r.tool_id).toBe(tools[modelRound - 2]!.name);
+      return { value: { invocation_id: ids[modelRound - 2] } };
+    }
+    if (r.type === 'invoke') {
+      const index = modelRound - 2;
+      pending = index === 2;
+      return {
+        value: {
+          status: 'ok',
+          invocationId: ids[index],
+          replayed: false,
+          result: payloads[index],
+        },
+      };
+    }
+    throw new Error(`unexpected request ${r.type}`);
+  });
+  const point = first.find((r) => r.type === 'pause_point');
+  if (point?.context.version !== 4) throw new Error('missing office v4 pause');
+  const snapshot = point.context;
+  expect(snapshot.next_call_no).toBe(4);
+  expect(snapshot.tool_refs).toEqual(ids);
+  expect(snapshot.usage).toEqual({ iterations: 4, tokens: 28 });
+  const observations = snapshot.native_state.units.map(({ observation }) => observation);
+  const resume = { ...start, snapshot, observations };
+  expect(HarnessR3ContextStartSchema.safeParse(resume).success).toBe(true);
+  const missing = { ...resume, observations: observations.slice(1) };
+  const changed = {
+    ...resume,
+    observations: [
+      {
+        ...observations[0],
+        result: {
+          status: 'ok',
+          result: { ...payloads[0], source: { ...source, version: 'b'.repeat(64) } },
+        },
+      },
+      ...observations.slice(1),
+    ],
+  };
+  for (const invalid of [missing, changed]) {
+    expect(HarnessR3ContextStartSchema.safeParse(invalid).success).toBe(false);
+    expect(await run(invalid, () => ({}), 2)).toEqual([]);
+  }
+  const unpaired = structuredClone(resume);
+  unpaired.snapshot.native_state.units[0]!.entries[1] = {
+    role: 'tool',
+    tool_call_id: 'call-2',
+    content: '{}',
+  };
+  expect(await run(unpaired, () => ({}), 2)).toEqual([]);
+
+  const [preview] = await run({ ...resume, mode: 'measure_only' }, () => ({
+    value: { accepted: true },
+  }));
+  const resumed = await run(resume, (r) => {
+    if (r.type === 'pause_probe') return { value: { pending: false } };
+    if (r.type === 'measure_context') return { value: measurement };
+    if (r.type === 'model')
+      return {
+        value: {
+          type: 'complete',
+          reply: {
+            usage: { total_tokens: 3 },
+            message: {
+              content: null,
+              tool_calls: [
+                {
+                  id: 'finish',
+                  type: 'function',
+                  function: {
+                    name: 'finish_goal',
+                    arguments: JSON.stringify({
+                      status: 'completed',
+                      outcomes: [
+                        { status: 'achieved', description: 'Report', receipt_refs: [ids[2]] },
+                      ],
+                      clarification: null,
+                      answer: 'Report created.',
+                    }),
+                  },
+                },
+              ],
+            },
+          },
+        },
+      };
+    if (r.type === 'finish_goal') {
+      expect(r.usage).toEqual({ iterations: 5, tokens: 31 });
+      expect(r.goal_result.outcomes[0]?.receipt_refs).toEqual([ids[2]]);
+      return { value: { accepted: true } };
+    }
+    throw new Error(`unexpected recovery request ${r.type}`);
+  });
+  const model = resumed.find((r) => r.type === 'model');
+  if (preview?.type !== 'context_preview' || model?.type !== 'model')
+    throw new Error('missing model context');
+  expect(preview.remaining_tokens).toBe(972);
+  expect(model.remaining_tokens).toBe(preview.remaining_tokens);
+  expect(model.messages).toEqual(preview.messages);
+  const toolMessages = model.messages.filter((message) => message.role === 'tool');
+  expect(toolMessages.map(({ content }) => JSON.parse(content))).toEqual(observations);
+
+  const delivery = {
+    invocation_id: ids[2],
+    tool_id: 'office_create_artifacts',
+    result: { status: 'ok', result: payloads[2] },
+  };
+  const prior = {
+    run_id: randomUUID(),
+    invocation_id: null,
+    original_input_message_id: randomUUID(),
+    original_text: 'Make a report, then remind me on March 1 at 9 AM.',
+    goal_result: {
+      status: 'partial',
+      answer: 'PRIVATE_PREVIOUS_MODEL_TEXT',
+      outcomes: [
+        { status: 'achieved', description: 'Report', receipt_refs: [ids[2]] },
+        { status: 'blocked', description: 'Reminder', receipt_refs: [] },
+      ],
+      clarification: { kind: 'timezone', question: 'What timezone?' },
+    },
+    receipts: [delivery],
+    source_result: null,
+  };
+  const continuation = {
+    ...start,
+    tools: [{ name: 'create_reminder', description: 'reminder', risk: 'low', parameters: {} }],
+    trusted_context: { ...start.trusted_context, continuation: prior },
+  };
+  expect(HarnessR3ContextStartSchema.safeParse(continuation).success).toBe(true);
+  const unrelated = {
+    ...continuation,
+    trusted_context: {
+      ...continuation.trusted_context,
+      continuation: { ...prior, receipts: [{ ...delivery, invocation_id: randomUUID() }] },
+    },
+  };
+  for (const invalid of [unrelated, { ...continuation, tools }]) {
+    expect(HarnessR3ContextStartSchema.safeParse(invalid).success).toBe(false);
+    expect(await run(invalid, () => ({}), 2)).toEqual([]);
+  }
+  await run(continuation, (r) => {
+    if (r.type === 'pause_probe') return { value: { pending: false } };
+    if (r.type === 'measure_context') return { value: measurement };
+    if (r.type === 'model') {
+      expect(JSON.stringify(r.messages)).toContain(artifactsId);
+      expect(JSON.stringify(r.messages)).not.toContain('PRIVATE_PREVIOUS_MODEL_TEXT');
+      return {
+        value: {
+          type: 'complete',
+          reply: {
+            usage: { total_tokens: 2 },
+            message: {
+              content: null,
+              tool_calls: [
+                {
+                  id: 'continue',
+                  type: 'function',
+                  function: { name: 'finish_goal', arguments: JSON.stringify(prior.goal_result) },
+                },
+              ],
+            },
+          },
+        },
+      };
+    }
+    if (r.type === 'finish_goal') {
+      expect(r.goal_result.outcomes[0]?.receipt_refs).toEqual([ids[2]]);
+      return { value: { accepted: true } };
+    }
+    throw new Error(`unexpected continuation request ${r.type}`);
+  });
 }, 30_000);
 
 test('v8 compact resume replaces only history and retains protected state and unknown usage', async () => {

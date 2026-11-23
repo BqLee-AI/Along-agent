@@ -106,6 +106,7 @@ extend Harness {
         uuid(field(o, "invocation_id"))
         let toolId = ref(field(o, "tool_id"))
         if (toolId == "feishu_docx_read") { require(tools.contains(toolId) && view == "full") }
+        if (officeRun) { require(tools.contains(toolId) && view == "full") }
         if (view == "full") {
             keys(o, ["view", "invocation_id", "tool_id", "result"])
             resultCheck(field(o, "result"), false, "", toolId)
@@ -187,6 +188,8 @@ extend Harness {
     }
     func resultCheck(v: JsonValue, outcome: Bool, id: String, toolId: String): Unit {
         if (toolId == "feishu_docx_read") { require(delegated) }
+        let office = isOfficeTool(toolId)
+        if (office) { require(pipe.protocol == "harness/v8" && delegated && tools.contains(toolId)) }
         let o = v.asObject()
         let status = str(field(o, "status"), 16)
         require(status == "ok" || status == "denied" || status == "failed" || status == "unknown")
@@ -199,6 +202,13 @@ extend Harness {
         if (status == "ok") {
             let payload = field(o, "result").asObject()
             let kind = ref(field(payload, "kind"))
+            if (office || isOfficeTool(kind)) {
+                require(office && kind == toolId)
+                if (kind == "office_read_notes") { officeNotesCheck(payload) }
+                else if (kind == "office_analyze_tasks") { officeAnalysisCheck(payload) }
+                else { officeArtifactsCheck(payload) }
+                return
+            }
             if (kind == "feishu_docx_read") {
                 require(toolId == "feishu_docx_read")
                 feishuDocxCheck(payload)

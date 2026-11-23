@@ -37,6 +37,12 @@ export {
   HarnessReplySchema,
   HarnessCancelSchema,
   RunModelSelectionSchema,
+  OfficeReadNotesInputSchema,
+  OfficeAnalyzeTasksInputSchema,
+  OfficeCreateArtifactsInputSchema,
+  OfficeReadNotesResultSchema,
+  OfficeAnalyzeTasksResultSchema,
+  OfficeCreateArtifactsResultSchema,
   RunViewSchema,
 } from './harness.js';
 export type {

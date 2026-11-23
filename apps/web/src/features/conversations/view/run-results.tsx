@@ -4,11 +4,13 @@ import Link from '@/shell/view/workspace-link';
 import { memo, useMemo } from 'react';
 import { conversationHref, modelSelectionLabel, runStatusLabel } from '../model/conversation-run';
 import type { RunTranscript } from '../model/conversation-run';
+import { projectOfficeRunResults } from '../model/office-results';
 import { runApprovalReferences } from '../model/presentation';
 import type { RunHistoryEntry } from '../model/presentation';
 import type { ConversationTask } from '../viewmodel/use-conversation-task';
 import { AssistantMarkdown } from './assistant-markdown';
 import ApprovalHistory from './approval-history';
+import { OfficeRunInputs, OfficeRunResultsPanel } from './office-run-results';
 import { GoalResultPanel } from './task-views';
 
 const RunHistoryRow = memo(function RunHistoryRow({
@@ -20,6 +22,9 @@ const RunHistoryRow = memo(function RunHistoryRow({
   showReminderResult,
   task,
   observeEffect,
+  officeHistoryCsrf,
+  projectionStale,
+  refreshOfficeResults,
 }: {
   entry: RunHistoryEntry;
   reply: RunTranscript | undefined;
@@ -29,8 +34,12 @@ const RunHistoryRow = memo(function RunHistoryRow({
   showReminderResult: boolean;
   task?: ConversationTask;
   observeEffect: ConversationTask['observeEffect'];
+  officeHistoryCsrf: string | null;
+  projectionStale: boolean;
+  refreshOfficeResults: (() => Promise<void>) | undefined;
 }) {
   const waiting = task?.run?.waiting;
+  const materials = entry.history?.office_materials;
   const approvals = useMemo(
     () => runApprovalReferences(reply?.approvals, waiting),
     [reply?.approvals, waiting],
@@ -38,7 +47,7 @@ const RunHistoryRow = memo(function RunHistoryRow({
   return (
     <details
       className="min-w-0 border-t border-separator pt-4"
-      open={(isSelected && (needsAction || showReminderResult)) || undefined}
+      open={(isSelected && (needsAction || showReminderResult || Boolean(materials))) || undefined}
       key={entry.runId}
     >
       <summary className="min-h-8 max-lg:min-h-11 content-center text-sm font-medium [overflow-wrap:anywhere]">
@@ -87,6 +96,24 @@ const RunHistoryRow = memo(function RunHistoryRow({
             {reply?.text ? <AssistantMarkdown text={reply.text} /> : null}
           </div>
         </details>
+        {materials && refreshOfficeResults ? (
+          <>
+            <OfficeRunInputs
+              key={`${conversationId}:${officeHistoryCsrf ?? ''}`}
+              conversationId={conversationId}
+              inputs={materials.inputs}
+              csrfToken={officeHistoryCsrf}
+              refresh={refreshOfficeResults}
+              projectionStale={projectionStale}
+            />
+            <OfficeRunResultsPanel
+              conversationId={conversationId}
+              results={projectOfficeRunResults(materials)}
+              retryRead={refreshOfficeResults}
+              projectionStale={projectionStale}
+            />
+          </>
+        ) : null}
         {approvals.length ? (
           <ul className="divide-y divide-separator">
             {approvals.map((reference) => (
@@ -116,19 +143,24 @@ export function RunResults({
   entries,
   needsAction,
   showReminderResult,
+  officeHistoryCsrf = null,
 }: {
   task: ConversationTask;
   conversationId: string | null;
   entries: RunHistoryEntry[];
   needsAction: boolean;
   showReminderResult: boolean;
+  officeHistoryCsrf?: string | null;
 }) {
   const selected = task.selected;
+  const showOfficeResult = entries.some(
+    (entry) => entry.runId === selected?.runId && entry.history?.office_materials,
+  );
   if (!entries.length || !conversationId) return null;
   return (
     <details
       id="run-results"
-      open={needsAction || showReminderResult || undefined}
+      open={needsAction || showReminderResult || showOfficeResult || undefined}
       className="min-w-0"
       data-testid="run-results"
     >
@@ -152,6 +184,11 @@ export function RunResults({
               showReminderResult={isSelected && showReminderResult}
               task={isSelected ? task : undefined}
               observeEffect={task.observeEffect}
+              officeHistoryCsrf={entry.history?.office_materials ? officeHistoryCsrf : null}
+              projectionStale={Boolean(
+                entry.history?.office_materials && task.officeHistoryReadError,
+              )}
+              refreshOfficeResults={entry.history?.office_materials ? task.refresh : undefined}
             />
           );
         })}

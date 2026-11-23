@@ -20,6 +20,7 @@ import { stateConflict } from '../../platform/errors.js';
 import { readRunInvocationStates } from '../tools/invocations/run-state.js';
 import { readRunContextObservations } from '../tools/invocations/context-query.js';
 import { assertContextSourcesAuthorized } from '../tools/invocations/context-source.js';
+import { assertOfficeToolAuthority } from '../tools/office/authority.js';
 import type { NativeHandoff } from '../harness/harness-process.js';
 import type { ConversationDeps, RunContext } from './contracts.js';
 import { withRunTransaction } from './run-ownership.js';
@@ -52,6 +53,10 @@ export async function guardHarnessStart(
 ): Promise<void> {
   await withRunTransaction(pool, context.ownership, async (client) => {
     await lockRun(client, context);
+    // All office starts, including fresh starts and reminder-only successors,
+    // carry an office grant even when there are no observations to recheck.
+    // Acquire the office fence before any source locks taken by the reply path.
+    if (context.officeMaterials) await assertOfficeToolAuthority(client, context);
     await assertContextSourcesAuthorized(
       client,
       { ...toolContext(context), signal },
@@ -97,6 +102,8 @@ export async function loadHarnessSession(
       resume?.checkpoint_id,
     );
     if (supplied.ownership) context.ownership = supplied.ownership;
+    if (context.officeMaterials && pausedResume?.source === 'runtime')
+      throw stateConflict('office Run cannot resume a compact operation');
     const compact =
       pausedResume?.source === 'runtime'
         ? await readConsumedCompactContinuation(client, context)

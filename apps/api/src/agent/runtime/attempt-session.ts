@@ -57,8 +57,8 @@ import { guardHarnessStart, loadHarnessSession } from './attempt-load.js';
 import { validateRoutingFacts } from './attempt-routing.js';
 import { createSnapshotValidator } from './attempt-snapshot.js';
 import { buildHarnessStart, poolOf, toolContext } from './context.js';
-import { requireCurrentFeishuBotAuthority } from '../tools/invocations/accepted-result.js';
 import { authorizePrivateOutput } from './private-output.js';
+import { assertOfficeToolAuthority } from '../tools/office/authority.js';
 import type { NativeHandoff, NativeReplyHandoff } from '../harness/harness-process.js';
 
 export const sessionAborts = new Map<string, Set<AbortController>>();
@@ -144,6 +144,7 @@ export async function createHarnessSession(
     });
   }
   async function assertActionAuthority(client: PoolClient): Promise<void> {
+    if (context.officeMaterials) await assertOfficeToolAuthority(client, context);
     if (
       context.authorizationRevision === 'delegation/1' &&
       (await hasRejectedDocumentApproval(client, context))
@@ -192,7 +193,7 @@ export async function createHarnessSession(
       ? await withRunTransaction(pool, context.ownership, async (client) => {
           // Terminal facts have already committed; a delta still needs a running attempt.
           await lockRun(client, context, event.type === 'message.delta');
-          await requireCurrentFeishuBotAuthority(client, context);
+          await authorizePrivateOutput(client, context);
           if (sessionSignal.aborted) throw stateConflict('harness attempt stopped');
           // Hand off to the sink while revocation is still blocked on the grant/session locks.
           const open = await write(event, 'held');
@@ -236,18 +237,23 @@ export async function createHarnessSession(
         request.type === 'context_source' ||
         request.type === 'model' ||
         request.type === 'model_next';
-      if (!context.feishuDocx || !potentiallyPrivate || !result) {
+      if ((!context.feishuDocx && !context.officeMaterials) || !potentiallyPrivate || !result) {
         enqueue();
         return;
       }
       await guarded(async (client) => {
-        if (request.type === 'context_source')
+        if (context.officeMaterials) {
+          await assertOfficeToolAuthority(client, context);
+        } else {
+          await authorizePrivateOutput(client, context);
+        }
+        if (request.type === 'context_source') {
           await assertContextSourcesAuthorized(
             client,
             { ...toolContext(context), signal: sessionSignal },
             [request.invocation_id],
           );
-        else await authorizePrivateOutput(client, context);
+        }
         sessionSignal.throwIfAborted();
         enqueue();
       });
@@ -553,9 +559,15 @@ export async function createHarnessSession(
         if (request.type === 'context_source') {
           if (!attemptState.delivered.has(request.invocation_id))
             throw forbidden('context source outside accepted Run references');
-          const observation = await guarded((client) =>
-            readRunContextSource(client, toolContext(context), request.invocation_id, request.view),
-          );
+          const observation = await guarded(async (client) => {
+            if (context.officeMaterials) await assertActionAuthority(client);
+            return readRunContextSource(
+              client,
+              toolContext(context),
+              request.invocation_id,
+              request.view,
+            );
+          });
           await guarded(async () => undefined);
           return observation;
         }
@@ -566,6 +578,7 @@ export async function createHarnessSession(
         if (request.type === 'snapshot') {
           const snapshot = decodeCurrentSnapshot(request.context);
           const id = await guarded(async (client) => {
+            if (context.officeMaterials) await assertActionAuthority(client);
             await validateSnapshot(client, snapshot);
             return writeHarnessSnapshotWithinTransaction(client, context, snapshot, start.protocol);
           });
@@ -607,6 +620,7 @@ export async function createHarnessSession(
           )
             throw stateConflict('native answer must match the accepted model delta');
           const { event, privateOutput } = await guarded(async (client) => {
+            if (context.officeMaterials) await assertActionAuthority(client);
             const privateOutput = await authorizePrivateOutput(client, context);
             const event = await appendEvent(client, context, 'message.delta', {
               ...eventPayload(context),

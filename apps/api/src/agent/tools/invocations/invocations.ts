@@ -42,6 +42,9 @@ import type {
   ToolOutcome,
   ToolResult,
 } from '../contracts.js';
+import { isOfficeToolId } from '../contracts.js';
+import { assertOfficeToolAuthority } from '../office/authority.js';
+import { isPrivateOfficeObservation, sealOfficeObservation } from '../office/observations.js';
 import { parseResult, resultKind } from '../result-schema.js';
 import {
   ReadRunObservationInputSchema,
@@ -123,6 +126,7 @@ const invocationSchema = z.object({
   execution_kind: z.enum(['local', 'read_only', 'non_transactional']),
   frozen_context: frozenSchema,
   state: z.enum(['reserved', 'unknown', 'completed']),
+  accepted_attempt_id: z.string().uuid().nullable().optional(),
   outcome_kind: z.string().nullable(),
   accepted_result: z.unknown(),
   result_version: z.number().nullable(),
@@ -303,6 +307,11 @@ export async function reserveInvocation(
     throw stateConflict('invalid tool call slot');
   return withRunTransaction(pool, ctx.ownership, async (client) => {
     const binding = await lockToolRunBinding(client, ctx);
+    if (isOfficeToolId(input.toolId)) {
+      if (!binding.canExecute || !ctx.allowlist.includes(input.toolId) || ctx.signal?.aborted)
+        throw forbidden('office tool authority unavailable');
+      await assertOfficeToolAuthority(client, ctx, input.toolId);
+    }
     const existing = await client.query(
       'SELECT * FROM tool_invocations WHERE run_id = $1 AND call_key = $2 FOR UPDATE',
       [ctx.runId, input.callKey],
@@ -547,9 +556,9 @@ export interface InvocationSnapshot {
   result: ToolResult;
 }
 
-// Bootstrap reads accepted facts only. No invocation/attempt/Run locks are
-// acquired here: callers may already hold attempt → Run locks, and historical
-// reads remain valid after suspension or completion.
+// Legacy historical projections may read immutable receipts after suspension.
+// Office results require a current attempt; safe inherited manifests are
+// verified by admission rather than reopening a prior Run's observations.
 export async function readInvocationSnapshots(
   client: PoolClient,
   ctx: ToolContext,
@@ -570,10 +579,20 @@ export async function readInvocationSnapshots(
     }),
   );
   const snapshots: InvocationSnapshot[] = [];
+  let officeAttemptVerified = false;
   for (const invocationId of invocationIds) {
     const row = invocations.get(invocationId);
     if (!row) throw notFound('tool invocation not found');
     if (row.state !== 'completed') throw stateConflict('tool invocation has no accepted result');
+    if (isOfficeToolId(row.tool_id)) {
+      if (ctx.signal?.aborted || !ctx.allowlist.includes(row.tool_id))
+        throw forbidden('office tool authority unavailable');
+      if (!officeAttemptVerified) {
+        if (!(await lockConversationToolBinding(client, ctx)).canExecute)
+          throw forbidden('office tool attempt unavailable');
+        officeAttemptVerified = true;
+      }
+    }
     if (!workspaceAuthorized(ctx, row)) throw forbidden('workspace authorization revoked');
     const accepted = parseResult(await readAcceptedInvocationResult(client, ctx, row));
     if (resultKind(accepted) !== row.outcome_kind)
@@ -596,9 +615,28 @@ async function accept(
   recordKind: string,
   evidenceRef: string | null = null,
   fileIdentity?: string,
+  officeAnalysisDigest?: string,
 ): Promise<ToolResult> {
   const result = parseResult(value);
   if (result.status === 'unknown') throw stateConflict('unknown is not a completed tool result');
+  const officeTool = isOfficeToolId(row.tool_id) ? row.tool_id : undefined;
+  if (
+    (officeTool && ctx.signal?.aborted) ||
+    (result.status === 'ok' &&
+      (isOfficeToolId(result.result.kind) || officeTool) &&
+      result.result.kind !== row.tool_id)
+  )
+    throw forbidden('invalid office result authority');
+  if (row.tool_id === 'create_reminder' && ctx.officeMaterials?.length && result.status === 'ok') {
+    if (ctx.signal?.aborted) throw forbidden('invalid office reminder authority');
+    await assertOfficeToolAuthority(client, ctx);
+  }
+  const officeKey =
+    officeTool && result.status === 'ok'
+      ? await assertOfficeToolAuthority(client, ctx, officeTool)
+      : null;
+  if (officeAnalysisDigest !== undefined && row.tool_id !== 'office_analyze_tasks')
+    throw stateConflict('unexpected office analysis facts');
   if (
     result.status === 'ok' &&
     (result.result.kind === 'create_applied' ||
@@ -679,7 +717,23 @@ async function accept(
   if (result.status === 'ok' && Boolean(docx) !== (row.tool_id === 'feishu_docx_read'))
     throw stateConflict('invalid Feishu observation tool');
   let serialized = logical;
-  if (docx) {
+  if (officeKey && result.status === 'ok' && isPrivateOfficeObservation(row.tool_id)) {
+    serialized = JSON.stringify(
+      sealOfficeObservation(
+        officeKey,
+        {
+          ownerId: ctx.ownerId,
+          conversationId: ctx.conversationId,
+          runId: ctx.runId,
+          attemptId: ctx.attemptId,
+          invocationId: row.invocation_id,
+          toolId: row.tool_id,
+        },
+        result,
+        officeAnalysisDigest,
+      ),
+    );
+  } else if (docx) {
     const grant = row.frozen_context.feishuDocx;
     const config = loadFeishuBotDocxConfiguration();
     const key = config && readFeishuBotObservationKey(config);
@@ -781,6 +835,22 @@ async function gate(
     else await audit(client, ctx, row, 'denied', denied);
     return { ...denied, invocationId: row.invocation_id, replayed: false };
   }
+  if (
+    row.tool_id === 'create_reminder' &&
+    (ctx.officeMaterials?.length ||
+      (
+        await client.query(
+          'SELECT 1 FROM office_run_materials WHERE run_id=$1 AND owner_id=$2 AND conversation_id=$3',
+          [ctx.runId, ctx.ownerId, ctx.conversationId],
+        )
+      ).rowCount)
+  ) {
+    if (!canExecute) {
+      await audit(client, ctx, row, 'denied', denied);
+      return { ...denied, invocationId: row.invocation_id, replayed: false };
+    }
+    await assertOfficeToolAuthority(client, ctx);
+  }
   if (row.tool_id === 'read_run_observation') {
     if (!canExecute || ctx.signal?.aborted) {
       await audit(client, ctx, row, 'denied', denied);
@@ -804,7 +874,7 @@ async function gate(
     }
   }
   if (row.state === 'completed') {
-    if (row.tool_id === 'feishu_docx_read' && !canExecute) {
+    if ((row.tool_id === 'feishu_docx_read' || isOfficeToolId(row.tool_id)) && !canExecute) {
       await audit(client, ctx, row, 'denied', denied);
       return { ...denied, invocationId: row.invocation_id, replayed: false };
     }
@@ -827,7 +897,10 @@ export async function executeLocalInvocation(
   pool: Pool,
   ctx: ToolContext,
   input: InvocationInput,
-  execute: (client: PoolClient, frozenContext: ToolContext) => Promise<ToolResult>,
+  execute: (
+    client: PoolClient,
+    frozenContext: ToolContext,
+  ) => Promise<ToolResult | { value: ToolResult; officeAnalysisDigest: string }>,
   validateBeforeReplay?: (client: PoolClient, accepted: ToolResult) => Promise<boolean>,
 ): Promise<ToolOutcome> {
   return withRunTransaction(pool, ctx.ownership, async (client) => {
@@ -836,11 +909,19 @@ export async function executeLocalInvocation(
     if (gated) return gated;
     if (row.execution_kind === 'non_transactional' || row.state !== 'reserved')
       throw stateConflict('invocation requires non-transactional coordinator');
+    if (isOfficeToolId(row.tool_id)) await assertOfficeToolAuthority(client, ctx, row.tool_id);
     const frozenContext = executionContext(ctx, row);
     await client.query('SAVEPOINT tool_business');
     let result: ToolResult;
+    let officeAnalysisDigest: string | undefined;
     try {
-      result = await execute(client, frozenContext);
+      const observed = await execute(client, frozenContext);
+      if ('officeAnalysisDigest' in observed) {
+        result = observed.value;
+        officeAnalysisDigest = observed.officeAnalysisDigest;
+      } else {
+        result = observed;
+      }
     } catch (error) {
       if (!(error instanceof ToolExecutionError)) throw error;
       result = failed;
@@ -856,6 +937,9 @@ export async function executeLocalInvocation(
       row,
       result,
       result.status === 'failed' ? 'failed' : 'accepted',
+      null,
+      undefined,
+      officeAnalysisDigest,
     );
     return { ...accepted, invocationId: row.invocation_id, replayed: false };
   });

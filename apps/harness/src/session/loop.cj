@@ -131,7 +131,6 @@ extend Harness {
                 message("system", "Correct only the structured result using the accepted receipts; no further business actions are allowed. The original iteration/token budget still applies.")
                 continue
             }
-            let args = JsonValue.fromStr(arguments).asObject()
             if (hardDenied != "" || closingGoal) {
                 // Rejected control arguments never reopen business execution.
                 // No reservation, invocation, invented receipt, or reset budget.
@@ -141,6 +140,15 @@ extend Harness {
                 continue
             }
             if (!tools.contains(name)) { finish("failed", "TOOL_DENIED"); return }
+            let office = isOfficeTool(name)
+            let args = if (office) {
+                match (officeArguments(name, arguments)) {
+                    case Some(valid) => valid
+                    case None =>
+                        message("system", "The proposed office tool arguments were invalid and no action was taken. Use only that tool's schema and accepted source invocation IDs; retry only the intended authorized action.")
+                        continue
+                }
+            } else { JsonValue.fromStr(arguments).asObject() }
             if (toolRefs.size() >= 64) { finish("failed", "HARNESS_CONTEXT_LIMIT"); return }
             require(nextCall < SAFE_INTEGER)
             let reservation = pipe.request("reserve", obj([("call_key", text("harness/${nextCall}")), ("tool_id", text(name)), ("args", args)])).asObject()
@@ -155,11 +163,12 @@ extend Harness {
             let id = uuid(field(reservation, "invocation_id"))
             let result = pipe.request("invoke", obj([("invocation_id", text(id)), ("tool_id", text(name)), ("args", args)]))
             resultCheck(result, true, id, name)
+            if (office) { officeResultMatches(name, args, result.asObject()) }
             let status = str(field(result.asObject(), "status"), 16)
             if (status == "unknown") { finish("failed", "TOOL_EFFECT_UNKNOWN"); return }
             nextCall++
             toolRefs.add(text(id))
-            let deferFailure = name == "feishu_docx_read" && status == "failed" && pipe.protocol == "harness/v8"
+            let deferFailure = (officeRun || (name == "feishu_docx_read" && pipe.protocol == "harness/v8")) && status == "failed"
             if (!deferFailure && status != "ok" && (!delegated || status == "failed")) {
                 let code = errorCheck(field(result.asObject(), "error"))
                 checkpoint()

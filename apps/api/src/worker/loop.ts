@@ -15,6 +15,7 @@ import { runAckPhase } from '../features/tasks/public.js';
 import { runMissedPhase } from '../features/tasks/public.js';
 import { createLocalInAppProvider } from '../features/notifications/public.js';
 import { runIdentityMailTick } from '../features/identity/public.js';
+import { createOfficeStorage } from '../features/native-office/public.js';
 
 const schedulerTicks = channel('along.scheduler.tick');
 
@@ -43,6 +44,7 @@ export function startWorkerLoop(options: WorkerLoopOptions = {}): WorkerLoopHand
   const provider = receivePool ? createLocalInAppProvider(receivePool) : null;
   let activeTick: Promise<void> | null = null;
   let activeMailTick: Promise<void> | null = null;
+  let activeOfficeCleanup: Promise<void> | null = null;
   let stopped = false;
   let stopping: Promise<void> | null = null;
 
@@ -85,6 +87,20 @@ export function startWorkerLoop(options: WorkerLoopOptions = {}): WorkerLoopHand
       });
   }
 
+  function officeCleanup(): void {
+    if (!pool || activeOfficeCleanup || stopped) return;
+    activeOfficeCleanup = createOfficeStorage(pool)
+      .pruneBytes()
+      .then(() => undefined)
+      .catch((error: unknown) => onError('office-cleanup', error))
+      .finally(() => {
+        activeOfficeCleanup = null;
+      });
+  }
+
+  officeCleanup();
+  const officeCleanupTimer = setInterval(officeCleanup, 60 * 60 * 1000);
+
   // Keep worker-only roles alive even when every PG connection is idle.
   const timer = setInterval(() => {
     void tick();
@@ -96,9 +112,10 @@ export function startWorkerLoop(options: WorkerLoopOptions = {}): WorkerLoopHand
       if (!stopping) {
         stopped = true;
         clearInterval(timer);
+        clearInterval(officeCleanupTimer);
         stopping = (async () => {
           try {
-            await Promise.all([activeTick, activeMailTick]);
+            await Promise.all([activeTick, activeMailTick, activeOfficeCleanup]);
           } finally {
             await receivePool?.end();
           }

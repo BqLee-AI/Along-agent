@@ -21,6 +21,7 @@ import { omitRetainedDocxObservations } from '../tools/invocations/context-sourc
 import {
   HARNESS_TOOL_DEFINITIONS,
   DELEGATION_TOOL_DEFINITIONS,
+  OFFICE_TOOL_DEFINITIONS,
   R3_MEMORY_TOOL_DEFINITIONS,
   R3_COMPACT_MEMORY_TOOL_DEFINITIONS,
   R3_MEMORY_SOURCE_TOOL_DEFINITION,
@@ -41,6 +42,34 @@ import {
 } from '../../features/conversations/public.js';
 import { supportsFrozenTools } from './frozen-tool-eligibility.js';
 import { resolveRunSelection } from '../../features/model-providers/public.js';
+import { assertOfficeToolAuthority } from '../tools/office/authority.js';
+
+const officeMaterialsSchema = z
+  .array(
+    z
+      .object({
+        role: z.enum(['notes', 'tasks']),
+        attachmentId: z.string().uuid(),
+        filename: z.string().min(1).max(255),
+        format: z.enum(['txt', 'markdown', 'csv']),
+        sizeBytes: z
+          .number()
+          .int()
+          .positive()
+          .max(1024 * 1024),
+        expiresAt: z.string().datetime(),
+        sha256: z.string().regex(/^[a-f0-9]{64}$/),
+      })
+      .strict(),
+  )
+  .min(1)
+  .max(2)
+  .refine(
+    (items) =>
+      new Set(items.map((item) => item.role)).size === items.length &&
+      new Set(items.map((item) => item.attachmentId)).size === items.length &&
+      items.every((item) => (item.role === 'tasks') === (item.format === 'csv')),
+  );
 
 export function poolOf(deps: ConversationDeps): Pool {
   if (!deps.pool) throw notReady();
@@ -103,6 +132,32 @@ export async function contextOf(
 ): Promise<RunContext> {
   const frozen = run.frozen_context;
   if (!frozen) throw stateConflict('Run accepted input missing');
+  let officeMaterials: RunContext['officeMaterials'];
+  let officeSessionId: string | undefined;
+  if (Object.hasOwn(frozen, 'officeMaterials')) {
+    const parsed = officeMaterialsSchema.safeParse(frozen.officeMaterials);
+    const session = z.string().uuid().safeParse(frozen.officeSessionId);
+    if (
+      !parsed.success ||
+      !session.success ||
+      frozen.authorization_revision !== 'delegation/1' ||
+      frozen.execution_lifecycle !== 'server-owned' ||
+      frozen.execution_profile !== 'compact-memory/1'
+    )
+      throw stateConflict('office Run authority unavailable');
+    await assertOfficeToolAuthority(client, {
+      ownerId: run.owner_id,
+      conversationId: run.conversation_id,
+      runId: run.id,
+      authorizationRevision: frozen.authorization_revision,
+      officeMaterials: parsed.data,
+      officeSessionId: session.data,
+    });
+    officeMaterials = parsed.data;
+    officeSessionId = session.data;
+  } else if (frozen.officeSessionId !== undefined) {
+    throw stateConflict('invalid office Run authority');
+  }
   const control = frozen.execution_profile === 'compact-memory/1' && run.input_message_id === null;
   if (!control && !run.input_message_id) throw stateConflict('Run accepted input missing');
   const message = control
@@ -222,6 +277,7 @@ export async function contextOf(
     ...(frozen.workspaceGrant ? { workspaceGrant: frozen.workspaceGrant } : {}),
     ...(frozen.workspaceGrants ? { workspaceGrants: frozen.workspaceGrants } : {}),
     ...(frozen.feishuDocx ? { feishuDocx: frozen.feishuDocx } : {}),
+    ...(officeMaterials && officeSessionId ? { officeMaterials, officeSessionId } : {}),
     ...(frozen.authorization_revision
       ? {
           authorizationRevision: frozen.authorization_revision,
@@ -268,6 +324,7 @@ export function buildHarnessStart(
               : tool,
           )
         : HARNESS_TOOL_DEFINITIONS),
+      ...(context.officeMaterials ? OFFICE_TOOL_DEFINITIONS : []),
       ...R3_COMPACT_MEMORY_TOOL_DEFINITIONS,
       R3_MEMORY_SOURCE_TOOL_DEFINITION,
     ].filter((tool) => context.allowlist.includes(tool.name));

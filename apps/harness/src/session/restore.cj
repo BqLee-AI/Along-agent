@@ -66,6 +66,7 @@ extend Harness {
         let units = field(field(snapshot, "native_state").asObject(), "units").asArray()
         require(refs.size() == units.size() && refs.size() <= 64 && supplied.size() <= refs.size())
         if (supplied.size() == refs.size()) { return supplied }
+        require(!officeRun)
         let observations = JsonArray()
         var next: Int64 = 0
         for (i in 0..refs.size()) {
@@ -183,6 +184,12 @@ extend Harness {
                     let projected = field(saved, "projected").asBool().getValue()
                     require(projected == (str(field(observation, "view"), 16) == "projected"))
                     let unit = ContextUnit(observation, field(saved, "seen").asBool().getValue(), projected)
+                    if (officeRun) {
+                        let supplied = observations.get(i).getOrThrow().asObject()
+                        let toolId = ref(field(observation, "tool_id"))
+                        require(version == 4 && officeWireEqual(observation, supplied))
+                        if (isOfficeTool(toolId)) { officeEntriesCheck(field(saved, "entries").asArray(), observation, toolId) }
+                    }
                     if (ref(field(observation, "tool_id")) == "feishu_docx_read") {
                         // Reapply the same model disclosure bound to the accepted result on resume.
                         unit.entries.add(observationEntry(observation))

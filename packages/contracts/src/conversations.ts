@@ -57,6 +57,48 @@ export const ConversationRunHistoryItemSchema = z
     status: RunStatusSchema,
     created_at: utcMicrosecond,
     ended_at: utcMicrosecond.nullable(),
+    office_materials: z
+      .object({
+        inputs: z
+          .array(
+            z
+              .object({
+                role: z.enum(['notes', 'tasks']),
+                attachment_id: uuid,
+                filename: z.string(),
+                format: z.enum(['txt', 'markdown', 'csv']),
+                byte_length: z.number().int().positive(),
+                expires_at: z.string().datetime(),
+                status: z.enum(['available', 'expired', 'revoked']),
+              })
+              .strict(),
+          )
+          .max(2),
+        artifacts: z
+          .array(
+            z
+              .object({
+                artifact_id: uuid,
+                run_id: uuid,
+                filename: z.string(),
+                format: z.enum(['markdown', 'csv']),
+                byte_length: z.number().int().positive(),
+                expires_at: z.string().datetime(),
+                status: z.enum(['available', 'expired', 'revoked']),
+                download_url: z.string().nullable(),
+              })
+              .strict(),
+          )
+          .max(2),
+        reminder: z.discriminatedUnion('state', [
+          z
+            .object({ state: z.literal('created'), task_id: uuid, current_status: z.string() })
+            .strict(),
+          z.object({ state: z.literal('unconfirmed') }).strict(),
+        ]),
+      })
+      .strict()
+      .optional(),
     original: z.discriminatedUnion('state', [
       z
         .object({

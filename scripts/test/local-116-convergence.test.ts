@@ -192,8 +192,8 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
   it('initializes an empty database at the converged version', async () => {
     await isolated(async (url) => {
       await deployment(url, async (db) => {
-        expect((await db.initialize()).version).toBe('0041');
-        expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0041' });
+        expect((await db.initialize()).version).toBe('0042');
+        expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0042' });
       });
       await sql(url, async (client) => {
         expect(
@@ -224,6 +224,7 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
           '0039',
           '0040',
           '0041',
+          '0042',
         ]);
       });
     });
@@ -247,8 +248,8 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
         );
         await deployment(url, async (db) => {
           expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0028' });
-          expect((await db.upgrade()).version).toBe('0041');
-          expect((await db.initialize()).version).toBe('0041');
+          expect((await db.upgrade()).version).toBe('0042');
+          expect((await db.initialize()).version).toBe('0042');
         });
         await sql(url, async (client) => {
           await client.query(
@@ -311,8 +312,8 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
         });
         await deployment(url, async (db) => {
           expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0037' });
-          expect((await db.upgrade()).version).toBe('0041');
-          expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0041' });
+          expect((await db.upgrade()).version).toBe('0042');
+          expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0042' });
         });
         await sql(url, async (client) => {
           expect((await client.query('SELECT * FROM model_provider_defaults')).rows).toEqual(
@@ -401,7 +402,7 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
           await expect(db.initialize()).rejects.toMatchObject({
             code: 'explicit_upgrade_required',
           });
-          expect((await db.upgrade()).version).toBe('0041');
+          expect((await db.upgrade()).version).toBe('0042');
         });
         await sql(url, async (client) => {
           expect(await facts(client, history)).toEqual(before);
@@ -444,11 +445,12 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
             '0039',
             '0040',
             '0041',
+            '0042',
           ]);
         });
         await deployment(url, async (db) => {
-          expect((await db.initialize()).version).toBe('0041');
-          expect((await db.upgrade()).version).toBe('0041');
+          expect((await db.initialize()).version).toBe('0042');
+          expect((await db.upgrade()).version).toBe('0042');
         });
       });
     }, 30000);
@@ -486,7 +488,7 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
             url,
             async (db) => {
               expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0025' });
-              expect((await db.upgrade()).version).toBe('0041');
+              expect((await db.upgrade()).version).toBe('0042');
             },
             directory,
           );
@@ -535,7 +537,7 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
           version: '0026',
           reason: 'explicit_upgrade_required',
         });
-        expect((await db.upgrade()).version).toBe('0041');
+        expect((await db.upgrade()).version).toBe('0042');
       });
       await sql(url, async (client) => {
         expect(await facts(client, 'legacy')).toEqual(before.facts);
@@ -645,7 +647,7 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
           ).toBe('0');
         });
         await deployment(url, async (db) => {
-          expect((await db.upgrade()).version).toBe('0041');
+          expect((await db.upgrade()).version).toBe('0042');
         });
         await sql(url, async (client) => expect(await facts(client, 'legacy')).toEqual(before));
       } finally {

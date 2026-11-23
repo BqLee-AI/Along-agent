@@ -106,6 +106,7 @@ export async function acceptReminderDate(
     const eligible = await client.query<{ id: string }>(
       `SELECT r.id FROM agent_runs r WHERE r.owner_id=$1 AND r.conversation_id=$2
        AND r.status='done' AND r.tools_allowlist ? 'create_reminder'
+       AND NOT (COALESCE(r.frozen_context, '{}'::jsonb) ? 'officeMaterials')
        AND r.goal_result->>'status' IN ('blocked','partial')
        AND r.goal_result->'clarification'->>'kind' IN ('time','timezone')
        AND NOT EXISTS (SELECT 1 FROM agent_runs next WHERE next.owner_id=$1

@@ -97,6 +97,7 @@ export async function requestRuntimeCompactPause(
       !deps.runDriver ||
       locked.run.execution !== 'harness' ||
       locked.run.frozen_context?.execution_lifecycle !== 'server-owned' ||
+      !!locked.run.frozen_context?.officeMaterials ||
       (locked.run.frozen_context?.execution_profile as string | undefined) !== 'compact-memory/1' ||
       locked.run.status !== 'running' ||
       locked.attempt.status !== 'running'

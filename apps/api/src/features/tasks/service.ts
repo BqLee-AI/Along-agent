@@ -27,6 +27,28 @@ export async function findOutboxTaskByKey(
   return rows[0]?.task_id ?? null;
 }
 
+/** Read created reminders by the scoped creation keys, without exposing outbox rows. */
+export async function readOfficeReminderStatuses(
+  pool: Pool,
+  ownerId: string,
+  scopeRunIds: readonly string[],
+) {
+  if (!scopeRunIds.length) return new Map<string, { taskId: string; state: string }>();
+  const keys = scopeRunIds.map((id) => `office-reminder:${id}`);
+  const { rows } = await pool.query<{ idempotency_key: string; task_id: string; state: string }>(
+    `SELECT o.idempotency_key, t.id AS task_id, t.state
+       FROM outbox o JOIN tasks t ON t.id=o.task_id AND t.owner_id=o.owner_id
+       WHERE o.owner_id=$1 AND o.idempotency_key=ANY($2::text[])`,
+    [ownerId, keys],
+  );
+  return new Map(
+    rows.map((row) => [
+      row.idempotency_key.slice('office-reminder:'.length),
+      { taskId: row.task_id, state: row.state },
+    ]),
+  );
+}
+
 export interface Deps {
   pool: Pool | null;
 }

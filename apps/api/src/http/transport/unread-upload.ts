@@ -11,7 +11,7 @@ export function writeFiniteResponse(
   res: ServerResponse,
   status: number,
   headers: Record<string, string | string[]>,
-  payload: string,
+  payload: string | Uint8Array,
 ): void {
   const closingUpload = res.shouldKeepAlive === false && res.getHeader('connection') === 'close';
   res.writeHead(status, {

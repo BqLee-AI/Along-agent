@@ -21,6 +21,7 @@ import {
 import { toolContext } from '../runtime/context.js';
 import { approvalAuthorizesActions, type AttemptEnvironment } from '../runtime/attempt-state.js';
 import { authorizePrivateOutput } from '../runtime/private-output.js';
+import { assertOfficeToolAuthority } from '../tools/office/authority.js';
 import { validateGoalResult } from './goal-result.js';
 import { readRunApprovalDecision } from './run-approval-decision.js';
 import { commitTerminal } from './finish.js';
@@ -55,6 +56,14 @@ export function createFinishHandlers(
     )
       throw new ApplicationError(429, 'BUDGET_EXCEEDED', '本轮推理预算用完，已停下。');
     const result = await guarded(async (client) => {
+      if (context.officeMaterials) {
+        const conversation = await client.query(
+          'SELECT 1 FROM conversations WHERE id=$1 AND owner_id=$2 FOR UPDATE',
+          [context.conversationId, context.ownerId],
+        );
+        if (!conversation.rowCount) throw stateConflict('conversation unavailable');
+        await assertOfficeToolAuthority(client, context);
+      }
       let goal;
       try {
         goal = await validateGoalResult(client, toolContext(context), request.goal_result);
@@ -119,8 +128,16 @@ export function createFinishHandlers(
     const { event, privateOutput } = await guarded(async (client) => {
       // Interruption only accounts for accepted effects and deltas. Use the
       // already validated in-memory usage baseline instead of reopening private state.
+      const privateOffice =
+        request.outcome !== 'done' &&
+        !!(
+          await client.query(
+            'SELECT 1 FROM office_run_materials WHERE owner_id=$1 AND conversation_id=$2 AND run_id=$3',
+            [context.ownerId, context.conversationId, context.runId],
+          )
+        ).rowCount;
       const previous =
-        request.outcome !== 'done' && context.feishuDocx
+        request.outcome !== 'done' && (context.feishuDocx || privateOffice)
           ? null
           : await readLatestRunSnapshotPayload(client, context);
       const baseline = previous
@@ -240,7 +257,9 @@ export function createFinishHandlers(
                 ...eventPayload(context),
                 error: {
                   code: request.error?.code ?? 'HARNESS_EXITED',
-                  message: request.error?.message ?? '原生执行失败。',
+                  message: context.officeMaterials
+                    ? '原生执行失败。'
+                    : (request.error?.message ?? '原生执行失败。'),
                   http_status: request.error?.code === 'BUDGET_EXCEEDED' ? 429 : 500,
                 },
               };

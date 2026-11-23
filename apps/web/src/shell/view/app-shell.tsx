@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { AppShell as LumenAppShell } from '@lorelum/lumen-ui/pro/app-shell';
 import ConversationPane from '@/features/conversations/view/conversation-pane';
+import type { OfficeSession } from '@/features/conversations/model/office-materials';
 import { isSettingsPath } from '@/features/capabilities/model/capabilities';
 import { ModelCatalogProvider } from '@/features/model-settings/viewmodel/model-catalog-context';
 import { SettingsPanel } from '@/features/capabilities/view/settings-panel';
@@ -32,9 +33,13 @@ const icons = { today: CalendarDays, reminders: Bell, memory: Brain, profile: Us
 export function AppShell({
   children,
   displayName,
+  officeViewer,
+  officeSession,
 }: {
   children: ReactNode;
   displayName: string | null;
+  officeViewer: OfficeSession | undefined;
+  officeSession: OfficeSession | undefined;
 }) {
   const { pathname, location: rawLocation, selection, href, switchSurface } = useWorkspaceShell();
   const router = useRouter();
@@ -95,7 +100,10 @@ export function AppShell({
             >
               <div className={location.invalid ? 'hidden' : 'flex min-h-0 w-full min-w-0 flex-1'}>
                 <ConversationPane
+                  key={officeViewer?.ownerId ?? 'unsigned'}
                   {...selection}
+                  {...(officeSession ? { officeSession } : {})}
+                  officeHistoryCsrf={officeViewer?.csrfToken ?? null}
                   sidebar={!location.workspaceOpen}
                   headerActions={
                     location.workspaceOpen ? null : (

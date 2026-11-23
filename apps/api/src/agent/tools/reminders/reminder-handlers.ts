@@ -30,6 +30,7 @@ import { readRunTimezoneSettings } from '../query.js';
 import { ApplicationError } from '../../../platform/errors.js';
 import type { ToolContext, ToolResult } from '../contracts.js';
 import type { ToolExecution } from '../handler-common.js';
+import { bindOfficeReminder } from '../office/reminder.js';
 
 const CLARIFY_TEXT: Record<string, string> = {
   ASK_YEAR: '请给年份：日期需要年份才能排期，请补充年份（如 2026 年 10 月 17 日 09:20）。',
@@ -196,6 +197,12 @@ export async function runCreateReminder(
         text: '请完整重述这条提醒的日期、时间、时区和事项。',
       },
     };
+  let idempotencyKey = `create:${invocationId}`;
+  if (ctx.officeMaterials?.length) {
+    const binding = await bindOfficeReminder(client, ctx, authority.originalText, input);
+    if ('denied' in binding) return binding.denied;
+    idempotencyKey = `office-reminder:${binding.scopeRunId}`;
+  }
   const sourceText = authority.clarificationText ?? authority.originalText;
   if (authority.source.kind !== 'clarification' && !sourceText.includes(input.raw_time_text))
     return {
@@ -318,7 +325,7 @@ export async function runCreateReminder(
         revision: 'elapsed/1',
       },
       originalNote: input.note,
-      idempotencyKey: `create:${invocationId}`,
+      idempotencyKey,
     });
     return { status: 'ok', result: { kind: 'task_created', ...receipt } };
   }
@@ -417,7 +424,7 @@ export async function runCreateReminder(
     resolvedUtcOffsetSeconds: result.normalized.offset_seconds,
     tzdbVersion: result.tzdb_version,
     originalNote: input.note,
-    idempotencyKey: `create:${invocationId}`,
+    idempotencyKey,
   });
   return { status: 'ok', result: { kind: 'task_created', ...receipt } };
 }

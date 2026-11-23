@@ -22,14 +22,12 @@ export async function writeAuthorizedEvent(
     } else if (!(await lockViewerAccess(client, ownerId, sessionId))) {
       throw forbidden('session authorization revoked');
     }
-    if (sessionId) {
-      const access = await privateDisclosureAccess(client, ownerId, sessionId, event);
-      if (access === 'withhold') return true;
-      if (access === 'allowed') {
-        const open = await write(event);
-        if (open) await releasePrivateDisclosure(client, event);
-        return open;
-      }
+    const access = await privateDisclosureAccess(client, ownerId, sessionId ?? null, event);
+    if (access === 'withhold') return true;
+    if (access === 'allowed') {
+      const open = await write(event);
+      if (open) await releasePrivateDisclosure(client, event);
+      return open;
     }
     return write(event);
   });

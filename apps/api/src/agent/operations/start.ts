@@ -4,8 +4,15 @@ import {
   readReminderTimeErrors,
 } from '../tools/reminders/reminder-source.js';
 import { createHash, randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import type { PoolClient } from 'pg';
-import { TrustedExecutionContextSchema, type ExecutionKind } from '@along/contracts';
+import {
+  GoalResultSchema,
+  HarnessToolResultSchema,
+  TrustedExecutionContextSchema,
+  type ExecutionKind,
+  type GoalResult,
+} from '@along/contracts';
 import type { ConversationDeps, RunContext, StartResult } from '../runtime/contracts.js';
 import { buildHarnessStart } from '../runtime/context.js';
 import {
@@ -53,7 +60,7 @@ import {
   resolveWorkspaceGrants,
   validateWorkspaceGrant,
 } from '../../features/workspaces/public.js';
-import { findReminderDirective } from '@along/time-core';
+import { findReminderDirective, reminderTimezoneReply, utcInCoverage } from '@along/time-core';
 import { requireTimeContext } from '../../features/time/public.js';
 import { withTransaction } from '../../db/transaction.js';
 import {
@@ -84,6 +91,14 @@ import {
   readFeishuBotObservationKey,
   suppliedFeishuDocxUrl,
 } from '../../features/office-connectors/public.js';
+import {
+  consumeOfficeAttachments,
+  continueOfficeAttachments,
+  prepareOfficeAttachments,
+  readOfficeObservationKey,
+  type OfficeExecution,
+  type OfficeFrozenInput,
+} from '../../features/native-office/public.js';
 
 const AGENT_REVISION = 'assistant/r1';
 const BUSINESS_MAX_ITERATIONS = 10;
@@ -115,6 +130,7 @@ function requestHashOf(input: {
   clarificationOfRunId?: string;
   authorizationRevision?: 'delegation/1';
   modelSelection?: { provider_id: string; model_id: string };
+  officeMaterials?: SendMessageBody['office_materials'];
 }): string {
   const material: unknown[] = [
     input.conversationId ?? null,
@@ -130,6 +146,15 @@ function requestHashOf(input: {
     material.push({
       model_selection: [input.modelSelection.provider_id, input.modelSelection.model_id],
     });
+  if (input.officeMaterials) {
+    material.push({
+      office_materials: [
+        input.officeMaterials.draft_id.toLowerCase(),
+        input.officeMaterials.notes_attachment_id?.toLowerCase() ?? null,
+        input.officeMaterials.tasks_attachment_id?.toLowerCase() ?? null,
+      ],
+    });
+  }
   const canonical = JSON.stringify(material);
   return createHash('sha256')
     .update(
@@ -148,6 +173,266 @@ function requestHashOf(input: {
 function textOf(body: SendMessageBody): string {
   if (!body.raw_text) throw validationError('raw_text is required');
   return body.raw_text;
+}
+
+type OfficePredecessor = {
+  id: string;
+  input_message_id: string;
+  content: string;
+  status: string;
+  goal_result: unknown;
+  execution: string;
+  tools_allowlist: string[];
+  materials: OfficeFrozenInput[] | null;
+  trusted_context: unknown;
+  session_id: string | null;
+  scope_run_id: string | null;
+};
+
+const officeClarificationUnavailable = () =>
+  validationError('无法确认办公资料的待补充时区；请重新选择资料并明确提交。');
+
+async function findOfficePredecessor(
+  client: PoolClient,
+  ownerId: string,
+  conversationId: string,
+  runId: string,
+) {
+  return (
+    (
+      await client.query<OfficePredecessor>(
+        `SELECT r.id,r.input_message_id,m.content,r.status,r.goal_result,r.execution,r.tools_allowlist,
+         r.frozen_context->'officeMaterials' AS materials,
+         r.frozen_context->'trustedExecutionContext' AS trusted_context,
+         o.session_id,o.scope_run_id
+       FROM agent_runs r
+       LEFT JOIN messages m ON m.id=r.input_message_id AND m.owner_id=r.owner_id
+         AND m.conversation_id=r.conversation_id AND m.role='user'
+       LEFT JOIN office_run_materials o ON o.run_id=r.id AND o.owner_id=r.owner_id
+         AND o.conversation_id=r.conversation_id
+       WHERE r.id=$3 AND r.owner_id=$1 AND r.conversation_id=$2
+         AND (o.run_id IS NOT NULL OR r.frozen_context ? 'officeMaterials')`,
+        [ownerId, conversationId, runId],
+      )
+    ).rows[0] ?? null
+  );
+}
+
+/** Read only a safe accepted manifest, never an earlier private observation. */
+async function readOfficeDelivery(
+  client: PoolClient,
+  binding: OfficeExecution,
+  sourceRunId: string,
+  achievedReceipts: readonly string[],
+) {
+  const { rows } = await client.query<{
+    invocation_id: string | null;
+    accepted_result: unknown;
+    manifest: unknown;
+    available: boolean;
+  }>(
+    `SELECT t.invocation_id,t.accepted_result,m.manifest,m.available
+       FROM office_deliveries d
+       CROSS JOIN LATERAL (
+         SELECT jsonb_agg(jsonb_build_object('artifact_id',a.id,'filename',a.filename,
+                  'format',a.format,'size_bytes',a.size_bytes) ORDER BY a.id) AS manifest,
+                bool_and(a.expires_at > statement_timestamp() AND b.artifact_id IS NOT NULL
+                  AND NOT EXISTS (
+                    SELECT 1 FROM office_run_inputs i JOIN office_attachments u ON u.id=i.attachment_id
+                    WHERE i.run_id=d.scope_run_id AND u.revoked_at IS NOT NULL
+                      AND (NOT a.sources_known OR EXISTS (
+                        SELECT 1 FROM office_artifact_sources s
+                        WHERE s.artifact_id=a.id AND s.attachment_id=i.attachment_id
+                      ))
+                  )) AS available
+         FROM office_artifacts a LEFT JOIN office_artifact_bytes b ON b.artifact_id=a.id
+         WHERE a.scope_run_id=d.scope_run_id
+       ) m
+       LEFT JOIN tool_invocations t ON t.run_id=d.run_id AND t.owner_id=d.owner_id
+         AND t.conversation_id=d.conversation_id AND t.tool_id='office_create_artifacts'
+         AND t.state='completed' AND t.outcome_kind='success' AND t.result_version=1
+         AND t.approval_id IS NULL
+         AND t.invocation_id=ANY($4::uuid[])
+       WHERE d.scope_run_id=$3 AND d.run_id=$3 AND d.owner_id=$1 AND d.conversation_id=$2
+       ORDER BY t.accepted_at,t.invocation_id`,
+    [binding.ownerId, binding.conversationId, sourceRunId, achievedReceipts],
+  );
+  if (!rows.length) return null;
+  for (const row of rows) {
+    const receipt = HarnessToolResultSchema.safeParse(row.accepted_result);
+    if (
+      row.invocation_id &&
+      row.available &&
+      receipt.success &&
+      receipt.data.status === 'ok' &&
+      receipt.data.result.kind === 'office_create_artifacts' &&
+      isDeepStrictEqual(
+        [...receipt.data.result.artifacts].sort((a, b) =>
+          a.artifact_id.localeCompare(b.artifact_id),
+        ),
+        row.manifest,
+      )
+    )
+      return {
+        invocation_id: row.invocation_id,
+        tool_id: 'office_create_artifacts',
+        result: receipt.data,
+      };
+  }
+  throw officeClarificationUnavailable();
+}
+
+// The conversation lock makes adjacency and successor selection atomic. Office
+// storage takes the owner lock on bind; the caller then rechecks frozen facts.
+async function acceptOfficeContinuation(
+  client: PoolClient,
+  binding: OfficeExecution,
+  prior: OfficePredecessor,
+  input: SendMessageBody,
+  time: ConversationDeps['timeContext'],
+) {
+  const goal = GoalResultSchema.safeParse(prior.goal_result);
+  const trusted = TrustedExecutionContextSchema.safeParse(prior.trusted_context);
+  const text = input.raw_text.trim();
+  const timezone = reminderTimezoneReply(text) ?? text;
+  const explicitTimezone = input.confirmed_timezone_id ?? input.confirmed_timezone;
+  if (
+    prior.status !== 'done' ||
+    prior.execution !== 'harness' ||
+    prior.session_id !== binding.sessionId ||
+    prior.scope_run_id !== prior.id ||
+    !prior.content ||
+    !Array.isArray(prior.materials) ||
+    !prior.materials.length ||
+    !goal.success ||
+    goal.data.clarification?.kind !== 'timezone' ||
+    !trusted.success ||
+    trusted.data.execution_lifecycle !== 'server-owned' ||
+    trusted.data.continuation !== null ||
+    trusted.data.timezone !== null ||
+    trusted.data.input_message_id !== prior.input_message_id ||
+    input.fold_choice !== 'none' ||
+    !time.available ||
+    trusted.data.time_capabilities.wall_rules?.ruleset_id !== time.ruleset_id ||
+    trusted.data.time_capabilities.wall_rules?.tzdb_version !== time.tzdb_version ||
+    trusted.data.time_capabilities.wall_rules?.alias_version !== time.aliases.version ||
+    !Object.hasOwn(time.ruleset.zones, timezone) ||
+    !utcInCoverage(time.ruleset, timezone, trusted.data.request_anchor_utc) ||
+    (explicitTimezone != null &&
+      (reminderTimezoneReply(explicitTimezone) ?? explicitTimezone) !== timezone)
+  )
+    throw officeClarificationUnavailable();
+
+  const { rows: adjacent } = await client.query<{ id: string; runs: number }>(
+    `SELECT m.id,(SELECT count(*)::integer FROM agent_runs r WHERE r.owner_id=$1
+                    AND r.conversation_id=$2 AND r.input_message_id=m.id) AS runs
+       FROM messages m WHERE m.owner_id=$1 AND m.conversation_id=$2 AND m.role='user'
+       ORDER BY m.created_at DESC,m.id DESC LIMIT 1`,
+    [binding.ownerId, binding.conversationId],
+  );
+  if (adjacent[0]?.id !== prior.input_message_id || adjacent[0]?.runs !== 1)
+    throw officeClarificationUnavailable();
+
+  const { rows: candidates } = await client.query<{
+    run_id: string;
+    invocation_id: string;
+    tool_id: string;
+    accepted_result: unknown;
+  }>(
+    `SELECT DISTINCT ON (r.id,t.tool_id) r.id AS run_id,t.invocation_id,t.tool_id,t.accepted_result
+       FROM office_run_materials o
+       JOIN agent_runs r ON r.id=o.run_id AND r.owner_id=o.owner_id AND r.conversation_id=o.conversation_id
+       JOIN tool_invocations t ON t.run_id=r.id AND t.owner_id=r.owner_id AND t.conversation_id=r.conversation_id
+       WHERE r.owner_id=$1 AND r.conversation_id=$2 AND r.status='done' AND r.execution='harness'
+         AND o.scope_run_id=o.run_id
+         AND r.goal_result->>'status' IN ('blocked','partial')
+         AND r.goal_result #>> '{clarification,kind}'='timezone'
+         AND NOT EXISTS (SELECT 1 FROM office_run_materials n WHERE n.previous_run_id=r.id)
+         AND t.state='completed' AND t.result_version=1 AND t.approval_id IS NULL
+         AND r.tools_allowlist ? t.tool_id
+         AND (
+           (t.tool_id='office_analyze_tasks' AND t.outcome_kind='denied'
+             AND t.accepted_result #>> '{error,code}'='OFFICE_TIMEZONE_REQUIRED')
+           OR (t.tool_id='create_reminder' AND t.outcome_kind='clarification'
+             AND t.accepted_result #>> '{result,reason}'='TIMEZONE_MISSING'
+             AND NOT EXISTS (
+               SELECT 1 FROM tool_invocations s WHERE s.run_id=r.id AND s.tool_id='create_reminder'
+                 AND s.state='completed' AND s.outcome_kind='success'
+             ))
+         )
+       ORDER BY r.id,t.tool_id,t.accepted_at,t.invocation_id LIMIT 3`,
+    [binding.ownerId, binding.conversationId],
+  );
+  if (!candidates.length || candidates.some(({ run_id }) => run_id !== prior.id))
+    throw officeClarificationUnavailable();
+  const analysis = candidates.find(({ tool_id }) => tool_id === 'office_analyze_tasks');
+  const gap = analysis ?? candidates[0]!;
+  const outcome = HarnessToolResultSchema.safeParse(gap.accepted_result);
+  if (
+    !outcome.success ||
+    (analysis
+      ? outcome.data.status !== 'denied' || outcome.data.error.code !== 'OFFICE_TIMEZONE_REQUIRED'
+      : outcome.data.status !== 'ok' ||
+        outcome.data.result.kind !== 'clarify' ||
+        outcome.data.result.reason !== 'TIMEZONE_MISSING')
+  )
+    throw officeClarificationUnavailable();
+
+  const delivery = await readOfficeDelivery(
+    client,
+    binding,
+    prior.id,
+    goal.data.outcomes.flatMap((outcome) =>
+      outcome.status === 'achieved' ? outcome.receipt_refs : [],
+    ),
+  );
+  // A committed single delivery slot cannot be expanded after an analysis
+  // failure. Only a reminder-only gap can safely reuse a verified delivery.
+  if (
+    analysis
+      ? delivery !== null || !prior.materials.some(({ role }) => role === 'tasks')
+      : !delivery
+  )
+    throw officeClarificationUnavailable();
+
+  // Model-authored answers and descriptions may quote private source data.
+  const safeGoal: GoalResult = {
+    status: delivery ? 'partial' : 'blocked',
+    outcomes: [
+      ...(delivery
+        ? [
+            {
+              description: '已交付文件',
+              status: 'achieved' as const,
+              receipt_refs: [delivery.invocation_id],
+            },
+          ]
+        : []),
+      {
+        description: analysis ? '任务表分析待补时区' : '提醒待补时区',
+        status: 'blocked',
+        receipt_refs: [],
+      },
+    ],
+    clarification: { kind: 'timezone', question: '请确认本次请求使用的时区。' },
+    answer: '请确认本次请求使用的时区。',
+  };
+  return {
+    continuation: {
+      run_id: prior.id,
+      invocation_id: gap.invocation_id,
+      original_input_message_id: prior.input_message_id,
+      original_text: prior.content,
+      goal_result: safeGoal,
+      receipts: delivery ? [delivery] : [],
+      source_result: null,
+    },
+    materials: prior.materials,
+    anchor: trusted.data.request_anchor_utc,
+    allowlist: prior.tools_allowlist,
+    timezone,
+    delivery,
+  };
 }
 
 /** Admit an explicit idle compact command; no ordinary message is created.
@@ -369,6 +654,7 @@ export async function startConversationRun(
   const parsed = SendMessageBodySchema.safeParse(body);
   if (!parsed.success) throw validationError('invalid message body');
   const input = parsed.data;
+  const officeAdmissionEnabled = process.env.ALONG_NATIVE_OFFICE_ADMISSION === '1';
   const execution = input.execution ?? 'business';
   const text = textOf(input);
   const timezone = input.confirmed_timezone_id ?? input.confirmed_timezone ?? null;
@@ -388,11 +674,15 @@ export async function startConversationRun(
     ...(input.clarification_of_run_id
       ? { clarificationOfRunId: input.clarification_of_run_id }
       : {}),
+    ...(input.office_materials ? { officeMaterials: input.office_materials } : {}),
   });
   const pool = requirePool(deps);
   const candidateRunId = randomUUID();
   const serverOwnedEligible =
-    execution === 'harness' && input.authorization_revision === 'delegation/1' && !!deps.runDriver;
+    execution === 'harness' &&
+    input.authorization_revision === 'delegation/1' &&
+    !!deps.runDriver &&
+    (!input.office_materials || officeAdmissionEnabled);
   let ownership: RunOwnership | undefined;
   if (serverOwnedEligible && !(await findIdempotency(pool, ownerId, key))) {
     try {
@@ -493,10 +783,84 @@ export async function startConversationRun(
       );
       if (paused.rowCount) throw stateConflict('conversation has a paused Run');
 
+      const clarificationRunId = input.clarification_of_run_id;
+      const officePredecessor =
+        clarificationRunId && input.conversation_id
+          ? await findOfficePredecessor(client, ownerId, conversation.id, clarificationRunId)
+          : null;
+      const office = input.office_materials !== undefined || officePredecessor !== null;
+      let officeBinding: OfficeExecution | undefined;
+      if (office) {
+        if (!officeAdmissionEnabled) throw validationError('office materials are not enabled');
+        if (!idempotencyKeyHeader && !input.idempotency_key)
+          throw validationError('office materials require an explicit idempotency key');
+        if (execution !== 'harness' || !delegation || !ownership || !deps.modelTransport)
+          throw validationError('office materials require server-owned harness execution');
+        if (!readOfficeObservationKey()) throw forbidden('private snapshot key unavailable');
+        if (!sessionId || !(await lockViewerAccess(client, ownerId, sessionId)))
+          throw forbidden('office session authorization unavailable');
+        if ((input.office_materials && clarificationRunId) || input.workspace_ids || workspaceGrant)
+          throw validationError(
+            'office admission cannot expand an existing goal or use workspaces',
+          );
+        officeBinding = {
+          ownerId,
+          conversationId: conversation.id,
+          runId: candidateRunId,
+          sessionId,
+        };
+      }
+      const officeSelection =
+        input.office_materials && officeBinding
+          ? {
+              ...officeBinding,
+              draftId: input.office_materials.draft_id,
+              ...(input.office_materials.notes_attachment_id
+                ? { notesAttachmentId: input.office_materials.notes_attachment_id }
+                : {}),
+              ...(input.office_materials.tasks_attachment_id
+                ? { tasksAttachmentId: input.office_materials.tasks_attachment_id }
+                : {}),
+            }
+          : null;
+      const officeContinuation =
+        officeBinding && officePredecessor
+          ? await acceptOfficeContinuation(
+              client,
+              officeBinding,
+              officePredecessor,
+              input,
+              deps.timeContext,
+            )
+          : null;
+      const officeMaterials = officeSelection
+        ? await prepareOfficeAttachments(client, officeSelection)
+        : officeContinuation?.materials;
+      if (officeMaterials) {
+        const priorTools = officeContinuation?.allowlist;
+        allowlist = [
+          ...(officeContinuation?.delivery
+            ? []
+            : [
+                ...(officeMaterials.some(({ role }) => role === 'notes')
+                  ? ['office_read_notes']
+                  : []),
+                ...(officeMaterials.some(({ role }) => role === 'tasks')
+                  ? ['office_analyze_tasks']
+                  : []),
+                'office_create_artifacts',
+              ]),
+          'get_user_prefs',
+          'create_reminder',
+        ].filter((tool) => !priorTools || priorTools.includes(tool));
+      }
+
       const preferences = delegation ? await readUserPreferences(client, ownerId) : null;
-      let confirmedTimezone = delegation
-        ? (timezone ?? preferences?.timezone_id ?? null)
-        : (timezone ?? conversation.confirmed_timezone_id);
+      let confirmedTimezone = officeContinuation
+        ? officeContinuation.timezone
+        : delegation
+          ? (timezone ?? preferences?.timezone_id ?? null)
+          : (timezone ?? conversation.confirmed_timezone_id);
       if (!delegation && !conversation.confirmed_timezone_id && timezone) {
         await freezeConversationTimezone(client, conversation.id, timezone);
         confirmedTimezone = timezone;
@@ -510,6 +874,7 @@ export async function startConversationRun(
         requestId,
       });
       let targetContinuation =
+        !office &&
         delegation &&
         execution === 'harness' &&
         input.clarification_of_run_id &&
@@ -531,24 +896,40 @@ export async function startConversationRun(
               kind: 'destination',
             })))
           : null;
-      const reminderDate = await acceptReminderDate(
-        client,
-        {
-          ownerId,
-          conversationId: conversation.id,
-          inputMessageId: userMessageId,
-          text,
-          receivedAtUtc,
-          foldChoice: input.fold_choice,
-          confirmedTimezone,
-          directCreation:
-            delegation && (allowlist as readonly string[]).includes('create_reminder'),
-          ...(input.clarification_of_run_id
-            ? { clarificationOfRunId: input.clarification_of_run_id }
-            : {}),
-        },
-        { listReminderClarifications, readReminderTimeErrors },
-      );
+      const reminderDate = office
+        ? {
+            anchor: officeContinuation?.anchor ?? receivedAtUtc,
+            source: officeContinuation
+              ? {
+                  version: 1 as const,
+                  kind: 'clarification' as const,
+                  inputMessageId: officeContinuation.continuation.original_input_message_id,
+                  sourceRunId: officeContinuation.continuation.run_id,
+                  sourceInvocationId: officeContinuation.continuation.invocation_id,
+                }
+              : {
+                  version: 1 as const,
+                  kind: 'new' as const,
+                  inputMessageId: userMessageId,
+                },
+            originalText: officeContinuation?.continuation.original_text,
+            timezone: officeContinuation?.timezone,
+          }
+        : await acceptReminderDate(
+            client,
+            {
+              ownerId,
+              conversationId: conversation.id,
+              inputMessageId: userMessageId,
+              text,
+              receivedAtUtc,
+              foldChoice: input.fold_choice,
+              confirmedTimezone,
+              directCreation: delegation && allowlist.includes('create_reminder'),
+              ...(clarificationRunId ? { clarificationOfRunId: clarificationRunId } : {}),
+            },
+            { listReminderClarifications, readReminderTimeErrors },
+          );
       if (
         !targetContinuation &&
         delegation &&
@@ -611,9 +992,11 @@ export async function startConversationRun(
             : []),
         ];
       }
-      if (execution === 'harness') allowlist = [...allowlist, ...R3_MEMORY_TOOL_IDS];
+      if (execution === 'harness' && !office) allowlist = [...allowlist, ...R3_MEMORY_TOOL_IDS];
       const feishuUrl =
-        delegation && execution === 'harness' && sessionId ? suppliedFeishuDocxUrl(text) : null;
+        !office && delegation && execution === 'harness' && sessionId
+          ? suppliedFeishuDocxUrl(text)
+          : null;
       const feishuConfig = feishuUrl ? loadFeishuBotDocxConfiguration() : null;
       const feishuDocx =
         feishuConfig &&
@@ -638,6 +1021,7 @@ export async function startConversationRun(
         ];
       }
       if (
+        !office &&
         delegation &&
         input.clarification_of_run_id &&
         !targetContinuation &&
@@ -671,25 +1055,26 @@ export async function startConversationRun(
       const compactCompletionCap = useR3Context
         ? (deps.harness!.compactCompletionCap ?? deps.harness!.contextPolicy.completion_cap)
         : undefined;
-      if (useR3Context) allowlist = [...allowlist, R3_MEMORY_SOURCE_TOOL_ID];
+      if (useR3Context && !office) allowlist = [...allowlist, R3_MEMORY_SOURCE_TOOL_ID];
       const selected =
         execution === 'harness'
           ? await resolveSelection(client, ownerId, input.model_selection)
           : null;
-      const autoCompactPolicy = useR3Context
-        ? deps.harness?.autoCompactPolicy
-          ? AutoCompactPolicySchema.parse(deps.harness.autoCompactPolicy)
-          : (createAutoCompactPolicy(
-              {
-                ...deps.harness!.contextPolicy,
-                model_binding: {
-                  ...deps.harness!.contextPolicy.model_binding,
-                  model: selected!.model_id,
+      const autoCompactPolicy =
+        useR3Context && !office
+          ? deps.harness?.autoCompactPolicy
+            ? AutoCompactPolicySchema.parse(deps.harness.autoCompactPolicy)
+            : (createAutoCompactPolicy(
+                {
+                  ...deps.harness!.contextPolicy,
+                  model_binding: {
+                    ...deps.harness!.contextPolicy.model_binding,
+                    model: selected!.model_id,
+                  },
                 },
-              },
-              deps.harness!.autoCompactPlanningTokens,
-            ) ?? undefined)
-        : undefined;
+                deps.harness!.autoCompactPlanningTokens,
+              ) ?? undefined)
+          : undefined;
       const messageRefs =
         execution === 'harness' && !useR3Context
           ? await listHarnessMessageRefs(client, {
@@ -712,6 +1097,7 @@ export async function startConversationRun(
             received_at_utc: receivedAtUtc,
             request_anchor_utc: targetContinuation?.anchor ?? reminderDate.anchor,
             continuation:
+              officeContinuation?.continuation ??
               targetContinuation?.continuation ??
               (reminderDate.source.kind === 'clarification'
                 ? {
@@ -722,8 +1108,8 @@ export async function startConversationRun(
             timezone: confirmedTimezone
               ? {
                   timezone_id: confirmedTimezone,
-                  source: timezone ? 'explicit' : 'preference',
-                  reference: timezone ? userMessageId : ownerId,
+                  source: timezone || officeContinuation ? 'explicit' : 'preference',
+                  reference: timezone || officeContinuation ? userMessageId : ownerId,
                 }
               : null,
             time_capabilities: {
@@ -766,6 +1152,9 @@ export async function startConversationRun(
         ...(workspaceGrant ? { workspaceGrant, workspaceSummary } : {}),
         ...(delegation ? { workspaceGrants: workspaceSet.grants } : {}),
         ...(feishuDocx ? { feishuDocx } : {}),
+        ...(officeMaterials && officeBinding
+          ? { officeMaterials, officeSessionId: officeBinding.sessionId }
+          : {}),
         ...(delegation &&
         (!targetContinuation || targetContinuation.createdArtifactReadAllowed) &&
         workspaceSet.grants.some((grant) => (grant.output_directories?.length ?? 0) > 0)
@@ -799,6 +1188,8 @@ export async function startConversationRun(
         frozenContext,
         inputMessageId: userMessageId,
       });
+      // The freezer derives history scope from the persisted office grant.
+      // A successor's original request is carried only in trustedExecutionContext.
       const r3Context = useR3Context
         ? await freezeR3Context(client, {
             ownerId,
@@ -827,8 +1218,30 @@ export async function startConversationRun(
         attemptNo: 1,
         ...(ownership ? { leaseToken: ownership.token } : {}),
       });
+      if (officeBinding) {
+        const bound = officeSelection
+          ? await consumeOfficeAttachments(client, officeSelection)
+          : officeContinuation
+            ? await continueOfficeAttachments(client, {
+                ...officeBinding,
+                previousRunId: officeContinuation.continuation.run_id,
+              })
+            : null;
+        if (!bound || !isDeepStrictEqual(bound, officeMaterials))
+          throw stateConflict('office materials changed during admission');
+        if (officeContinuation) {
+          const delivery = await readOfficeDelivery(
+            client,
+            officeBinding,
+            officeContinuation.continuation.run_id,
+            officeContinuation.delivery ? [officeContinuation.delivery.invocation_id] : [],
+          );
+          if (!isDeepStrictEqual(delivery, officeContinuation.delivery))
+            throw stateConflict('office delivery changed during admission');
+        }
+      }
       const routingPolicy =
-        execution === 'harness' && !feishuDocx ? routingRuntimeOf(deps).policy() : null;
+        execution === 'harness' && !feishuDocx && !office ? routingRuntimeOf(deps).policy() : null;
       if (routingPolicy)
         await insertRoutingPolicy(
           client,
@@ -886,25 +1299,36 @@ export async function startConversationRun(
         ...(workspaceGrant ? { workspaceGrant } : {}),
         ...(delegation ? { workspaceGrants: workspaceSet.grants } : {}),
         ...(feishuDocx ? { feishuDocx } : {}),
+        ...(officeMaterials && officeBinding
+          ? { officeMaterials, officeSessionId: officeBinding.sessionId }
+          : {}),
         ...(trustedExecutionContext
           ? { authorizationRevision: 'delegation/1' as const, trustedExecutionContext }
           : {}),
         timeContext: deps.timeContext,
       };
-      if (r3Context)
-        buildHarnessStart(
+      if (r3Context) {
+        const start = buildHarnessStart(
           runContext,
           null,
           [],
           null,
           routingPolicy,
-          !feishuDocx &&
+          !office &&
+            !feishuDocx &&
             !trustedExecutionContext?.continuation &&
             !r3Context.summary &&
             routingPolicy?.mode !== 'off'
             ? 'fresh_first_step'
             : 'disabled',
         );
+        if (
+          office &&
+          (start.tools.length !== allowlist.length ||
+            start.tools.some(({ name }) => !allowlist.includes(name)))
+        )
+          throw stateConflict('frozen office tool catalog unavailable');
+      }
       return { conversationId: conversation.id, runId, replayRunId: null, context: runContext };
     });
   } catch (err) {
@@ -933,6 +1357,25 @@ export async function startConversationRun(
 
   if (started.replayRunId && ownership) await deps.runDriver!.release(ownership);
   if (started.replayRunId) {
+    // A private replay is an authorized subscription to the original Run,
+    // never an eager read of private checkpoint payloads or a new execution.
+    if (
+      (input.office_materials || input.clarification_of_run_id) &&
+      (
+        await pool.query(
+          `SELECT 1 FROM office_run_materials WHERE run_id=$1 AND owner_id=$2 AND conversation_id=$3`,
+          [started.replayRunId, ownerId, started.conversationId],
+        )
+      ).rowCount
+    )
+      return {
+        conversationId: started.conversationId,
+        runId: started.replayRunId,
+        replay: null,
+        context: null,
+        serverOwned: true,
+        afterSeq: null,
+      };
     const replay = await listRunEvents(pool, ownerId, started.replayRunId);
     return {
       conversationId: started.conversationId,

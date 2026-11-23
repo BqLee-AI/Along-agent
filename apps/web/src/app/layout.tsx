@@ -7,6 +7,10 @@ import { AppShell } from '@/shell/view/app-shell';
 import { AppTheme } from '@/shared/ui/app-theme';
 import { parseThemeMode, THEME_COOKIE } from '@/shared/ui/theme-mode';
 import { apiGet } from '@/shared/http/server';
+import {
+  officeAdmissionSession,
+  officeViewer,
+} from '@/features/conversations/model/office-materials';
 
 export const metadata: Metadata = {
   title: 'Along',
@@ -16,6 +20,10 @@ export const metadata: Metadata = {
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const identity = await apiGet((api) => api.api.v1.me.get());
   const displayName = identity.ok ? identity.data.user.display_name : null;
+  const viewer = officeViewer(identity.ok ? identity.data : null);
+  const capabilities = viewer
+    ? await apiGet((api) => api.api.v1.conversations['office-capabilities'].get())
+    : null;
   const mode = parseThemeMode((await cookies()).get(THEME_COOKIE)?.value);
   return (
     <html
@@ -41,7 +49,16 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
               </div>
             }
           >
-            <AppShell displayName={displayName}>{children}</AppShell>
+            <AppShell
+              displayName={displayName}
+              officeViewer={viewer}
+              officeSession={officeAdmissionSession(
+                viewer,
+                capabilities?.ok ? capabilities.data : null,
+              )}
+            >
+              {children}
+            </AppShell>
           </Suspense>
         </AppTheme>
       </body>

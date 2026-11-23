@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { randomBytes, randomUUID } from 'node:crypto';
-import type { HarnessSnapshot } from '@along/contracts';
+import { HarnessR3SnapshotSchema, type HarnessSnapshot } from '@along/contracts';
 import {
   continueConversationPause,
   requestConversationPause,
@@ -35,6 +35,7 @@ const secretEnv = 'TEST_PRIVATE_SNAPSHOT_BOT_SECRET';
 const observationKeyEnv = 'TEST_PRIVATE_SNAPSHOT_OBSERVATION_KEY';
 const url = `https://synthetic.feishu.cn/docx/${'A'.repeat(27)}`;
 const appId = 'cli_123456789abc';
+const officeKeyEnv = 'ALONG_OFFICE_OBSERVATION_KEY';
 
 suite('private Harness snapshots', () => {
   let db: IntegrationDatabase;
@@ -232,6 +233,246 @@ suite('private Harness snapshots', () => {
         if (value === undefined) delete process.env[name];
         else process.env[name] = value;
       }
+    }
+  });
+
+  test('persists only Along envelopes for office checkpoint, pause and compact recovery', async () => {
+    const priorKey = process.env[officeKeyEnv];
+    const { userId: ownerId } = await seedAdmittedSession(db.pool);
+    const [conversationId, runId, attemptId, resumedAttemptId, pauseId, messageId, attachmentId] =
+      Array.from({ length: 7 }, () => randomUUID());
+    const binding = { ownerId, conversationId, runId, attemptId };
+    const pause = { ...binding, id: pauseId, kind: 'pause' as const };
+    const continuation = {
+      ...pause,
+      attemptId: resumedAttemptId,
+      kind: 'compact-snapshot' as const,
+    };
+    const compactContext = { ...continuation, kind: 'compact-context' as const };
+    const privateText = 'synthetic-office-notes-待核对';
+    const snapshot = HarnessR3SnapshotSchema.parse({
+      version: 4,
+      original_manifest: { message_ids: [] },
+      original_summary: null,
+      context: {
+        manifest: { message_ids: [] },
+        summary: null,
+        messages: [],
+        input: { type: 'user', message_id: messageId, content: privateText },
+      },
+      tool_refs: [],
+      next_call_no: 1,
+      usage: { iterations: 1, tokens: null },
+      waiting: null,
+      native_state: {
+        protected_messages: [],
+        history_index: 0,
+        units: [],
+        hard_denied: '',
+        closing_goal: false,
+        pending_model: { content: privateText, tool_calls: [] },
+      },
+    });
+    type Sealed = { encoding: string; ciphertext: string };
+    const encoding = 'along-office-snapshot-aead/1';
+    const officeMaterials = [
+      {
+        attachmentId,
+        role: 'notes',
+        filename: 'synthetic.txt',
+        format: 'txt',
+        sha256: 'a'.repeat(64),
+        sizeBytes: Buffer.byteLength(privateText),
+        expiresAt: '2027-01-01T00:00:00Z',
+      },
+    ];
+
+    try {
+      const key = randomBytes(32).toString('base64');
+      process.env[officeKeyEnv] = key;
+      const { checkpointId, invalidBindings, legacyBinding } = await withTransaction(
+        db.pool,
+        async (client) => {
+          await client.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
+            conversationId,
+            ownerId,
+          ]);
+          await client.query(
+            `INSERT INTO messages(id,owner_id,conversation_id,role,content) VALUES($1,$2,$3,'user','synthetic')`,
+            [messageId, ownerId, conversationId],
+          );
+          const insertRun = async (id: string, frozen: Record<string, unknown>) => {
+            await client.query(
+              `INSERT INTO agent_runs(id,owner_id,conversation_id,agent_revision,mode,status,
+               budget_max_iterations,budget_max_tokens,execution,input_message_id,frozen_context)
+             VALUES($1,$2,$3,'test','chat','paused',10,10000,'harness',$4,$5::jsonb)`,
+              [
+                id,
+                ownerId,
+                conversationId,
+                messageId,
+                JSON.stringify({
+                  execution_profile: 'compact-memory/1',
+                  execution_lifecycle: 'request-bound',
+                  ...frozen,
+                }),
+              ],
+            );
+          };
+          const insertFixture = async (frozen: Record<string, unknown>) => {
+            const fixture = { ...pause, runId: randomUUID(), attemptId: randomUUID() };
+            await insertRun(fixture.runId, frozen);
+            await client.query(
+              `INSERT INTO run_attempts(id,owner_id,run_id,attempt_no,status)
+             VALUES($1,$2,$3,1,'done')`,
+              [fixture.attemptId, ownerId, fixture.runId],
+            );
+            return fixture;
+          };
+          await insertRun(runId, { officeMaterials });
+          await client.query(
+            `INSERT INTO run_attempts(id,owner_id,run_id,attempt_no,status)
+           VALUES($1,$2,$3,1,'done'),($4,$2,$3,2,'running')`,
+            [attemptId, ownerId, runId, resumedAttemptId],
+          );
+          const checkpoint = await writeHarnessSnapshotWithinTransaction(
+            client,
+            binding,
+            snapshot,
+            'harness/v8',
+          );
+          const sealedPause = await encodeRunSnapshot(client, pause, snapshot);
+          const sealedSnapshot = await encodeRunSnapshot(client, continuation, snapshot);
+          const sealedContext = await encodeRunSnapshot(client, compactContext, snapshot.context);
+          await client.query(
+            `INSERT INTO harness_pauses(id,owner_id,conversation_id,run_id,attempt_id,idempotency_key,
+             reason,purpose,resume_source,state,snapshot)
+           VALUES($1,$2,$3,$4,$5,$1,'runtime','manual_compact','runtime','paused',$6::jsonb)`,
+            [pauseId, ownerId, conversationId, runId, attemptId, sealedPause],
+          );
+          await client.query(
+            `INSERT INTO compact_operations(pause_id,owner_id,conversation_id,run_id,attempt_id,status)
+           VALUES($1,$2,$3,$4,$5,'pending')`,
+            [pauseId, ownerId, conversationId, runId, attemptId],
+          );
+          await client.query(
+            `INSERT INTO compact_continuations(pause_id,attempt_id,snapshot,context)
+           VALUES($1,$2,$3::jsonb,$4::jsonb)`,
+            [pauseId, resumedAttemptId, sealedSnapshot, sealedContext],
+          );
+          const invalidBindings = [
+            {
+              binding: await insertFixture({
+                officeMaterials,
+                feishuDocx: { kind: 'feishu-docx-bot/1' },
+              }),
+              error: 'conflicting private snapshot authorities',
+            },
+          ];
+          for (const malformed of [null, [], {}]) {
+            invalidBindings.push({
+              binding: await insertFixture({ officeMaterials: malformed }),
+              error: 'invalid office snapshot authority',
+            });
+          }
+          return {
+            checkpointId: checkpoint,
+            invalidBindings,
+            legacyBinding: await insertFixture({}),
+          };
+        },
+      );
+      await withTransaction(db.pool, async (client) => {
+        const {
+          rows: [row],
+        } = await client.query<{
+          checkpoint: Sealed;
+          pause: Sealed;
+          snapshot: Sealed;
+          context: Sealed;
+        }>(
+          `SELECT k.payload AS checkpoint,p.snapshot AS pause,c.snapshot,c.context
+           FROM harness_pauses p JOIN compact_continuations c ON c.pause_id=p.id
+           JOIN run_checkpoints k ON k.id=$2 WHERE p.id=$1`,
+          [pauseId, checkpointId],
+        );
+        const stored = row!;
+        for (const envelope of Object.values(stored)) {
+          expect(envelope).toEqual({ encoding, ciphertext: expect.any(String) });
+          expect(JSON.stringify(envelope)).not.toContain(privateText);
+        }
+        expect(await readRunSnapshotPayload(client, binding, checkpointId)).toEqual(snapshot);
+        expect(await readLatestRunSnapshotPayload(client, binding)).toEqual({ payload: snapshot });
+        expect(await decodeRunSnapshot(client, pause, stored.pause)).toEqual(snapshot);
+        expect(await decodeRunSnapshot(client, continuation, stored.snapshot)).toEqual(snapshot);
+        expect(await decodeRunSnapshot(client, compactContext, stored.context)).toEqual(
+          snapshot.context,
+        );
+
+        for (const moved of [
+          { ...pause, attemptId: resumedAttemptId },
+          { ...pause, id: randomUUID() },
+          { ...pause, kind: 'compact-snapshot' as const },
+        ]) {
+          await expect(decodeRunSnapshot(client, moved, stored.pause)).rejects.toThrow(
+            'invalid private snapshot ciphertext',
+          );
+        }
+        for (const field of ['ownerId', 'conversationId', 'runId'] as const) {
+          await expect(
+            decodeRunSnapshot(client, { ...pause, [field]: randomUUID() }, stored.pause),
+          ).rejects.toThrow('snapshot Run binding unavailable');
+        }
+
+        const tampered = Buffer.from(stored.pause.ciphertext, 'base64');
+        tampered.writeUInt8(tampered.readUInt8(tampered.length - 1) ^ 1, tampered.length - 1);
+        await expect(
+          decodeRunSnapshot(client, pause, { encoding, ciphertext: tampered.toString('base64') }),
+        ).rejects.toThrow('invalid private snapshot ciphertext');
+        for (const unsealed of [
+          snapshot,
+          { ...stored.pause, encoding: 'feishu-snapshot-aead/1' },
+          { ...stored.pause, ciphertext: `${stored.pause.ciphertext}\n` },
+        ]) {
+          await expect(decodeRunSnapshot(client, pause, unsealed)).rejects.toThrow(
+            'invalid private snapshot encoding',
+          );
+        }
+
+        delete process.env[officeKeyEnv];
+        await expect(encodeRunSnapshot(client, pause, snapshot)).rejects.toThrow(
+          'private snapshot key unavailable',
+        );
+        await expect(readRunSnapshotPayload(client, binding, checkpointId)).rejects.toThrow(
+          'private snapshot key unavailable',
+        );
+        process.env[officeKeyEnv] = randomBytes(32).toString('base64');
+        await expect(decodeRunSnapshot(client, pause, stored.pause)).rejects.toThrow(
+          'invalid private snapshot ciphertext',
+        );
+        process.env[officeKeyEnv] = key;
+
+        for (const { binding: invalidBinding, error } of invalidBindings) {
+          await expect(encodeRunSnapshot(client, invalidBinding, snapshot)).rejects.toThrow(error);
+          await expect(decodeRunSnapshot(client, invalidBinding, snapshot)).rejects.toThrow(error);
+        }
+        await expect(decodeRunSnapshot(client, legacyBinding, stored.pause)).rejects.toThrow(
+          'invalid private snapshot encoding',
+        );
+      });
+      const reader = await db.pool.connect();
+      try {
+        await reader.query('BEGIN READ ONLY');
+        await expect(readRunSnapshotPayload(reader, binding, checkpointId)).rejects.toThrow(
+          'private snapshot authorization unavailable',
+        );
+      } finally {
+        await reader.query('ROLLBACK');
+        reader.release();
+      }
+    } finally {
+      if (priorKey === undefined) delete process.env[officeKeyEnv];
+      else process.env[officeKeyEnv] = priorKey;
     }
   });
 

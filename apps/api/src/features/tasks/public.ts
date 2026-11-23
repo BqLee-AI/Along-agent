@@ -15,6 +15,7 @@ export {
 export { cancelTaskWithinTransaction, requestCancel } from './cancellation/cancel.js';
 export type { CancelResult, CancelDeps } from './cancellation/cancel.js';
 export { findOutboxTaskByKey, getTaskDetail, listTasksForOwner, getTaskEvents } from './service.js';
+export { readOfficeReminderStatuses } from './service.js';
 export { listHistoricalOwners } from './owner-history.js';
 export { runCancelPhase } from './scheduler/cancel-phase.js';
 export { runSchedulePhase } from './scheduler/schedule.js';

@@ -3,6 +3,7 @@ import { HARNESS_MAX_FRAME_BYTES } from '@along/contracts';
 import type { PoolClient } from 'pg';
 import { z } from 'zod';
 import { lockViewerAccess } from '../../identity/public.js';
+import { readOfficeObservationKey } from '../../native-office/public.js';
 import {
   feishuBotDocxGrantSchema,
   loadFeishuBotDocxConfiguration,
@@ -20,12 +21,13 @@ type SnapshotBinding = {
   kind: 'checkpoint' | 'pause' | 'compact-snapshot' | 'compact-context';
 };
 
-const encoding = 'feishu-snapshot-aead/1';
+const feishuEncoding = 'feishu-snapshot-aead/1';
+const officeEncoding = 'along-office-snapshot-aead/1';
 const nonceBytes = 12;
 const tagBytes = 16;
 const envelope = z
   .object({
-    encoding: z.literal(encoding),
+    encoding: z.enum([feishuEncoding, officeEncoding]),
     ciphertext: z
       .string()
       .max(4 * Math.ceil((HARNESS_MAX_FRAME_BYTES + nonceBytes + tagBytes) / 3)),
@@ -39,10 +41,17 @@ async function snapshotAuthority(client: PoolClient, binding: SnapshotBinding) {
     rows: [run],
   } = await client.query<{
     grant: unknown;
+    office_material_count: number | null;
     active: boolean;
     writable: boolean;
   }>(
     `SELECT r.frozen_context->'feishuDocx' AS grant,
+      CASE
+        WHEN r.frozen_context->'officeMaterials' IS NULL THEN NULL
+        WHEN jsonb_typeof(r.frozen_context->'officeMaterials')='array'
+          THEN jsonb_array_length(r.frozen_context->'officeMaterials')
+        ELSE 0
+      END AS office_material_count,
       r.status IN ('running','paused','suspended_approval') AS active,
       current_setting('transaction_read_only')='off' AS writable
       FROM agent_runs r JOIN run_attempts a ON a.run_id=r.id AND a.owner_id=r.owner_id
@@ -50,6 +59,26 @@ async function snapshotAuthority(client: PoolClient, binding: SnapshotBinding) {
     [binding.runId, binding.ownerId, binding.conversationId, binding.attemptId],
   );
   if (!run) throw stateConflict('snapshot Run binding unavailable');
+  // Only an absent field denotes a Run admitted without native office materials.
+  if (run.office_material_count !== null) {
+    if (run.office_material_count === 0) throw stateConflict('invalid office snapshot authority');
+    if (run.grant != null) throw stateConflict('conflicting private snapshot authorities');
+    if (!run.active || !run.writable) throw forbidden('private snapshot authorization unavailable');
+    const key = readOfficeObservationKey();
+    if (!key) throw forbidden('private snapshot key unavailable');
+    const aad = Buffer.from(
+      JSON.stringify([
+        officeEncoding,
+        binding.kind,
+        binding.ownerId,
+        binding.conversationId,
+        binding.runId,
+        binding.attemptId,
+        binding.id,
+      ]),
+    );
+    return { encoding: officeEncoding, key, aad };
+  }
   if (run.grant == null) return null;
   const parsed = feishuBotDocxGrantSchema.safeParse(run.grant);
   if (!parsed.success) throw stateConflict('invalid snapshot grant');
@@ -68,7 +97,7 @@ async function snapshotAuthority(client: PoolClient, binding: SnapshotBinding) {
   if (!key) throw forbidden('private snapshot key unavailable');
   const aad = Buffer.from(
     JSON.stringify([
-      encoding,
+      feishuEncoding,
       binding.kind,
       binding.ownerId,
       binding.conversationId,
@@ -84,7 +113,7 @@ async function snapshotAuthority(client: PoolClient, binding: SnapshotBinding) {
       grant.url,
     ]),
   );
-  return { key, aad };
+  return { encoding: feishuEncoding, key, aad };
 }
 
 export async function encodeRunSnapshot(
@@ -101,7 +130,7 @@ export async function encodeRunSnapshot(
   const cipher = createCipheriv('aes-256-gcm', authority.key, nonce);
   cipher.setAAD(authority.aad);
   return JSON.stringify({
-    encoding,
+    encoding: authority.encoding,
     ciphertext: Buffer.concat([
       nonce,
       cipher.update(json, 'utf8'),
@@ -121,7 +150,8 @@ export async function decodeRunSnapshot(
   if (!authority && !tagged) return payload;
   if (!authority || !tagged) throw stateConflict('invalid private snapshot encoding');
   const parsed = envelope.safeParse(payload);
-  if (!parsed.success) throw stateConflict('invalid private snapshot encoding');
+  if (!parsed.success || parsed.data.encoding !== authority.encoding)
+    throw stateConflict('invalid private snapshot encoding');
   const bytes = Buffer.from(parsed.data.ciphertext, 'base64');
   if (
     bytes.length <= nonceBytes + tagBytes ||

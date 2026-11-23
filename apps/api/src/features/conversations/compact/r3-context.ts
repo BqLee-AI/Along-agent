@@ -69,11 +69,36 @@ async function freezeContext(
     [conversationId, ownerId],
   );
   if (!locked.rowCount) throw notFound('conversation unavailable');
-  const run = await client.query(
-    `SELECT 1 FROM agent_runs WHERE id=$1 AND owner_id=$2 AND conversation_id=$3 AND input_message_id IS NOT DISTINCT FROM $4::uuid`,
+  const run = await client.query<{ office: boolean }>(
+    `SELECT COALESCE(frozen_context ? 'officeMaterials', false) AS office
+     FROM agent_runs WHERE id=$1 AND owner_id=$2 AND conversation_id=$3
+       AND input_message_id IS NOT DISTINCT FROM $4::uuid`,
     [runId, ownerId, conversationId, userMessageId],
   );
-  if (!run.rowCount) throw stateConflict('R3 Run binding unavailable');
+  const admitted = run.rows[0];
+  if (!admitted) throw stateConflict('R3 Run binding unavailable');
+  if (admitted.office) {
+    if (!userMessageId) throw stateConflict('office Run requires an accepted user message');
+    const {
+      rows: [input],
+    } = await client.query<{ content: string; bytes: number }>(
+      `SELECT content,octet_length(content) AS bytes FROM messages
+       WHERE id=$1 AND owner_id=$2 AND conversation_id=$3 AND role='user' AND source_run_id IS NULL`,
+      [userMessageId, ownerId, conversationId],
+    );
+    if (!input) throw stateConflict('R3 message binding unavailable');
+    if (input.bytes > HARNESS_MAX_FRAME_BYTES) capacity();
+    // An office Run opts in to selected files, never to conversation history.
+    // Trusted continuations are frozen on the Run separately from this view.
+    const context: R3Context = {
+      manifest: { message_ids: [] },
+      summary: null,
+      messages: [],
+      input: { type: 'user', message_id: userMessageId, content: input.content },
+    };
+    await persistContext(client, binding, userMessageId, context);
+    return context;
+  }
 
   // Counts and byte sums are evaluated in PostgreSQL before readCompactView can
   // materialize its source closure or any original message content in Node.
@@ -167,6 +192,16 @@ async function freezeContext(
   const context: R3Context | R3ControlContext = input
     ? { ...shared, input: { type: 'user', message_id: input.message_id, content: input.content } }
     : { ...shared, input: { type: 'compact_control' } };
+  await persistContext(client, binding, userMessageId, context);
+  return context;
+}
+
+async function persistContext(
+  client: PoolClient,
+  { ownerId, conversationId, runId }: R3ControlBinding,
+  userMessageId: string | null,
+  context: R3Context | R3ControlContext,
+): Promise<void> {
   const json = JSON.stringify(context);
   if (Buffer.byteLength(json, 'utf8') > HARNESS_MAX_FRAME_BYTES) capacity();
   const storedSize = (
@@ -178,7 +213,6 @@ async function freezeContext(
      VALUES ($1,$2,$3,$4,$5::jsonb)`,
     [runId, ownerId, conversationId, userMessageId, json],
   );
-  return context;
 }
 
 /** Resolve only the immutable admission snapshot; never select the current head. */
@@ -190,7 +224,12 @@ export async function readR3Context(
     `SELECT f.context FROM r3_context_freezes f
      JOIN agent_runs r ON r.id=f.run_id AND r.owner_id=f.owner_id AND r.conversation_id=f.conversation_id AND r.input_message_id=f.input_message_id
      JOIN conversations c ON c.id=f.conversation_id AND c.owner_id=f.owner_id
-     WHERE f.owner_id=$1 AND f.conversation_id=$2 AND f.run_id=$3 AND f.input_message_id=$4`,
+     WHERE f.owner_id=$1 AND f.conversation_id=$2 AND f.run_id=$3 AND f.input_message_id=$4
+       AND (NOT COALESCE(r.frozen_context ? 'officeMaterials', false) OR (
+         f.context->'manifest'->'message_ids'='[]'::jsonb
+         AND f.context->'summary'='null'::jsonb
+         AND f.context->'messages'='[]'::jsonb
+       ))`,
     [binding.ownerId, binding.conversationId, binding.runId, binding.userMessageId],
   );
   if (!result.rows[0]) throw notFound('R3 context unavailable');

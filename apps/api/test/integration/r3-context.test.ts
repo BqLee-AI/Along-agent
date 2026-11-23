@@ -143,6 +143,7 @@ suite('R3 immutable admission context', () => {
     ownerId: string,
     conversationId: string,
     input = 'full input',
+    frozen: Record<string, unknown> = {},
   ): Promise<R3ContextBinding> {
     const runId = randomUUID(),
       userMessageId = randomUUID();
@@ -164,6 +165,7 @@ suite('R3 immutable admission context', () => {
         JSON.stringify({
           execution_profile: 'compact-memory/1',
           execution_lifecycle: 'request-bound',
+          ...frozen,
         }),
       ],
     );
@@ -296,6 +298,24 @@ suite('R3 immutable admission context', () => {
       message_ids: [f.first, late, f.second],
     });
     expect(reordered.manifest.message_ids.slice(0, 3)).toEqual([f.first, late, f.second]);
+    const office = await tx(async (c) => {
+      const binding = await newRun(c, f.ownerId, f.conversationId, 'selected material request', {
+        officeMaterials: [{ role: 'notes' }],
+      });
+      const admitted = await freezeR3Context(c, binding);
+      expect(await readR3Context(c, binding)).toEqual(admitted);
+      return { binding, admitted };
+    });
+    expect(office.admitted).toEqual({
+      manifest: { message_ids: [] },
+      summary: null,
+      messages: [],
+      input: {
+        type: 'user',
+        message_id: office.binding.userMessageId,
+        content: 'selected material request',
+      },
+    });
   });
 
   test('admission serializes with publication and preserves its selected head', async () => {

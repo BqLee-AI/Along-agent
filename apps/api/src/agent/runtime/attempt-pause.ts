@@ -64,6 +64,7 @@ export function createPauseHandlers(
         request.after_measurement &&
         state.nextPermit &&
         !context.compactControl &&
+        !context.officeMaterials &&
         context.executionProfile === 'compact-memory/1' &&
         context.r3Context &&
         context.contextPolicy &&

@@ -3,6 +3,7 @@
 import { memo } from 'react';
 import { Markdown } from '@lorelum/lumen-ui/components/markdown';
 import { Table } from '@lorelum/lumen-ui/components/table';
+import { isOfficeDownloadLink } from '../model/office-results';
 
 /** The same safe Markdown renderer is used for persisted and incremental text. */
 export const AssistantMarkdown = memo(function AssistantMarkdown({
@@ -18,21 +19,27 @@ export const AssistantMarkdown = memo(function AssistantMarkdown({
       data-testid="assistant-markdown"
       streaming={streaming}
       components={{
-        a: ({ children, href }) => (
-          <a href={href} target="_blank" rel="noopener noreferrer">
-            {children}
-          </a>
-        ),
+        a: ({ children, href }) =>
+          isOfficeDownloadLink(href) ? (
+            <span>{children}</span>
+          ) : (
+            <a href={href} target="_blank" rel="noopener noreferrer">
+              {children}
+            </a>
+          ),
         // Keep remote image URLs readable without fetching untrusted tracking pixels.
-        img: ({ alt, src }) => (
-          <a
-            href={typeof src === 'string' ? src : undefined}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            {alt || '查看图片'}
-          </a>
-        ),
+        img: ({ alt, src }) =>
+          typeof src === 'string' && isOfficeDownloadLink(src) ? (
+            <span>{alt || '图片'}</span>
+          ) : (
+            <a
+              href={typeof src === 'string' ? src : undefined}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {alt || '查看图片'}
+            </a>
+          ),
         table: ({ children }) => (
           <div className="max-w-full overflow-x-auto" tabIndex={0} role="region" aria-label="表格">
             <Table variant="plain">{children}</Table>

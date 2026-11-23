@@ -14,6 +14,21 @@ export const SendMessageBodySchema = z
       .min(1)
       .refine((ids) => new Set(ids).size === ids.length)
       .optional(),
+    office_materials: z
+      .object({
+        draft_id: z.string().uuid(),
+        notes_attachment_id: z.string().uuid().optional(),
+        tasks_attachment_id: z.string().uuid().optional(),
+      })
+      .strict()
+      .refine(
+        (materials) =>
+          (materials.notes_attachment_id !== undefined ||
+            materials.tasks_attachment_id !== undefined) &&
+          (!materials.notes_attachment_id ||
+            materials.notes_attachment_id !== materials.tasks_attachment_id),
+      )
+      .optional(),
     raw_text: z.string().min(1).max(20000),
     card_ref: z.string().min(1).max(200).optional(),
     confirmed_timezone_id: z.string().min(1).max(100).nullable().optional(),
@@ -48,6 +63,18 @@ export const SendMessageBodySchema = z
         input.authorization_revision === 'delegation/1' &&
         input.workspace_id === undefined),
     { message: 'workspace_ids requires delegation harness execution', path: ['workspace_ids'] },
+  )
+  .refine(
+    (input) =>
+      input.office_materials === undefined ||
+      (input.execution === 'harness' &&
+        input.authorization_revision === 'delegation/1' &&
+        input.workspace_id === undefined &&
+        input.workspace_ids === undefined),
+    {
+      message: 'office materials require delegation harness execution',
+      path: ['office_materials'],
+    },
   );
 
 export type SendMessageBody = z.infer<typeof SendMessageBodySchema>;

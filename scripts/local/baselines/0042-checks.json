@@ -1,0 +1,803 @@
+{
+  "version": "0042",
+  "tables": [
+    "office_attachments",
+    "office_attachment_bytes",
+    "office_run_materials",
+    "office_run_inputs",
+    "office_deliveries",
+    "office_artifacts",
+    "office_artifact_bytes",
+    "office_artifact_sources"
+  ],
+  "columns": [
+    {
+      "table": "office_artifact_bytes",
+      "name": "artifact_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_artifact_bytes",
+      "name": "size_bytes",
+      "type": "int4",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_artifact_bytes",
+      "name": "content",
+      "type": "bytea",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_artifact_sources",
+      "name": "artifact_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_artifact_sources",
+      "name": "scope_run_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_artifact_sources",
+      "name": "attachment_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_artifacts",
+      "name": "id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_artifacts",
+      "name": "scope_run_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_artifacts",
+      "name": "filename",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_artifacts",
+      "name": "format",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_artifacts",
+      "name": "size_bytes",
+      "type": "int4",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_artifacts",
+      "name": "sources_known",
+      "type": "bool",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_artifacts",
+      "name": "created_at",
+      "type": "timestamptz",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_artifacts",
+      "name": "expires_at",
+      "type": "timestamptz",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_attachment_bytes",
+      "name": "attachment_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_attachment_bytes",
+      "name": "size_bytes",
+      "type": "int4",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_attachment_bytes",
+      "name": "content",
+      "type": "bytea",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_attachments",
+      "name": "id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_attachments",
+      "name": "owner_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_attachments",
+      "name": "session_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_attachments",
+      "name": "draft_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_attachments",
+      "name": "upload_conversation_id",
+      "type": "uuid",
+      "required": false,
+      "default": ""
+    },
+    {
+      "table": "office_attachments",
+      "name": "bound_conversation_id",
+      "type": "uuid",
+      "required": false,
+      "default": ""
+    },
+    {
+      "table": "office_attachments",
+      "name": "idempotency_key",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_attachments",
+      "name": "filename",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_attachments",
+      "name": "format",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_attachments",
+      "name": "size_bytes",
+      "type": "int4",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_attachments",
+      "name": "sha256",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_attachments",
+      "name": "created_at",
+      "type": "timestamptz",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_attachments",
+      "name": "expires_at",
+      "type": "timestamptz",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_attachments",
+      "name": "revoked_at",
+      "type": "timestamptz",
+      "required": false,
+      "default": ""
+    },
+    {
+      "table": "office_deliveries",
+      "name": "scope_run_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_deliveries",
+      "name": "run_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_deliveries",
+      "name": "owner_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_deliveries",
+      "name": "conversation_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_deliveries",
+      "name": "params_sha256",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_run_inputs",
+      "name": "run_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_run_inputs",
+      "name": "owner_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_run_inputs",
+      "name": "conversation_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_run_inputs",
+      "name": "session_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_run_inputs",
+      "name": "draft_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_run_inputs",
+      "name": "role",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_run_inputs",
+      "name": "attachment_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_run_inputs",
+      "name": "format",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_run_inputs",
+      "name": "sha256",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_run_materials",
+      "name": "run_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_run_materials",
+      "name": "owner_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_run_materials",
+      "name": "conversation_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_run_materials",
+      "name": "session_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_run_materials",
+      "name": "draft_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_run_materials",
+      "name": "scope_run_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "office_run_materials",
+      "name": "previous_run_id",
+      "type": "uuid",
+      "required": false,
+      "default": ""
+    }
+  ],
+  "constraints": [
+    {
+      "table": "agent_runs",
+      "name": "agent_runs_id_owner_conversation_unique",
+      "type": "u",
+      "columns": ["id", "owner_id", "conversation_id"]
+    },
+    {
+      "table": "conversations",
+      "name": "conversations_id_owner_unique",
+      "type": "u",
+      "columns": ["id", "owner_id"]
+    },
+    {
+      "table": "office_artifact_bytes",
+      "name": "office_artifact_bytes_artifact_id_size_bytes_fkey",
+      "type": "f",
+      "columns": ["artifact_id", "size_bytes"],
+      "target": "office_artifacts",
+      "delete_action": "a",
+      "target_columns": ["id", "size_bytes"]
+    },
+    {
+      "table": "office_artifact_bytes",
+      "name": "office_artifact_bytes_check",
+      "type": "c",
+      "columns": ["content", "size_bytes"],
+      "expression": "(octet_length(content) = size_bytes)"
+    },
+    {
+      "table": "office_artifact_bytes",
+      "name": "office_artifact_bytes_pkey",
+      "type": "p",
+      "columns": ["artifact_id"]
+    },
+    {
+      "table": "office_artifact_sources",
+      "name": "office_artifact_sources_artifact_id_scope_run_id_fkey",
+      "type": "f",
+      "columns": ["artifact_id", "scope_run_id"],
+      "target": "office_artifacts",
+      "delete_action": "a",
+      "target_columns": ["id", "scope_run_id"]
+    },
+    {
+      "table": "office_artifact_sources",
+      "name": "office_artifact_sources_pkey",
+      "type": "p",
+      "columns": ["artifact_id", "attachment_id"]
+    },
+    {
+      "table": "office_artifact_sources",
+      "name": "office_artifact_sources_scope_run_id_attachment_id_fkey",
+      "type": "f",
+      "columns": ["scope_run_id", "attachment_id"],
+      "target": "office_run_inputs",
+      "delete_action": "a",
+      "target_columns": ["run_id", "attachment_id"]
+    },
+    {
+      "table": "office_artifacts",
+      "name": "office_artifacts_check",
+      "type": "c",
+      "columns": ["expires_at", "created_at"],
+      "expression": "(expires_at > created_at)"
+    },
+    {
+      "table": "office_artifacts",
+      "name": "office_artifacts_filename_check",
+      "type": "c",
+      "columns": ["filename"],
+      "expression": "((length(filename) >= 1) AND (length(filename) <= 255))"
+    },
+    {
+      "table": "office_artifacts",
+      "name": "office_artifacts_format_check",
+      "type": "c",
+      "columns": ["format"],
+      "expression": "(format = ANY (ARRAY['markdown'::text, 'csv'::text]))"
+    },
+    {
+      "table": "office_artifacts",
+      "name": "office_artifacts_id_scope_run_id_key",
+      "type": "u",
+      "columns": ["id", "scope_run_id"]
+    },
+    {
+      "table": "office_artifacts",
+      "name": "office_artifacts_id_size_bytes_key",
+      "type": "u",
+      "columns": ["id", "size_bytes"]
+    },
+    {
+      "table": "office_artifacts",
+      "name": "office_artifacts_pkey",
+      "type": "p",
+      "columns": ["id"]
+    },
+    {
+      "table": "office_artifacts",
+      "name": "office_artifacts_scope_run_id_fkey",
+      "type": "f",
+      "columns": ["scope_run_id"],
+      "target": "office_deliveries",
+      "delete_action": "a",
+      "target_columns": ["scope_run_id"]
+    },
+    {
+      "table": "office_artifacts",
+      "name": "office_artifacts_scope_run_id_format_key",
+      "type": "u",
+      "columns": ["scope_run_id", "format"]
+    },
+    {
+      "table": "office_artifacts",
+      "name": "office_artifacts_size_bytes_check",
+      "type": "c",
+      "columns": ["size_bytes"],
+      "expression": "((size_bytes >= 1) AND (size_bytes <= 2097152))"
+    },
+    {
+      "table": "office_attachment_bytes",
+      "name": "office_attachment_bytes_attachment_id_size_bytes_fkey",
+      "type": "f",
+      "columns": ["attachment_id", "size_bytes"],
+      "target": "office_attachments",
+      "delete_action": "a",
+      "target_columns": ["id", "size_bytes"]
+    },
+    {
+      "table": "office_attachment_bytes",
+      "name": "office_attachment_bytes_check",
+      "type": "c",
+      "columns": ["content", "size_bytes"],
+      "expression": "(octet_length(content) = size_bytes)"
+    },
+    {
+      "table": "office_attachment_bytes",
+      "name": "office_attachment_bytes_pkey",
+      "type": "p",
+      "columns": ["attachment_id"]
+    },
+    {
+      "table": "office_attachments",
+      "name": "office_attachments_bound_conversation_id_owner_id_fkey",
+      "type": "f",
+      "columns": ["bound_conversation_id", "owner_id"],
+      "target": "conversations",
+      "delete_action": "a",
+      "target_columns": ["id", "owner_id"]
+    },
+    {
+      "table": "office_attachments",
+      "name": "office_attachments_check",
+      "type": "c",
+      "columns": ["expires_at", "created_at"],
+      "expression": "(expires_at > created_at)"
+    },
+    {
+      "table": "office_attachments",
+      "name": "office_attachments_check1",
+      "type": "c",
+      "columns": ["bound_conversation_id", "upload_conversation_id"],
+      "expression": "((bound_conversation_id IS NULL) OR (upload_conversation_id IS NULL) OR (bound_conversation_id = upload_conversation_id))"
+    },
+    {
+      "table": "office_attachments",
+      "name": "office_attachments_filename_check",
+      "type": "c",
+      "columns": ["filename"],
+      "expression": "((length(filename) >= 1) AND (length(filename) <= 255))"
+    },
+    {
+      "table": "office_attachments",
+      "name": "office_attachments_format_check",
+      "type": "c",
+      "columns": ["format"],
+      "expression": "(format = ANY (ARRAY['txt'::text, 'markdown'::text, 'csv'::text]))"
+    },
+    {
+      "table": "office_attachments",
+      "name": "office_attachments_id_owner_id_bound_conversation_id_sessio_key",
+      "type": "u",
+      "columns": [
+        "id",
+        "owner_id",
+        "bound_conversation_id",
+        "session_id",
+        "draft_id",
+        "format",
+        "sha256"
+      ]
+    },
+    {
+      "table": "office_attachments",
+      "name": "office_attachments_id_size_bytes_key",
+      "type": "u",
+      "columns": ["id", "size_bytes"]
+    },
+    {
+      "table": "office_attachments",
+      "name": "office_attachments_idempotency_key_check",
+      "type": "c",
+      "columns": ["idempotency_key"],
+      "expression": "((length(idempotency_key) >= 1) AND (length(idempotency_key) <= 200))"
+    },
+    {
+      "table": "office_attachments",
+      "name": "office_attachments_owner_id_session_id_draft_id_idempotency_key",
+      "type": "u",
+      "columns": ["owner_id", "session_id", "draft_id", "idempotency_key"]
+    },
+    {
+      "table": "office_attachments",
+      "name": "office_attachments_pkey",
+      "type": "p",
+      "columns": ["id"]
+    },
+    {
+      "table": "office_attachments",
+      "name": "office_attachments_sha256_check",
+      "type": "c",
+      "columns": ["sha256"],
+      "expression": "(sha256 ~ '^[0-9a-f]{64}$'::text)"
+    },
+    {
+      "table": "office_attachments",
+      "name": "office_attachments_size_bytes_check",
+      "type": "c",
+      "columns": ["size_bytes"],
+      "expression": "((size_bytes >= 1) AND (size_bytes <= 1048576))"
+    },
+    {
+      "table": "office_attachments",
+      "name": "office_attachments_upload_conversation_id_owner_id_fkey",
+      "type": "f",
+      "columns": ["upload_conversation_id", "owner_id"],
+      "target": "conversations",
+      "delete_action": "a",
+      "target_columns": ["id", "owner_id"]
+    },
+    {
+      "table": "office_deliveries",
+      "name": "office_deliveries_params_sha256_check",
+      "type": "c",
+      "columns": ["params_sha256"],
+      "expression": "(params_sha256 ~ '^[0-9a-f]{64}$'::text)"
+    },
+    {
+      "table": "office_deliveries",
+      "name": "office_deliveries_pkey",
+      "type": "p",
+      "columns": ["scope_run_id"]
+    },
+    {
+      "table": "office_deliveries",
+      "name": "office_deliveries_run_id_key",
+      "type": "u",
+      "columns": ["run_id"]
+    },
+    {
+      "table": "office_deliveries",
+      "name": "office_deliveries_run_id_owner_id_conversation_id_scope_ru_fkey",
+      "type": "f",
+      "columns": ["run_id", "owner_id", "conversation_id", "scope_run_id"],
+      "target": "office_run_materials",
+      "delete_action": "a",
+      "target_columns": ["run_id", "owner_id", "conversation_id", "scope_run_id"]
+    },
+    {
+      "table": "office_run_inputs",
+      "name": "office_run_inputs_attachment_id_key",
+      "type": "u",
+      "columns": ["attachment_id"]
+    },
+    {
+      "table": "office_run_inputs",
+      "name": "office_run_inputs_attachment_id_owner_id_conversation_id_s_fkey",
+      "type": "f",
+      "columns": [
+        "attachment_id",
+        "owner_id",
+        "conversation_id",
+        "session_id",
+        "draft_id",
+        "format",
+        "sha256"
+      ],
+      "target": "office_attachments",
+      "delete_action": "a",
+      "target_columns": [
+        "id",
+        "owner_id",
+        "bound_conversation_id",
+        "session_id",
+        "draft_id",
+        "format",
+        "sha256"
+      ]
+    },
+    {
+      "table": "office_run_inputs",
+      "name": "office_run_inputs_check",
+      "type": "c",
+      "columns": ["role", "format"],
+      "expression": "(((role = 'notes'::text) AND (format = ANY (ARRAY['txt'::text, 'markdown'::text]))) OR ((role = 'tasks'::text) AND (format = 'csv'::text)))"
+    },
+    {
+      "table": "office_run_inputs",
+      "name": "office_run_inputs_pkey",
+      "type": "p",
+      "columns": ["run_id", "role"]
+    },
+    {
+      "table": "office_run_inputs",
+      "name": "office_run_inputs_run_id_attachment_id_key",
+      "type": "u",
+      "columns": ["run_id", "attachment_id"]
+    },
+    {
+      "table": "office_run_inputs",
+      "name": "office_run_inputs_run_id_owner_id_conversation_id_session__fkey",
+      "type": "f",
+      "columns": ["run_id", "owner_id", "conversation_id", "session_id", "draft_id"],
+      "target": "office_run_materials",
+      "delete_action": "a",
+      "target_columns": ["run_id", "owner_id", "conversation_id", "session_id", "draft_id"]
+    },
+    {
+      "table": "office_run_materials",
+      "name": "office_run_materials_check",
+      "type": "c",
+      "columns": ["scope_run_id", "run_id", "previous_run_id"],
+      "expression": "(((scope_run_id = run_id) AND (previous_run_id IS NULL)) OR ((scope_run_id <> run_id) AND (previous_run_id <> run_id) AND (previous_run_id IS NOT NULL)))"
+    },
+    {
+      "table": "office_run_materials",
+      "name": "office_run_materials_conversation_id_owner_id_fkey",
+      "type": "f",
+      "columns": ["conversation_id", "owner_id"],
+      "target": "conversations",
+      "delete_action": "a",
+      "target_columns": ["id", "owner_id"]
+    },
+    {
+      "table": "office_run_materials",
+      "name": "office_run_materials_pkey",
+      "type": "p",
+      "columns": ["run_id"]
+    },
+    {
+      "table": "office_run_materials",
+      "name": "office_run_materials_previous_run_id_key",
+      "type": "u",
+      "columns": ["previous_run_id"]
+    },
+    {
+      "table": "office_run_materials",
+      "name": "office_run_materials_previous_run_id_owner_id_conversation_fkey",
+      "type": "f",
+      "columns": ["previous_run_id", "owner_id", "conversation_id", "scope_run_id", "draft_id"],
+      "target": "office_run_materials",
+      "delete_action": "a",
+      "target_columns": ["run_id", "owner_id", "conversation_id", "scope_run_id", "draft_id"]
+    },
+    {
+      "table": "office_run_materials",
+      "name": "office_run_materials_run_id_owner_id_conversation_id_fkey",
+      "type": "f",
+      "columns": ["run_id", "owner_id", "conversation_id"],
+      "target": "agent_runs",
+      "delete_action": "a",
+      "target_columns": ["id", "owner_id", "conversation_id"]
+    },
+    {
+      "table": "office_run_materials",
+      "name": "office_run_materials_run_id_owner_id_conversation_id_key",
+      "type": "u",
+      "columns": ["run_id", "owner_id", "conversation_id"]
+    },
+    {
+      "table": "office_run_materials",
+      "name": "office_run_materials_run_id_owner_id_conversation_id_scope__key",
+      "type": "u",
+      "columns": ["run_id", "owner_id", "conversation_id", "scope_run_id", "draft_id"]
+    },
+    {
+      "table": "office_run_materials",
+      "name": "office_run_materials_run_id_owner_id_conversation_id_scope_key1",
+      "type": "u",
+      "columns": ["run_id", "owner_id", "conversation_id", "scope_run_id"]
+    },
+    {
+      "table": "office_run_materials",
+      "name": "office_run_materials_run_id_owner_id_conversation_id_sessio_key",
+      "type": "u",
+      "columns": ["run_id", "owner_id", "conversation_id", "session_id", "draft_id"]
+    },
+    {
+      "table": "office_run_materials",
+      "name": "office_run_materials_scope_run_id_owner_id_conversation_id_fkey",
+      "type": "f",
+      "columns": ["scope_run_id", "owner_id", "conversation_id"],
+      "target": "office_run_materials",
+      "delete_action": "a",
+      "target_columns": ["run_id", "owner_id", "conversation_id"]
+    }
+  ],
+  "alter_constraints": [
+    {
+      "table": "compact_continuations",
+      "name": "compact_continuations_context_check",
+      "type": "c",
+      "columns": ["context"],
+      "expression": "\nCASE\n    WHEN (context ? 'encoding'::text) THEN ((((context ->> 'encoding'::text) = ANY (ARRAY['feishu-snapshot-aead/1'::text, 'along-office-snapshot-aead/1'::text])) AND (jsonb_typeof((context -> 'ciphertext'::text)) = 'string'::text) AND (((context - 'encoding'::text) - 'ciphertext'::text) = '{}'::jsonb) AND ((length((context ->> 'ciphertext'::text)) >= 40) AND (length((context ->> 'ciphertext'::text)) <= 1398140))) IS TRUE)\n    ELSE (octet_length((context)::text) <= 1048576)\nEND"
+    },
+    {
+      "table": "compact_continuations",
+      "name": "compact_continuations_snapshot_check",
+      "type": "c",
+      "columns": ["snapshot"],
+      "expression": "\nCASE\n    WHEN (snapshot ? 'encoding'::text) THEN ((((snapshot ->> 'encoding'::text) = ANY (ARRAY['feishu-snapshot-aead/1'::text, 'along-office-snapshot-aead/1'::text])) AND (jsonb_typeof((snapshot -> 'ciphertext'::text)) = 'string'::text) AND (((snapshot - 'encoding'::text) - 'ciphertext'::text) = '{}'::jsonb) AND ((length((snapshot ->> 'ciphertext'::text)) >= 40) AND (length((snapshot ->> 'ciphertext'::text)) <= 1398140))) IS TRUE)\n    ELSE (octet_length((snapshot)::text) <= 1048576)\nEND"
+    }
+  ]
+}

@@ -12,7 +12,8 @@ const server = createServer((req, res) => {
   if (process.env.DROP_REVISION_RESPONSE === '1' && req.url?.endsWith('/actions/revise')) {
     const end = res.end.bind(res);
     res.end = ((chunk: unknown) => {
-      const payload = typeof chunk === 'string' ? JSON.parse(chunk) : null;
+      const payload =
+        typeof chunk === 'string' || Buffer.isBuffer(chunk) ? JSON.parse(chunk.toString()) : null;
       if (payload?.code === 0) {
         // The real handler committed; hold the body until the client disconnects.
         process.stdout.write(`${JSON.stringify({ stage: 'revision_committed' })}\n`);
