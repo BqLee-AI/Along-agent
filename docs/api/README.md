@@ -11,6 +11,8 @@
 > Proposed 用户模型配置见 [模型接入 API](model-providers.md) 和 [design/22](../design/22-model-provider-settings.md)；接纳、历史投影及 SDK 传输以对应合同与验收为准。
 
 > R3（#144）的用户暂停、显式继续和 compact 见 [conversations API §9–§10](conversations/conversations_routes.md#9-用户安全点暂停和继续)，本人记忆管理见 §12；语义和边界见 [design/23](../design/23-r3-short-term-memory-and-compact.md)。
+> Proposed 原生会话资料接口见 [design/24 §2](../design/24-native-office-delivery.md#2-http暂存和接纳)；上传、撤销和下载尚不计入下方既有路由总数。
+
 
 ## 1. Base Path 与路由总数 [Required]
 
