@@ -95,6 +95,14 @@ bun test --timeout 30000 \
 
 静态检查：`bun run typecheck` 全部 workspace 通过；`bun run lint` 为 0 warnings、0 errors。首次 `bun run format:check` 仅两份文档不符合格式，已修正；测试文件格式通过。格式修正没有改变已验证的业务或测试行为。
 
+### #171 主审后的日期夹具修正
+
+主审指出新增 5 个取消收据场景使用固定 2027-11-04/05，而实际 `runSchedulePhase` 按 `Date.now()` 判断过窗，长期运行会转为 `missed`。本次不重跑已确认的问题，仅将这 5 个场景的年份改为每例一次读取的当前 UTC 年份加一；原话中的明确日期、`fireAtUtc` 和 `wallTime` 共用该年份，仍用 11 月 4/5 日区分两条同名提醒。不修改生产时间逻辑、不模拟时钟，原有正反例和真实回执断言全部保留。
+
+定向执行：`bun test --timeout 30000 --test-name-pattern "checks actual cancellation receipts" apps/api/test/integration/direct-reminder.test.ts`，Docker Linux / Bun 1.4.2 / 独立 PG16，**5 pass、0 fail、35 assertions，48 项按名称过滤未执行**。API workspace 的 `typecheck` 通过。完整日志：`D:/Temp/along-169-future-dates.log`。
+
+本次只改变这 5 项的测试日期，既有文件字节/MCP、目标接续和其他取消场景的实现及输入未变，复用前述证据，不重跑全套、不把历史检查记成新 head 的结果。
+
 ## 未覆盖与后续定位
 
 - 历史误取消的完整原话与工具参数未恢复；只能按公开证据核对故障形态，不能声称逐字重放事故。

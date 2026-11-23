@@ -200,9 +200,10 @@ describe('direct reminder accepted facts', () => {
     { name: 'explicit dated target', sameNote: true, wrongMetadata: false, allowed: true },
   ]) {
     it(`checks actual cancellation receipts for ${scenario.name}`, async () => {
+      const targetYear = new Date().getUTCFullYear() + 1;
       const request = scenario.allowed
         ? scenario.sameNote
-          ? '取消“核对报告”2027年11月5日那条。'
+          ? `取消“核对报告”${targetYear}年11月5日那条。`
           : '取消“另一条”这条提醒。'
         : '取消“核对报告”这条提醒。';
       const ctx = await fresh(['cancel_reminder'], request);
@@ -218,8 +219,8 @@ describe('direct reminder accepted facts', () => {
           const task = await createTaskWithinTransaction(client, {
             ownerId: ctx.ownerId,
             source: { approvalId: source.id },
-            fireAtUtc: `2027-11-0${index + 4}T01:20:00Z`,
-            wallTime: `2027-11-0${index + 4} 09:20`,
+            fireAtUtc: `${targetYear}-11-0${index + 4}T01:20:00Z`,
+            wallTime: `${targetYear}-11-0${index + 4} 09:20`,
             timezoneId: 'Asia/Shanghai',
             fold: 0,
             resolvedUtcOffsetSeconds: 28800,
