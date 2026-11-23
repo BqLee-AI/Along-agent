@@ -1,9 +1,13 @@
 ---
 name: 决策事项
-description: P0 阻塞类决策模板
-title: '[Decision] '
+description: 标题按 decision(area) 填写，记录选项与决策依据
 labels: ['decision']
 ---
+
+<!--
+标题示例：decision(auth): 确定账户恢复方式。
+按 CONTRIBUTING.md 的「Issue 标题与标签」补充领域标签，保留 decision 标签。
+-->
 
 ## 背景
 
