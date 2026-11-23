@@ -48,7 +48,7 @@ API 将业务能力放在 `features/`，将跨功能操作、Run 执行和仓颉
 | 21   | [受邀账户准入与恢复](design/21-invited-account-access.md)                | #112 显式准入/有限管理、停用后的流式披露边界、邀请/恢复/会话与前向升级；#131 本机口令重置；隔离实现证据与真实外部放行分列        |
 | 22   | [用户模型接入与运行绑定](design/22-model-provider-settings.md)           | Proposed：本人模型配置、各接入默认、加密凭据、冻结决议、SDK 受控流式出站与受限 Fake-IP 例外；真实外部验收独立                    |
 | 23   | [R3 跨会话记忆与 compact](design/23-r3-short-term-memory-and-compact.md) | 通用暂停继续、摘要压缩、来源记忆、安全边界及最小 MVP 验收                                                                        |
-| 24   | [原生会话资料处理与交付](design/24-native-office-delivery.md)             | Proposed：显式附件、确定性 CSV、私有产物与站内提醒；实现和真实用户路径分层验收                                                  |
+| 24   | [原生会话资料处理与交付](design/24-native-office-delivery.md)            | Proposed：显式附件、确定性 CSV、私有产物与站内提醒；实现和真实用户路径分层验收                                                   |
 
 活动列表为空与历史创建事实、批量请求部分完成及标题序号的证据边界见[design/09 §5](design/09-agent-runtime-and-checkpoint.md#5-toolgateway-交互required)。
 

@@ -13,7 +13,6 @@
 > R3（#144）的用户暂停、显式继续和 compact 见 [conversations API §9–§10](conversations/conversations_routes.md#9-用户安全点暂停和继续)，本人记忆管理见 §12；语义和边界见 [design/23](../design/23-r3-short-term-memory-and-compact.md)。
 > Proposed 原生会话资料接口见 [design/24 §2](../design/24-native-office-delivery.md#2-http暂存和接纳)；上传、撤销和下载尚不计入下方既有路由总数。
 
-
 ## 1. Base Path 与路由总数 [Required]
 
 - Base Path：`/api/v1`。下文路由表省略该前缀，如 `GET /me` 即 `GET /api/v1/me`。
