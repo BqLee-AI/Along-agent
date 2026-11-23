@@ -147,6 +147,7 @@ R2-B 的完整目标及多轮自主查询边界见[design/19 §4、§6](design/1
 | 17   | [2026-11-16 R3 MVP 验收](verification/r3-mvp-acceptance-2026-11-16.md)                           | 真实模型、隔离检索、受控竞争与升级恢复证据及未覆盖边界                                              |
 | 18   | [2026-11-02—03 桌面工作台验证](verification/desktop-experience-verification-2026-11-02.md)       | 工作台构建、真实浏览器与本机实测的分段证据及未覆盖范围                                              |
 | 19   | [2026-11-18 Elysia API 重构验证](verification/elysia-api-modular-refactor-2026-11-18.md)         | 独立工作树的 HTTP/TLS、Eden、浏览器、PostgreSQL 与仓颉验证及未覆盖范围                              |
+| 20   | [2026-11-23 工具供给对照](verification/tool-supply-167-2026-11-23.md)                            | #167 真实工具目录、受控与宿主模型配对、累计输入体积/轮次及不推进按需供给的依据                      |
 
 ## 十、References（3 篇）
 

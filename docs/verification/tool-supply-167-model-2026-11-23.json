@@ -1,0 +1,574 @@
+{
+  "format": "tool-supply-experiment/1",
+  "sources": {
+    "apps/api/src/agent/tools/catalog.ts": "f689c62eeadad85e8aecad4e2ada646f61c3f2d10721a92c23aa5045319f60e0",
+    "apps/api/src/agent/tools/contracts.ts": "6a31fad92873fd44e310cccda2ec44dd2d6096369b92fc157522d8b79d5f16f4",
+    "docs/demo/fault-injection-smoke.md": "51b2e60910fa6a5272ed5775c7f69d8ad3ef0a0ed9f489bea77589fa1ce7c800"
+  },
+  "catalogCount": 19,
+  "threshold": {
+    "cumulativeByteReduction": 0.2,
+    "completionRegressions": 0,
+    "medianExtraRounds": 1,
+    "maxExtraRounds": 2
+  },
+  "adapter": "host completion default; JSON action protocol, not native function calling",
+  "providerUsage": null,
+  "rows": [
+    {
+      "id": "prefs",
+      "mode": "full",
+      "repetition": 0,
+      "kind": "simple",
+      "rounds": 2,
+      "searchCalls": 0,
+      "businessCalls": ["get_user_prefs"],
+      "rejected": [],
+      "initialBytes": 11714,
+      "inputBytes": 23640,
+      "schemaBytes": 22130,
+      "success": true,
+      "final": {
+        "status": "complete",
+        "answer": "你保存的默认时区原值为：Asia/Shanghai。"
+      },
+      "trace": [
+        {
+          "requestSha256": "40e9dd8da5d0e3dcff84ed64d4623b45e2896461725b65fdd287fec2657d697f",
+          "inputBytes": 11714,
+          "elapsedMs": 2487,
+          "action": {
+            "name": "get_user_prefs",
+            "arguments": {}
+          }
+        },
+        {
+          "requestSha256": "2b50418612d560384981ae31f3d540dd4f6d482f77d1b20569f17b79d6cae4f3",
+          "inputBytes": 11926,
+          "elapsedMs": 2754,
+          "action": {
+            "status": "complete",
+            "answer": "你保存的默认时区原值为：Asia/Shanghai。"
+          }
+        }
+      ]
+    },
+    {
+      "id": "prefs",
+      "mode": "demand",
+      "repetition": 0,
+      "kind": "simple",
+      "rounds": 3,
+      "searchCalls": 1,
+      "businessCalls": ["get_user_prefs"],
+      "rejected": [],
+      "initialBytes": 6724,
+      "inputBytes": 21712,
+      "schemaBytes": 18631,
+      "success": true,
+      "final": {
+        "status": "complete",
+        "answer": "你保存的默认时区原值为：Asia/Shanghai。"
+      },
+      "trace": [
+        {
+          "requestSha256": "1a4d7f2a5c38f86eaad67dcf8dfcf0edecb1dd10694b91a9d609a5d504e66f9c",
+          "inputBytes": 6724,
+          "elapsedMs": 2055,
+          "action": {
+            "name": "tool_search",
+            "arguments": {
+              "names": ["get_user_prefs"]
+            }
+          }
+        },
+        {
+          "requestSha256": "32dee5a55233692b6ee3e0e879483d0b7295e20e585a691a55651fd5587feef7",
+          "inputBytes": 7388,
+          "elapsedMs": 2796,
+          "action": {
+            "name": "get_user_prefs",
+            "arguments": {}
+          }
+        },
+        {
+          "requestSha256": "4f8daa856a1e3f8257f907383d0facf86ec34c16dabe930e669e59c399226894",
+          "inputBytes": 7600,
+          "elapsedMs": 2023,
+          "action": {
+            "status": "complete",
+            "answer": "你保存的默认时区原值为：Asia/Shanghai。"
+          }
+        }
+      ]
+    },
+    {
+      "id": "tasks",
+      "mode": "full",
+      "repetition": 0,
+      "kind": "simple",
+      "rounds": 2,
+      "searchCalls": 0,
+      "businessCalls": ["list_tasks"],
+      "rejected": [],
+      "initialBytes": 11753,
+      "inputBytes": 23777,
+      "schemaBytes": 22130,
+      "success": true,
+      "final": {
+        "status": "complete",
+        "answer": "读到 1 条活动提醒：\n1. 检查备份（已排期）"
+      },
+      "trace": [
+        {
+          "requestSha256": "44350fa6eec15cc396a509f19053fba90bf17bbe82223dd83c655fd82811189b",
+          "inputBytes": 11753,
+          "elapsedMs": 2034,
+          "action": {
+            "name": "list_tasks",
+            "arguments": {
+              "limit": 5
+            }
+          }
+        },
+        {
+          "requestSha256": "36c7230824a1954a6a5f8b1c15c8fe4af8f7ae2d9d98646fda0210950b74568d",
+          "inputBytes": 12024,
+          "elapsedMs": 4987,
+          "action": {
+            "status": "complete",
+            "answer": "读到 1 条活动提醒：\n1. 检查备份（已排期）"
+          }
+        }
+      ]
+    },
+    {
+      "id": "tasks",
+      "mode": "demand",
+      "repetition": 0,
+      "kind": "simple",
+      "rounds": 3,
+      "searchCalls": 1,
+      "businessCalls": ["list_tasks"],
+      "rejected": [],
+      "initialBytes": 6763,
+      "inputBytes": 25120,
+      "schemaBytes": 20201,
+      "success": true,
+      "final": {
+        "status": "complete",
+        "answer": "读到 1 条活动提醒：\n1. 检查备份（已排期）"
+      },
+      "trace": [
+        {
+          "requestSha256": "fb743b9b027d77aa9a53c6be73a91913e27986e0ed8b2909d95be667cd923bbc",
+          "inputBytes": 6763,
+          "elapsedMs": 2352,
+          "action": {
+            "name": "tool_search",
+            "arguments": {
+              "names": ["list_tasks"]
+            }
+          }
+        },
+        {
+          "requestSha256": "49fe1755d896d037117e84d1c75cdd5e537ce3fd697e61a9909a18b9422b092e",
+          "inputBytes": 9043,
+          "elapsedMs": 4665,
+          "action": {
+            "name": "list_tasks",
+            "arguments": {
+              "limit": 5
+            }
+          }
+        },
+        {
+          "requestSha256": "d784044aed119948dc36196e5fa86ae7176e32f55a7444f172c0fdb5fee17a5e",
+          "inputBytes": 9314,
+          "elapsedMs": 5477,
+          "action": {
+            "status": "complete",
+            "answer": "读到 1 条活动提醒：\n1. 检查备份（已排期）"
+          }
+        }
+      ]
+    },
+    {
+      "id": "cross-read",
+      "mode": "full",
+      "repetition": 0,
+      "kind": "cross",
+      "rounds": 3,
+      "searchCalls": 0,
+      "businessCalls": ["get_user_prefs", "read_brief_cards"],
+      "rejected": [],
+      "initialBytes": 11753,
+      "inputBytes": 35927,
+      "schemaBytes": 33195,
+      "success": true,
+      "final": {
+        "status": "complete",
+        "answer": "默认时区：Asia/Shanghai。\n2026-11-23 的简报卡片标题：本周验收。"
+      },
+      "trace": [
+        {
+          "requestSha256": "94c069816043b625f2e67ed533f56e527635dfadb6b35a010fbab7e5d9bf1288",
+          "inputBytes": 11753,
+          "elapsedMs": 7408,
+          "action": {
+            "name": "get_user_prefs",
+            "arguments": {}
+          }
+        },
+        {
+          "requestSha256": "2d1cf03a29e6545623e7d055098c43064c612803cbefc8afaa960eb43d1b359e",
+          "inputBytes": 11965,
+          "elapsedMs": 3193,
+          "action": {
+            "name": "read_brief_cards",
+            "arguments": {
+              "date": "2026-11-23"
+            }
+          }
+        },
+        {
+          "requestSha256": "a9c86c83c522f589cf50e40b195df251d885e14fb8fead13fcb45a3ceb55b7f5",
+          "inputBytes": 12209,
+          "elapsedMs": 3239,
+          "action": {
+            "status": "complete",
+            "answer": "默认时区：Asia/Shanghai。\n2026-11-23 的简报卡片标题：本周验收。"
+          }
+        }
+      ]
+    },
+    {
+      "id": "cross-read",
+      "mode": "demand",
+      "repetition": 0,
+      "kind": "cross",
+      "rounds": 4,
+      "searchCalls": 1,
+      "businessCalls": ["get_user_prefs", "read_brief_cards"],
+      "rejected": [],
+      "initialBytes": 6763,
+      "inputBytes": 32163,
+      "schemaBytes": 26007,
+      "success": true,
+      "final": {
+        "status": "complete",
+        "answer": "默认时区：Asia/Shanghai（亚洲/上海）。\n2026-11-23 简报卡片标题：本周验收。"
+      },
+      "trace": [
+        {
+          "requestSha256": "f605632716be9c6479a9d1f9af55d2dc679f4f47deb43c68f0c63e1a21f72c03",
+          "inputBytes": 6763,
+          "elapsedMs": 2663,
+          "action": {
+            "name": "tool_search",
+            "arguments": {
+              "names": ["get_user_prefs", "read_brief_cards"]
+            }
+          }
+        },
+        {
+          "requestSha256": "bbf267cabbd635fca5f612b16fef0f7818c01f19757d863e094bfe5ba7377057",
+          "inputBytes": 8244,
+          "elapsedMs": 3126,
+          "action": {
+            "name": "get_user_prefs",
+            "arguments": {}
+          }
+        },
+        {
+          "requestSha256": "280d56f5f38151b05cf005162b2d6edd5182253c0467ef9bc884c2987fea0d8c",
+          "inputBytes": 8456,
+          "elapsedMs": 2786,
+          "action": {
+            "name": "read_brief_cards",
+            "arguments": {
+              "date": "2026-11-23"
+            }
+          }
+        },
+        {
+          "requestSha256": "3f5e0c5e05abd4a64d6dd54de2c8c45f32509203829f2c26f5c3f9c26abb8eae",
+          "inputBytes": 8700,
+          "elapsedMs": 3286,
+          "action": {
+            "status": "complete",
+            "answer": "默认时区：Asia/Shanghai（亚洲/上海）。\n2026-11-23 简报卡片标题：本周验收。"
+          }
+        }
+      ]
+    },
+    {
+      "id": "file-delivery",
+      "mode": "full",
+      "repetition": 0,
+      "kind": "cross",
+      "rounds": 4,
+      "searchCalls": 0,
+      "businessCalls": ["workspace_read", "workspace_create", "workspace_read"],
+      "rejected": [],
+      "initialBytes": 11890,
+      "inputBytes": 91171,
+      "schemaBytes": 44260,
+      "success": true,
+      "final": {
+        "status": "complete",
+        "answer": "已全文读取 repo 内 docs/demo/fault-injection-smoke.md，并以不覆盖方式创建 out/smoke-copy.md。创建成功后已独立重新读取副本，核对全文与原文一致。"
+      },
+      "trace": [
+        {
+          "requestSha256": "4c7e207cd1cad5451197c7122099b11a43b28077d55b209a44c3c460c18b83ed",
+          "inputBytes": 11890,
+          "elapsedMs": 6500,
+          "action": {
+            "name": "workspace_read",
+            "arguments": {
+              "path": "docs/demo/fault-injection-smoke.md",
+              "workspace_id": "repo"
+            }
+          }
+        },
+        {
+          "requestSha256": "5c99250f7fd039de739c63976cb62cd523a6e480bbebf8be594928752ab8e290",
+          "inputBytes": 19203,
+          "elapsedMs": 39733,
+          "action": {
+            "name": "workspace_create",
+            "arguments": {
+              "workspace_id": "repo",
+              "output_directory": "out",
+              "filename": "smoke-copy.md",
+              "content": "# 故障注入冒烟\n\n> 状态：验收规程，不是执行证据。范围：真实 worker 强杀/恢复、取消竞争、规则缺失；保证边界以 design/08 §7–§9、design/05 和安全 spec 为准。不包含：混沌工程全矩阵、外部推送、网络分区、多可用区。阶段：v0。\n\n## 前置与证据边界\n\n- 独占 PostgreSQL 16、真实服务端镜像，先经真实 Web/session/CSRF/SSE/按钮走通登记回执；每个故障项使用自己的 approval/task，不复用已终态任务冒充新路径。\n- 保存 source/image、角色、规则标识、原始输入、请求/approval/task/send key、receipt、数据库时间及事件。凭据不进记录。\n- **实际 provider 入口调用、独立接收、通知、fired 分开计数**，跨重启累计，有正常调用正控制；不能用零通知、唯一行、心跳或无日志推断零调用。\n- 实际演练 SQL 只读，不改 fire_at、lease、outbox、receipt、通知或事件。测试夹具中的改钟/填状态仅为隔离回归，不能当真实故障证据。\n- 优先 Linux 镜像内真实 SIGKILL，记录目标 PID 与退出证据。Windows强制终止需如实说明方式，不能声称执行了 kill -9。worker 恢复靠 PG 扫描，不是 AgentRuntime 的 resume_from/checkpoint。\n- 故障时可用同镜像 api/worker 分角色保留观察面；这不替代最终同镜像 ROLE=all+Compose+真实 Web 的业务验收。\n- 规则资源与 PostgreSQL 分别断开、同时断开并恢复。主池和独立接收池的闲置/借出连接错误只使相关查询失败并记录连接故障，不应使 API 进程退出；`/healthz` 仍 200，`/readyz` 优先报规则不可用，其次报数据库不可用，恢复后用真实查询转绿。\n\n## F1 真正强杀与未知回答（A3）\n\n使用生产路径可证明的检查点，分别建立任务，不能一次无阶段强杀包办全部窗口。检查点暂停只证明相应故障阶段，不当作常态连续运行证据。\n\n| 故障窗口                      | 恢复行为与判据                                                                              |\n| ----------------------------- | ------------------------------------------------------------------------------------------- |\n| claim 已提交，调用许可未提交  | 尚无调用；恢复领取一次许可，实际调用累计1、接收1、通知1、fired1                             |\n| 许可已提交，尚未调用          | 可能调用项只核对；实际调用可0，不产生伪接收/通知/fired，可未知或超窗未完成                  |\n| provider 已进入，接收尚未提交 | 实际调用累计1，无接收事实只核对，禁止第二次调用；可未知或超窗未完成                         |\n| 接收已提交，回答丢失          | 独立接收跨worker死亡存活；恢复只查询并收尾，实际调用累计1、接收1、通知1、fired1             |\n| 接收已提交，worker结果未提交  | 杀后task/事件/outbox结果可回滚，已提交的通知接收不回滚；恢复只核对后幂等收尾，累计仍1/1/1/1 |\n| fired终态提交后               | 重启不新增调用、接收、通知或fired                                                           |\n\n“回答丢失”必须在**生产接收事务已提交**后中断实际回答：不能让假 provider 返回某组 delivered/answered、填表或改状态来替代。无事实时不推断从未调用。用户选定安全优先：不承诺任意崩溃空隙均严格一次且完成，不用通知去重把这个限制藏起来。\n\n核对恢复必须验证 owner/task/fire/version/send key；旧版本、错绑定、取消后事实不允许触发。原到点+15min 后不发新请求；已存在有效接收事实可只核对历史收尾。missed前在task锁内查事实，无事实才终止为不确定未完成；终态后迟到事实保留供核对、不复活旧任务。\n\n## F2 取消与发送竞争（A3/D9）\n\n1. 通过实际页面创建足够未来的任务并确认 scheduled及登记回执，记录原 fire。\n2. 分别覆盖许可前取消、许可后/调用前取消、调用进行中取消和 fired后取消，保存请求返回与数据库COMMIT时间，不以响应发出时间代替提交边界。\n3. 取消先提交：后续实际 provider调用0；生产撤销核验并持久化回执后才 cancelled，无回执保持 cancel_pending。不得注入撤销回执。\n4. 调用已持task锁：取消等待；fired先提交则取消409。worker在结果前死亡时，历史接收是否存在分别核对，不能授权取消后再次调用。\n5. 从cancel_pending COMMIT连续观察到原fire+15min后至少两个**实际worker tick**；只读观察任务/receipt/outbox/lease/通知/事件，取消后实际调用0，观察器同期正常任务调用1。中间断档或只测心跳必须声明不足。\n\nfired行数及cancel_breach仅作补充，不能替代调用时间证据。#26旧证据仅复用仍未变范围；发送/核对协议改变后，此取消边界需新证据。\n\n## F3 实际规则缺失（A4）\n\n1. 在同一受控生产构建与装载链上移除/损坏**实际规则资源**，记录确切资源位置、镜像与处理方式，再重启。资源位置随A4实现记录；不得仅换版本标签或注入假不可用对象来声称规则缺失。\n2. GET /healthz保持200；GET /readyz返回503、非envelope `{\"status\":\"not_ready\",\"reason\":\"TZDB_UNAVAILABLE\"}`。规则健康但真实DB不可达时reason为NOT_READY；同时失败优先规则reason，不组合/不降级。\n3. 经真实会话发起新归一：认证/CSRF/结构等既有边界后、SSE头与新业务记录之前503 TZDB_UNAVAILABLE，不能先建conversation/message/run再拒绝；已成功持久结果只读回放不套新规则门。\n4. 规则健康时不存在/重复未选/未知时区使用typed422；已建立SSE外层HTTP200，错误唯一thread.failed终结、承诺零写，不把错误伪装thread.completed澄清。普通缺信息/模糊仍澄清。\n5. 同环境先有的冻结task读取/确认/取消/执行仍按冻结事实工作；记录实际业务证据，不因新归一不就绪停止worker。healthz/readiness探针不能替代此业务检查。\n6. 恢复真实资源及匹配标识后重启，验证实际就绪与正常归一。DB探测只需连通，不要求D7全新库已迁移。\n\n## 交付证据\n\n记录每个窗口的到达证据、强杀/重启、调用累计、持久接收、API/Web/只读SQL、时间窗、正控制及未覆盖项。每项指定一个验证负责人，不为了身份重复演练。独立代码/证据审查、OpenSpec archive、精确最终head五门SUCCESS与CLEAN后才收口；规程、回归测试或规划本身不能标记A3/A4通过。\n"
+            }
+          }
+        },
+        {
+          "requestSha256": "88e81f54a6aca1ef5e12a933f0a9f2b646bde855c456fcfcfe724d50e11a88d2",
+          "inputBytes": 26444,
+          "elapsedMs": 2930,
+          "action": {
+            "name": "workspace_read",
+            "arguments": {
+              "path": "out/smoke-copy.md",
+              "workspace_id": "repo"
+            }
+          }
+        },
+        {
+          "requestSha256": "a737d28f9a3eb3904e7b6f2c5103ca9add9564c067e81844a147ccfd0017c1fd",
+          "inputBytes": 33634,
+          "elapsedMs": 3459,
+          "action": {
+            "status": "complete",
+            "answer": "已全文读取 repo 内 docs/demo/fault-injection-smoke.md，并以不覆盖方式创建 out/smoke-copy.md。创建成功后已独立重新读取副本，核对全文与原文一致。"
+          }
+        }
+      ]
+    },
+    {
+      "id": "file-delivery",
+      "mode": "demand",
+      "repetition": 0,
+      "kind": "cross",
+      "rounds": 5,
+      "searchCalls": 1,
+      "businessCalls": ["workspace_read", "workspace_create", "workspace_read"],
+      "rejected": [],
+      "initialBytes": 6900,
+      "inputBytes": 87971,
+      "schemaBytes": 34591,
+      "success": true,
+      "final": {
+        "status": "complete",
+        "answer": "已全文读取 repo 内的 docs/demo/fault-injection-smoke.md，并将原文新建为 out/smoke-copy.md，未覆盖已有文件。创建成功后已独立重新全文读取副本，核对与原文完全一致。"
+      },
+      "trace": [
+        {
+          "requestSha256": "59e2addd446dab338d9874587dfc8eb56ebb5a0156b4238d7999dee2ccb4bbb9",
+          "inputBytes": 6900,
+          "elapsedMs": 3499,
+          "action": {
+            "name": "tool_search",
+            "arguments": {
+              "names": ["workspace_read", "workspace_create"]
+            }
+          }
+        },
+        {
+          "requestSha256": "74e8fadb41f27433d6da22b9ea33946535237277d9906e2ef8ffec6de87123b1",
+          "inputBytes": 9365,
+          "elapsedMs": 4409,
+          "action": {
+            "name": "workspace_read",
+            "arguments": {
+              "path": "docs/demo/fault-injection-smoke.md",
+              "workspace_id": "repo"
+            }
+          }
+        },
+        {
+          "requestSha256": "5a753839bda59b04f9c4a176d4ecc1864abb29b572bb7bffff2d30a7cdabadb9",
+          "inputBytes": 16678,
+          "elapsedMs": 44963,
+          "action": {
+            "name": "workspace_create",
+            "arguments": {
+              "workspace_id": "repo",
+              "output_directory": "out",
+              "filename": "smoke-copy.md",
+              "content": "# 故障注入冒烟\n\n> 状态：验收规程，不是执行证据。范围：真实 worker 强杀/恢复、取消竞争、规则缺失；保证边界以 design/08 §7–§9、design/05 和安全 spec 为准。不包含：混沌工程全矩阵、外部推送、网络分区、多可用区。阶段：v0。\n\n## 前置与证据边界\n\n- 独占 PostgreSQL 16、真实服务端镜像，先经真实 Web/session/CSRF/SSE/按钮走通登记回执；每个故障项使用自己的 approval/task，不复用已终态任务冒充新路径。\n- 保存 source/image、角色、规则标识、原始输入、请求/approval/task/send key、receipt、数据库时间及事件。凭据不进记录。\n- **实际 provider 入口调用、独立接收、通知、fired 分开计数**，跨重启累计，有正常调用正控制；不能用零通知、唯一行、心跳或无日志推断零调用。\n- 实际演练 SQL 只读，不改 fire_at、lease、outbox、receipt、通知或事件。测试夹具中的改钟/填状态仅为隔离回归，不能当真实故障证据。\n- 优先 Linux 镜像内真实 SIGKILL，记录目标 PID 与退出证据。Windows强制终止需如实说明方式，不能声称执行了 kill -9。worker 恢复靠 PG 扫描，不是 AgentRuntime 的 resume_from/checkpoint。\n- 故障时可用同镜像 api/worker 分角色保留观察面；这不替代最终同镜像 ROLE=all+Compose+真实 Web 的业务验收。\n- 规则资源与 PostgreSQL 分别断开、同时断开并恢复。主池和独立接收池的闲置/借出连接错误只使相关查询失败并记录连接故障，不应使 API 进程退出；`/healthz` 仍 200，`/readyz` 优先报规则不可用，其次报数据库不可用，恢复后用真实查询转绿。\n\n## F1 真正强杀与未知回答（A3）\n\n使用生产路径可证明的检查点，分别建立任务，不能一次无阶段强杀包办全部窗口。检查点暂停只证明相应故障阶段，不当作常态连续运行证据。\n\n| 故障窗口                      | 恢复行为与判据                                                                              |\n| ----------------------------- | ------------------------------------------------------------------------------------------- |\n| claim 已提交，调用许可未提交  | 尚无调用；恢复领取一次许可，实际调用累计1、接收1、通知1、fired1                             |\n| 许可已提交，尚未调用          | 可能调用项只核对；实际调用可0，不产生伪接收/通知/fired，可未知或超窗未完成                  |\n| provider 已进入，接收尚未提交 | 实际调用累计1，无接收事实只核对，禁止第二次调用；可未知或超窗未完成                         |\n| 接收已提交，回答丢失          | 独立接收跨worker死亡存活；恢复只查询并收尾，实际调用累计1、接收1、通知1、fired1             |\n| 接收已提交，worker结果未提交  | 杀后task/事件/outbox结果可回滚，已提交的通知接收不回滚；恢复只核对后幂等收尾，累计仍1/1/1/1 |\n| fired终态提交后               | 重启不新增调用、接收、通知或fired                                                           |\n\n“回答丢失”必须在**生产接收事务已提交**后中断实际回答：不能让假 provider 返回某组 delivered/answered、填表或改状态来替代。无事实时不推断从未调用。用户选定安全优先：不承诺任意崩溃空隙均严格一次且完成，不用通知去重把这个限制藏起来。\n\n核对恢复必须验证 owner/task/fire/version/send key；旧版本、错绑定、取消后事实不允许触发。原到点+15min 后不发新请求；已存在有效接收事实可只核对历史收尾。missed前在task锁内查事实，无事实才终止为不确定未完成；终态后迟到事实保留供核对、不复活旧任务。\n\n## F2 取消与发送竞争（A3/D9）\n\n1. 通过实际页面创建足够未来的任务并确认 scheduled及登记回执，记录原 fire。\n2. 分别覆盖许可前取消、许可后/调用前取消、调用进行中取消和 fired后取消，保存请求返回与数据库COMMIT时间，不以响应发出时间代替提交边界。\n3. 取消先提交：后续实际 provider调用0；生产撤销核验并持久化回执后才 cancelled，无回执保持 cancel_pending。不得注入撤销回执。\n4. 调用已持task锁：取消等待；fired先提交则取消409。worker在结果前死亡时，历史接收是否存在分别核对，不能授权取消后再次调用。\n5. 从cancel_pending COMMIT连续观察到原fire+15min后至少两个**实际worker tick**；只读观察任务/receipt/outbox/lease/通知/事件，取消后实际调用0，观察器同期正常任务调用1。中间断档或只测心跳必须声明不足。\n\nfired行数及cancel_breach仅作补充，不能替代调用时间证据。#26旧证据仅复用仍未变范围；发送/核对协议改变后，此取消边界需新证据。\n\n## F3 实际规则缺失（A4）\n\n1. 在同一受控生产构建与装载链上移除/损坏**实际规则资源**，记录确切资源位置、镜像与处理方式，再重启。资源位置随A4实现记录；不得仅换版本标签或注入假不可用对象来声称规则缺失。\n2. GET /healthz保持200；GET /readyz返回503、非envelope `{\"status\":\"not_ready\",\"reason\":\"TZDB_UNAVAILABLE\"}`。规则健康但真实DB不可达时reason为NOT_READY；同时失败优先规则reason，不组合/不降级。\n3. 经真实会话发起新归一：认证/CSRF/结构等既有边界后、SSE头与新业务记录之前503 TZDB_UNAVAILABLE，不能先建conversation/message/run再拒绝；已成功持久结果只读回放不套新规则门。\n4. 规则健康时不存在/重复未选/未知时区使用typed422；已建立SSE外层HTTP200，错误唯一thread.failed终结、承诺零写，不把错误伪装thread.completed澄清。普通缺信息/模糊仍澄清。\n5. 同环境先有的冻结task读取/确认/取消/执行仍按冻结事实工作；记录实际业务证据，不因新归一不就绪停止worker。healthz/readiness探针不能替代此业务检查。\n6. 恢复真实资源及匹配标识后重启，验证实际就绪与正常归一。DB探测只需连通，不要求D7全新库已迁移。\n\n## 交付证据\n\n记录每个窗口的到达证据、强杀/重启、调用累计、持久接收、API/Web/只读SQL、时间窗、正控制及未覆盖项。每项指定一个验证负责人，不为了身份重复演练。独立代码/证据审查、OpenSpec archive、精确最终head五门SUCCESS与CLEAN后才收口；规程、回归测试或规划本身不能标记A3/A4通过。\n"
+            }
+          }
+        },
+        {
+          "requestSha256": "827dd229c3db05f8df993ee45f3082888469a5183211d9a87fd841c5b126db90",
+          "inputBytes": 23919,
+          "elapsedMs": 2565,
+          "action": {
+            "name": "workspace_read",
+            "arguments": {
+              "path": "out/smoke-copy.md",
+              "workspace_id": "repo"
+            }
+          }
+        },
+        {
+          "requestSha256": "fce4ac21feb51ee22f817bbf26e836221e9e28261895b65995f7754e9aaf4e3c",
+          "inputBytes": 31109,
+          "elapsedMs": 4101,
+          "action": {
+            "status": "complete",
+            "answer": "已全文读取 repo 内的 docs/demo/fault-injection-smoke.md，并将原文新建为 out/smoke-copy.md，未覆盖已有文件。创建成功后已独立重新全文读取副本，核对与原文完全一致。"
+          }
+        }
+      ]
+    },
+    {
+      "id": "not-found",
+      "mode": "full",
+      "repetition": 0,
+      "kind": "missing",
+      "rounds": 1,
+      "searchCalls": 0,
+      "businessCalls": [],
+      "rejected": [],
+      "initialBytes": 11792,
+      "inputBytes": 11792,
+      "schemaBytes": 11065,
+      "success": true,
+      "final": {
+        "status": "unavailable",
+        "answer": "当前没有邮件发送能力，未向 demo@example.invalid 发送“验收完成”。"
+      },
+      "trace": [
+        {
+          "requestSha256": "53543bc3487c99ecb8fedf856a13423404c6535f644cb6814482f90796ad4b1b",
+          "inputBytes": 11792,
+          "elapsedMs": 3444,
+          "action": {
+            "status": "unavailable",
+            "answer": "当前没有邮件发送能力，未向 demo@example.invalid 发送“验收完成”。"
+          }
+        }
+      ]
+    },
+    {
+      "id": "not-found",
+      "mode": "demand",
+      "repetition": 0,
+      "kind": "missing",
+      "rounds": 1,
+      "searchCalls": 0,
+      "businessCalls": [],
+      "rejected": [],
+      "initialBytes": 6802,
+      "inputBytes": 6802,
+      "schemaBytes": 6075,
+      "success": true,
+      "final": {
+        "status": "unavailable",
+        "answer": "当前没有邮件发送能力，未向 demo@example.invalid 发送“验收完成”。"
+      },
+      "trace": [
+        {
+          "requestSha256": "544bee90f9aad8903f08a239497764082cfe6af06133dde40675b575ca6879d0",
+          "inputBytes": 6802,
+          "elapsedMs": 3220,
+          "action": {
+            "status": "unavailable",
+            "answer": "当前没有邮件发送能力，未向 demo@example.invalid 发送“验收完成”。"
+          }
+        }
+      ]
+    },
+    {
+      "id": "not-qualified",
+      "mode": "full",
+      "repetition": 0,
+      "kind": "denied",
+      "rounds": 1,
+      "searchCalls": 0,
+      "businessCalls": [],
+      "rejected": [],
+      "initialBytes": 2332,
+      "inputBytes": 2332,
+      "schemaBytes": 1558,
+      "success": true,
+      "final": {
+        "status": "unavailable",
+        "answer": "未读取 repo 中的 docs/demo/fault-injection-smoke.md。本轮未提供 workspace_read 或工具搜索能力，无法搜索、装载或执行该读取工具；现有工具均与资料读取无关，因此未调用。"
+      },
+      "trace": [
+        {
+          "requestSha256": "c234eeb7aa7ac4a4ec68156a429279abe86a5b4612cf03f88e87203106358094",
+          "inputBytes": 2332,
+          "elapsedMs": 3101,
+          "action": {
+            "status": "unavailable",
+            "answer": "未读取 repo 中的 docs/demo/fault-injection-smoke.md。本轮未提供 workspace_read 或工具搜索能力，无法搜索、装载或执行该读取工具；现有工具均与资料读取无关，因此未调用。"
+          }
+        }
+      ]
+    },
+    {
+      "id": "not-qualified",
+      "mode": "demand",
+      "repetition": 0,
+      "kind": "denied",
+      "rounds": 1,
+      "searchCalls": 0,
+      "businessCalls": [],
+      "rejected": [],
+      "initialBytes": 2108,
+      "inputBytes": 2108,
+      "schemaBytes": 1334,
+      "success": true,
+      "final": {
+        "status": "unavailable",
+        "answer": "未读取 repo 的 docs/demo/fault-injection-smoke.md。本轮冻结资格目录不包含 workspace_read 或其他资料读取工具，无法装载或执行该工具。"
+      },
+      "trace": [
+        {
+          "requestSha256": "7922dd3ef3de5fee6e4f4bd4b7b649d6a6c7a97c0dbee10ec95ed2640c3011d6",
+          "inputBytes": 2108,
+          "elapsedMs": 6671,
+          "action": {
+            "status": "unavailable",
+            "answer": "未读取 repo 的 docs/demo/fault-injection-smoke.md。本轮冻结资格目录不包含 workspace_read 或其他资料读取工具，无法装载或执行该工具。"
+          }
+        }
+      ]
+    }
+  ],
+  "hostFailures": {
+    "attempts": 12,
+    "reason": "Run no longer active",
+    "scope": "completion calls started in a cell that returned before awaiting; no model output; excluded from model quality and byte comparison"
+  },
+  "baseCommit": "ea01db0452fa53509958412a14734901acfdbf60",
+  "recordedAt": "2026-11-23"
+}
