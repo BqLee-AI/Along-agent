@@ -20,9 +20,24 @@ import {
   testProvider,
   testProviderConnection,
 } from '../public.js';
+import {
+  MAX_OFFICE_NOTES_BYTES,
+  summarizeOfficeNotes,
+} from '../outbound/summarize-office-notes.js';
 
 export const modelSelectionWritePath = '/api/v1/model-selection/actions/set-default' as const;
 export const modelProviderWriteScopes = ['/api/v1/model-providers'] as const;
+const officeNotesSchema = z.strictObject({
+  notes: z
+    .string()
+    .refine(
+      (notes) =>
+        notes.isWellFormed() &&
+        Buffer.byteLength(notes, 'utf8') <= MAX_OFFICE_NOTES_BYTES &&
+        notes.trim().length > 0,
+      'invalid meeting notes',
+    ),
+});
 function providerId(id: string) {
   if (!isUuid(id)) throw validationError('invalid provider id');
   return id;
@@ -47,6 +62,21 @@ export function createModelProviderController(
       '/api/v1/model-providers',
       async ({ pool, owner, requestId }) => okEnvelope(await listProviders(pool, owner), requestId),
       { response: responses(model.ProviderListSchema) },
+    )
+    .post(
+      '/api/v1/model-providers/actions/summarize-notes',
+      async ({ pool, request, requestId, body }) =>
+        okEnvelope(
+          await summarizeOfficeNotes(
+            pool,
+            await access.requireActor(request),
+            body.notes,
+            deps.modelTransport,
+            request.signal,
+          ),
+          requestId,
+        ),
+      { parse, body: officeNotesSchema, response: responses(z.object({ summary: z.string() })) },
     )
     .post(
       '/api/v1/model-providers',
