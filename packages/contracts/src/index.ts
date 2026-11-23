@@ -18,6 +18,7 @@ export {
   HarnessModelStepSchema,
   HarnessToolPayloadSchema,
   LearnDocsSearchPayloadSchema,
+  LearnDocsQuerySchema,
   HarnessToolResultSchema,
   HarnessSnapshotSchema,
   HarnessR3ContextSchema,

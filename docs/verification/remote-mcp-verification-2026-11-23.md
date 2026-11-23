@@ -42,10 +42,34 @@
 
 视觉证据：`D:/Temp/omp-sshots-15d98813bf11c779.webp`（已启用）、`D:/Temp/omp-sshots-15d988264111c77a.webp`（已断开）。这是隔离 UI/API 验证，不替代原安装、新对话模型调用和最终引用展示验收。
 
-## 原安装阻塞与未覆盖项
+## 前轮原安装尝试（历史记录，不是本功能验收前提）
 
 复用 #155 的既有私有安装配置，未创建第三套安装、未修改密钥或 `.env`。原安装可用其原 artifact 启动；默认安装保存的登录资料与此安装不匹配，未重置账户。
 
 随后尝试同配置 `local:upgrade`。候选构建完成，但原库在迁移前被拒绝：`UNSUPPORTED_UPGRADE_SOURCE`；只读分类为 `unknown/version0041/baseline_foreign_keys_mismatch`。原 artifact 的 `0041-checks.json` 没有合并版本要求的 `messages.source_run_id`、`feishu_pending_disclosures` 等结构；同一迁移编号对应不同历史实验结构。未应用 `0042`，未改旧迁移、未清库或伪造升级完成。按照生命周期合同，原安装保留未完成升级记录和停止写者，未恢复旧写者。
 
-未完成：原安装前滚修复、该安装正式登录、新对话经真实模型/native 查询 Microsoft Learn、最终答案引用和该对话的历史恢复。不能把隔离网关、受控 native 或隔离连接卡证据算作这些项目。A1 保持未勾选；需先明确处理该安装的历史实验 schema 差异，并取得对应登录路径，再完成验收。
+前轮未完成原安装的新对话、引用和历史路径。后续审查明确使用任务隔离的正式安装验收；旧实验 0041 差异与本功能分离，不要求先修复它，也不再操作该安装。前轮隔离网关、受控 native 和连接卡证据只覆盖各自明确的边界。
+
+## 本轮精确出站查询修正
+
+合入 #170 的 `4567b377`，merge commit `72379bf`。连接不再给普通聊天授予工具。会话固定快捷入口提交与 raw_text 完全相同的 `microsoft_learn_query`，本人签名与连接校验后冻结 `{generation,query}`；Unicode 码点上限为 500，保留原始空白和标点。模型只能用 `{}` 触发；历史、摘要、受管资料和工具结果不能替换查询。同键加入、移除或更改查询绑定均冲突。
+
+先修改现有网关行为测试，实际 Red 为“已连接的普通聊天仍有 learn_docs_search”（`review-red.log`），再调整接纳与网关。新增覆盖包括精确中文/空格/标点/emoji 的实际 SDK 出站参数、500/501 码点、无效会话、普通下一轮、幂等重放/冲突和冻结上下文恢复。沿用前轮断开、取消、容量、错误及审计证据，不重复全量集成或全量消费者套件。
+
+本轮首次运行前的 `docker ps -a`：`along-e5c913a69f054844-postgres-1` 运行且健康；`along-e5c913a69f054844-api-1` 已退出 0。本轮没有停止旧容器。前轮正式 upgrade 停止的 API 容器为 `along-e5c913a69f054844-api-1`，Web 为 Windows 进程；前轮首次 start 前是否运行没有足够保留证据，不能由后续状态反推。证据：`review-initial-containers.json`。本轮只新建任务自有 `along-168-review` 正式安装和 `along-168-review-pg` 测试库，不接入旧安装。
+
+### 本轮最终增量检查
+
+- 全 workspace typecheck 通过。5 个聚焦文件 **63 pass、0 fail、431 assertions**：TS Learn 合同、真实 SDK 适配、PG 网关接纳/幂等/恢复/撤权、会话入口请求流和展示。`review-typecheck-final.log`、`review-focused-final.log`。
+- 正式镜像只运行 Learn native 用例：**1 pass、0 fail、83 assertions**，22 个无关用例按名称过滤；包括实际 receipt、精确查询、Unicode 边界和 R3 恢复。`review-native-final.log`。
+- lint、依赖边界、此 change strict、格式检查通过；没有重跑旧的全量 verify、404 消费者或全量集成集。对应 `review-{lint,depcruise,spec,format}-final.log`。
+
+### 隔离正式安装全链路
+
+负责人 `FormalLearnAcceptance` 使用正式 `local:init --new`、`local:start`，均退出 0，数据库 0042。源快照 digest `d35eb49240182ba8e3449fc8646460f89c6bf0ce0d5b4ba7ea675642b0759544`，image ID `sha256:319328a2334bb15c8df272e01c3bf43b281a58c493f6f961df2fcdb2d2f30af5`。Docker 默认地址池耗尽，单独创建本任务 Compose bridge 后重试；未停止或改动任何旧项目。通过真实产品 Web 初始化合成管理员、配置并选择受控模型、启用连接，没有 seed session 或直接 SQL 建号。
+
+实际输入为 `  Azure PostgreSQL 备份，retention? 🧪  `，包含两端各两个空格。选择入口与填写阶段，浏览器请求、模型请求、MCP 派发均为 0。点击发送后 HTTP 200，经正式 API/native 调用 `learn_docs_search {}`；捕获的真实 `tools/call` 为 `microsoft_docs_search`，query 与已提交全文逐码点相等。Microsoft 实际返回的公开资料进入已接受观察，受控模型使用该观察中的真实来源生成答案；浏览器显示三条带链接摘录，刷新与历史侧栏重开均仍可见。随后同会话普通消息没有 Learn 工具，MCP 派发数不增加。
+
+证据边界：模型决策及最后排版由受控 OpenAI-compatible endpoint 生成，不证明真实 LLM 自主选工具或回答质量；Microsoft MCP 和来源内容是真实服务。为了观察真实派发，临时只读 Bun preload 仅记录固定 MCP POST 并原样调用原 fetch，没有修改请求或伪造结果；该观察命令与未经插桩启动分别记录。之后已通过正式 stop/start 移除探针，API readiness 200，两个回合仍能展示。没有配置工作区，因此此产品路径不宣称覆盖真实受管文件组合攻击；网关额外参数拒绝、固定冻结值等边界由聚焦测试保护。
+
+脱敏证据：`D:/Temp/along-168/review-e2e-result.json`；截图 `review-e2e-query-before-submit.png`、`review-e2e-learn-answer.png`、`review-e2e-learn-history.png`、`review-e2e-ordinary-follow-up.png`。私有合成凭据与完整模型请求不入库。隔离安装保留供主审，本轮旧安装原状未改；测试库与受控模型仅属于本任务。

@@ -350,7 +350,8 @@ export async function reserveInvocation(
       throw forbidden();
     if (
       input.toolId === 'learn_docs_search' &&
-      (ctx.authorizationRevision !== 'delegation/1' || !ctx.microsoftLearn)
+      (ctx.authorizationRevision !== 'delegation/1' ||
+        !microsoftLearnGrantSchema.safeParse(ctx.microsoftLearn).success)
     )
       throw forbidden();
     let selected = ctx.workspaceGrant ?? null;

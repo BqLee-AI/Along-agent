@@ -2,7 +2,17 @@
 
 import { useRef } from 'react';
 import Link from '@/shell/view/workspace-link';
-import { ArrowUp, Bell, ChevronDown, Files, MessageSquare, Plus, Square, X } from 'lucide-react';
+import {
+  ArrowUp,
+  Bell,
+  BookOpen,
+  ChevronDown,
+  Files,
+  MessageSquare,
+  Plus,
+  Square,
+  X,
+} from 'lucide-react';
 import type { GoalResult } from '@along/contracts';
 import { Dropdown } from '@lorelum/lumen-ui/components/dropdown';
 import { Button } from '@lorelum/lumen-ui/components/button';
@@ -503,7 +513,8 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
   const workspace = task.workspaces.find((item) => item.workspace_id === task.workspaceId);
   const textarea = useComposerDisplay(task.input);
   const composing = useRef(false);
-  const command = compactCommand(task.input);
+  const isLearnQuery = task.intent === 'microsoft-learn';
+  const command = compactCommand(task.input, task.intent);
   const allowed = command
     ? task.compactAvailable
     : task.eligibility.allowed && !(task.ambiguousProposal && !task.foldChoice);
@@ -512,7 +523,7 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
     ? task.compactAvailable
       ? null
       : '当前压缩请求尚不可提交。'
-    : composerBlockedReason({
+    : (composerBlockedReason({
         effectsUnknown: task.effectsUnknown,
         reading: task.reading,
         run: task.run,
@@ -520,7 +531,7 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
         ambiguous: Boolean(task.ambiguousProposal && !task.foldChoice),
         active: task.active,
         eligibilityReason: task.eligibility.reason,
-      });
+      }) ?? (isLearnQuery ? task.eligibility.reason : null));
   return (
     <section
       className="flex max-h-[min(460px,calc(100dvh-14rem))] min-h-0 min-w-0 flex-col gap-2 overflow-y-auto p-1 text-sm leading-[22px]"
@@ -551,6 +562,9 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
             <Alert.Title>发送结果尚未确认</Alert.Title>
             <Alert.Description>
               <p>先读取历史核实，不要另开同目标任务。仅可显式重试同一原文与请求键。</p>
+              {task.pendingMicrosoftLearnQuery ? (
+                <p>原请求包含 Microsoft Learn 查询全文。</p>
+              ) : null}
               <div className="mt-2 flex flex-wrap gap-2">
                 <Button
                   variant="glass"
@@ -631,12 +645,18 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
                 className="inline-flex min-w-0 items-center gap-2 text-sm font-medium text-brand-ink"
                 data-testid="selected-tool"
               >
-                {task.intent === 'reminder' ? (
+                {isLearnQuery ? (
+                  <BookOpen className="size-4" aria-hidden="true" />
+                ) : task.intent === 'reminder' ? (
                   <Bell className="size-4" aria-hidden="true" />
                 ) : (
                   <Files className="size-4" aria-hidden="true" />
                 )}
-                {task.intent === 'reminder' ? '创建提醒' : '处理资料'}
+                {isLearnQuery
+                  ? 'Microsoft Learn 查询'
+                  : task.intent === 'reminder'
+                    ? '创建提醒'
+                    : '处理资料'}
                 <Button
                   type="button"
                   variant="clear"
@@ -793,11 +813,13 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
               ? '你希望如何处理这些资料？'
               : task.intent === 'reminder'
                 ? '你希望什么时候提醒什么？'
-                : '有什么想聊的？'
+                : isLearnQuery
+                  ? '要在 Microsoft Learn 上查询什么？'
+                  : '有什么想聊的？'
           }
           value={task.input}
           disabled={task.sendUncertain}
-          aria-describedby={`task-send-reason${task.intent === 'reminder' ? ' task-help' : ''}${task.error ? ' task-form-error' : ''}`}
+          aria-describedby={`task-send-reason${task.intent === 'reminder' ? ' task-help' : ''}${isLearnQuery ? ' learn-query-help' : ''}${task.error ? ' task-form-error' : ''}`}
           onChange={(event) => task.setInput(event.target.value)}
           onCompositionStart={() => {
             composing.current = true;
@@ -819,6 +841,11 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
             }
           }}
         />
+        {isLearnQuery ? (
+          <p id="learn-query-help" className="px-2 text-sm text-secondary-foreground">
+            输入全文将作为查询词发送到 Microsoft Learn。请勿输入私密信息。
+          </p>
+        ) : null}
         <div className="flex min-w-0 shrink-0 items-center justify-between gap-2">
           <Dropdown>
             <Dropdown.Trigger
@@ -848,6 +875,7 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
                 [
                   { value: 'reminder', label: '创建提醒', icon: Bell },
                   { value: 'document', label: '处理资料', icon: Files },
+                  { value: 'microsoft-learn', label: 'Microsoft Learn 查询', icon: BookOpen },
                   { value: 'chat', label: '普通对话', icon: MessageSquare },
                 ] as const
               ).map(({ value, label, icon: Icon }) => (

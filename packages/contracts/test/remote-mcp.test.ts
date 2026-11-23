@@ -25,15 +25,26 @@ test('accepts immutable Learn search excerpts and an empty search', () => {
   }
 });
 
-test('rejects wrong kinds, extra fields, non-normalized queries and invalid UTC timestamps', () => {
+test('round-trips the exact nonblank Learn query up to 500 Unicode code points', () => {
+  for (const query of [' \tAzure 数据库，cafe\u0301\u00a0\n', '😀'.repeat(498) + ' \n']) {
+    const disclosed = { ...payload, query };
+    const decoded = JSON.parse(JSON.stringify(disclosed));
+    expect(HarnessToolPayloadSchema.parse(decoded)).toEqual(disclosed);
+  }
+});
+
+test('rejects wrong kinds, extra fields, invalid queries and invalid UTC timestamps', () => {
   for (const disclosed of [
     { ...payload, kind: 'microsoft_docs_search' },
     { ...payload, representation: 'full_text' },
     { ...payload, endpoint: url },
     { ...payload, items: [{ ...item, full_text: 'extra' }] },
     { ...payload, query: '' },
-    { ...payload, query: 'query\u00a0' },
-    { ...payload, query: '😀'.repeat(251) },
+    { ...payload, query: ' \t\n\u00a0\u3000\ufeff' },
+    { ...payload, query: 'x'.repeat(500) + '\n' },
+    { ...payload, query: '😀'.repeat(501) },
+    { ...payload, query: 'query\uD800' },
+    { ...payload, query: '\uDC00query' },
     { ...payload, fetched_at: '2026-02-29T10:20:30.123Z' },
     { ...payload, fetched_at: '2026-11-23T10:20:30Z' },
     { ...payload, fetched_at: '2026-11-23T10:20:30.123+00:00' },

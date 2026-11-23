@@ -112,6 +112,7 @@ export interface ConversationTask {
   streaming: boolean;
   retryResume: ResumeRequest | null;
   sendUncertain: boolean;
+  pendingMicrosoftLearnQuery: boolean;
   ambiguousProposal: AmbiguousProposal | null;
   foldChoice: 'first' | 'second' | '';
   clarificationReply: boolean;
@@ -203,7 +204,9 @@ export function useConversationTask({
   const [streaming, setStreaming] = useState(false);
   const [retryResume, setRetryResume] = useState<ResumeRequest | null>(null);
   const [sendUncertain, setSendUncertain] = useState(false);
-  const [ambiguousProposal, setAmbiguousProposal] = useState<AmbiguousProposal | null>(null);
+  const [storedAmbiguousProposal, setAmbiguousProposal] = useState<AmbiguousProposal | null>(null);
+  // An explicit query can only use the current input, not historical clarification text.
+  const ambiguousProposal = intent === 'microsoft-learn' ? null : storedAmbiguousProposal;
   const [foldChoice, setFoldChoice] = useState<'first' | 'second' | ''>('');
   const [clarificationReply, setClarificationReply] = useState(false);
   const [leaving, setLeaving] = useState(false);
@@ -710,10 +713,10 @@ export function useConversationTask({
   }
 
   async function send(retry = false) {
-    const command = compactCommand(retry ? (pendingSend.current?.text ?? '') : input);
+    const command = retry ? null : compactCommand(input, intent);
     if (command) {
-      if (retry || command === 'invalid') {
-        setError(' /compact 不接受参数，也不能作为普通消息重试。'.trim());
+      if (command === 'invalid') {
+        setError('/compact 不接受参数，也不能作为普通消息重试。');
       } else {
         await compact();
       }
@@ -745,12 +748,14 @@ export function useConversationTask({
             raw_text: text,
             conversation_id: conversationRef.current ?? undefined,
             confirmed_timezone:
-              proposal?.timezone_id ?? (intent === 'chat' ? undefined : me.confirmed_timezone),
+              proposal?.timezone_id ??
+              (intent === 'reminder' || intent === 'document' ? me.confirmed_timezone : undefined),
             fold_choice: proposal ? foldChoice : undefined,
             clarification_of_run_id:
               proposal?.source_run_id ??
               (clarificationReply && canReplyToClarification ? run?.run_id : undefined),
             ...taskAdmission(intent),
+            ...(intent === 'microsoft-learn' ? { microsoft_learn_query: text } : {}),
             ...(intent === 'document' ? { workspace_id: workspaceId } : {}),
             ...(intent !== 'reminder' && modelSelection
               ? {
@@ -783,6 +788,7 @@ export function useConversationTask({
       const submittedText = pending.text;
       // The message is shown and persisted as pending, so the composer is free for the next draft.
       setInput((draft) => (draft === submittedText ? '' : draft));
+      if (intent === 'microsoft-learn') setIntent('chat');
       const accepted = await stream('/api/v1/conversations/messages', pending.body, pending.text);
       // A request the server rejected was never sent: give the draft back instead of losing it.
       if (mounted.current && !authentication.signal.aborted && !accepted && !pendingSend.current)
@@ -1491,6 +1497,8 @@ export function useConversationTask({
     streaming,
     retryResume,
     sendUncertain,
+    pendingMicrosoftLearnQuery:
+      sendUncertain && typeof pendingSend.current?.body.microsoft_learn_query === 'string',
     ambiguousProposal,
     foldChoice,
     clarificationReply,

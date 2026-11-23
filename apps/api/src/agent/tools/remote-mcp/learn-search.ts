@@ -1,6 +1,7 @@
 import type { Pool, PoolClient } from 'pg';
 import { httpStatusForError } from '@along/contracts';
 import {
+  microsoftLearnGrantSchema,
   readMicrosoftLearnGrant,
   searchMicrosoftLearn,
 } from '../../../features/remote-mcp/public.js';
@@ -20,7 +21,7 @@ export async function invokeLearnDocsSearch(pool: Pool, ctx: ToolContext, input:
   async function authorized(client: PoolClient) {
     return (
       ctx.authorizationRevision === 'delegation/1' &&
-      !!ctx.microsoftLearn &&
+      microsoftLearnGrantSchema.safeParse(ctx.microsoftLearn).success &&
       !ctx.signal?.aborted &&
       (await lockToolRunBinding(client, ctx)).canExecute &&
       !!(await readMicrosoftLearnGrant(client, ctx.ownerId, ctx.microsoftLearn))
@@ -32,13 +33,16 @@ export async function invokeLearnDocsSearch(pool: Pool, ctx: ToolContext, input:
     input,
     async (frozen) => {
       const parsed = TOOL_INPUT_SCHEMAS.learn_docs_search.safeParse(input.args);
-      if (!parsed.success)
+      if (!parsed.success || !frozen.microsoftLearn)
         return {
           status: 'denied',
-          error: { code: 'TOOL_INPUT_INVALID', message: '仅接受非空公开查询词，最多 500 字符。' },
+          error: {
+            code: 'TOOL_INPUT_INVALID',
+            message: '仅接受空参数，并消费本轮冻结的 Microsoft Learn 查询。',
+          },
         };
       const result = await searchMicrosoftLearn({
-        query: parsed.data.query,
+        query: frozen.microsoftLearn.query,
         signal: frozen.signal,
         authorized: () => withRunTransaction(pool, ctx.ownership, authorized),
       });

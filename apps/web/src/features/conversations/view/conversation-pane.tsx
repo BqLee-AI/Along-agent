@@ -4,7 +4,16 @@ import { useCallback, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import Link from '@/shell/view/workspace-link';
 import { Brand } from '@/shared/ui/brand';
-import { ArrowDown, Bell, Files, Info, MessageSquareText, PanelLeftOpen, Plus } from 'lucide-react';
+import {
+  ArrowDown,
+  Bell,
+  BookOpen,
+  Files,
+  Info,
+  MessageSquareText,
+  PanelLeftOpen,
+  Plus,
+} from 'lucide-react';
 import { Button } from '@lorelum/lumen-ui/components/button';
 import { AnimatePresence, m, useReducedMotion } from 'motion/react';
 import type { TaskIntent } from '../model/task';
@@ -195,6 +204,12 @@ export default function ConversationPane({
                         },
                         { intent: 'reminder', title: '安排提醒', input: '', icon: Bell },
                         { intent: 'document', title: '处理资料', input: '', icon: Files },
+                        {
+                          intent: 'microsoft-learn',
+                          title: 'Microsoft Learn 查询',
+                          input: '',
+                          icon: BookOpen,
+                        },
                       ].map(({ intent, title, input, icon: Icon }) => (
                         <button
                           key={intent}

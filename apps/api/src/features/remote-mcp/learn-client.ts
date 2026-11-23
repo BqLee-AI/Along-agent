@@ -1,4 +1,4 @@
-import { LearnDocsSearchPayloadSchema } from '@along/contracts';
+import { LearnDocsQuerySchema, LearnDocsSearchPayloadSchema } from '@along/contracts';
 import { Client, ProtocolError, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import type { z } from 'zod';
 
@@ -143,8 +143,8 @@ export async function searchMicrosoftLearn(input: Input, request: Fetch = fetch)
     Object.keys(input).some((key) => key !== 'query' && key !== 'signal' && key !== 'authorized')
   )
     return denied;
-  const query = input.query.trim();
-  if (!query || query.length > 500 || input.signal?.aborted) return denied;
+  const query = input.query;
+  if (!LearnDocsQuerySchema.safeParse(query).success || input.signal?.aborted) return denied;
 
   const operation = new AbortController();
   const signal = input.signal

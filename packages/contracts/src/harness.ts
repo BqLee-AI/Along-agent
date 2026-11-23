@@ -220,16 +220,21 @@ const learnSourceUrl = boundedUtf8(2048).refine(
   { message: 'expected an official Microsoft Learn HTTPS source URL' },
 );
 
+export const LearnDocsQuerySchema = z.string().refine(
+  (value) => {
+    let length = 0;
+    for (const rune of value) {
+      if (unpairedSurrogate.test(rune) || ++length > 500) return false;
+    }
+    return /\S/u.test(value);
+  },
+  { message: 'expected a nonblank Unicode query of at most 500 code points' },
+);
+
 export const LearnDocsSearchPayloadSchema = z
   .object({
     kind: z.literal('learn_docs_search'),
-    query: z
-      .string()
-      .min(1)
-      .max(500)
-      .refine((value) => value.trim() === value && !unpairedSurrogate.test(value), {
-        message: 'expected a trimmed Unicode query',
-      }),
+    query: LearnDocsQuerySchema,
     fetched_at: z.string().length(24).datetime({ precision: 3 }),
     representation: z.literal('search_excerpts'),
     items: z

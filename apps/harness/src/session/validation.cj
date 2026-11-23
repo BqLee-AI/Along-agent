@@ -189,7 +189,7 @@ extend Harness {
         for (i in 20..23) { require(fetched[i] >= b'0' && fetched[i] <= b'9') }
         utcCheck(text(fetched[0..19] + "Z"))
     }
-    // Match ECMAScript trim for the persisted, already-normalized query string.
+    // Match ECMAScript whitespace for query blankness and URL validation.
     func learnWhitespace(code: UInt32): Bool {
         return (code >= 0x09 && code <= 0x0D) || code == 0x20 || code == 0xA0 ||
             code == 0x1680 || (code >= 0x2000 && code <= 0x200A) ||
@@ -232,14 +232,15 @@ extend Harness {
     }
     func learnSearchCheck(payload: JsonObject): Unit {
         keys(payload, ["kind", "query", "fetched_at", "representation", "items"])
-        let query = nonempty(field(payload, "query"), 500)
-        var first = true
-        var trailingSpace = false
+        let query = field(payload, "query").asString().getValue()
+        var length: Int64 = 0
+        var nonblank = false
         for (r in query.runes()) {
-            trailingSpace = learnWhitespace(UInt32(r))
-            if (first) { require(!trailingSpace); first = false }
+            length++
+            require(length <= 500)
+            if (!nonblank && !learnWhitespace(UInt32(r))) { nonblank = true }
         }
-        require(!trailingSpace)
+        require(nonblank)
         fetchedAtCheck(field(payload, "fetched_at"))
         require(ref(field(payload, "representation")) == "search_excerpts")
         let items = field(payload, "items").asArray()

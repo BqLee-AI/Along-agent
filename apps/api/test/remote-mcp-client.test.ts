@@ -17,7 +17,10 @@ const article = {
   content: 'The service stores automated backups.',
   extensionData: { uri: 'https://other.invalid/ignored' },
 };
-const defaultInput: Input = { query: ' backup retention ', authorized: async () => true };
+const defaultInput: Input = {
+  query: '  Azure PostgreSQL 备份，retention? 🧪  ',
+  authorized: async () => true,
+};
 const posts = ['initialize', 'notifications/initialized', 'tools/list', 'tools/call'];
 const encoder = new TextEncoder();
 const invalidProtocol = { status: 'failed', code: 'REMOTE_MCP_PROTOCOL_ERROR' } as const;
@@ -97,7 +100,7 @@ for (const sse of [false, true]) {
       status: 'ok',
       result: {
         kind: 'learn_docs_search',
-        query: 'backup retention',
+        query: defaultInput.query,
         representation: 'search_excerpts',
         fetched_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u),
         items: [{ title: article.title, url: article.contentUrl, content: article.content }],
@@ -107,7 +110,7 @@ for (const sse of [false, true]) {
     expect(requests.map(({ rpc }) => rpc.method)).toEqual(posts);
     expect(requests.at(-1)?.rpc.params).toEqual({
       name: 'microsoft_docs_search',
-      arguments: { query: 'backup retention' },
+      arguments: { query: defaultInput.query },
     });
     for (const { init, url } of requests) {
       expect(url).toBe(endpoint);

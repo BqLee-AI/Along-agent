@@ -20,9 +20,13 @@ export function selectResumeRequest(
   return previous && ['running', 'suspended_approval'].includes(run.status) ? previous : null;
 }
 
-export type TaskIntent = 'chat' | 'reminder' | 'document';
-/** Compact is a control command, including malformed arguments, never a message. */
-export function compactCommand(text: string): 'compact' | 'invalid' | null {
+export type TaskIntent = 'chat' | 'reminder' | 'document' | 'microsoft-learn';
+/** Compact is a control command except in an explicit Microsoft Learn query. */
+export function compactCommand(
+  text: string,
+  intent: TaskIntent = 'chat',
+): 'compact' | 'invalid' | null {
+  if (intent === 'microsoft-learn') return null;
   const value = text.trim();
   if (value === '/compact') return 'compact';
   return /^\/compact(?:\s|$)/.test(value) ? 'invalid' : null;
@@ -41,7 +45,7 @@ export function taskAdmission(intent: TaskIntent): {
   execution: ExecutionKind;
   authorization_revision?: 'delegation/1';
 } {
-  return intent === 'chat'
+  return intent === 'chat' || intent === 'microsoft-learn'
     ? { execution: 'harness', authorization_revision: 'delegation/1' }
     : { execution: intent === 'reminder' ? 'business' : 'harness' };
 }
@@ -92,7 +96,18 @@ export function taskSendEligibility({
     if (!workspaces.some((workspace) => workspace.workspace_id === workspaceId))
       return { allowed: false, reason: '请显式选择读取成功的资料登记。' };
   }
-  if (!text.trim()) return { allowed: false, reason: '请填写完整任务原话。' };
+  if (!text.trim())
+    return {
+      allowed: false,
+      reason: intent === 'microsoft-learn' ? '请输入查询词。' : '请填写完整任务原话。',
+    };
+  if (intent === 'microsoft-learn' && text.length > 500) {
+    for (let offset = 0, count = 0; offset < text.length;) {
+      if (++count > 500)
+        return { allowed: false, reason: '查询词最多 500 个字符（按 Unicode 码点计数）。' };
+      offset += text.codePointAt(offset)! > 0xffff ? 2 : 1;
+    }
+  }
   return { allowed: true, reason: null };
 }
 

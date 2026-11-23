@@ -1,11 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { z } from 'zod';
+import { LearnDocsQuerySchema } from '@along/contracts';
 import { withTransaction } from '../../db/transaction.js';
 import { isActiveOwner, lockViewerAccess } from '../identity/public.js';
 import { forbidden } from '../../platform/errors.js';
 
-export const microsoftLearnGrantSchema = z.object({ generation: z.string().uuid() }).strict();
+export const microsoftLearnGrantSchema = z
+  .object({
+    generation: z.string().uuid(),
+    query: LearnDocsQuerySchema,
+  })
+  .strict();
 export type MicrosoftLearnGrant = z.infer<typeof microsoftLearnGrantSchema>;
 type Viewer = { ownerId: string; sessionId: string };
 type Status = { state: 'idle' | 'connected' };
@@ -14,15 +20,15 @@ type Status = { state: 'idle' | 'connected' };
 export async function readMicrosoftLearnGrant(
   client: PoolClient,
   ownerId: string,
-  expected?: MicrosoftLearnGrant,
-): Promise<MicrosoftLearnGrant | null> {
+  expected?: Pick<MicrosoftLearnGrant, 'generation'>,
+): Promise<{ generation: string } | null> {
   if (!(await isActiveOwner(client, ownerId, { lock: 'share' }))) return null;
   const { rows } = await client.query<{ generation: string }>(
     `SELECT generation FROM microsoft_learn_connections
      WHERE owner_id=$1 AND ($2::uuid IS NULL OR generation=$2) FOR SHARE`,
     [ownerId, expected?.generation ?? null],
   );
-  return rows[0] ? microsoftLearnGrantSchema.parse(rows[0]) : null;
+  return rows[0] ?? null;
 }
 
 export function createMicrosoftLearnConnections(pool: Pool) {

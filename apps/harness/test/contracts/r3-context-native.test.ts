@@ -90,7 +90,10 @@ test('delegated Learn search preserves an accepted receipt across R3 restore and
   const inputId = randomUUID();
   const invocationId = randomUUID();
   const toolId = 'learn_docs_search';
-  const query = 'Azure database backups';
+  const searchTerms = ' \tAzure 数据库，cafe\u0301';
+  const trailingWhitespace = '\u00a0\n';
+  const remainingCodePoints = 500 - [...searchTerms, ...trailingWhitespace].length;
+  const query = searchTerms + '😀'.repeat(remainingCodePoints) + trailingWhitespace;
   const context = {
     manifest: { message_ids: [] },
     summary: null,
@@ -114,7 +117,12 @@ test('delegated Learn search preserves an accepted receipt across R3 restore and
       workspaces: [],
     },
     tools: [
-      { name: toolId, description: 'Search public Learn excerpts.', parameters: {}, risk: 'low' },
+      {
+        name: toolId,
+        description: 'Search public Learn excerpts using the exact query submitted for this Run.',
+        parameters: { type: 'object', properties: {}, additionalProperties: false },
+        risk: 'low',
+      },
     ],
   };
   const item = {
@@ -175,12 +183,15 @@ test('delegated Learn search preserves an accepted receipt across R3 restore and
           case 'measure_context':
             return measure;
           case 'model':
-            return toolCall(toolId, { query });
+            expect(request.messages).toContainEqual({ role: 'user', content: query });
+            return toolCall(toolId, {});
           case 'reserve':
-            expect(request).toMatchObject({ tool_id: toolId, args: { query } });
+            expect(request.tool_id).toBe(toolId);
+            expect(request.args).toEqual({});
             return { value: { invocation_id: invocationId } };
           case 'invoke':
             expect(request).toMatchObject({ tool_id: toolId, invocation_id: invocationId });
+            expect(request.args).toEqual({});
             invoked = true;
             return {
               value: { status: 'ok', result: receipt, invocationId, replayed: false },
@@ -225,6 +236,12 @@ test('delegated Learn search preserves an accepted receipt across R3 restore and
   expect(resumed.at(-1)).toMatchObject({ type: 'finish_goal', goal_result: goal });
 
   const malformed = [
+    { ...payload, query: '' },
+    { ...payload, query: ' \t\n\u00a0\u3000\ufeff' },
+    { ...payload, query: query + '😀' },
+    { ...payload, query: 'x'.repeat(500) + '\n' },
+    { ...payload, query: 'query\uD800' },
+    { ...payload, query: '\uDC00query' },
     { ...payload, items: [{ ...item, url: 'https://@learn.microsoft.com/' }] },
     { ...payload, items: [{ ...item, content: '😀'.repeat(1025) }] },
     { ...payload, items: Array(10).fill({ ...item, content: '"'.repeat(4096) }) },
