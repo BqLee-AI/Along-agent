@@ -131,6 +131,14 @@ run(
       expect(fresh.allowlist).toContain('feishu_docx_read');
       expect(fresh.allowlist).not.toContain('remember_memory');
       expect(fresh.allowlist).not.toContain('workspace_create');
+      expect(fresh.allowlist).not.toContain('learn_docs_search');
+      await expect(
+        reserveToolInvocation(db.pool, fresh, {
+          callKey: 'private-read-public-search',
+          toolId: 'learn_docs_search',
+          args: { query: 'Azure PostgreSQL backup retention' },
+        }),
+      ).rejects.toThrow();
       const toolId = 'feishu_docx_read';
       const args = {};
       await expect(
@@ -259,6 +267,7 @@ run(
           latestModelMessage: null,
           modelToolCount: 0,
           nextPermit: true,
+          lastModelInputTokens: null,
           lastMeasurement: null,
           modelStream: null,
         };

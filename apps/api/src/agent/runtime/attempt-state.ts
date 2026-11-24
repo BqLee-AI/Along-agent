@@ -35,6 +35,7 @@ export interface AttemptState {
     | null;
   modelToolCount: number;
   nextPermit: boolean;
+  lastModelInputTokens: number | null;
   lastMeasurement: {
     measurement: HarnessContextMeasurement;
     remaining: number | null;

@@ -1,4 +1,5 @@
 import {
+  hasBlockingInvocationFailure,
   readRunInvocationIdentities,
   readRunInvocationStates,
 } from '../tools/invocations/run-state.js';
@@ -118,6 +119,7 @@ export async function createHarnessSession(
         : null,
     modelToolCount: initial.snapshot?.tool_refs.length ?? 0,
     nextPermit: false,
+    lastModelInputTokens: null,
     lastMeasurement: null,
     modelStream: null,
   };
@@ -588,7 +590,9 @@ export async function createHarnessSession(
             if (initial.snapshot?.tool_refs.includes(request.invocation_id))
               throw stateConflict('original approval waiting point cannot suspend again');
             const states = await readRunInvocationStates(client, toolContext(context));
-            if (states.some((row) => row.state !== 'completed' || row.outcome_kind === 'failed'))
+            if (
+              states.some((row) => row.state !== 'completed' || hasBlockingInvocationFailure(row))
+            )
               throw stateConflict('cannot suspend unresolved tool effects');
             await suspendRunWithinTransaction(client, context, {
               checkpointId: request.checkpoint_ref,

@@ -33,11 +33,16 @@ import {
 
 const binaryPath = process.env.HARNESS_BINARY ?? '';
 const maybe = binaryPath && databaseUrl ? describe : describe.skip;
-const ModelBody = z.object({
-  stream: z.literal(true),
-  stream_options: z.object({ include_usage: z.literal(true) }),
-  messages: z.array(HarnessModelMessageSchema),
-});
+const ModelBody = z
+  .object({
+    stream: z.literal(true),
+    stream_options: z.object({ include_usage: z.literal(true) }),
+    messages: z.array(HarnessModelMessageSchema),
+    model: z.string(),
+    max_tokens: z.number().int().positive(),
+    tools: z.array(z.object({ function: z.object({ name: z.string() }) })).optional(),
+  })
+  .passthrough();
 const Detail = z.object({
   data: z.object({
     approval_id: z.string().uuid(),
@@ -55,6 +60,33 @@ const longAnswers = [
   { kind: 'longascii', content: 'a'.repeat(4001) },
   { kind: 'longunicode', content: 'a'.repeat(3999) + '😀' + '界'.repeat(4001) },
 ];
+const learnQuery = 'Azure Database for PostgreSQL Flexible Server backup retention';
+const learnCases = [
+  {
+    kind: 'learnfailure',
+    current: '请查微软官方文档：Azure PostgreSQL 灵活服务器的备份保留多久？\n请注明出处。',
+    query: learnQuery,
+    outcome: 'failed',
+    code: 'REMOTE_MCP_SERVICE_FAILED',
+    answer: '暂时无法访问 Microsoft Learn，未能核实备份保留期限。',
+  },
+  {
+    kind: 'learnnoquery',
+    current: '可以查一下上面提到的内容吗？',
+    query: null,
+    outcome: 'denied',
+    code: 'LEARN_QUERY_UNAVAILABLE',
+    answer: '无法仅根据本轮消息查询 Microsoft Learn，请说明要查找的公开技术问题。',
+  },
+] as const;
+const LearnObservation = z.object({
+  invocation_id: z.string().uuid(),
+  tool_id: z.literal('learn_docs_search'),
+  result: z.object({
+    status: z.enum(['failed', 'denied']),
+    error: z.object({ code: z.string() }),
+  }),
+});
 
 maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', () => {
   let database: IntegrationDatabase;
@@ -94,6 +126,37 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
         const requests = modelRequests.get(id) ?? [];
         requests.push(body);
         modelRequests.set(id, requests);
+        const learnCase = learnCases.find((scenario) => scenario.kind === kind);
+        if (learnCase) {
+          const observed = findModelObservation(body.messages, LearnObservation);
+          if (requests.length > 2 && observed?.result.error.code !== learnCase.code)
+            throw new Error('expected the accepted Microsoft Learn observation');
+          const call =
+            requests.length === 1
+              ? { name: 'learn_docs_search', arguments: '{}' }
+              : {
+                  name: 'finish_goal',
+                  arguments: JSON.stringify({
+                    status: 'blocked',
+                    outcomes: [
+                      { description: '查询公开文档', status: 'blocked', receipt_refs: [] },
+                    ],
+                    clarification: null,
+                    answer: learnCase.answer,
+                  }),
+                };
+          sendModelSse(res, {
+            message: {
+              content: requests.length === 2 ? JSON.stringify({ query: learnCase.query }) : null,
+              tool_calls:
+                requests.length === 2
+                  ? []
+                  : [{ id: `provider-learn-${requests.length}`, type: 'function', function: call }],
+            },
+            usage: { total_tokens: 5 },
+          });
+          return;
+        }
         if (kind === 'hold') {
           const gate = hold.get(id);
           if (!gate) throw new Error('missing held provider');
@@ -522,6 +585,152 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
       ).status,
     ).toBe(403);
   });
+
+  for (const scenario of learnCases) {
+    it(`isolates the Microsoft Learn query and lets the native model handle ${scenario.code}`, async () => {
+      const { headers } = await actor();
+      const firstId = randomUUID();
+      const secret = `synthetic-private-history-${randomUUID()}`;
+      const prior = { ...input(firstId, 'read'), raw_text: `nativeCase:${firstId}:read ${secret}` };
+      const first = await post('/api/v1/conversations/messages', prior, headers);
+      expect(first.status).toBe(200);
+      const firstEvents = frames(await first.text());
+      expect(firstEvents.at(-1)?.type).toBe('thread.completed');
+      expect(modelCalls.get(firstId)).toBe(2);
+      const id = randomUUID();
+      const body = {
+        ...input(id, scenario.kind),
+        conversation_id: started(firstEvents).conversation_id,
+        authorization_revision: 'delegation/1',
+        raw_text: `nativeCase:${id}:${scenario.kind} ${scenario.current}`,
+      };
+
+      const beforeFetch = globalThis.fetch;
+      const rpcMethods: string[] = [];
+      const toolCalls: unknown[] = [];
+      globalThis.fetch = Object.assign(
+        async (url: string | URL | Request, init?: RequestInit) => {
+          if (String(url) !== 'https://learn.microsoft.com/api/mcp') return beforeFetch(url, init);
+          const rpc = z
+            .object({
+              method: z.string(),
+              id: z.number().optional(),
+              params: z.unknown().optional(),
+            })
+            .parse(JSON.parse(String(init?.body)));
+          rpcMethods.push(rpc.method);
+          if (rpc.method === 'notifications/initialized')
+            return new Response(null, { status: 202 });
+          if (rpc.method === 'tools/call') {
+            toolCalls.push(rpc.params);
+            return new Response(null, { status: 503 });
+          }
+          const result =
+            rpc.method === 'initialize'
+              ? {
+                  protocolVersion: '2025-06-18',
+                  capabilities: { tools: {} },
+                  serverInfo: { name: 'Controlled Microsoft Learn', version: '1' },
+                }
+              : rpc.method === 'tools/list'
+                ? {
+                    tools: [
+                      {
+                        name: 'microsoft_docs_search',
+                        annotations: { readOnlyHint: true },
+                        inputSchema: { type: 'object', properties: { query: { type: 'string' } } },
+                        outputSchema: {
+                          type: 'object',
+                          properties: { results: { type: 'array', items: { type: 'object' } } },
+                        },
+                      },
+                    ],
+                  }
+                : undefined;
+          if (!result) throw new Error(`unexpected Learn RPC ${rpc.method}`);
+          return Response.json({ jsonrpc: '2.0', id: rpc.id, result });
+        },
+        { preconnect: beforeFetch.preconnect },
+      );
+      let events: ThreadEvent[];
+      try {
+        const response = await post('/api/v1/conversations/messages', body, headers);
+        expect(response.status).toBe(200);
+        events = frames(await response.text());
+      } finally {
+        globalThis.fetch = beforeFetch;
+      }
+
+      expect(events.at(-1)).toMatchObject({
+        type: 'thread.completed',
+        payload: { goal_result: { status: 'blocked', answer: scenario.answer } },
+      });
+
+      const requests = modelRequests.get(id);
+      expect(requests).toHaveLength(3);
+      const [choice, queryRequest, followup] = requests ?? [];
+      if (!choice || !queryRequest || !followup) throw new Error('missing Learn provider requests');
+      expect(choice.messages).toContainEqual({ role: 'user', content: prior.raw_text });
+      expect(choice.tools?.map((tool) => tool.function.name)).toContain('learn_docs_search');
+      expect(queryRequest.model).toBe(choice.model);
+      expect(queryRequest.messages).toEqual([
+        { role: 'system', content: expect.stringContaining('Microsoft Learn') },
+        { role: 'user', content: body.raw_text },
+      ]);
+      expect(queryRequest.messages[0]?.content).toContain('JSON');
+      expect(queryRequest.messages[0]?.content).not.toContain(`nativeCase:${id}`);
+      expect(JSON.stringify(queryRequest)).not.toContain(secret);
+      expect(queryRequest.tools ?? []).toEqual([]);
+      expect(queryRequest.max_tokens).toBeLessThanOrEqual(256);
+      const expectedResult = { status: scenario.outcome, error: { code: scenario.code } };
+      expect(
+        followup.messages.find(
+          (message) => message.role === 'assistant' && 'tool_calls' in message,
+        ),
+      ).toMatchObject({
+        tool_calls: [
+          {
+            id: 'provider-learn-1',
+            function: { name: 'learn_docs_search', arguments: '{}' },
+          },
+        ],
+      });
+      const observation = followup.messages.findLast((message) => message.role === 'tool');
+      expect(observation).toMatchObject({ role: 'tool', tool_call_id: 'provider-learn-1' });
+      expect(observation && JSON.parse(observation.content)).toMatchObject({
+        tool_id: 'learn_docs_search',
+        result: expectedResult,
+      });
+      expect(rpcMethods).toEqual(
+        scenario.query
+          ? ['initialize', 'notifications/initialized', 'tools/list', 'tools/call']
+          : [],
+      );
+      expect(toolCalls).toEqual(
+        scenario.query
+          ? [{ name: 'microsoft_docs_search', arguments: { query: scenario.query } }]
+          : [],
+      );
+
+      const run = started(events);
+      expect(await view(run.conversation_id, run.run_id, headers)).toMatchObject({
+        status: 'done',
+        goal_result: { status: 'blocked', answer: scenario.answer },
+      });
+      const invocations = await database.pool.query(
+        'SELECT tool_id, state, outcome_kind, accepted_result FROM tool_invocations WHERE run_id=$1',
+        [run.run_id],
+      );
+      expect(invocations.rows).toMatchObject([
+        {
+          tool_id: 'learn_docs_search',
+          state: 'completed',
+          outcome_kind: scenario.outcome,
+          accepted_result: expectedResult,
+        },
+      ]);
+    }, 30000);
+  }
 
   it('native receives the deterministic newest 63 visible predecessors and the complete 20000-unit current input once', async () => {
     const { session, headers } = await actor();

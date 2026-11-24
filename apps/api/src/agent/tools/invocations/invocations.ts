@@ -339,6 +339,11 @@ export async function reserveInvocation(
         !('kind' in ctx.feishuDocx))
     )
       throw forbidden();
+    if (
+      input.toolId === 'learn_docs_search' &&
+      (ctx.authorizationRevision !== 'delegation/1' || !!ctx.feishuDocx)
+    )
+      throw forbidden();
     let selected = ctx.workspaceGrant ?? null;
     let documentEdit: ToolContext['documentEdit'];
     let documentCreate: ToolContext['documentCreate'];

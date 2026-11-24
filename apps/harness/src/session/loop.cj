@@ -7,6 +7,10 @@ import std.collection.*
 import stdx.encoding.json.*
 
 extend Harness {
+    func isRecoverableLearnFailure(name: String, status: String): Bool {
+        return delegated && name == "learn_docs_search" && status == "failed"
+    }
+
     protected func loop(): Unit {
         if (pipe.compactControl) {
             require(isNull(waiting) && isNull(pendingModel) && contextState.units.size == 0 && toolRefs.size() == 0)
@@ -153,14 +157,33 @@ extend Harness {
             }
             keys(reservation, ["invocation_id"])
             let id = uuid(field(reservation, "invocation_id"))
-            let result = pipe.request("invoke", obj([("invocation_id", text(id)), ("tool_id", text(name)), ("args", args)]))
+            var result = pipe.request("invoke", obj([("invocation_id", text(id)), ("tool_id", text(name)), ("args", args)]))
+            let invocationReply = result.asObject()
+            if (invocationReply.containsKey("auxiliary_usage")) {
+                require(name == "learn_docs_search" && delegated)
+                keys(invocationReply, ["outcome", "auxiliary_usage"])
+                let usage = field(invocationReply, "auxiliary_usage").asObject()
+                keys(usage, ["iterations", "tokens"])
+                let iterations = integer(field(usage, "iterations"), 1)
+                require(iterations == budgetState.iterations + 1 && iterations < budgetState.maxIterations)
+                budgetState.iterations = iterations
+                let tokens = field(usage, "tokens")
+                if (isNull(tokens)) { budgetState.tokensKnown = false }
+                else {
+                    require(budgetState.tokensKnown)
+                    budgetState.knownTokens = integer(tokens, budgetState.knownTokens)
+                }
+                result = field(invocationReply, "outcome")
+                require(!field(result.asObject(), "replayed").asBool().getValue())
+            }
             resultCheck(result, true, id, name)
             let status = str(field(result.asObject(), "status"), 16)
             if (status == "unknown") { finish("failed", "TOOL_EFFECT_UNKNOWN"); return }
             nextCall++
             toolRefs.add(text(id))
             let deferFailure = name == "feishu_docx_read" && status == "failed" && pipe.protocol == "harness/v8"
-            if (!deferFailure && status != "ok" && (!delegated || status == "failed")) {
+            if (status != "ok" && (!delegated || status == "failed") &&
+                !deferFailure && !isRecoverableLearnFailure(name, status)) {
                 let code = errorCheck(field(result.asObject(), "error"))
                 checkpoint()
                 finish("failed", code)

@@ -623,6 +623,7 @@ export async function startConversationRun(
         (await lockViewerAccess(client, ownerId, sessionId))
           ? await freezeFeishuBotDocxGrant(client, feishuConfig, { ownerId, sessionId }, feishuUrl)
           : null;
+      if (delegation && execution === 'harness') allowlist = [...allowlist, 'learn_docs_search'];
       if (feishuDocx) {
         // Private text is model input, not authorization to publish that text via another tool.
         const privateReadTools: Partial<Record<string, true>> = {

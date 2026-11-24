@@ -108,13 +108,13 @@ extend Harness {
             let name = ref(field(t, "name"))
             if (name == "read_memory_source") { require(pipe.protocol == "harness/v8") }
             if (name == "remember_memory" || name == "recall_memories") { require(pipe.protocol != "harness/v6") }
-            if (name == "feishu_docx_read") { require(delegated) }
+            if (name == "feishu_docx_read" || name == "learn_docs_search") { require(delegated) }
             require(delegated || (name != "create_reminder" && name != "get_task" && name != "cancel_reminder" && name != "workspace_replace" && name != "workspace_create"))
             if (delegated) {
                 let workspaceRead = name == "workspace_list" || name == "workspace_grep" || name == "workspace_read"
                 let workspaceWrite = name == "workspace_replace" || name == "workspace_propose_replace" || name == "workspace_apply_replace"
                 let workspaceCreate = name == "workspace_create"
-                require(name == "get_user_prefs" || name == "set_user_timezone" || name == "create_reminder" || name == "get_task" || name == "cancel_reminder" || name == "read_run_observation" || name == "list_tasks" || name == "read_brief_cards" || name == "feishu_docx_read" || (pipe.protocol != "harness/v6" && (name == "remember_memory" || name == "recall_memories")) || (pipe.protocol == "harness/v8" && name == "read_memory_source") || workspaceRead || workspaceWrite || workspaceCreate)
+                require(name == "get_user_prefs" || name == "set_user_timezone" || name == "create_reminder" || name == "get_task" || name == "cancel_reminder" || name == "read_run_observation" || name == "list_tasks" || name == "read_brief_cards" || name == "feishu_docx_read" || name == "learn_docs_search" || (pipe.protocol != "harness/v6" && (name == "remember_memory" || name == "recall_memories")) || (pipe.protocol == "harness/v8" && name == "read_memory_source") || workspaceRead || workspaceWrite || workspaceCreate)
                 if (workspaceRead) { require(workspaceIds.size > 0) }
                 if (workspaceWrite) { require(hasWritableWorkspace) }
                 if (workspaceCreate) { require(hasOutputWorkspace) }

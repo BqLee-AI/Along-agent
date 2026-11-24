@@ -3,12 +3,16 @@ import type { HarnessRequest } from '@along/contracts';
 import type { ThreadEvent } from '@along/stream-protocol';
 import { ApplicationError, forbidden, stateConflict } from '../../platform/errors.js';
 import { invokeTool, reserveToolInvocation } from '../tools/gateway.js';
-import { readRunInvocationStates } from '../tools/invocations/run-state.js';
+import {
+  hasBlockingInvocationFailure,
+  readRunInvocationStates,
+} from '../tools/invocations/run-state.js';
 import type { ToolPayload } from '../tools/contracts.js';
 import { appendEvent } from '../../features/conversations/public.js';
 import { routingIdentity } from '../routing/routing-checkpoints.js';
 import { toolContext } from './context.js';
 import { approvalAuthorizesActions, type AttemptEnvironment } from './attempt-state.js';
+import { formLearnQuery } from './learn-query.js';
 
 /** Reservation and acceptance remain synchronous; there is no second execution queue. */
 export function createToolHandlers(
@@ -102,7 +106,7 @@ export function createToolHandlers(
           throw stateConflict('routing direct cannot reserve a second slot');
       }
       const states = await readRunInvocationStates(client, toolContext(context));
-      if (states.some((row) => row.state === 'unknown' || row.outcome_kind === 'failed'))
+      if (states.some(hasBlockingInvocationFailure))
         throw stateConflict('Run has unresolved tool effects');
       if (
         states.some(
@@ -154,7 +158,7 @@ export function createToolHandlers(
       if (attemptState.routingDecision?.payload.decision === 'direct')
         await directInvocation(client, request.invocation_id);
       const states = await readRunInvocationStates(client, toolContext(context));
-      if (states.some((row) => row.state === 'unknown' || row.outcome_kind === 'failed'))
+      if (states.some(hasBlockingInvocationFailure))
         throw stateConflict('Run has unresolved tool effects');
       if (
         states.some(
@@ -166,9 +170,16 @@ export function createToolHandlers(
       )
         throw stateConflict('approval requires suspension before further actions');
     });
+    const iterationsBefore = attemptState.cumulative.iterations;
     const outcome = await invokeTool(
       pool,
-      { ...toolContext(context), signal: sessionSignal },
+      {
+        ...toolContext(context),
+        signal: sessionSignal,
+        ...(request.tool_id === 'learn_docs_search'
+          ? { formLearnQuery: (signal: AbortSignal) => formLearnQuery(environment, signal) }
+          : {}),
+      },
       {
         invocationId: request.invocation_id,
         toolId: request.tool_id,
@@ -183,7 +194,9 @@ export function createToolHandlers(
     )
       await approvalEvents(outcome.result);
     attemptState.delivered.add(outcome.invocationId);
-    return outcome;
+    return attemptState.cumulative.iterations === iterationsBefore
+      ? outcome
+      : { outcome, auxiliary_usage: { ...attemptState.cumulative } };
   }
   return { reserve, invoke };
 }

@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import {
   HarnessRequestSchema,
   HarnessR3SnapshotSchema,
+  LearnDocsSearchPayloadSchema,
   type HarnessRequest,
 } from '@along/contracts';
 
@@ -52,9 +53,10 @@ async function run(
   const protocol = start.protocol;
   child.stdin.write(JSON.stringify(start) + '\n');
   const requests: HarnessRequest[] = [];
+  const decoder = new TextDecoder();
   let buffer = '';
   for await (const bytes of child.stdout) {
-    buffer += new TextDecoder().decode(bytes);
+    buffer += decoder.decode(bytes, { stream: true });
     while (buffer.includes('\n')) {
       const at = buffer.indexOf('\n');
       const request = HarnessRequestSchema.parse(JSON.parse(buffer.slice(0, at)));
@@ -83,6 +85,248 @@ const base = {
   observations: [],
   approval: null,
 };
+
+test('delegated Learn search restores accepted R3 receipts, continues after failure and rejects bad results', async () => {
+  const inputId = randomUUID();
+  const invocationId = randomUUID();
+  const toolId = 'learn_docs_search';
+  const userMessage =
+    '请查微软官方文档：Azure Database for PostgreSQL 灵活服务器的备份可以保留多久？请给出处。';
+  const query = 'Azure Database for PostgreSQL Flexible Server backup retention';
+  const searchTerms = ' \tAzure 数据库，cafe\u0301';
+  const trailingWhitespace = '\u00a0\n';
+  const remainingCodePoints = 500 - [...searchTerms, ...trailingWhitespace].length;
+  const boundaryQuery = searchTerms + '😀'.repeat(remainingCodePoints) + trailingWhitespace;
+  const context = {
+    manifest: { message_ids: [] },
+    summary: null,
+    messages: [],
+    input: { type: 'user', message_id: inputId, content: userMessage },
+  };
+  const start = {
+    ...base,
+    protocol: 'harness/v8',
+    r3_context: context,
+    trusted_context: {
+      version: 1,
+      authorization_revision: 'delegation/1',
+      execution_lifecycle: 'request-bound',
+      input_message_id: inputId,
+      received_at_utc: '2026-11-23T10:20:30Z',
+      request_anchor_utc: '2026-11-23T10:20:30Z',
+      continuation: null,
+      timezone: { timezone_id: 'UTC', source: 'preference', reference: inputId },
+      time_capabilities: { elapsed_revision: null, wall_rules: null },
+      workspaces: [],
+    },
+    tools: [
+      {
+        name: toolId,
+        description: 'Search Microsoft Learn using public technical keywords.',
+        parameters: {
+          type: 'object',
+          properties: {},
+          required: [],
+          additionalProperties: false,
+        },
+        risk: 'low',
+      },
+    ],
+  };
+  const item = {
+    title: 'Backup and restore in Azure Database for PostgreSQL Flexible Server',
+    url: 'https://learn.microsoft.com/en-us/azure/postgresql/flexible-server/concepts-backup-restore?a=b&c=d',
+    content: 'The backup retention period can be configured from 7 to 35 days.',
+  };
+  const payload = LearnDocsSearchPayloadSchema.parse({
+    kind: toolId,
+    query,
+    fetched_at: '2026-11-23T10:20:30.123Z',
+    representation: 'search_excerpts',
+    items: [item],
+  });
+  const result = { status: 'ok', result: payload };
+  const observation = { view: 'full', invocation_id: invocationId, tool_id: toolId, result };
+  const goal = {
+    status: 'completed',
+    outcomes: [
+      {
+        description: 'Answer with official backup retention guidance',
+        status: 'achieved',
+        receipt_refs: [invocationId],
+      },
+    ],
+    clarification: null,
+    answer: `备份保留期可配置为 7 至 35 天。来源：${item.url}`,
+  };
+  const measure = {
+    value: {
+      wire_bytes: 1,
+      http_bytes: 1,
+      input_meter: { quality: 'unavailable', input_tokens: null, meter_revision: 'fixture/1' },
+      output_ceiling: 37,
+      limit_reason: null,
+    },
+  };
+  const toolCall = (name: string, args: unknown) => ({
+    value: {
+      type: 'complete',
+      reply: {
+        message: {
+          content: null,
+          tool_calls: [
+            {
+              id: 'provider-tool',
+              type: 'function',
+              function: { name, arguments: JSON.stringify(args) },
+            },
+          ],
+        },
+        usage: { total_tokens: 5 },
+      },
+    },
+  });
+  async function search(receipt: unknown, expectedExit = 0) {
+    let invoked = false;
+    return run(
+      start,
+      (request) => {
+        switch (request.type) {
+          case 'pause_probe':
+            return { value: { pending: invoked } };
+          case 'measure_context':
+            return measure;
+          case 'model':
+            expect(request.messages).toContainEqual({ role: 'user', content: userMessage });
+            return toolCall(toolId, {});
+          case 'reserve':
+            expect(request.tool_id).toBe(toolId);
+            expect(request.args).toEqual({});
+            return { value: { invocation_id: invocationId } };
+          case 'invoke':
+            expect(request).toMatchObject({ tool_id: toolId, invocation_id: invocationId });
+            expect(request.args).toEqual({});
+            invoked = true;
+            return {
+              value: { status: 'ok', result: receipt, invocationId, replayed: false },
+            };
+          case 'pause_point':
+            return { value: { paused: true } };
+          default:
+            throw new Error(`Unexpected Learn search request ${request.type}`);
+        }
+      },
+      expectedExit,
+    );
+  }
+  expect(await run({ ...start, trusted_context: null }, () => ({}), 2)).toEqual([]);
+  const requests = await search(payload);
+  const pause = requests.find((request) => request.type === 'pause_point');
+  if (!pause || pause.context.version !== 4) throw new Error('Missing paused Learn observation');
+  expect(pause.context.tool_refs).toEqual([invocationId]);
+  expect(pause.context.native_state.units).toMatchObject([{ observation, projected: false }]);
+
+  const resumed = await run(
+    { ...start, snapshot: pause.context, observations: [observation] },
+    (request) => {
+      switch (request.type) {
+        case 'pause_probe':
+          return { value: { pending: false } };
+        case 'measure_context':
+          return measure;
+        case 'model': {
+          const tool = request.messages.find((message) => message.role === 'tool');
+          if (!tool) throw new Error('Missing restored Learn receipt');
+          expect(JSON.parse(tool.content)).toEqual(observation);
+          return toolCall('finish_goal', goal);
+        }
+        case 'finish_goal':
+          return { value: { accepted: true } };
+        default:
+          throw new Error(`Unexpected Learn restore request ${request.type}`);
+      }
+    },
+  );
+  expect(resumed.at(-1)).toMatchObject({ type: 'finish_goal', goal_result: goal });
+
+  const failure = {
+    status: 'failed',
+    error: {
+      code: 'REMOTE_MCP_SERVICE_FAILED',
+      message: 'Microsoft Learn 查询未完成。',
+    },
+  };
+  const failedObservation = { ...observation, result: failure };
+  const blocked = {
+    status: 'blocked',
+    outcomes: [{ description: '查询微软官方资料', status: 'blocked', receipt_refs: [] }],
+    clarification: null,
+    answer: 'Microsoft Learn 暂时无法查询，未能核实官方出处。',
+  };
+  const failed = await run(start, (request) => {
+    switch (request.type) {
+      case 'pause_probe':
+        return { value: { pending: false } };
+      case 'measure_context':
+        return measure;
+      case 'model': {
+        const tool = request.messages.find((message) => message.role === 'tool');
+        if (!tool) return toolCall(toolId, {});
+        expect(JSON.parse(tool.content)).toEqual(failedObservation);
+        return toolCall('finish_goal', blocked);
+      }
+      case 'reserve':
+        return { value: { invocation_id: invocationId } };
+      case 'invoke':
+        return {
+          value: {
+            outcome: { ...failure, invocationId, replayed: false },
+            auxiliary_usage: { iterations: 2, tokens: 10 },
+          },
+        };
+      case 'snapshot':
+        if (request.context.version !== 4) throw new Error('Missing R3 checkpoint');
+        expect(request.context.usage).toEqual({ iterations: 2, tokens: 10 });
+        expect(
+          request.context.native_state.units.map((unit) => unit.observation.invocation_id),
+        ).toEqual(request.context.tool_refs);
+        return { value: { checkpoint_ref: randomUUID() } };
+      case 'finish_goal':
+        return { value: { accepted: true } };
+      default:
+        throw new Error(`Unexpected failed Learn search request ${request.type}`);
+    }
+  });
+  expect(failed.at(-1)).toMatchObject({ type: 'finish_goal', goal_result: blocked });
+
+  const boundaryPayload = LearnDocsSearchPayloadSchema.parse({ ...payload, query: boundaryQuery });
+  expect((await search(boundaryPayload)).at(-1)).toMatchObject({
+    type: 'pause_point',
+    context: {
+      native_state: {
+        units: [
+          { observation: { result: { status: 'ok', result: boundaryPayload } }, projected: false },
+        ],
+      },
+    },
+  });
+
+  const malformed = [
+    { ...payload, query: '' },
+    { ...payload, query: ' \t\n\u00a0\u3000\ufeff' },
+    { ...payload, query: boundaryQuery + '😀' },
+    { ...payload, query: 'x'.repeat(500) + '\n' },
+    { ...payload, query: 'query\uD800' },
+    { ...payload, query: '\uDC00query' },
+    { ...payload, items: [{ ...item, url: 'https://@learn.microsoft.com/' }] },
+    { ...payload, items: [{ ...item, content: '😀'.repeat(1025) }] },
+    { ...payload, items: Array(10).fill({ ...item, content: '"'.repeat(4096) }) },
+    { kind: 'effect_evidence', evidence_ref: 'otherwise-valid' },
+  ];
+  for (const invalid of malformed) {
+    expect((await search(invalid, 2)).at(-1)).toMatchObject({ type: 'invoke' });
+  }
+}, 30_000);
 
 test('only v8 restores successful Docx bodies from saved units without bootstrap duplicates', async () => {
   const inputId = randomUUID();

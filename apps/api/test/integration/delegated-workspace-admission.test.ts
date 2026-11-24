@@ -161,7 +161,11 @@ maybe('delegated conversation workspace admission against PostgreSQL', () => {
     const row = await stored(run.runId);
     expect(row.frozen_context.workspaceGrants).toEqual([]);
     expect(row.frozen_context.trustedExecutionContext.workspaces).toEqual([]);
-    expect(row.tools_allowlist).toEqual([...DELEGATION_TOOL_IDS, ...R3_MEMORY_TOOL_IDS]);
+    expect(row.tools_allowlist).toEqual([
+      ...DELEGATION_TOOL_IDS,
+      ...R3_MEMORY_TOOL_IDS,
+      'learn_docs_search',
+    ]);
     expect(row.tools_allowlist).not.toContain('workspace_read');
   });
 

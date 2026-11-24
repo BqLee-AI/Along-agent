@@ -106,6 +106,7 @@ extend Harness {
         uuid(field(o, "invocation_id"))
         let toolId = ref(field(o, "tool_id"))
         if (toolId == "feishu_docx_read") { require(tools.contains(toolId) && view == "full") }
+        if (toolId == "learn_docs_search") { require(view == "full") }
         if (view == "full") {
             keys(o, ["view", "invocation_id", "tool_id", "result"])
             resultCheck(field(o, "result"), false, "", toolId)
@@ -176,17 +177,92 @@ extend Harness {
         let revision = field(payload, "revision").asObject()
         keys(revision, ["before", "after"])
         require(integer(field(revision, "before"), 1) == integer(field(revision, "after"), 1))
-        let fetched = str(field(payload, "fetched_at"), 24)
-        require(fetched.size == 24 && fetched[19] == b'.' && fetched[23] == b'Z')
-        for (i in 20..23) { require(fetched[i] >= b'0' && fetched[i] <= b'9') }
-        utcCheck(text(fetched[0..19] + "Z"))
+        fetchedAtCheck(field(payload, "fetched_at"))
         hash(field(payload, "content_hash"))
         require(ref(field(payload, "representation")) == "plain_text")
         require(ref(field(payload, "completeness")) == "complete_plain_text")
         require(str(field(payload, "content"), 240000).size <= 240000 && wireJson(payload).size <= 240000)
     }
+    func fetchedAtCheck(value: JsonValue): Unit {
+        let fetched = str(value, 24)
+        require(fetched.size == 24 && fetched[19] == b'.' && fetched[23] == b'Z')
+        for (i in 20..23) { require(fetched[i] >= b'0' && fetched[i] <= b'9') }
+        utcCheck(text(fetched[0..19] + "Z"))
+    }
+    // Match ECMAScript whitespace for query blankness and URL validation.
+    func learnWhitespace(code: UInt32): Bool {
+        return (code >= 0x09 && code <= 0x0D) || code == 0x20 || code == 0xA0 ||
+            code == 0x1680 || (code >= 0x2000 && code <= 0x200A) ||
+            code == 0x2028 || code == 0x2029 || code == 0x202F || code == 0x205F ||
+            code == 0x3000 || code == 0xFEFF
+    }
+    func learnUrlCheck(url: String): Unit {
+        let prefix = "https://learn.microsoft.com"
+        require(url.size >= prefix.size)
+        for (i in 0..prefix.size) {
+            let byte = url[i]
+            require(byte == prefix[i] ||
+                (byte >= b'A' && byte <= b'Z' && byte + 32 == prefix[i]))
+        }
+        var authorityEnd = prefix.size
+        if (authorityEnd < url.size && url[authorityEnd] == b':') {
+            authorityEnd++
+            while (authorityEnd < url.size && url[authorityEnd] == b'0') { authorityEnd++ }
+            require(authorityEnd + 3 <= url.size && url[authorityEnd..authorityEnd + 3] == "443")
+            authorityEnd += 3
+        }
+        require(authorityEnd == url.size || url[authorityEnd] == b'/' ||
+            url[authorityEnd] == b'?' || url[authorityEnd] == b'#')
+        for (r in url.runes()) {
+            let code = UInt32(r)
+            require(code > 0x20 && code != 0x5C && code != 0x7F && !learnWhitespace(code))
+        }
+    }
+    // Count compact JSON bytes from decoded text, including escape expansion.
+    func learnJsonStringBytes(value: String): Int64 {
+        var bytes = value.size + 2
+        for (r in value.runes()) {
+            let code = UInt32(r)
+            require(code < 0xD800 || code > 0xDFFF)
+            if (code == 0x22 || code == 0x5C || code == 8 || code == 9 ||
+                code == 10 || code == 12 || code == 13) { bytes++ }
+            else if (code < 0x20) { bytes += 5 }
+        }
+        return bytes
+    }
+    func learnSearchCheck(payload: JsonObject): Unit {
+        keys(payload, ["kind", "query", "fetched_at", "representation", "items"])
+        let query = field(payload, "query").asString().getValue()
+        var length: Int64 = 0
+        var nonblank = false
+        for (r in query.runes()) {
+            length++
+            require(length <= 500)
+            if (!nonblank && !learnWhitespace(UInt32(r))) { nonblank = true }
+        }
+        require(nonblank)
+        fetchedAtCheck(field(payload, "fetched_at"))
+        require(ref(field(payload, "representation")) == "search_excerpts")
+        let items = field(payload, "items").asArray()
+        require(items.size() <= 10)
+        var bytes = "{\"kind\":\"learn_docs_search\",\"query\":,\"fetched_at\":\"0000-00-00T00:00:00.000Z\",\"representation\":\"search_excerpts\",\"items\":[]}".size +
+            learnJsonStringBytes(query)
+        if (items.size() > 0) { bytes += items.size() - 1 }
+        for (value in items.getItems()) {
+            let item = value.asObject()
+            keys(item, ["title", "url", "content"])
+            let title = field(item, "title").asString().getValue()
+            let url = field(item, "url").asString().getValue()
+            let content = field(item, "content").asString().getValue()
+            require(title.size <= 512 && url.size <= 2048 && content.size <= 4096)
+            learnUrlCheck(url)
+            bytes += "{\"title\":,\"url\":,\"content\":}".size +
+                learnJsonStringBytes(title) + learnJsonStringBytes(url) + learnJsonStringBytes(content)
+            require(bytes <= 65536)
+        }
+    }
     func resultCheck(v: JsonValue, outcome: Bool, id: String, toolId: String): Unit {
-        if (toolId == "feishu_docx_read") { require(delegated) }
+        if (toolId == "feishu_docx_read" || toolId == "learn_docs_search") { require(delegated) }
         let o = v.asObject()
         let status = str(field(o, "status"), 16)
         require(status == "ok" || status == "denied" || status == "failed" || status == "unknown")
@@ -204,7 +280,12 @@ extend Harness {
                 feishuDocxCheck(payload)
                 return
             }
-            require(toolId != "feishu_docx_read")
+            if (kind == "learn_docs_search") {
+                require(toolId == "learn_docs_search")
+                learnSearchCheck(payload)
+                return
+            }
+            require(toolId != "feishu_docx_read" && toolId != "learn_docs_search")
             if (kind == "timezone_setting") {
                 keys(payload, ["kind", "timezone_id", "previous_timezone_id", "alias_version"])
                 for (name in ["timezone_id", "previous_timezone_id"]) {

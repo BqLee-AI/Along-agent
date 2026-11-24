@@ -8,6 +8,7 @@
 
 > Proposed 用户模型配置与 Run 冻结引用见 [模型接入数据合同](model-provider-schema.md)；旧部署只能明确指定 owner 导入，不自动复制共享。此项不代表已应用迁移。
 > Proposed R3（#144）：通用暂停继续、摘要覆盖、记忆事实及可重建向量索引的目标合同见 [design/23](../design/23-r3-short-term-memory-and-compact.md)；新增状态及迁移尚未实施，不改写原 Run、快照或批准事实。
+> Microsoft Learn 公开搜索不新增表或连接状态；参数、结果及原调用账本边界见 [Microsoft Learn 合同](../api/microsoft-learn.md)。
 
 ## 落地顺序
 
