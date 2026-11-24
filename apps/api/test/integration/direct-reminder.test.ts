@@ -21,6 +21,8 @@ import {
 } from '../../src/agent/operations/goal-result.js';
 import { acceptTargetContinuation } from '../../src/agent/operations/target-continuation.js';
 import { createTaskWithinTransaction } from '../../src/features/tasks/create.js';
+import { runSchedulePhase } from '../../src/features/tasks/scheduler/schedule.js';
+import { runCancelPhase } from '../../src/features/tasks/scheduler/cancel-phase.js';
 
 describe('direct reminder accepted facts', () => {
   let db: IntegrationDatabase;
@@ -174,6 +176,116 @@ describe('direct reminder accepted facts', () => {
       expected_wall_time: task.wall_time,
       expected_timezone_id: task.timezone_id,
     };
+  }
+  for (const scenario of [
+    {
+      name: 'wrong ID with requested metadata',
+      sameNote: false,
+      wrongMetadata: true,
+      allowed: false,
+    },
+    {
+      name: 'self-consistent unrelated target',
+      sameNote: false,
+      wrongMetadata: false,
+      allowed: false,
+    },
+    {
+      name: 'self-consistent ambiguous target',
+      sameNote: true,
+      wrongMetadata: false,
+      allowed: false,
+    },
+    { name: 'explicit unique target', sameNote: false, wrongMetadata: false, allowed: true },
+    { name: 'explicit dated target', sameNote: true, wrongMetadata: false, allowed: true },
+  ]) {
+    it(`checks actual cancellation receipts for ${scenario.name}`, async () => {
+      const targetYear = new Date().getUTCFullYear() + 1;
+      const request = scenario.allowed
+        ? scenario.sameNote
+          ? `取消“核对报告”${targetYear}年11月5日那条。`
+          : '取消“另一条”这条提醒。'
+        : '取消“核对报告”这条提醒。';
+      const ctx = await fresh(['cancel_reminder'], request);
+      const ids: string[] = [];
+      const client = await db.pool.connect();
+      try {
+        await client.query('BEGIN');
+        for (const [index, note] of [
+          '核对报告',
+          scenario.sameNote ? '核对报告' : '另一条',
+        ].entries()) {
+          const source = await seedApproval(db.pool, { ownerId: ctx.ownerId, state: 'consumed' });
+          const task = await createTaskWithinTransaction(client, {
+            ownerId: ctx.ownerId,
+            source: { approvalId: source.id },
+            fireAtUtc: `${targetYear}-11-0${index + 4}T01:20:00Z`,
+            wallTime: `${targetYear}-11-0${index + 4} 09:20`,
+            timezoneId: 'Asia/Shanghai',
+            fold: 0,
+            resolvedUtcOffsetSeconds: 28800,
+            tzdbVersion: 'fixture-v1',
+            originalNote: note,
+            idempotencyKey: randomUUID(),
+          });
+          ids.push(task.task_id);
+        }
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+      await runSchedulePhase(db.pool);
+      expect(
+        (await db.pool.query('SELECT state FROM tasks WHERE id=ANY($1::uuid[])', [ids])).rows,
+      ).toEqual([{ state: 'scheduled' }, { state: 'scheduled' }]);
+      const input = await cancelInput(ids[scenario.wrongMetadata ? 0 : 1]!);
+      input.task_id = ids[1]!;
+      const { outcome } = await call(ctx, 'receipt/scope', input, 'cancel_reminder');
+      expect(outcome).toMatchObject({
+        status: 'ok',
+        result: { kind: scenario.allowed ? 'reminder_cancelled' : 'clarify' },
+      });
+      expect((await db.pool.query('SELECT state FROM tasks WHERE id=$1', [ids[1]])).rows).toEqual([
+        { state: scenario.allowed ? 'cancel_pending' : 'scheduled' },
+      ]);
+      await runCancelPhase(db.pool);
+      const tasks = await db.pool.query('SELECT id,state FROM tasks WHERE id=ANY($1::uuid[])', [
+        ids,
+      ]);
+      const states = new Map(tasks.rows.map((task) => [task.id, task.state]));
+      expect(states.get(ids[0])).toBe('scheduled');
+      expect(states.get(ids[1])).toBe(scenario.allowed ? 'cancelled' : 'scheduled');
+      const receipts = await db.pool.query(
+        `SELECT o.task_id, o.provider_receipt_id, e.evidence_ref FROM outbox o
+         JOIN task_events e ON e.task_id=o.task_id AND e.type='cancelled'
+         WHERE o.task_id=ANY($1::uuid[]) AND o.command->>'kind'='cancel'
+           AND o.status='dispatched'`,
+        [ids],
+      );
+      if (scenario.allowed) {
+        expect(receipts.rows).toEqual([
+          {
+            task_id: ids[1],
+            provider_receipt_id: expect.stringMatching(/^pg-cancel:/u),
+            evidence_ref: expect.stringMatching(/^pg-cancel:/u),
+          },
+        ]);
+        expect(receipts.rows[0].evidence_ref).toBe(receipts.rows[0].provider_receipt_id);
+      } else {
+        expect(receipts.rows).toEqual([]);
+        expect(
+          (
+            await db.pool.query(
+              "SELECT 1 FROM task_events WHERE task_id=ANY($1::uuid[]) AND type='cancel_requested'",
+              [ids],
+            )
+          ).rows,
+        ).toEqual([]);
+      }
+    });
   }
   for (const [request, allowed] of [
     ['帮我取消“同名提醒”这条提醒。', false],
