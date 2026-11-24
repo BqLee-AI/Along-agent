@@ -2,17 +2,17 @@
 
 ### Requirement: 固定公开 MCP 的模型查询工具
 
-系统 SHALL 在合格新普通 Harness Run 中提供单个固定 learn_docs_search 工具，严格接受 {query:string}。模型可按任务提炼、翻译公开技术查询；不得发送私有正文、个人/账户/工作区标识或密钥。服务端 SHALL 固定 endpoint 与 microsoft_docs_search，验证参数、原执行资格与冻结名单，不从其他上下文追加请求内容，不动态注册远端发现项。具体容量和输入见本 change design；提示说明不是严格防泄漏门。
+系统 SHALL 在合格新普通 Harness Run 中提供固定 `learn_docs_search({})`。主对话模型只选择检索。服务端 SHALL 使用本 Run 已绑定的同一模型，仅以固定说明和本轮接受的用户消息独立生成 query。历史、摘要、工作区、工具结果、模型主对话输出、私有上下文标识和任何工具定义均不得进入该次推理。服务端 SHALL 固定 endpoint 与唯一远程工具 microsoft_docs_search。
 
 #### Scenario: 模型提供技术 query
 
-- **WHEN** 合格 Run 的模型用有效 query 调用搜索，该 query 可以不同于当前消息全文
-- **THEN** 经既有只读网关派发到 https://learn.microsoft.com/api/mcp 的唯一 microsoft_docs_search，实际 query 和结果中的 query 等于模型参数，返回真实公开摘录与官方来源，不要求连接状态或额外审批。
+- **WHEN** 合格 Run 选择搜索且独立推理从本轮消息生成有效公开查询
+- **THEN** 经既有只读网关发送独立生成的 query，返回真实公开摘录、官方来源和实际派发的 query。
 
 #### Scenario: 目的地与参数不能扩展
 
-- **WHEN** query 缺失、全空白、超过 500 个 Unicode 码点或包含孤立 surrogate，或模型提供 endpoint/工具名等额外字段，或调用不在冻结名单/当前资格中
-- **THEN** 本地拒绝且零 MCP 出站；其他发现工具、写工具和任意 URL 不可调用。
+- **WHEN** 主对话工具参数非空、当前无执行资格、独立推理未返回有效 query 或本轮内容不足以形成公开查询
+- **THEN** 本地返回有界结果，零 MCP 出站，对话继续。模型不得通过参数选择 endpoint 或远程工具。
 
 ### Requirement: 当前执行资格、取消与不可变重放
 
@@ -45,7 +45,7 @@
 #### Scenario: 超时和服务失败
 
 - **WHEN** 整体 deadline 超时或 HTTP/MCP 服务失败
-- **THEN** 保留不同的超时/服务失败分类，不自动重试，不以旧结果或空数组伪装成功。
+- **THEN** 按原分类保留已接受的失败，检查点同时保存对应引用和观察。原模型可收到该观察并完成响应，无自动重试、旧结果兜底或假成功。
 
 #### Scenario: 超界和不合约响应
 
