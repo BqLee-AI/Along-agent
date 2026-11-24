@@ -28,4 +28,4 @@ Web 输入框说明本轮提问可能生成发送给 Microsoft Learn 的公开�
 
 公开搜索无独立连接路由、连接卡、generation、入站查询字段或专用状态，不新增数据库表；未发布的连接表与 manifest 移除，已合并迁移不修改。旧实验安装不升级、降级或清理；新版本验收从全新隔离正式安装空库开始。
 
-行为依据：[OpenSpec change](../../openspec/changes/add-readonly-remote-mcp-connection/design.md)。带日期的协议、受控模型与真实模型证据分别记录，本文不证明部署或自主意图验收结果。
+行为依据见 [会话规范](../../openspec/specs/conversations/spec.md) 和 [工具网关规范](../../openspec/specs/tool-gateway/spec.md)。协议实验、受控模型验证及真实模型预检见 [验证记录](../verification/remote-mcp-verification-2026-11-23.md)。
