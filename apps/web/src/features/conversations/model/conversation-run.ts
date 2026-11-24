@@ -374,6 +374,7 @@ export interface RunTranscript extends Pick<
 > {
   text: string;
   approvals: HistoryApprovalReference[];
+  usage?: { iterations: number; tokens: number | null };
 }
 
 // Callers normalize persisted seq once with mergeThreadEvents before collecting.
@@ -407,6 +408,7 @@ export function collectRunTranscripts(
         event.type === 'thread.cancelled'
       ) {
         transcript.goal_result = event.payload.goal_result;
+        transcript.usage = event.payload.usage;
       }
     }
     if (event.type !== 'approval_required') continue;
@@ -430,7 +432,14 @@ export function collectRunTranscripts(
       });
       if (sameApprovals) {
         transcript.approvals = prior.approvals;
-        if (prior.text === transcript.text) transcripts.set(runId, prior);
+        if (
+          prior.text === transcript.text &&
+          prior.authorization_revision === transcript.authorization_revision &&
+          prior.execution_lifecycle === transcript.execution_lifecycle &&
+          prior.goal_result === transcript.goal_result &&
+          prior.usage === transcript.usage
+        )
+          transcripts.set(runId, prior);
       }
     }
   }

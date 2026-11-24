@@ -9,7 +9,7 @@ export function useConversationScroll(identity: string | null) {
   const content = useRef<HTMLDivElement>(null);
   const following = useRef(true);
   const frame = useRef<number | null>(null);
-  const pendingScroll = useRef(false);
+  const lastTop = useRef(0);
   const [showLatest, setShowLatest] = useState(false);
   const schedule = useCallback(() => {
     if (frame.current !== null) return;
@@ -17,20 +17,10 @@ export function useConversationScroll(identity: string | null) {
       frame.current = null;
       const scroll = viewport.current;
       if (!scroll || !scroll.clientHeight) return;
-      // Finish all geometry reads before the optional scroll write.
-      const height = scroll.scrollHeight;
-      const top = scroll.scrollTop;
-      const clientHeight = scroll.clientHeight;
-      if (pendingScroll.current) {
-        following.current = isNearChatBottom({
-          scrollHeight: height,
-          scrollTop: top,
-          clientHeight,
-        });
-        pendingScroll.current = false;
+      if (following.current && !isNearChatBottom(scroll)) {
+        scroll.scrollTop = scroll.scrollHeight;
+        lastTop.current = scroll.scrollTop;
       }
-      setShowLatest(!following.current);
-      if (following.current) scroll.scrollTop = height;
     });
   }, []);
   useEffect(() => {
@@ -49,34 +39,22 @@ export function useConversationScroll(identity: string | null) {
   }, [schedule]);
   useEffect(() => {
     following.current = true;
-    pendingScroll.current = false;
+    lastTop.current = viewport.current?.scrollTop ?? 0;
     setShowLatest(false);
     schedule();
   }, [identity, schedule]);
   const onScroll = useCallback(() => {
-    pendingScroll.current = true;
-    schedule();
-  }, [schedule]);
+    const scroll = viewport.current;
+    if (!scroll || scroll.scrollTop === lastTop.current) return;
+    lastTop.current = scroll.scrollTop;
+    // A reader's scroll updates intent; it never schedules a scroll write.
+    following.current = isNearChatBottom(scroll);
+    setShowLatest(!following.current);
+  }, []);
   const jumpLatest = useCallback(() => {
     following.current = true;
-    pendingScroll.current = false;
     setShowLatest(false);
     schedule();
   }, [schedule]);
-  const locate = useCallback((id: string) => {
-    const target = document.getElementById(id);
-    if (!target || !viewport.current?.contains(target)) return;
-    let ancestor: HTMLElement | null = target;
-    while (ancestor && ancestor !== viewport.current) {
-      if (ancestor instanceof HTMLDetailsElement) ancestor.open = true;
-      ancestor = ancestor.parentElement;
-    }
-    following.current = false;
-    pendingScroll.current = false;
-    setShowLatest(true);
-    target.tabIndex = -1;
-    target.focus({ preventScroll: true });
-    target.scrollIntoView({ behavior: 'instant', block: 'start' });
-  }, []);
-  return { viewport, content, showLatest, onScroll, jumpLatest, locate };
+  return { viewport, content, showLatest, onScroll, jumpLatest };
 }

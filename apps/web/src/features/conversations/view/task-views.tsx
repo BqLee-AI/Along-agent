@@ -13,9 +13,9 @@ import { Alert } from '@lorelum/lumen-ui/components/alert';
 import { Dialog } from '@lorelum/lumen-ui/components/dialog';
 import { Select } from '@lorelum/lumen-ui/components/select';
 import { Radio } from '@lorelum/lumen-ui/components/radio';
+import { AnimatePresence, m, useReducedMotion } from 'motion/react';
 import { ErrorNotice } from '@/shared/ui/page';
 import {
-  modelSelectionLabel,
   runStatusLabel,
   userPauseCanContinue,
 } from '@/features/conversations/model/conversation-run';
@@ -23,6 +23,7 @@ import { compactCommand, shouldSubmitMessage } from '@/features/conversations/mo
 import type { ConversationTask } from '@/features/conversations/viewmodel/use-conversation-task';
 import { composerBlockedReason } from '../model/presentation';
 import { useComposerDisplay } from '../viewmodel/use-composer-display';
+import { chatFileAccept } from '../model/chat-files';
 import { AssistantMarkdown } from './assistant-markdown';
 
 export function ScopePaths({ title, paths }: { title: string; paths: readonly string[] }) {
@@ -162,7 +163,6 @@ export function RunStatusPanel({ task }: { task: ConversationTask }) {
   const { run, selected, effectsUnknown } = task;
   if (!selected) return null;
   const transcript = task.transcript.get(selected.runId);
-  const lifecycle = run?.execution_lifecycle ?? transcript?.execution_lifecycle;
   const goalResult = run?.goal_result ?? transcript?.goal_result;
   const answerVisible =
     Boolean(goalResult && task.liveReply) ||
@@ -184,15 +184,6 @@ export function RunStatusPanel({ task }: { task: ConversationTask }) {
       aria-label="此次运行事实"
       className="min-w-0 space-y-3 text-sm [overflow-wrap:anywhere]"
     >
-      {lifecycle === 'request-bound' ? (
-        <p data-testid="request-bound-lifecycle" className="text-secondary-foreground">
-          此运行绑定当前连接；离开、刷新或断线可能中止执行，已接受的效果不会自动撤销。
-        </p>
-      ) : lifecycle === 'server-owned' ? (
-        <p data-testid="server-owned-lifecycle" className="text-secondary-foreground">
-          此运行由服务端管理；离开只断开查看，停止请使用停止按钮。
-        </p>
-      ) : null}
       {effectsUnknown ? (
         <Alert role="alert" color="warning" variant="glass">
           <Alert.Content>
@@ -202,11 +193,6 @@ export function RunStatusPanel({ task }: { task: ConversationTask }) {
             </Alert.Description>
           </Alert.Content>
         </Alert>
-      ) : null}
-      {run ? (
-        <p className="text-secondary-foreground" data-testid="run-model-selection">
-          本次运行模型：{modelSelectionLabel(run.model_selection)}
-        </p>
       ) : null}
       {run?.document_effects?.length ? (
         <section className="space-y-3" aria-label="文件效果">
@@ -255,7 +241,9 @@ export function RunStatusPanel({ task }: { task: ConversationTask }) {
       ) : null}
       {goalResult ? (
         <>
-          {goalResult.status !== 'completed' || goalResult.clarification || !answerVisible ? (
+          {!answerVisible ||
+          goalResult.outcomes.some((outcome) => outcome.receipt_refs.length > 0) ||
+          goalResult.status === 'unknown' ? (
             <div className="py-2 text-sm">
               <GoalResultPanel result={goalResult} showAnswer={!answerVisible} />
             </div>
@@ -485,12 +473,6 @@ export function RunStatusPanel({ task }: { task: ConversationTask }) {
               >
                 读取最新状态
               </Button>
-              <a
-                className="inline-flex min-h-8 max-lg:min-h-11 items-center text-brand-ink underline"
-                href="#run-results"
-              >
-                查看批准与结果
-              </a>
             </div>
           </div>
         </details>
@@ -503,6 +485,8 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
   const workspace = task.workspaces.find((item) => item.workspace_id === task.workspaceId);
   const textarea = useComposerDisplay(task.input);
   const composing = useRef(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const reduceMotion = useReducedMotion();
   const command = compactCommand(task.input);
   const allowed = command
     ? task.compactAvailable
@@ -527,6 +511,25 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
       aria-label="对话输入"
       data-testid="chat-composer"
     >
+      <input
+        ref={fileInput}
+        type="file"
+        accept={chatFileAccept}
+        multiple
+        hidden
+        onChange={(event) => {
+          const files = Array.from(event.currentTarget.files ?? []);
+          event.currentTarget.value = '';
+          void task.addFiles(files);
+        }}
+      />
+      <AnimatePresence initial={false}>
+        {task.fileError ? (
+          <m.div exit={{ opacity: 0 }} transition={{ duration: reduceMotion ? 0 : 0.18 }}>
+            <ErrorNotice message={task.fileError.message} />
+          </m.div>
+        ) : null}
+      </AnimatePresence>
       {task.error ? (
         <div id="task-form-error">
           <ErrorNotice message={task.error} />
@@ -618,12 +621,39 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
       <PromptInput
         variant="glass"
         submitDisabled={!allowed}
-        className="flex min-h-0 min-w-0 flex-col gap-1 rounded-2xl bg-background! bg-none! p-2 shadow-[0_0_0_1px_rgba(0,0,0,0.06),0_2px_6px_rgba(0,0,0,0.04),0_12px_32px_rgba(0,0,0,0.06)]! transition-shadow duration-200 focus-within:shadow-[0_0_0_1px_color-mix(in_oklab,var(--brand-ink)_35%,transparent),0_2px_8px_rgba(0,0,0,0.04),0_12px_32px_rgba(0,0,0,0.07)]! motion-reduce:transition-none dark:bg-secondary! dark:shadow-[0_0_0_1px_rgba(255,255,255,0.08),inset_0_1px_0_rgba(255,255,255,0.04),0_8px_28px_rgba(0,0,0,0.3)]! dark:focus-within:shadow-[0_0_0_1px_color-mix(in_oklab,var(--brand-ink)_45%,transparent),0_8px_28px_rgba(0,0,0,0.3)]!"
+        className="chat-composer flex min-h-0 min-w-0 flex-col px-1.5 py-1.5"
         onSubmit={(event) => {
           event.preventDefault();
           if (allowed) void task.send();
         }}
       >
+        {task.files.length ? (
+          <ul
+            aria-label="待发送文件"
+            className="flex max-h-28 flex-wrap gap-1.5 overflow-auto px-1 pb-1"
+          >
+            {task.files.map((file, index) => (
+              <li
+                key={index}
+                className="flex min-w-0 max-w-full items-center gap-1 rounded-control bg-muted pl-2 text-xs"
+              >
+                <Files aria-hidden="true" className="size-3.5 shrink-0" />
+                <span className="truncate" title={file.name}>
+                  {file.name}
+                </span>
+                <button
+                  type="button"
+                  className="grid size-8 shrink-0 place-items-center rounded-control hover:bg-background focus-visible:outline-2 focus-visible:outline-ring max-lg:size-11"
+                  disabled={task.active}
+                  aria-label={`移除 ${file.name}`}
+                  onClick={() => task.removeFile(index)}
+                >
+                  <X aria-hidden="true" className="size-3.5" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
         <div className="max-h-[32dvh] min-h-0 space-y-3 overflow-y-auto overscroll-contain">
           {task.intent !== 'chat' ? (
             <div className="flex flex-wrap items-center gap-2">
@@ -766,60 +796,11 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
               </Radio.Group>
             </fieldset>
           ) : null}
-          {task.canReplyToClarification && !task.ambiguousProposal ? (
-            <label className="flex min-h-11 items-center gap-2 px-3 text-sm">
-              <input
-                type="checkbox"
-                checked={task.clarificationReply}
-                disabled={task.active}
-                onChange={(event) => task.setClarificationReply(event.target.checked)}
-              />
-              这条消息补充上一个问题（不勾选则作为新请求）
-            </label>
-          ) : null}
         </div>
         <Label htmlFor="task-message" className="sr-only">
           发给 Along 的消息
         </Label>
-        <PromptInput.Textarea
-          ref={textarea}
-          id="task-message"
-          aria-label="发给 Along 的消息"
-          autoSize={false}
-          submitOnEnter={false}
-          className="max-h-48 min-h-14 resize-none border-0 bg-transparent! px-2 py-1.5 text-[15px] leading-6 shadow-none! outline-none ring-0! focus-visible:ring-0 md:text-[15px]"
-          placeholder={
-            task.intent === 'document'
-              ? '你希望如何处理这些资料？'
-              : task.intent === 'reminder'
-                ? '你希望什么时候提醒什么？'
-                : '有什么想聊的？'
-          }
-          value={task.input}
-          disabled={task.sendUncertain}
-          aria-describedby={`task-send-reason task-learn-search-note${task.intent === 'reminder' ? ' task-help' : ''}${task.error ? ' task-form-error' : ''}`}
-          onChange={(event) => task.setInput(event.target.value)}
-          onCompositionStart={() => {
-            composing.current = true;
-          }}
-          onCompositionEnd={() => {
-            composing.current = false;
-          }}
-          onKeyDown={(event) => {
-            if (
-              shouldSubmitMessage({
-                key: event.key,
-                shiftKey: event.shiftKey,
-                isComposing: composing.current || event.nativeEvent.isComposing,
-                keyCode: event.nativeEvent.keyCode,
-              })
-            ) {
-              event.preventDefault();
-              if (allowed) event.currentTarget.form?.requestSubmit();
-            }
-          }}
-        />
-        <div className="flex min-w-0 shrink-0 items-center justify-between gap-2">
+        <div className="flex min-w-0 shrink-0 items-end gap-1.5">
           <Dropdown>
             <Dropdown.Trigger
               render={
@@ -828,11 +809,11 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
                   variant="clear"
                   color="default"
                   size="icon"
-                  className="rounded-lg border-0 bg-transparent! bg-none! text-muted-foreground shadow-none! hover:bg-muted! hover:text-foreground"
+                  className="chat-composer-tool shrink-0 rounded-full border-0 bg-none! shadow-none!"
                 />
               }
               disabled={task.active}
-              aria-label="添加工具"
+              aria-label="添加文件或工具"
               data-testid="chat-tools"
             >
               <Plus className="size-4" aria-hidden="true" />
@@ -844,10 +825,17 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
               className="min-w-52 max-w-[calc(100vw-24px)]"
               aria-label="对话工具"
             >
+              <Dropdown.Item
+                className="min-h-8 max-lg:min-h-11 gap-3"
+                onClick={() => fileInput.current?.click()}
+              >
+                <Files className="size-4" aria-hidden="true" />
+                添加本地文件
+              </Dropdown.Item>
               {(
                 [
                   { value: 'reminder', label: '创建提醒', icon: Bell },
-                  { value: 'document', label: '处理资料', icon: Files },
+                  { value: 'document', label: '使用已登记目录', icon: Files },
                   { value: 'chat', label: '普通对话', icon: MessageSquare },
                 ] as const
               ).map(({ value, label, icon: Icon }) => (
@@ -860,8 +848,53 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
                   {label}
                 </Dropdown.Item>
               ))}
+              <Dropdown.Separator />
+              <p className="max-w-52 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                公开检索可能使用从问题提取的搜索词，请勿输入敏感信息。
+              </p>
             </Dropdown.Content>
           </Dropdown>
+          <PromptInput.Textarea
+            ref={textarea}
+            id="task-message"
+            aria-label="发给 Along 的消息"
+            rows={1}
+            autoSize={false}
+            submitOnEnter={false}
+            className="max-h-40 min-h-8 min-w-0 flex-1 resize-none border-0 bg-transparent! px-1.5 py-1 text-base leading-6 shadow-none! outline-none ring-0! focus-visible:ring-0 lg:text-[15px]"
+            placeholder={
+              task.files.length
+                ? '告诉 Along 怎样处理这些文件'
+                : task.intent === 'document'
+                  ? '你希望如何处理这些资料？'
+                  : task.intent === 'reminder'
+                    ? '你希望什么时候提醒什么？'
+                    : '有什么想聊的？'
+            }
+            value={task.input}
+            disabled={task.sendUncertain}
+            aria-describedby={`task-ai-note${blockedReason ? ' task-send-reason' : ''}${task.intent === 'reminder' ? ' task-help' : ''}${task.error ? ' task-form-error' : ''}`}
+            onChange={(event) => task.setInput(event.target.value)}
+            onCompositionStart={() => {
+              composing.current = true;
+            }}
+            onCompositionEnd={() => {
+              composing.current = false;
+            }}
+            onKeyDown={(event) => {
+              if (
+                shouldSubmitMessage({
+                  key: event.key,
+                  shiftKey: event.shiftKey,
+                  isComposing: composing.current || event.nativeEvent.isComposing,
+                  keyCode: event.nativeEvent.keyCode,
+                })
+              ) {
+                event.preventDefault();
+                if (allowed) event.currentTarget.form?.requestSubmit();
+              }
+            }}
+          />
           {task.intent !== 'reminder' ? (
             <Dropdown>
               <Dropdown.Trigger
@@ -870,13 +903,13 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
                     type="button"
                     variant="clear"
                     color="default"
-                    className="max-w-48 gap-1 rounded-lg border-0 bg-transparent! bg-none! text-muted-foreground shadow-none! hover:bg-muted! hover:text-foreground"
+                    className="max-w-48 shrink-0 gap-1 rounded-full border-0 bg-transparent! bg-none! text-secondary-foreground shadow-none! hover:bg-muted! hover:text-foreground"
                   />
                 }
                 disabled={task.sendUncertain}
                 aria-label="选择模型"
               >
-                <span className="truncate">
+                <span className="hidden truncate sm:inline">
                   {task.modelSelection?.model_id ?? task.defaultSelection?.model_id ?? '选择模型'}
                 </span>
                 <ChevronDown className="size-3.5 shrink-0" aria-hidden="true" />
@@ -918,14 +951,13 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
               </Dropdown.Content>
             </Dropdown>
           ) : null}
-          <span className="min-w-0 flex-1" aria-hidden="true" />
           {canStop ? (
             <Button
               type="button"
               size="icon"
               variant="glass"
               color="default"
-              className="rounded-full"
+              className="shrink-0 rounded-full"
               disabled={task.stopping || !task.selected}
               aria-label={task.stopping ? '正在停止' : '停止回复'}
               title="停止"
@@ -940,7 +972,7 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
               type="submit"
               size="icon"
               color="primary"
-              className="rounded-full bg-brand-ink! text-background! transition-[opacity,background-color]! duration-200! ease-out! hover:opacity-90 disabled:opacity-50 motion-reduce:transition-none!"
+              className="chat-composer-send shrink-0 rounded-full bg-none! shadow-none!"
               disabled={!allowed}
               aria-label={command ? '执行压缩命令' : '发送消息'}
               data-testid="send-message"
@@ -950,21 +982,13 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
           ) : null}
         </div>
       </PromptInput>
-      <p
-        id="task-learn-search-note"
-        className="px-1 text-center text-xs leading-5 text-muted-foreground"
-      >
-        本轮提问可能生成发给 Microsoft Learn 的公开搜索词，请避免输入敏感信息。
-      </p>
-      <p
-        id="task-send-reason"
-        className={
-          blockedReason
-            ? 'px-1 text-xs leading-5 text-muted-foreground'
-            : 'hidden px-1 text-center text-xs leading-5 text-muted-foreground lg:block'
-        }
-      >
-        {blockedReason ?? 'Enter 发送 · Shift + Enter 换行'}
+      {blockedReason ? (
+        <p id="task-send-reason" className="px-1 text-xs leading-5 text-muted-foreground">
+          {blockedReason}
+        </p>
+      ) : null}
+      <p id="task-ai-note" className="px-1 text-center text-xs leading-5 text-muted-foreground">
+        内容由 AI 生成，仅供参考。
       </p>
     </section>
   );

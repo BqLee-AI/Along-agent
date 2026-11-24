@@ -1,7 +1,8 @@
 import 'server-only';
 
-import { AccountViewSchema, authStatusSchema } from '@along/contracts';
+import { AccountViewSchema, authStatusSchema, workspaceSummarySchema } from '@along/contracts';
 import type { AccountView as AccountProfile, AuthStatus } from '@along/contracts';
+import { z } from 'zod';
 import { apiGet } from '@/shared/http/server';
 import type { ApiResult } from '@/shared/http/result';
 import { MeSchema } from '@/shared/session/identity';
@@ -33,5 +34,13 @@ export async function readAccountIdentity(): Promise<AccountRead<Me>> {
 export async function readAccountProfile(): Promise<AccountRead<AccountProfile>> {
   return checked(await apiGet((api) => api.api.v1.auth.account.get(), '/account'), (value) =>
     AccountViewSchema.safeParse(value),
+  );
+}
+
+const workspaceListSchema = z.object({ items: z.array(workspaceSummarySchema) }).strict();
+
+export async function readAccountWorkspaces() {
+  return checked(await apiGet((api) => api.api.v1.workspaces.get()), (value) =>
+    workspaceListSchema.safeParse(value),
   );
 }

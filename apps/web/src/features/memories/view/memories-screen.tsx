@@ -1,11 +1,12 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Pencil, RefreshCw, X } from 'lucide-react';
 import type { MessageHistoryItem } from '@along/contracts';
 import { Button } from '@lorelum/lumen-ui/components/button';
 import Link from '@/shell/view/workspace-link';
 import { useHistoryPage } from '@/shared/http/use-page';
-import { EmptyState, ErrorNotice, PageHeading } from '@/shared/ui/page';
+import { ErrorNotice, PageHeading } from '@/shared/ui/page';
 import { ReadControls } from '@/shared/ui/read-controls';
 import {
   correctMemory,
@@ -40,17 +41,15 @@ function Correction({
   const selected = state.items.find((message) => message.message_id === chosen);
   return (
     <section className="space-y-3 border-t border-separator pt-4" aria-label="选择更正来源">
-      <p>
-        请先在原会话写下完整的更正，再回到此处选择那条本人消息。更正内容将原样使用所选消息，不会自动选取旧消息。
-      </p>
+      <p>在来源会话写下完整更正，再选择该条消息。所选内容会原样保存。</p>
       <Link
         className="inline-flex min-h-11 items-center text-primary underline"
         href={`/conversations?${new URLSearchParams({ conversation_id: memory.conversationId })}`}
       >
-        前往来源会话写下更正
+        打开来源会话
       </Link>
       <fieldset disabled={busy || state.reading} className="space-y-3">
-        <legend className="font-medium">选择明确表达此次更正的本人消息</legend>
+        <legend className="font-medium">选择更正消息</legend>
         {state.items
           .filter((message) => message.role === 'user')
           .map((message) => (
@@ -97,9 +96,6 @@ function Correction({
       >
         {busy ? '正在提交…' : '使用所选本人消息更正'}
       </Button>
-      <p className="text-xs text-muted-foreground">
-        来源可追溯不代表内容已核实；请核对消息确实是此次更正。
-      </p>
       {selected && selected.content.length > 12000 ? (
         <p role="alert">所选消息超过更正长度限制，请先在会话中写一条较短的完整更正。</p>
       ) : null}
@@ -178,71 +174,88 @@ function MemoryCard({ item, changed }: { item: Memory; changed: () => Promise<vo
         aria-busy={busy}
       >
         <p className="whitespace-pre-wrap">{memory.content}</p>
-        <dl className="space-y-1 text-xs text-muted-foreground">
-          <div>
-            <dt className="inline">来源：</dt>
-            <dd className="inline">
-              {memory.sourceKind === 'explicit' ? '明确记住' : '其他来源'} ·{' '}
-              <Link
-                className="text-primary underline"
-                href={`/conversations?${new URLSearchParams({ conversation_id: memory.conversationId })}`}
-              >
-                查看来源会话
-              </Link>
-            </dd>
-          </div>
-          <div>
-            <dt className="inline">来源消息：</dt>
-            <dd className="inline">{memory.messageIds.join('、')}</dd>
-          </div>
-          <div>
-            <dt className="inline">创建：</dt>
-            <dd className="inline">
-              <time dateTime={memory.createdAt}>{memory.createdAt}</time>
-            </dd>
-          </div>
-          <div>
-            <dt className="inline">修订：</dt>
-            <dd className="inline">
-              第 {memory.revision} 版 · <time dateTime={memory.updatedAt}>{memory.updatedAt}</time>
-            </dd>
-          </div>
-          {memory.expiresAt ? (
+        <details className="text-xs text-secondary-foreground">
+          <summary className="inline-flex min-h-8 cursor-pointer list-none items-center underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-ring max-lg:min-h-11 [&::-webkit-details-marker]:hidden">
+            来源与版本
+          </summary>
+          <dl className="space-y-1 pt-1">
             <div>
-              <dt className="inline">到期：</dt>
+              <dt className="inline">来源：</dt>
               <dd className="inline">
-                <time dateTime={memory.expiresAt}>{memory.expiresAt}</time>
+                {memory.sourceKind === 'explicit' ? '明确记住' : '其他来源'} ·{' '}
+                <Link
+                  className="text-primary underline"
+                  href={`/conversations?${new URLSearchParams({ conversation_id: memory.conversationId })}`}
+                >
+                  查看来源会话
+                </Link>
               </dd>
             </div>
-          ) : null}
-          {detail ? (
             <div>
-              <dt className="inline">记忆 ID：</dt>
-              <dd className="inline">{memory.id}</dd>
+              <dt className="inline">来源消息：</dt>
+              <dd className="inline">{memory.messageIds.join('、')}</dd>
             </div>
-          ) : null}
-        </dl>
+            <div>
+              <dt className="inline">创建：</dt>
+              <dd className="inline">
+                <time dateTime={memory.createdAt}>{memory.createdAt}</time>
+              </dd>
+            </div>
+            <div>
+              <dt className="inline">修订：</dt>
+              <dd className="inline">
+                第 {memory.revision} 版 ·{' '}
+                <time dateTime={memory.updatedAt}>{memory.updatedAt}</time>
+              </dd>
+            </div>
+            {memory.expiresAt ? (
+              <div>
+                <dt className="inline">到期：</dt>
+                <dd className="inline">
+                  <time dateTime={memory.expiresAt}>{memory.expiresAt}</time>
+                </dd>
+              </div>
+            ) : null}
+            {detail ? (
+              <div>
+                <dt className="inline">记忆 ID：</dt>
+                <dd className="inline">{memory.id}</dd>
+              </div>
+            ) : null}
+          </dl>
+        </details>
         {error ? <ErrorNotice message={error} /> : null}
         {notice ? <p role="status">{notice}</p> : null}
         <div className="flex flex-wrap gap-2">
           <Button
             variant="glass"
             color="default"
+            size="icon"
+            aria-label="刷新这条记忆"
+            title="刷新这条记忆"
             disabled={busy}
             onClick={() => void perform('detail')}
           >
-            {busy ? '处理中…' : '读取最新记忆'}
+            <RefreshCw className="size-4" aria-hidden="true" />
           </Button>
           <Button
             variant="glass"
             color="default"
+            size="icon"
+            aria-label={correcting ? '收起更正' : '更正记忆'}
+            title={correcting ? '收起更正' : '更正记忆'}
+            aria-expanded={correcting}
             disabled={busy || needsRead || stopped}
             onClick={() => {
               setCorrecting(!correcting);
               setConfirmStop(false);
             }}
           >
-            {correcting ? '收起更正' : '更正记忆'}
+            {correcting ? (
+              <X className="size-4" aria-hidden="true" />
+            ) : (
+              <Pencil className="size-4" aria-hidden="true" />
+            )}
           </Button>
           <Button
             variant="glass"
@@ -285,26 +298,16 @@ export default function MemoriesScreen() {
   const { state, read } = useHistoryPage<Memory>('memories', loader);
   return (
     <section className="min-w-0 space-y-6 text-sm leading-6">
-      <PageHeading
-        eyebrow="个人记忆"
-        title="记忆"
-        description="查看当前可召回的记忆及其来源；记忆是历史材料，不是授权或提醒。"
-      />
+      <PageHeading title="记忆" />
       {state.loaded && !state.error && state.items.length === 0 ? (
-        <EmptyState
-          title="暂无可召回记忆"
-          description="此处只显示当前可读取且尚未停止或过期的记忆。"
-        />
+        <p className="rounded-xl bg-muted px-4 py-6 text-secondary-foreground">暂无可召回记忆</p>
       ) : null}
       <ul className="space-y-3" aria-label="可召回记忆">
         {state.items.map((item) => (
           <MemoryCard key={item.id} item={item} changed={() => read(true)} />
         ))}
       </ul>
-      <ReadControls state={state} read={read} label="记忆" />
-      <p className="border-t border-border pt-5 text-muted-foreground">
-        读取、翻页或打开来源不会修改记忆。更正和停止召回均需明确操作。
-      </p>
+      <ReadControls state={state} read={read} label="记忆" compact />
     </section>
   );
 }

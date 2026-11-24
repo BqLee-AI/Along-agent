@@ -1,5 +1,6 @@
 'use client';
 
+import { ListFilter } from 'lucide-react';
 import { Button } from '@lorelum/lumen-ui/components/button';
 import { Label } from '@lorelum/lumen-ui/components/label';
 import { Select } from '@lorelum/lumen-ui/components/select';
@@ -32,8 +33,15 @@ export function TaskStatusFilter({ status }: { status: TaskFilter }) {
           </Select.Content>
         </Select>
       </div>
-      <Button variant="glass" color="default" type="submit">
-        应用筛选
+      <Button
+        variant="glass"
+        color="default"
+        type="submit"
+        size="icon"
+        aria-label="应用筛选"
+        title="应用筛选"
+      >
+        <ListFilter className="size-4" aria-hidden="true" />
       </Button>
     </WorkspaceFilterForm>
   );

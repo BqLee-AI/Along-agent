@@ -54,6 +54,26 @@ export async function setUserTimezoneWithinTransaction(
   };
 }
 
+export async function updateAccountProfile(
+  client: PoolClient,
+  ownerId: string,
+  input: { display_name?: string; timezone_id?: string | null },
+  timeContext: TimeContext,
+): Promise<{ display_name: string; timezone_id: string | null }> {
+  if (input.timezone_id !== undefined)
+    await setUserTimezoneWithinTransaction(client, ownerId, input.timezone_id, timeContext);
+
+  const { rows } = await client.query<{ display_name: string; timezone_id: string | null }>(
+    input.display_name === undefined
+      ? "SELECT display_name,timezone_id FROM users WHERE id=$1 AND status='active'"
+      : "UPDATE users SET display_name=$2,updated_at=clock_timestamp() WHERE id=$1 AND status='active' RETURNING display_name,timezone_id",
+    input.display_name === undefined ? [ownerId] : [ownerId, input.display_name],
+  );
+  const profile = rows[0];
+  if (!profile) throw forbidden('owner cannot update account profile');
+  return profile;
+}
+
 export interface OwnerEligibilityOptions {
   lock?: 'share';
 }

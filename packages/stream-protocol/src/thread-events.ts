@@ -237,6 +237,18 @@ function delegationEnvelope<T extends ThreadEventType, P extends z.ZodTypeAny>(
     })
     .strict();
 }
+// Legacy terminal events stay strict. Earlier delegation events omit usage.
+const delegationTerminalFields = {
+  goal_result: goalResult,
+  usage: z
+    .object({
+      iterations: z.number().int().safe().nonnegative(),
+      tokens: z.number().int().safe().nonnegative().nullable(),
+    })
+    .strict()
+    .optional(),
+};
+
 export const DelegationThreadEventSchema = z.discriminatedUnion('type', [
   delegationEnvelope(
     z.literal('thread.started'),
@@ -251,15 +263,15 @@ export const DelegationThreadEventSchema = z.discriminatedUnion('type', [
   delegationEnvelope(z.literal('approval_required'), ApprovalRequiredPayloadSchema),
   delegationEnvelope(
     z.literal('thread.completed'),
-    ThreadCompletedPayloadSchema.extend({ goal_result: goalResult }),
+    ThreadCompletedPayloadSchema.extend(delegationTerminalFields),
   ),
   delegationEnvelope(
     z.literal('thread.failed'),
-    ThreadFailedPayloadSchema.extend({ goal_result: goalResult }),
+    ThreadFailedPayloadSchema.extend(delegationTerminalFields),
   ),
   delegationEnvelope(
     z.literal('thread.cancelled'),
-    ThreadCancelledPayloadSchema.extend({ goal_result: goalResult }),
+    ThreadCancelledPayloadSchema.extend(delegationTerminalFields),
   ),
 ]);
 export const ThreadEventSchema = z.union([LegacyThreadEventSchema, DelegationThreadEventSchema]);

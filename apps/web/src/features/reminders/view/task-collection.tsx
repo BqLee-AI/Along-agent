@@ -1,10 +1,9 @@
 'use client';
 
 import Link from '@/shell/view/workspace-link';
-import { ArrowUpRight, Clock3 } from 'lucide-react';
+import { Clock3 } from 'lucide-react';
 import { Button } from '@lorelum/lumen-ui/components/button';
 import { Badge } from '@lorelum/lumen-ui/components/badge';
-import { EmptyState } from '@/shared/ui/page';
 import type { TaskListItem } from '../model/types';
 import { TaskListPageSchema, taskListRequest } from '../model/data';
 import type { PageSnapshot, TaskFilter } from '../model/data';
@@ -40,17 +39,9 @@ export function TaskCollection({
         </p>
       )}
       {page?.items.length === 0 ? (
-        <EmptyState title="此范围没有提醒任务">
-          <Button
-            variant="glass"
-            color="default"
-            role="link"
-            nativeButton={false}
-            render={<Link href="/approvals" />}
-          >
-            查看提醒确认
-          </Button>
-        </EmptyState>
+        <p className="rounded-xl bg-muted px-4 py-6 text-sm text-secondary-foreground">
+          {status === 'all' ? '暂无提醒' : '此状态暂无提醒'}
+        </p>
       ) : null}
       {page && page.items.length > 0 ? (
         <ul className="space-y-3">
@@ -72,27 +63,31 @@ export function TaskCollection({
                         ) : null}
                       </p>
                       <p className="mt-0.5 text-[13px] leading-5 text-muted-foreground">
-                        {task.timezone_id} · 冻结本地时间
+                        {task.timezone_id}
                       </p>
                       <ElapsedBasis basis={task.time_basis} />
                     </div>
                   </div>
                   <div className="flex min-w-0 flex-col items-end gap-1">
                     <TaskState state={task.state} />
-                    <p className="text-[13px] leading-5 text-muted-foreground">
-                      {task.schedule_receipt ? '有调度登记回执' : '无调度登记回执'}
-                    </p>
+                    {index ? (
+                      <p className="text-[13px] leading-5 text-muted-foreground">
+                        {task.schedule_receipt ? '有调度登记回执' : '无调度登记回执'}
+                      </p>
+                    ) : null}
                   </div>
                 </div>
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-separator pt-3">
-                  <details className="min-w-0 text-[13px] text-muted-foreground">
-                    <summary className="cursor-pointer py-1">
-                      技术信息 · {task.task_id.slice(0, 8)}
-                    </summary>
-                    <p className="select-text font-mono [overflow-wrap:anywhere]">
-                      task_id: {task.task_id}
-                    </p>
-                  </details>
+                  {index ? (
+                    <details className="min-w-0 text-[13px] text-muted-foreground">
+                      <summary className="cursor-pointer py-1">
+                        技术信息 · {task.task_id.slice(0, 8)}
+                      </summary>
+                      <p className="select-text font-mono [overflow-wrap:anywhere]">
+                        task_id: {task.task_id}
+                      </p>
+                    </details>
+                  ) : null}
                   <Button
                     variant="clear"
                     color="default"
@@ -110,8 +105,7 @@ export function TaskCollection({
                       />
                     }
                   >
-                    {index ? '查看此任务事件' : '查看任务详情'}
-                    <ArrowUpRight className="size-4" aria-hidden="true" />
+                    {index ? '查看此任务事件' : '详情'}
                     <span className="sr-only">
                       {' '}
                       · {task.fire_at_local} · {task.task_id}
@@ -130,7 +124,7 @@ export function TaskCollection({
           </Button>
         </ResourceError>
       ) : null}
-      {page ? (
+      {page && (index || page.next_cursor !== null) ? (
         <PageControls
           count={page.items.length}
           nextCursor={page.next_cursor}

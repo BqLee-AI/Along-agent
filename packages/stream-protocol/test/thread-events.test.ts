@@ -97,6 +97,34 @@ describe('thread-events', () => {
     });
   });
 
+  it('retains reported token totals and distinguishes missing usage and unknown totals', () => {
+    const terminal = base(
+      'thread.completed',
+      {
+        conversation_id: CONVERSATION_ID,
+        run_id: RUN_ID,
+        approval_id: null,
+        goal_result: {
+          status: 'completed',
+          outcomes: [{ description: 'Replied', status: 'achieved', receipt_refs: [] }],
+          clarification: null,
+          answer: 'Done',
+        },
+      },
+      { protocol_version: 'v2' },
+    );
+    expect(ThreadEventSchema.parse(terminal).payload).not.toHaveProperty('usage');
+    for (const tokens of [1234, null, 0]) {
+      const usage = { iterations: tokens === 0 ? 0 : 2, tokens };
+      expect(
+        ThreadEventSchema.parse({
+          ...terminal,
+          payload: { ...terminal.payload, usage },
+        }).payload,
+      ).toHaveProperty('usage', usage);
+    }
+  });
+
   it('rejects extra fields on every event', () => {
     const payloads: Array<[string, Record<string, unknown>]> = [
       [

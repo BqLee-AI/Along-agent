@@ -140,6 +140,7 @@ initialize 原子提交 user/credential/session/安装绑定后才发 Cookie。c
 | ----------------------------------- | -------------------- | --------------------------------------------- | ----------------------------------------------------------------------------- |
 | POST `/auth/sign-in`（变更）        | O                    | `{login_name,password}` 或 `{email,password}` | 200 `{authenticated:true}`；原七天库 Cookie                                   |
 | GET `/auth/account`                 | 签名会话             | 无                                            | 200 `AccountView`                                                             |
+| POST `/auth/account/profile`        | S                    | `{display_name?,timezone_id?}`                | 200 `{display_name,timezone_id}`                                              |
 | POST `/auth/contact/request`        | S                    | `{email,current_password}`                    | 202 `{contact_state:"pending",delivery:DeliveryView}`；同路径显式重发产生新代 |
 | POST `/auth/contact/verify`         | S，必须为发起本人    | `{token}`                                     | 200 `{contact_state:"verified"}`；不签新会话                                  |
 | GET `/auth/invitations`             | 管理员签名会话       | `limit?,cursor?`                              | 200 `{items:InvitationView[],next_cursor:string                               | null}`                                                |
@@ -158,6 +159,8 @@ initialize 原子提交 user/credential/session/安装绑定后才发 Cookie。c
 | POST `/auth/deletion-request`       | S                    | `{current_password,confirmed:true}`           | 200 `{deletion_requested:true,signed_out:true}`；不是删除完成                 |
 
 本人任一写入都以当前 actor 为 owner。唯一管理员禁止 disable/deletion-request；无在线启用/交接/任意代改密码/通用 users PATCH/公开注册。既有 status/initialize/claim/sign-out 保留，status 匿名仍只返回安装状态；有会话时本人 workspace 摘要不泄漏其他 owner 或全安装诊断。无 workspace 不阻断任何账户流程，初始化仍受原空安装防接管门。
+
+`/auth/account/profile` 至少提供一个字段，省略表示保留，`timezone_id: null` 表示清除。名称去除首尾空白后为 1–128 字符。时区校验沿用 identity 的默认时区用例，响应返回规范 ID。两项同时修改时原子提交。
 
 GET 列表 query strict：`limit` 默认 20、1–50，cursor 为最多 2048 字节的不透明签名站内游标，绑定 actor、集合/过滤和 `(created_at,id)` 降序边界；跨 actor/集合或畸形游标 400，不泄漏记录。GET 零副作用，不续 session、不修复、不重发。管理 GET 不要求在 URL/query 传密码，但仍当次核验管理员身份，不取得业务读取特权。
 

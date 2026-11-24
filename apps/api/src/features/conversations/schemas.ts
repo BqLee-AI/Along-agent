@@ -1,6 +1,12 @@
 // Conversation HTTP contracts (issue #9): docs/api/conversations.
 import { z } from 'zod';
-import { ModelSelectionSchema, workspaceSummarySchema } from '@along/contracts';
+import {
+  ChatFilesSchema,
+  chatMessageLimit,
+  encodeChatMessage,
+  ModelSelectionSchema,
+  workspaceSummarySchema,
+} from '@along/contracts';
 
 export const SendMessageBodySchema = z
   .object({
@@ -14,7 +20,8 @@ export const SendMessageBodySchema = z
       .min(1)
       .refine((ids) => new Set(ids).size === ids.length)
       .optional(),
-    raw_text: z.string().min(1).max(20000),
+    raw_text: z.string().min(1).max(chatMessageLimit),
+    files: ChatFilesSchema.optional(),
     card_ref: z.string().min(1).max(200).optional(),
     confirmed_timezone_id: z.string().min(1).max(100).nullable().optional(),
     confirmed_timezone: z.string().min(1).max(100).nullable().optional(),
@@ -24,6 +31,21 @@ export const SendMessageBodySchema = z
     client_sent_at: z.string().max(100).optional(),
   })
   .strict()
+  .refine(
+    (input) =>
+      !input.files ||
+      (input.execution === 'harness' &&
+        input.authorization_revision === 'delegation/1' &&
+        !input.workspace_id &&
+        !input.workspace_ids &&
+        !input.clarification_of_run_id &&
+        Boolean(input.raw_text.trim()) &&
+        encodeChatMessage(input.raw_text, input.files).length <= chatMessageLimit),
+    {
+      message: 'files require a standalone chat message within the message size limit',
+      path: ['files'],
+    },
+  )
   .refine((input) => input.model_selection === undefined || input.execution === 'harness', {
     message: 'model_selection requires harness execution',
     path: ['model_selection'],

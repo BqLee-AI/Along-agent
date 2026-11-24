@@ -67,6 +67,8 @@ export * from './document-approvals.js';
 export {
   authInitializeSchema,
   authClaimSchema,
+  authAccountProfileSchema,
+  authAccountProfileUpdateSchema,
   authSignInSchema,
   authSignOutSchema,
   authStatusSchema,
@@ -135,6 +137,7 @@ export type {
   AuthListQuery,
 } from './auth.js';
 export * from './conversations.js';
+export * from './chat-files.js';
 export * from './approvals.js';
 export * from './routing.js';
 export * from './goals.js';

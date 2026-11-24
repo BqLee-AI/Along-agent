@@ -1,4 +1,4 @@
-import type { AccountView as AccountProfile, AuthStatus } from '@along/contracts';
+import type { AccountView as AccountProfile, AuthStatus, WorkspaceSummary } from '@along/contracts';
 import type { Me } from '@/shared/session/identity';
 import type { AccountFailure } from './account-operation';
 
@@ -23,7 +23,7 @@ export type AccountScreenState = {
       account: AccountProfile | null;
       canClaim: boolean;
       canSignOut: boolean;
-      workspaceLabel: string;
-      workspaceMessage: string;
+      /** Null means the registration could not be read. */
+      workspaces: readonly WorkspaceSummary[] | null;
     }
 );
