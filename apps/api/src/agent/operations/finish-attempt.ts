@@ -12,7 +12,10 @@ import type { ThreadEvent } from '@along/stream-protocol';
 import { ApplicationError, forbidden, stateConflict } from '../../platform/errors.js';
 import { validateDocumentApprovalsDone } from '../../features/approvals/public.js';
 import { readRunDocumentEvidence } from '../tools/query.js';
-import { readRunInvocationStates } from '../tools/invocations/run-state.js';
+import {
+  hasBlockingInvocationFailure,
+  readRunInvocationStates,
+} from '../tools/invocations/run-state.js';
 import {
   readRoutingRecord,
   routingHash,
@@ -176,7 +179,7 @@ export function createFinishHandlers(
           throw new ApplicationError(429, 'BUDGET_EXCEEDED', '本轮推理预算用完，已停下。');
         const states = await readRunInvocationStates(client, toolContext(context));
         for (const row of states) {
-          if (row.state !== 'completed' || row.outcome_kind === 'failed')
+          if (row.state !== 'completed' || hasBlockingInvocationFailure(row))
             throw stateConflict('Run has unresolved tool effects');
           if (
             row.outcome_kind === 'approval_pending' &&

@@ -16,12 +16,13 @@ const source =
 
 const exactQuery = '  Azure PostgreSQL Flexible Server backup retention 🧪  ';
 
-test('ordinary Runs search model queries with frozen scopes, immutable audit and cancel acceptance barriers', async () => {
+test('ordinary Runs search attempt-formed queries with frozen scopes, immutable audit and cancel acceptance barriers', async () => {
   const db = await createIntegrationDatabase();
   const beforeSecret = process.env.BETTER_AUTH_SECRET;
   process.env.BETTER_AUTH_SECRET = 'synthetic-remote-mcp-gateway-test-only';
   const beforeFetch = globalThis.fetch;
   const requests: { method: string; name?: string }[] = [];
+  let formedQueries = 0;
   let hold: (() => Promise<void>) | undefined;
   let serviceFails = false;
   globalThis.fetch = Object.assign(
@@ -125,7 +126,14 @@ test('ordinary Runs search model queries with frozen scopes, immutable audit and
         session.sessionId,
       );
       if (!context) throw new Error('no context');
-      return context;
+      return {
+        ...context,
+        formLearnQuery: async (signal: AbortSignal) => {
+          signal.throwIfAborted();
+          formedQueries++;
+          return exactQuery;
+        },
+      };
     }
     const fresh = await admit();
     expect(fresh.allowlist).toContain('learn_docs_search');
@@ -154,13 +162,14 @@ test('ordinary Runs search model queries with frozen scopes, immutable audit and
       restoreClient.release();
     }
     const toolId = 'learn_docs_search';
-    const args = { query: exactQuery };
+    const args = {};
     const slot = (ctx: typeof fresh, value: unknown = args) =>
       reserveToolInvocation(db.pool, ctx, { callKey: randomUUID(), toolId, args: value });
     await expect(slot(old)).rejects.toThrow();
     await expect(slot({ ...old, allowlist: [...old.allowlist, toolId] })).rejects.toThrow();
     await expect(slot({ ...fresh, ownerId: second.userId })).rejects.toThrow();
     expect(requests).toEqual([]);
+    expect(formedQueries).toBe(0);
     const firstSlot = await slot(fresh);
     const result = await invokeTool(db.pool, fresh, { ...firstSlot, toolId, args });
     expect(result).toMatchObject({
@@ -182,6 +191,7 @@ test('ordinary Runs search model queries with frozen scopes, immutable audit and
       await invokeTool(db.pool, fresh, { ...firstSlot, toolId, args: { query: 'changed' } }),
     ).toMatchObject({ status: 'denied', error: { code: 'STATE_CONFLICT' } });
     expect(requests.length).toBe(count);
+    expect(formedQueries).toBe(1);
     const audit = await db.pool.query(
       'SELECT invocation_id, record_kind, outcome_kind FROM tool_calls WHERE invocation_id=$1 ORDER BY created_at',
       [firstSlot.invocationId],
@@ -197,13 +207,9 @@ test('ordinary Runs search model queries with frozen scopes, immutable audit and
       history.release();
     }
     for (const bad of [
-      {},
-      { query: '' },
-      { query: ' \n ' },
-      { query: '🧪'.repeat(501) },
-      { query: '\ud800' },
-      { query: exactQuery, url: 'https://foreign.invalid' },
-      { query: exactQuery, tool: 'microsoft_docs_fetch' },
+      { query: exactQuery },
+      { url: 'https://foreign.invalid' },
+      { tool: 'microsoft_docs_fetch' },
     ]) {
       const ctx = await admit();
       const ref = await slot(ctx, bad);
@@ -227,6 +233,7 @@ test('ordinary Runs search model queries with frozen scopes, immutable audit and
       }),
     ).toMatchObject({ status: 'denied' });
     expect(requests.length).toBe(count);
+    expect(formedQueries).toBe(1);
     const canceled = await admit();
     const cancelRef = await slot(canceled);
     const entered = Promise.withResolvers<void>();
@@ -260,12 +267,14 @@ test('ordinary Runs search model queries with frozen scopes, immutable audit and
       status: 'denied',
     });
     expect(requests.length).toBe(afterCancel);
+    expect(formedQueries).toBe(2);
     serviceFails = true;
     const failedRef = await slot(fresh);
     expect(await invokeTool(db.pool, fresh, { ...failedRef, toolId, args })).toMatchObject({
       status: 'failed',
       error: { code: 'REMOTE_MCP_SERVICE_FAILED' },
     });
+    expect(formedQueries).toBe(3);
     expect(
       (
         await db.pool.query('SELECT error_code FROM tool_calls WHERE invocation_id=$1', [

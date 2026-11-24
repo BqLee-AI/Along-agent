@@ -8,7 +8,10 @@ import {
 import { ApplicationError, forbidden, stateConflict } from '../../platform/errors.js';
 import { resolveRunSelection } from '../../features/model-providers/public.js';
 import { requireCurrentFeishuBotAuthority } from '../tools/invocations/accepted-result.js';
-import { readRunInvocationStates } from '../tools/invocations/run-state.js';
+import {
+  hasBlockingInvocationFailure,
+  readRunInvocationStates,
+} from '../tools/invocations/run-state.js';
 import { toolContext, unavailable } from './context.js';
 import { approvalAuthorizesActions, type AttemptEnvironment } from './attempt-state.js';
 
@@ -150,7 +153,7 @@ export function createModelHandlers(environment: AttemptEnvironment) {
         );
       }
       const states = await readRunInvocationStates(client, toolContext(context));
-      if (states.some((row) => row.state === 'unknown' || row.outcome_kind === 'failed'))
+      if (states.some(hasBlockingInvocationFailure))
         throw stateConflict('Run has unresolved tool effects');
       if (
         states.some(
@@ -187,6 +190,7 @@ export function createModelHandlers(environment: AttemptEnvironment) {
         pulling: false,
       };
       attemptState.modelStarted = true;
+      attemptState.lastModelInputTokens = measurement.input_meter.input_tokens;
       return true;
     });
     if (!scheduled) return { type: 'pause_requested' };

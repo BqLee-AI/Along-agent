@@ -15,7 +15,10 @@ import {
 } from '../../platform/errors.js';
 import { readRunContextObservations } from '../tools/invocations/context-query.js';
 import { assertContextSourcesAuthorized } from '../tools/invocations/context-source.js';
-import { readRunInvocationStates } from '../tools/invocations/run-state.js';
+import {
+  hasBlockingInvocationFailure,
+  readRunInvocationStates,
+} from '../tools/invocations/run-state.js';
 import { validateWorkspaceGrant } from '../../features/workspaces/public.js';
 import { resolveRunSelection } from '../../features/model-providers/public.js';
 import type { ConversationDeps, RunContext } from '../runtime/contracts.js';
@@ -465,7 +468,7 @@ async function executeRuntimeCompactWork(
       throw stateConflict('compact leaves no continuation budget');
     const states = await readRunInvocationStates(client, toolContext(context));
     for (const state of states) {
-      if (state.state !== 'completed' || state.outcome_kind === 'failed')
+      if (state.state !== 'completed' || hasBlockingInvocationFailure(state))
         throw stateConflict('compact has unresolved tool effects');
       if (
         state.outcome_kind === 'approval_pending' &&

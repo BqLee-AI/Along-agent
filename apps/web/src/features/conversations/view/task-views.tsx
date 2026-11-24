@@ -797,7 +797,7 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
           }
           value={task.input}
           disabled={task.sendUncertain}
-          aria-describedby={`task-send-reason${task.intent === 'reminder' ? ' task-help' : ''}${task.error ? ' task-form-error' : ''}`}
+          aria-describedby={`task-send-reason task-learn-search-note${task.intent === 'reminder' ? ' task-help' : ''}${task.error ? ' task-form-error' : ''}`}
           onChange={(event) => task.setInput(event.target.value)}
           onCompositionStart={() => {
             composing.current = true;
@@ -950,6 +950,12 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
           ) : null}
         </div>
       </PromptInput>
+      <p
+        id="task-learn-search-note"
+        className="px-1 text-center text-xs leading-5 text-muted-foreground"
+      >
+        本轮提问可能生成发给 Microsoft Learn 的公开搜索词，请避免输入敏感信息。
+      </p>
       <p
         id="task-send-reason"
         className={

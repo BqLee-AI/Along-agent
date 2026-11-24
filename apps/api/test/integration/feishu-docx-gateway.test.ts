@@ -267,6 +267,7 @@ run(
           latestModelMessage: null,
           modelToolCount: 0,
           nextPermit: true,
+          lastModelInputTokens: null,
           lastMeasurement: null,
           modelStream: null,
         };

@@ -89,6 +89,7 @@ export interface ToolContext {
   workspaceGrant?: WorkspaceGrant | null;
   workspaceGrants?: WorkspaceGrant[];
   feishuDocx?: { connectionId: string; sessionId: string; url: string } | FeishuBotDocxGrant;
+  formLearnQuery?: (signal: AbortSignal) => Promise<string | null>;
   documentEdit?: {
     base_read_invocation_id: string;
     relative_path: string;

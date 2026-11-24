@@ -25,6 +25,15 @@ const runInvocationStateSchema = z
   .strict();
 export type RunInvocationState = z.infer<typeof runInvocationStateSchema>;
 
+export function hasBlockingInvocationFailure(row: RunInvocationState): boolean {
+  // A completed Learn failure is an observation, not an unresolved effect.
+  return (
+    row.state === 'unknown' ||
+    (row.outcome_kind === 'failed' &&
+      !(row.state === 'completed' && row.tool_id === 'learn_docs_search'))
+  );
+}
+
 export async function readRunInvocationStates(
   client: PoolClient,
   ctx: Pick<ToolContext, 'ownerId' | 'conversationId' | 'runId'>,

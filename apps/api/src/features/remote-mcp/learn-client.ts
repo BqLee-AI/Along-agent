@@ -9,7 +9,11 @@ const RESPONSE_BYTES = 131_072;
 const RPC_SEQUENCE = ['initialize', 'notifications/initialized', 'tools/list', 'tools/call'];
 
 type Fetch = (url: string | URL, init?: RequestInit) => Promise<Response>;
-type Input = { query: string; signal?: AbortSignal; authorized: () => Promise<boolean> };
+type Input = {
+  query: string;
+  signal?: AbortSignal;
+  authorized: (enqueue: () => void) => Promise<boolean>;
+};
 type FailureCode =
   | 'REMOTE_MCP_TIMEOUT'
   | 'REMOTE_MCP_SERVICE_FAILED'
@@ -191,23 +195,29 @@ export async function searchMicrosoftLearn(input: Input, request: Fetch = fetch)
 
       const dispatchSignal = init.signal ? AbortSignal.any([signal, init.signal]) : signal;
       dispatchSignal.throwIfAborted();
-      let allowed: boolean;
+      let pending: Promise<Response> | undefined;
       try {
-        allowed = await waitForAuthorization(input.authorized(), dispatchSignal);
+        const allowed = await waitForAuthorization(
+          input.authorized(() => {
+            dispatchSignal.throwIfAborted();
+            pending = request(ENDPOINT, {
+              ...init,
+              redirect: 'error',
+              credentials: 'omit',
+              signal: dispatchSignal,
+            });
+            void pending.catch(() => undefined);
+          }),
+          dispatchSignal,
+        );
+        if (!allowed || !pending) return fail(denied);
       } catch (error) {
         if (!dispatchSignal.aborted) authorizationFailure = { error };
         throw error;
       }
-      dispatchSignal.throwIfAborted();
-      if (!allowed) return fail(denied);
 
       try {
-        const response = await request(ENDPOINT, {
-          ...init,
-          redirect: 'error',
-          credentials: 'omit',
-          signal: dispatchSignal,
-        });
+        const response = await pending;
         if (
           dispatchSignal.aborted ||
           !response.ok ||

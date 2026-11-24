@@ -19,7 +19,10 @@ const article = {
 };
 const defaultInput: Input = {
   query: '  Azure PostgreSQL 备份，retention? 🧪  ',
-  authorized: async () => true,
+  authorized: async (enqueue) => {
+    enqueue();
+    return true;
+  },
 };
 const posts = ['initialize', 'notifications/initialized', 'tools/list', 'tools/call'];
 const encoder = new TextEncoder();
@@ -92,7 +95,12 @@ for (const sse of [false, true]) {
     const result = await searchMicrosoftLearn(
       {
         ...defaultInput,
-        authorized: async () => ++checks === requests.length + 1,
+        authorized: async (enqueue) => {
+          ++checks;
+          enqueue();
+          expect(requests).toHaveLength(checks);
+          return true;
+        },
       },
       request,
     );
@@ -130,8 +138,9 @@ for (const sse of [false, true]) {
 test('denies missing, extra, and invalid local input before authorization or HTTP', async () => {
   const { request, requests } = controlled();
   let checks = 0;
-  const authorized = async () => {
+  const authorized: Input['authorized'] = async (enqueue) => {
     ++checks;
+    enqueue();
     return true;
   };
   const badInputs = [
@@ -159,7 +168,11 @@ test('rechecks authorization at each actual dispatch and preserves local databas
     await searchMicrosoftLearn(
       {
         ...defaultInput,
-        authorized: async () => ++checks < 4,
+        authorized: async (enqueue) => {
+          if (++checks === 4) return false;
+          enqueue();
+          return true;
+        },
       },
       denied.request,
     ),
@@ -173,8 +186,9 @@ test('rechecks authorization at each actual dispatch and preserves local databas
   const call = searchMicrosoftLearn(
     {
       ...defaultInput,
-      authorized: async () => {
+      authorized: async (enqueue) => {
         if (++checks === 2) throw databaseError;
+        enqueue();
         return true;
       },
     },

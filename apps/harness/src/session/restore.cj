@@ -106,6 +106,7 @@ extend Harness {
                 if (status == "unknown") { bootstrapFailure = "TOOL_EFFECT_UNKNOWN" }
                 if (status == "ok") { acceptedReceipts.add(id) }
                 else if (status != "ok" && bootstrapFailure != "TOOL_EFFECT_UNKNOWN" &&
+                    !isRecoverableLearnFailure(ref(field(o, "tool_id")), status) &&
                     !(delegated && status == "denied" && !isNull(field(start, "snapshot")) &&
                         integer(field(field(start, "snapshot").asObject(), "version"), 2) >= 3)) {
                     bootstrapFailure = errorCheck(field(result, "error"))

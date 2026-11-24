@@ -2,7 +2,7 @@
 
 日期：2026-11-23。范围：`feat/168-microsoft-learn-mcp`，基于 OpenSpec-only commit `e54928a571`；[草稿 PR #170](https://github.com/BqLee-AI/Along-agent/pull/170) 先于源码实现建立。本文记录实际证据，不代表原安装或完整产品验收通过，不归档 change、不关闭 issue。
 
-2026-11-24 用户再次纠正产品方向：连接/专用模式及精确原文冻结合同已废弃，以下旧实验仍按各自版本理解，不能作为零设置普通会话的验收。有效合同为 #170 的 `9b7b101deb`；本轮记录见文末。
+2026-11-24：普通对话方案取代连接、专用模式与精确原文冻结合同。有效合同为 #170 的 `a43cd9ed7e`，旧实验按各自版本理解。
 
 ## 实验与真实服务
 
@@ -109,3 +109,9 @@
 正式 stop/start 均 exit0，移除观测探针后 readyz200，浏览器再次读取保留两条官方来源。新安装供审查保留；父任务聚焦 PG 与生命周期 PG 均已清理，未恢复或修改旧模型服务/安装。
 
 脱敏完整证据 `D:/Temp/along-168/zero-setup-e2e-result.json` 汇总模型调用、wire、DB 和八张截图；回答图 `zero-setup-learn-answer.png`，普通后续图 `zero-setup-ordinary-follow-up.png`，正式重启历史图 `zero-setup-history-after-restart.png`（均在同目录）。普通中文问题实际模型 query 为 `Azure Database for PostgreSQL Flexible Server backup retention period`，真实上游接收10条摘录；实际显示的备份来源为 [Backup and restore](https://learn.microsoft.com/azure/postgresql/backup-restore/concepts-backup-restore#backup-frequency-and-retention) 和 [Secure your server](https://learn.microsoft.com/azure/postgresql/security/security-overview#backup-and-recovery)。
+
+## 2026-11-24：独立查询与失败恢复复验
+
+- Edge 登录任务隔离安装，通过普通输入框提交中文备份问题。输入框可见公开搜索提示，`aria-describedby` 指向说明。受控模型依次选择空参工具、从两条无工具消息生成 query、依据真实 Microsoft Learn 的 10 条摘录回答 7 到 35 天，并显示两条本次实际返回的官方链接。刷新后两条链接仍在。同一对话发「你好」只观察到一条普通模型请求。模型选择受控，真实 provider 自主检索仍缺可用凭据。
+- Bun 1.4.2、生产 native、真实签名 HTTP 和隔离 PostgreSQL。Learn 两例通过，共 46 项断言，覆盖 503 合同失败进入续答、返回空查询时零 MCP、原查询只收到本轮输入及固定说明、原会话历史保持可用、接受结果落库。原生契约验证预算增加到两轮和 10 tokens 后保存观察与引用，共 93 项断言。
+- 测试中实际观察到回调缺失导致模型预算不一致，修复合成 HTTP 适配器后两例均完成。网关用例通过，共 53 项断言。协议适配器 36 例与 142 项断言通过，含锁内启动 HTTP、拒绝派发时无查询 POST、授权错误原样返回。独立复审通过查询隔离、取消顺序、失败恢复与预算修订。

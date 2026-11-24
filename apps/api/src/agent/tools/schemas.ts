@@ -3,7 +3,7 @@
 // such as user_id/conversation_id/run_id/request_id and time internals such as
 // fire_at_utc/fold/offset) are rejected at the gateway and audited as deny.
 import { z } from 'zod';
-import { LearnDocsQuerySchema, ReadMemorySourceInputSchema } from '@along/contracts';
+import { ReadMemorySourceInputSchema } from '@along/contracts';
 
 import { TASK_STATES } from './contracts.js';
 
@@ -159,7 +159,7 @@ export const TOOL_INPUT_SCHEMAS = {
   workspace_grep: WorkspaceGrepInputSchema,
   workspace_read: WorkspaceReadInputSchema,
   feishu_docx_read: z.object({}).strict(),
-  learn_docs_search: z.object({ query: LearnDocsQuerySchema }).strict(),
+  learn_docs_search: z.object({}).strict(),
   workspace_propose_replace: WorkspaceProposeReplaceInputSchema,
   workspace_replace: WorkspaceReplaceInputSchema,
   workspace_create: WorkspaceCreateInputSchema,

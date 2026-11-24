@@ -8,7 +8,10 @@ import {
   type HarnessR3Snapshot,
 } from '@along/contracts';
 import { stateConflict } from '../../platform/errors.js';
-import { readRunInvocationStates } from '../tools/invocations/run-state.js';
+import {
+  hasBlockingInvocationFailure,
+  readRunInvocationStates,
+} from '../tools/invocations/run-state.js';
 import {
   readRunContextObservations,
   readRunContextSource,
@@ -177,7 +180,7 @@ export function createPauseHandlers(
       )
         throw stateConflict('pause usage differs from accepted model steps');
       const states = await readRunInvocationStates(client, toolContext(context));
-      if (states.some((row) => row.state !== 'completed' || row.outcome_kind === 'failed'))
+      if (states.some((row) => row.state !== 'completed' || hasBlockingInvocationFailure(row)))
         throw stateConflict('pause requires all tool effects to be resolved');
       await validateSnapshot(
         client,

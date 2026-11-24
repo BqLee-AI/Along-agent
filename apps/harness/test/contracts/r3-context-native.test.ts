@@ -86,7 +86,7 @@ const base = {
   approval: null,
 };
 
-test('delegated Learn search forwards a model query, restores its accepted R3 receipt and rejects bad results', async () => {
+test('delegated Learn search restores accepted R3 receipts, continues after failure and rejects bad results', async () => {
   const inputId = randomUUID();
   const invocationId = randomUUID();
   const toolId = 'learn_docs_search';
@@ -125,8 +125,8 @@ test('delegated Learn search forwards a model query, restores its accepted R3 re
         description: 'Search Microsoft Learn using public technical keywords.',
         parameters: {
           type: 'object',
-          properties: { query: { type: 'string' } },
-          required: ['query'],
+          properties: {},
+          required: [],
           additionalProperties: false,
         },
         risk: 'low',
@@ -186,7 +186,7 @@ test('delegated Learn search forwards a model query, restores its accepted R3 re
       },
     },
   });
-  async function search(searchQuery: string, receipt: unknown, expectedExit = 0) {
+  async function search(receipt: unknown, expectedExit = 0) {
     let invoked = false;
     return run(
       start,
@@ -198,14 +198,14 @@ test('delegated Learn search forwards a model query, restores its accepted R3 re
             return measure;
           case 'model':
             expect(request.messages).toContainEqual({ role: 'user', content: userMessage });
-            return toolCall(toolId, { query: searchQuery });
+            return toolCall(toolId, {});
           case 'reserve':
             expect(request.tool_id).toBe(toolId);
-            expect(request.args).toEqual({ query: searchQuery });
+            expect(request.args).toEqual({});
             return { value: { invocation_id: invocationId } };
           case 'invoke':
             expect(request).toMatchObject({ tool_id: toolId, invocation_id: invocationId });
-            expect(request.args).toEqual({ query: searchQuery });
+            expect(request.args).toEqual({});
             invoked = true;
             return {
               value: { status: 'ok', result: receipt, invocationId, replayed: false },
@@ -220,7 +220,7 @@ test('delegated Learn search forwards a model query, restores its accepted R3 re
     );
   }
   expect(await run({ ...start, trusted_context: null }, () => ({}), 2)).toEqual([]);
-  const requests = await search(query, payload);
+  const requests = await search(payload);
   const pause = requests.find((request) => request.type === 'pause_point');
   if (!pause || pause.context.version !== 4) throw new Error('Missing paused Learn observation');
   expect(pause.context.tool_refs).toEqual([invocationId]);
@@ -249,8 +249,58 @@ test('delegated Learn search forwards a model query, restores its accepted R3 re
   );
   expect(resumed.at(-1)).toMatchObject({ type: 'finish_goal', goal_result: goal });
 
+  const failure = {
+    status: 'failed',
+    error: {
+      code: 'REMOTE_MCP_SERVICE_FAILED',
+      message: 'Microsoft Learn 查询未完成。',
+    },
+  };
+  const failedObservation = { ...observation, result: failure };
+  const blocked = {
+    status: 'blocked',
+    outcomes: [{ description: '查询微软官方资料', status: 'blocked', receipt_refs: [] }],
+    clarification: null,
+    answer: 'Microsoft Learn 暂时无法查询，未能核实官方出处。',
+  };
+  const failed = await run(start, (request) => {
+    switch (request.type) {
+      case 'pause_probe':
+        return { value: { pending: false } };
+      case 'measure_context':
+        return measure;
+      case 'model': {
+        const tool = request.messages.find((message) => message.role === 'tool');
+        if (!tool) return toolCall(toolId, {});
+        expect(JSON.parse(tool.content)).toEqual(failedObservation);
+        return toolCall('finish_goal', blocked);
+      }
+      case 'reserve':
+        return { value: { invocation_id: invocationId } };
+      case 'invoke':
+        return {
+          value: {
+            outcome: { ...failure, invocationId, replayed: false },
+            auxiliary_usage: { iterations: 2, tokens: 10 },
+          },
+        };
+      case 'snapshot':
+        if (request.context.version !== 4) throw new Error('Missing R3 checkpoint');
+        expect(request.context.usage).toEqual({ iterations: 2, tokens: 10 });
+        expect(
+          request.context.native_state.units.map((unit) => unit.observation.invocation_id),
+        ).toEqual(request.context.tool_refs);
+        return { value: { checkpoint_ref: randomUUID() } };
+      case 'finish_goal':
+        return { value: { accepted: true } };
+      default:
+        throw new Error(`Unexpected failed Learn search request ${request.type}`);
+    }
+  });
+  expect(failed.at(-1)).toMatchObject({ type: 'finish_goal', goal_result: blocked });
+
   const boundaryPayload = LearnDocsSearchPayloadSchema.parse({ ...payload, query: boundaryQuery });
-  expect((await search(boundaryQuery, boundaryPayload)).at(-1)).toMatchObject({
+  expect((await search(boundaryPayload)).at(-1)).toMatchObject({
     type: 'pause_point',
     context: {
       native_state: {
@@ -274,7 +324,7 @@ test('delegated Learn search forwards a model query, restores its accepted R3 re
     { kind: 'effect_evidence', evidence_ref: 'otherwise-valid' },
   ];
   for (const invalid of malformed) {
-    expect((await search(query, invalid, 2)).at(-1)).toMatchObject({ type: 'invoke' });
+    expect((await search(invalid, 2)).at(-1)).toMatchObject({ type: 'invoke' });
   }
 }, 30_000);
 

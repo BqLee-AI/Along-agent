@@ -34,13 +34,29 @@ export async function invokeLearnDocsSearch(pool: Pool, ctx: ToolContext, input:
           status: 'denied',
           error: {
             code: 'TOOL_INPUT_INVALID',
-            message: '需要有效的公开技术 query，不接受其他字段。',
+            message: 'Microsoft Learn 搜索只接受空参数。',
+          },
+        };
+      const timeout = AbortSignal.timeout(10_000);
+      const signal = frozen.signal ? AbortSignal.any([frozen.signal, timeout]) : timeout;
+      const query = await frozen.formLearnQuery?.(signal);
+      if (!query || signal.aborted)
+        return {
+          status: 'denied',
+          error: {
+            code: 'LEARN_QUERY_UNAVAILABLE',
+            message: '本轮消息未能生成可用的 Microsoft Learn 公开搜索词。',
           },
         };
       const result = await searchMicrosoftLearn({
-        query: parsed.data.query,
+        query,
         signal: frozen.signal,
-        authorized: () => withRunTransaction(pool, ctx.ownership, authorized),
+        authorized: (enqueue) =>
+          withRunTransaction(pool, ctx.ownership, async (client) => {
+            if (!(await authorized(client))) return false;
+            enqueue();
+            return true;
+          }),
       });
       if (result.status === 'denied') return denied;
       if (result.status === 'failed')
