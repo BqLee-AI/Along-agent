@@ -12,11 +12,11 @@ Required：没有 Learn 设置或模式的新普通对话能由现有模型决�
 
 沿用现有普通消息入口和模型选择；为合格的新 delegation Harness Run 冻结 `learn_docs_search` 工具名单资格，不增加 microsoft_learn_query、连接状态、generation、专属状态或单独开关。名单资格不是自动执行，模型决定是否调用。旧 Run 的持久化 allowlist 是权威，继续、恢复、刷新或部署不补工具；不从全局新目录覆盖旧名单。
 
-既有飞书私有读取 Run 仍按原规则收窄工具，不暴露公开搜索。公开工具说明要求仅生成检索所需的公开技术关键词；不得把私有正文、个人/账户/工作区标识、令牌或密钥当搜索词。可提炼、翻译，不要求查询逐字来自当前消息。说明约束模型行为而非严格的数据防泄漏门；不造新分类器，不把所有受管资料一律判为禁止公开搜索的来源，也不新增正常对话、工作区、提醒、审批的阻断。
+既有飞书私有读取 Run 继续按原规则收窄工具。普通对话模型可看到原有上下文，只能选择是否调用严格 `learn_docs_search({})`。服务端在获得执行资格后，使用本 Run 已绑定的同一 provider 和模型，从固定说明与本轮已接受的用户输入进行一次独立查询生成。推理不接收主模型输出、历史、摘要、工作区、记忆、工具结果、资源 ID 或任何工具定义。仅续用先前材料而缺少独立技术问题时，要求查询生成返回无可用查询。本轮用户输入本身可含敏感信息，搜索生成说明要求省略这些内容，Web 输入框提示本轮技术问题可能用于公开搜索。该说明无法分类任意当前输入。
 
 ## 唯一工具与协议边界
 
-`learn_docs_search({query:string})` 是严格单字段对象，query 非全空白、最多 500 个 Unicode 码点且无孤立 surrogate。模型组织查询词，适配器只验证并发送该参数，不追加历史或正文；接受结果中的 query 与实际派发值一致。endpoint、远程工具、owner、headers 和凭据不可由模型指定。缺 query、额外字段、无效资格本地拒绝，零 MCP 出站。
+独立推理可以提炼或翻译技术问题，只接受 JSON 对象 `{"query":string|null}`。输出须在有界时间、输出容量和本轮绑定内完成。query 非全空白、最多 500 个 Unicode 码点且无孤立 surrogate。无可用查询、推理失败或输出不合约均不调用 MCP，由模型继续对话并说明缺少可检索的公开问题。网关只发送该独立推理的 query。接受结果中的 query 与实际派发值一致。endpoint、远程工具、owner、headers 和凭据不可由模型指定。额外工具字段或无效资格在本地拒绝。
 
 每个新 invocation 使用短生命周期 SDK Client/StreamableHTTPClientTransport：初始化、单页发现、调用一次固定 microsoft_docs_search、关闭。不缓存或动态注册目录，不请求 roots/prompts/resources。发现最多 16 项、无 cursor；固定工具须仍声明只读，具有可识别 query 输入与 results 输出合同，其他工具不暴露或调用。
 
@@ -26,11 +26,11 @@ Required：没有 Learn 设置或模式的新普通对话能由现有模型决�
 
 ## 资格、接受与失败
 
-复用 executeReadOnlyInvocation、invocation/call key/args hash、首次不可变结果和 tool_calls 审计。模型 query 是 invocation 参数绑定的一部分；同 invocation 改 query 不替换原执行。每次真正出站前及最终接受时核验 owner、Run/attempt、冻结名单与停止信号，网络期间无数据库锁。取消或原资格失效先提交时不接受迟到成功，不宣称能撤回已经派发的 HTTP。
+复用 executeReadOnlyInvocation、invocation/call key/args hash、首次不可变结果和 tool_calls 审计。模型搜索选择的空参数进入 invocation 绑定，实际查询词进入接受结果以关联真实来源。合格重放不重做查询生成。每次真正出站前及最终接受时核验 owner、Run/attempt、冻结名单与停止信号。网络等待期间无数据库锁。取消或原资格失效先提交时不接受迟到成功。
 
 合格重放返回原接受结果，零上游；历史及上下文恢复能读取已接受的公开事实，但不能增加旧 Run 的工具名单。公开结果不复制飞书私有内容的加密、披露或撤回机制。
 
-失败保留 REMOTE_MCP_TIMEOUT、REMOTE_MCP_SERVICE_FAILED、REMOTE_MCP_PROTOCOL_ERROR、REMOTE_MCP_RESULT_TOO_LARGE；本地资格/参数走既有 denied。失败不伪报空结果，不用旧结果兜底，不自动重试或切换 slot，不扩展错误平台。
+失败保留 REMOTE_MCP_TIMEOUT、REMOTE_MCP_SERVICE_FAILED、REMOTE_MCP_PROTOCOL_ERROR、REMOTE_MCP_RESULT_TOO_LARGE。与成功一样保留本轮对应观察，在检查点前写入引用与观察结果。模型收到实际失败后继续生成回答，只有成功结果可作为成功证据。资格或参数错误走既有 denied。无自动重试、旧结果兜底或切换 slot。
 
 ## 未发布结构的移除
 
@@ -38,8 +38,8 @@ Required：没有 Learn 设置或模式的新普通对话能由现有模型决�
 
 ## 验证与交付
 
-Spec-only 分支先校验、提交推送 #170，再实施 #172；两者保留草稿，不合并、不归档、不关闭 #168。验证记录区分合同校验、SDK/网关受控实验、真实 native 与产品运行，不把旧验收冒充新普通输入路径。
+OpenSpec-only PR 先于实现合并。验证记录区分合同校验、受控模型与真实 native/Web/MCP 执行。
 
 新隔离正式安装使用实际 Web 普通输入“请查微软官方文档，Azure Database for PostgreSQL Flexible Server 的备份保留多久？请给出处”或等价合成问题，无连接、无模式。优先已有可用真实模型与真实 public MCP，捕获模型选择、实际 query、真实来源和历史；模型不可用则记录真实失败原因，另用受控模型证明链路，不称自主意图已验证。无需检索的普通消息不产生 MCP 派发。
 
-定向覆盖已冻结旧 Run 不增权、模型 query 与固定 endpoint、非法参数、取消先于接受、失败与容量、重放/审计、既有飞书私有读取隔离。保留有效既有结果，仅对受影响合同补测；正式安装从空库证明移除未发布表后的真实目标版本，旧环境保持原状。
+定向覆盖旧 Run、飞书私有读取隔离、独立查询生成无法接收历史或工作区结果、主模型无法传入 query、缺少查询零 MCP、固定 endpoint、取消、失败时真实 Harness/API 对话继续、容量和重放审计。正式安装从空库验证实际目标版本。
