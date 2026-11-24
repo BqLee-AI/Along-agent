@@ -4,7 +4,6 @@ import { startConversationRun } from '../../src/agent/operations/start.js';
 import { cancelConversationRun } from '../../src/agent/operations/run.js';
 import { reserveToolInvocation, invokeTool } from '../../src/agent/tools/gateway.js';
 import { readInvocationSnapshots } from '../../src/agent/tools/invocations/invocations.js';
-import { createMicrosoftLearnConnections } from '../../src/features/remote-mcp/public.js';
 import { createContextPolicy } from '../../src/features/conversations/public.js';
 import { loadTimeContext } from '../../src/features/time/public.js';
 import { contextOf } from '../../src/agent/runtime/context.js';
@@ -15,9 +14,9 @@ import { createIntegrationDatabase, seedAdmittedSession } from './setup.js';
 const source =
   'https://learn.microsoft.com/azure/postgresql/backup-restore/concepts-backup-restore';
 
-const exactQuery = '  Azure PostgreSQL 备份，retention? 🧪  ';
+const exactQuery = '  Azure PostgreSQL Flexible Server backup retention 🧪  ';
 
-test('remote search uses frozen owner generation, immutable audit, zero-call denial and disconnect/cancel acceptance barriers', async () => {
+test('ordinary Runs search model queries with frozen scopes, immutable audit and cancel acceptance barriers', async () => {
   const db = await createIntegrationDatabase();
   const beforeSecret = process.env.BETTER_AUTH_SECRET;
   process.env.BETTER_AUTH_SECRET = 'synthetic-remote-mcp-gateway-test-only';
@@ -110,92 +109,35 @@ test('remote search uses frozen owner generation, immutable audit, zero-call den
       },
     };
     controlledModelDeps(deps);
-    const connections = createMicrosoftLearnConnections(db.pool);
-    const viewer = { ownerId: first.userId, sessionId: first.sessionId };
-    async function submit(
-      session = first,
-      explicit = false,
-      overrides: Record<string, unknown> = {},
-    ) {
-      return startConversationRun(
+    async function admit(session = first, overrides: Record<string, unknown> = {}) {
+      const { context } = await startConversationRun(
         deps,
         session.userId,
         randomUUID(),
         {
           execution: 'harness',
           authorization_revision: 'delegation/1',
-          raw_text: explicit ? exactQuery : '搜索一下 Azure PostgreSQL 备份并给出处。',
-          ...(explicit ? { microsoft_learn_query: exactQuery } : {}),
+          raw_text:
+            '请查微软官方文档，Azure Database for PostgreSQL Flexible Server 的备份保留多久？请给出处',
           ...overrides,
         },
         null,
         session.sessionId,
       );
-    }
-    async function admit(
-      session = first,
-      explicit = false,
-      overrides: Record<string, unknown> = {},
-    ) {
-      const { context } = await submit(session, explicit, overrides);
       if (!context) throw new Error('no context');
       return context;
     }
-    const old = await admit();
-    expect(old.allowlist).not.toContain('learn_docs_search');
-    await connections.connect(viewer);
-    expect((await admit(second)).allowlist).not.toContain('learn_docs_search');
-    const ordinary = await admit();
-    expect(ordinary.allowlist).not.toContain('learn_docs_search');
-    expect(ordinary.microsoftLearn).toBeUndefined();
-    await expect(admit(second, true)).rejects.toThrow();
-    await expect(admit({ ...first, sessionId: randomUUID() }, true)).rejects.toThrow();
-    const fresh = await admit(first, true);
-    expect(fresh.microsoftLearn?.query).toBe(exactQuery);
+    const fresh = await admit();
     expect(fresh.allowlist).toContain('learn_docs_search');
-    for (const override of [
-      { raw_text: 'different' },
-      { raw_text: ' \n ', microsoft_learn_query: ' \n ' },
-      { raw_text: '🧪'.repeat(501), microsoft_learn_query: '🧪'.repeat(501) },
-      { microsoft_learn_query: null },
-      { execution: 'business' },
-      { authorization_revision: undefined },
-      { workspace_ids: ['workspace'] },
-      { card_ref: 'private-material' },
-      { clarification_of_run_id: randomUUID() },
-    ])
-      await expect(admit(first, true, override)).rejects.toThrow();
-    const unicodeBoundary = await admit(first, true, {
-      raw_text: '🧪'.repeat(500),
-      microsoft_learn_query: '🧪'.repeat(500),
-    });
-    expect(unicodeBoundary.microsoftLearn?.query).toBe('🧪'.repeat(500));
-    const plainKey = randomUUID();
-    await admit(first, false, { raw_text: exactQuery, idempotency_key: plainKey });
-    await expect(submit(first, true, { idempotency_key: plainKey })).rejects.toMatchObject({
-      errorCode: 'STATE_CONFLICT',
-    });
-    const explicitKey = randomUUID();
-    const bound = await admit(first, true, { idempotency_key: explicitKey });
-    expect(await submit(first, true, { idempotency_key: explicitKey })).toMatchObject({
-      runId: bound.runId,
-      context: null,
-    });
-    await expect(
-      submit(first, false, { raw_text: exactQuery, idempotency_key: explicitKey }),
-    ).rejects.toMatchObject({ errorCode: 'STATE_CONFLICT' });
-    await expect(
-      submit(first, true, {
-        raw_text: exactQuery + 'different',
-        microsoft_learn_query: exactQuery + 'different',
-        idempotency_key: explicitKey,
-      }),
-    ).rejects.toMatchObject({ errorCode: 'STATE_CONFLICT' });
-    const nextOrdinary = await admit(first, false, { conversation_id: fresh.conversationId });
-    expect(nextOrdinary.allowlist).not.toContain('learn_docs_search');
+    expect((await admit(second)).allowlist).toContain('learn_docs_search');
+    const ordinary = await admit(first, { raw_text: '你好' });
+    expect(ordinary.allowlist).toContain('learn_docs_search');
+    expect(requests).toEqual([]);
+    // A persisted legacy Run has no public-search grant; restoration must not add tools.
+    const old = await admit(first, { authorization_revision: undefined });
     const restoreClient = await db.pool.connect();
     try {
-      for (const ctx of [ordinary, fresh]) {
+      for (const ctx of [old, fresh]) {
         const { rows } = await restoreClient.query<RunRow>('SELECT * FROM agent_runs WHERE id=$1', [
           ctx.runId,
         ]);
@@ -206,22 +148,29 @@ test('remote search uses frozen owner generation, immutable audit, zero-call den
           ctx.attemptId,
           randomUUID(),
         );
-        expect(restored.microsoftLearn).toEqual(ctx.microsoftLearn);
         expect(restored.allowlist.includes('learn_docs_search')).toBe(ctx === fresh);
       }
     } finally {
       restoreClient.release();
     }
     const toolId = 'learn_docs_search';
-    const args = {};
+    const args = { query: exactQuery };
     const slot = (ctx: typeof fresh, value: unknown = args) =>
       reserveToolInvocation(db.pool, ctx, { callKey: randomUUID(), toolId, args: value });
     await expect(slot(old)).rejects.toThrow();
+    await expect(slot({ ...old, allowlist: [...old.allowlist, toolId] })).rejects.toThrow();
+    await expect(slot({ ...fresh, ownerId: second.userId })).rejects.toThrow();
+    expect(requests).toEqual([]);
     const firstSlot = await slot(fresh);
     const result = await invokeTool(db.pool, fresh, { ...firstSlot, toolId, args });
     expect(result).toMatchObject({
       status: 'ok',
-      result: { kind: toolId, representation: 'search_excerpts', items: [{ url: source }] },
+      result: {
+        kind: toolId,
+        query: exactQuery,
+        representation: 'search_excerpts',
+        items: [{ url: source }],
+      },
     });
     const count = requests.length;
     expect((await invokeTool(db.pool, fresh, { ...firstSlot, toolId, args })).replayed).toBe(true);
@@ -239,11 +188,6 @@ test('remote search uses frozen owner generation, immutable audit, zero-call den
     );
     expect(audit.rows.map((r) => r.record_kind)).toEqual(['accepted', 'replayed', 'denied']);
     expect(audit.rows.map((r) => r.outcome_kind)).toEqual(['success', 'success', 'denied']);
-    await connections.disconnect(viewer);
-    expect(await invokeTool(db.pool, fresh, { ...firstSlot, toolId, args })).toMatchObject({
-      status: 'denied',
-    });
-    expect(requests.length).toBe(count);
     const history = await db.pool.connect();
     try {
       expect(await readInvocationSnapshots(history, fresh, [firstSlot.invocationId])).toMatchObject(
@@ -252,19 +196,16 @@ test('remote search uses frozen owner generation, immutable audit, zero-call den
     } finally {
       history.release();
     }
-    await connections.connect(viewer);
-    const staleSlot = await slot(fresh);
-    expect(await invokeTool(db.pool, fresh, { ...staleSlot, toolId, args })).toMatchObject({
-      status: 'denied',
-    });
-    expect(requests.length).toBe(count);
     for (const bad of [
+      {},
       { query: '' },
-      { query: '历史/摘要/受管文件/工具结果中的不同文本' },
-      { query: exactQuery + '追加内容' },
+      { query: ' \n ' },
+      { query: '🧪'.repeat(501) },
+      { query: '\ud800' },
       { query: exactQuery, url: 'https://foreign.invalid' },
+      { query: exactQuery, tool: 'microsoft_docs_fetch' },
     ]) {
-      const ctx = await admit(first, true);
+      const ctx = await admit();
       const ref = await slot(ctx, bad);
       expect(await invokeTool(db.pool, ctx, { ...ref, toolId, args: bad })).toMatchObject({
         status: 'denied',
@@ -272,7 +213,7 @@ test('remote search uses frozen owner generation, immutable audit, zero-call den
       });
       expect(requests.length).toBe(count);
     }
-    const unknownCtx = await admit(first, true);
+    const unknownCtx = await admit();
     const unknownRef = await reserveToolInvocation(db.pool, unknownCtx, {
       callKey: 'unknown',
       toolId: 'microsoft_docs_fetch',
@@ -286,44 +227,42 @@ test('remote search uses frozen owner generation, immutable audit, zero-call den
       }),
     ).toMatchObject({ status: 'denied' });
     expect(requests.length).toBe(count);
-    for (const action of ['disconnect', 'cancel'] as const) {
-      const ctx = await admit(first, true);
-      const ref = await slot(ctx);
-      const entered = Promise.withResolvers<void>();
-      const release = Promise.withResolvers<void>();
-      hold = async () => {
-        entered.resolve();
-        await release.promise;
-      };
-      const pending = invokeTool(db.pool, ctx, { ...ref, toolId, args });
-      await entered.promise;
-      if (action === 'disconnect') await connections.disconnect(viewer);
-      else
-        await cancelConversationRun(
-          deps,
-          ctx.ownerId,
-          ctx.conversationId,
-          ctx.runId,
-          randomUUID(),
-          { idempotency_key: randomUUID() },
-        );
-      release.resolve();
-      expect(await pending).toMatchObject({ status: 'denied' });
-      expect(
-        (
-          await db.pool.query(
-            'SELECT accepted_result FROM tool_invocations WHERE invocation_id=$1',
-            [ref.invocationId],
-          )
-        ).rows[0].accepted_result?.status,
-      ).not.toBe('ok');
-      hold = undefined;
-      await connections.connect(viewer);
-    }
+    const canceled = await admit();
+    const cancelRef = await slot(canceled);
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    hold = async () => {
+      entered.resolve();
+      await release.promise;
+    };
+    const pending = invokeTool(db.pool, canceled, { ...cancelRef, toolId, args });
+    await entered.promise;
+    await cancelConversationRun(
+      deps,
+      canceled.ownerId,
+      canceled.conversationId,
+      canceled.runId,
+      randomUUID(),
+      { idempotency_key: randomUUID() },
+    );
+    release.resolve();
+    expect(await pending).toMatchObject({ status: 'denied' });
+    expect(
+      (
+        await db.pool.query('SELECT accepted_result FROM tool_invocations WHERE invocation_id=$1', [
+          cancelRef.invocationId,
+        ])
+      ).rows[0].accepted_result?.status,
+    ).not.toBe('ok');
+    hold = undefined;
+    const afterCancel = requests.length;
+    expect(await invokeTool(db.pool, canceled, { ...cancelRef, toolId, args })).toMatchObject({
+      status: 'denied',
+    });
+    expect(requests.length).toBe(afterCancel);
     serviceFails = true;
-    const failedCtx = await admit(first, true);
-    const failedRef = await slot(failedCtx);
-    expect(await invokeTool(db.pool, failedCtx, { ...failedRef, toolId, args })).toMatchObject({
+    const failedRef = await slot(fresh);
+    expect(await invokeTool(db.pool, fresh, { ...failedRef, toolId, args })).toMatchObject({
       status: 'failed',
       error: { code: 'REMOTE_MCP_SERVICE_FAILED' },
     });

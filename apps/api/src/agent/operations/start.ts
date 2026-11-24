@@ -84,7 +84,6 @@ import {
   readFeishuBotObservationKey,
   suppliedFeishuDocxUrl,
 } from '../../features/office-connectors/public.js';
-import { readMicrosoftLearnGrant } from '../../features/remote-mcp/public.js';
 
 const AGENT_REVISION = 'assistant/r1';
 const BUSINESS_MAX_ITERATIONS = 10;
@@ -116,7 +115,6 @@ function requestHashOf(input: {
   clarificationOfRunId?: string;
   authorizationRevision?: 'delegation/1';
   modelSelection?: { provider_id: string; model_id: string };
-  microsoftLearnQuery?: string;
 }): string {
   const material: unknown[] = [
     input.conversationId ?? null,
@@ -132,8 +130,6 @@ function requestHashOf(input: {
     material.push({
       model_selection: [input.modelSelection.provider_id, input.modelSelection.model_id],
     });
-  if (input.microsoftLearnQuery !== undefined)
-    material.push({ microsoft_learn_query: input.microsoftLearnQuery });
   const canonical = JSON.stringify(material);
   return createHash('sha256')
     .update(
@@ -389,9 +385,6 @@ export async function startConversationRun(
       : {}),
     ...(input.workspace_id !== undefined ? { workspaceId: input.workspace_id } : {}),
     ...(input.workspace_ids !== undefined ? { workspaceIds: input.workspace_ids } : {}),
-    ...(input.microsoft_learn_query !== undefined
-      ? { microsoftLearnQuery: input.microsoft_learn_query }
-      : {}),
     ...(input.clarification_of_run_id
       ? { clarificationOfRunId: input.clarification_of_run_id }
       : {}),
@@ -621,8 +614,6 @@ export async function startConversationRun(
       if (execution === 'harness') allowlist = [...allowlist, ...R3_MEMORY_TOOL_IDS];
       const feishuUrl =
         delegation && execution === 'harness' && sessionId ? suppliedFeishuDocxUrl(text) : null;
-      if (input.microsoft_learn_query !== undefined && feishuUrl)
-        throw validationError('Microsoft Learn 查询不能与飞书私有读取组合');
       const feishuConfig = feishuUrl ? loadFeishuBotDocxConfiguration() : null;
       const feishuDocx =
         feishuConfig &&
@@ -632,15 +623,7 @@ export async function startConversationRun(
         (await lockViewerAccess(client, ownerId, sessionId))
           ? await freezeFeishuBotDocxGrant(client, feishuConfig, { ownerId, sessionId }, feishuUrl)
           : null;
-      let microsoftLearn;
-      if (input.microsoft_learn_query !== undefined) {
-        if (!sessionId || !(await lockViewerAccess(client, ownerId, sessionId)))
-          throw forbidden('Signed session required for Microsoft Learn query');
-        const connection = await readMicrosoftLearnGrant(client, ownerId);
-        if (!connection) throw forbidden('Microsoft Learn connection required');
-        microsoftLearn = { ...connection, query: input.microsoft_learn_query };
-      }
-      if (microsoftLearn) allowlist = [...allowlist, 'learn_docs_search'];
+      if (delegation && execution === 'harness') allowlist = [...allowlist, 'learn_docs_search'];
       if (feishuDocx) {
         // Private text is model input, not authorization to publish that text via another tool.
         const privateReadTools: Partial<Record<string, true>> = {
@@ -784,7 +767,6 @@ export async function startConversationRun(
         ...(workspaceGrant ? { workspaceGrant, workspaceSummary } : {}),
         ...(delegation ? { workspaceGrants: workspaceSet.grants } : {}),
         ...(feishuDocx ? { feishuDocx } : {}),
-        ...(microsoftLearn ? { microsoftLearn } : {}),
         ...(delegation &&
         (!targetContinuation || targetContinuation.createdArtifactReadAllowed) &&
         workspaceSet.grants.some((grant) => (grant.output_directories?.length ?? 0) > 0)
@@ -905,7 +887,6 @@ export async function startConversationRun(
         ...(workspaceGrant ? { workspaceGrant } : {}),
         ...(delegation ? { workspaceGrants: workspaceSet.grants } : {}),
         ...(feishuDocx ? { feishuDocx } : {}),
-        ...(microsoftLearn ? { microsoftLearn } : {}),
         ...(trustedExecutionContext
           ? { authorizationRevision: 'delegation/1' as const, trustedExecutionContext }
           : {}),

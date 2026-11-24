@@ -1,10 +1,6 @@
 import type { Pool, PoolClient } from 'pg';
 import { httpStatusForError } from '@along/contracts';
-import {
-  microsoftLearnGrantSchema,
-  readMicrosoftLearnGrant,
-  searchMicrosoftLearn,
-} from '../../../features/remote-mcp/public.js';
+import { searchMicrosoftLearn } from '../../../features/remote-mcp/public.js';
 import { lockToolRunBinding } from '../../../features/conversations/public.js';
 import { ApplicationError } from '../../../platform/errors.js';
 import { withRunTransaction } from '../../runtime/run-ownership.js';
@@ -21,10 +17,10 @@ export async function invokeLearnDocsSearch(pool: Pool, ctx: ToolContext, input:
   async function authorized(client: PoolClient) {
     return (
       ctx.authorizationRevision === 'delegation/1' &&
-      microsoftLearnGrantSchema.safeParse(ctx.microsoftLearn).success &&
+      !ctx.feishuDocx &&
+      ctx.allowlist.includes('learn_docs_search') &&
       !ctx.signal?.aborted &&
-      (await lockToolRunBinding(client, ctx)).canExecute &&
-      !!(await readMicrosoftLearnGrant(client, ctx.ownerId, ctx.microsoftLearn))
+      (await lockToolRunBinding(client, ctx)).canExecute
     );
   }
   return executeReadOnlyInvocation(
@@ -33,16 +29,16 @@ export async function invokeLearnDocsSearch(pool: Pool, ctx: ToolContext, input:
     input,
     async (frozen) => {
       const parsed = TOOL_INPUT_SCHEMAS.learn_docs_search.safeParse(input.args);
-      if (!parsed.success || !frozen.microsoftLearn)
+      if (!parsed.success)
         return {
           status: 'denied',
           error: {
             code: 'TOOL_INPUT_INVALID',
-            message: '仅接受空参数，并消费本轮冻结的 Microsoft Learn 查询。',
+            message: '需要有效的公开技术 query，不接受其他字段。',
           },
         };
       const result = await searchMicrosoftLearn({
-        query: frozen.microsoftLearn.query,
+        query: parsed.data.query,
         signal: frozen.signal,
         authorized: () => withRunTransaction(pool, ctx.ownership, authorized),
       });

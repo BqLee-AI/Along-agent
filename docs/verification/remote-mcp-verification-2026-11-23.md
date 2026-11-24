@@ -2,6 +2,8 @@
 
 日期：2026-11-23。范围：`feat/168-microsoft-learn-mcp`，基于 OpenSpec-only commit `e54928a571`；[草稿 PR #170](https://github.com/BqLee-AI/Along-agent/pull/170) 先于源码实现建立。本文记录实际证据，不代表原安装或完整产品验收通过，不归档 change、不关闭 issue。
 
+2026-11-24 用户再次纠正产品方向：连接/专用模式及精确原文冻结合同已废弃，以下旧实验仍按各自版本理解，不能作为零设置普通会话的验收。有效合同为 #170 的 `9b7b101deb`；本轮记录见文末。
+
 ## 实验与真实服务
 
 - 使用 Bun 1.4.2、`@modelcontextprotocol/client` 2.4.0，无认证访问固定 `https://learn.microsoft.com/api/mcp`。
@@ -83,3 +85,15 @@
 验证按 CI 生命周期命令的 `--no-env-file test --parallel=2` 运行四个文件，使用任务自有 `along-168-ci-lifecycle-pg`（PostgreSQL 16）与 Bun 1.4.2，每个用例仍创建/删除独立数据库，临时迁移目录位于 D 盘。此次仅测试及验证记录变化，沿用上述成功的产品链路与该 CI 的 checks/integration 证据；不重复全量 verify、database 后续集成集或 Web/native/MCP 产品验收，不操作旧安装。
 
 结果：四个文件未按名称过滤，**80 pass、0 fail、619 assertions**，包含原 CI 的全部 60 个失败场景；目标版本断言之后的数据不变、漂移拒绝、ledger 保护和 DDL 回滚检查均执行。PostgreSQL `16.15`，用例清理后除系统库与默认 postgres 库外剩余数据库数为 0，随后删除本任务 PG 容器及卷。完整本地日志 `D:/Temp/along-168/review-ci-lifecycle-fixed.log`；四个文件定向 lint 与五个改动文件（含本记录）的格式检查通过。新提交的远端 CI 由主审等待和最终评审，此处不以本地四文件通过宣称全量 database 或新 CI 已绿。
+
+## 2026-11-24：零设置普通对话检索
+
+先在 spec-review 更新并推送 #170 `9b7b101debafffb3e567ab8cc70982495e4097d5`，strict 与六份 Markdown 格式检查通过，再合入实现分支 `fe1a76c`。新普通 delegation Harness Run 冻结搜索名单，现有模型按需调用严格 `{query}`、可提炼/翻译公开技术问题。旧持久化名单不补工具；保留飞书私有读取工具收窄，新增实际网关拒绝公开搜索的行为覆盖。工具说明禁止私有正文、标识与密钥外发，不声称是严格防泄漏门；不加分类器、逐字匹配、逐次审批、#88 或新平台设置。
+
+干净删除未发布连接卡/路由/服务、generation、入站查询字段、专用入口/状态、连接测试与未合并 0042 表/manifest；目标版本相关测试恢复 0041，完整 ledger 历史项和所有漂移/数据/回滚保护不变。已合并迁移与旧实验安装不动。
+
+实际 Red：普通消息接纳后的名单不含 learn_docs_search（`zero-setup-red.log`）。此后修改接纳和工具输入。Root typecheck 通过；首轮聚焦 92 pass，两个失败分别是缺少测试 secret 和旧 Run 测试夹具试图更新不可变名单，不计作产品 Red。改用真实 legacy 接纳冻结旧名单；workspace 七用例与飞书私有网关一用例已通过。独立不合法调用沿用原测试每项新 Run，避免混入单 Run 预算耗尽。
+
+删除未发布迁移后的四个生命周期文件由 DropUnreleasedLearnSchema 完整运行一次：Bun1.4.2、任务自有 PostgreSQL16.15，**80 pass、0 fail、619 assertions**。额外空库观察 supported/0041/target_schema_verified，0012–0041 连续 30 条 ledger，无 0042 行及 Learn 连接表；任务 PG 已删除。日志 `D:/Temp/along-168/zero-setup-lifecycle.log`。不复用旧 0042 库冒充新版本。
+
+真实模型预检由验收负责人执行：现有 DeepSeek 凭据仅向官方 chat/completions 发送合成 Reply OK 请求，实际 HTTP401 authentication_error/invalid_request_error，认证被拒；另一个模型凭据没有绑定 endpoint/model，未向猜测服务发送。未读取 .env 或旧安装。新正式安装采用受控模型与真实 Learn MCP 时，只证明执行链，不证明真实模型自主意图；后续实际结果单列，不用旧产品路径替代。

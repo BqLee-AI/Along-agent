@@ -42,7 +42,6 @@
 - `conversation_id`：缺省则服务端新建并在首个 SSE 事件返回；传入则续写（跨用户 id 返回 `403`）。
 - `card_ref`：可选，围绕某卡片追问时带；服务端只做关联，不做授权旁路。
 - `raw_text`：用户原话，按不可信输入解析，原样进回显引用。
-- `microsoft_learn_query`：仅会话“Microsoft Learn 查询”快捷入口发送，必须与本次 `raw_text` 全文逐码点相同；不得全为空白，最多 500 个 Unicode 码点，不 trim 或改写。要求本人签名、已启用连接、显式 delegation harness；不能与资料工作区、卡片、补充请求或飞书私有读取组合。字段缺省时普通聊天不获查询资格，字段无效或未连接时拒绝，不降级。是否存在及确切值纳入同 owner/key 幂等绑定；模型仅能以 `{}` 消费冻结值，见 [Microsoft Learn 合同](../microsoft-learn.md)。
 - `execution`：可选 `business | harness`，省略为兼容的确定性业务。harness 明确进入正式仓颉，`mode=chat` 不作隐式分派；缺实际依赖在任何新写入/SSE 前503 `HARNESS_UNAVAILABLE`，不自动改走 TS/fixture。
 - Web 默认 Agent 对话显式传 `execution:'harness',authorization_revision:'delegation/1'`；提醒快捷入口仍为 business，资料快捷入口传 harness 与显式 `workspace_id`，均保持 legacy。HTTP 省略 execution 的默认值不变。
 - `authorization_revision`：可选，唯一值 `delegation/1`；必须显式 `execution:'harness'` 且省略单数 `workspace_id`，否则400。省略按 legacy 合同执行，不能从部署、wire 或历史推断升级。实际工具以该 Run 冻结 allowlist 和资源为准。

@@ -1,5 +1,4 @@
 import type { RunRow } from '../../features/conversations/public.js';
-import { microsoftLearnGrantSchema } from '../../features/remote-mcp/public.js';
 import {
   DELEGATION_TOOL_IDS,
   DELEGATION_WORKSPACE_READ_TOOL_IDS,
@@ -31,9 +30,7 @@ export function supportsFrozenTools(run: RunRow): boolean {
   return run.tools_allowlist.every(
     (name) =>
       (name === 'feishu_docx_read' && !!frozen.authorization_revision && !!frozen.feishuDocx) ||
-      (name === 'learn_docs_search' &&
-        !!frozen.authorization_revision &&
-        microsoftLearnGrantSchema.safeParse(frozen.microsoftLearn).success) ||
+      (name === 'learn_docs_search' && !!frozen.authorization_revision && !frozen.feishuDocx) ||
       supported.includes(name) ||
       ((frozen.execution_profile === 'pause-memory/1' ||
         frozen.execution_profile === 'compact-memory/1') &&

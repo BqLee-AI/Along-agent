@@ -86,19 +86,22 @@ const base = {
   approval: null,
 };
 
-test('delegated Learn search preserves an accepted receipt across R3 restore and rejects bad results', async () => {
+test('delegated Learn search forwards a model query, restores its accepted R3 receipt and rejects bad results', async () => {
   const inputId = randomUUID();
   const invocationId = randomUUID();
   const toolId = 'learn_docs_search';
+  const userMessage =
+    '请查微软官方文档：Azure Database for PostgreSQL 灵活服务器的备份可以保留多久？请给出处。';
+  const query = 'Azure Database for PostgreSQL Flexible Server backup retention';
   const searchTerms = ' \tAzure 数据库，cafe\u0301';
   const trailingWhitespace = '\u00a0\n';
   const remainingCodePoints = 500 - [...searchTerms, ...trailingWhitespace].length;
-  const query = searchTerms + '😀'.repeat(remainingCodePoints) + trailingWhitespace;
+  const boundaryQuery = searchTerms + '😀'.repeat(remainingCodePoints) + trailingWhitespace;
   const context = {
     manifest: { message_ids: [] },
     summary: null,
     messages: [],
-    input: { type: 'user', message_id: inputId, content: query },
+    input: { type: 'user', message_id: inputId, content: userMessage },
   };
   const start = {
     ...base,
@@ -119,16 +122,21 @@ test('delegated Learn search preserves an accepted receipt across R3 restore and
     tools: [
       {
         name: toolId,
-        description: 'Search public Learn excerpts using the exact query submitted for this Run.',
-        parameters: { type: 'object', properties: {}, additionalProperties: false },
+        description: 'Search Microsoft Learn using public technical keywords.',
+        parameters: {
+          type: 'object',
+          properties: { query: { type: 'string' } },
+          required: ['query'],
+          additionalProperties: false,
+        },
         risk: 'low',
       },
     ],
   };
   const item = {
-    title: 'Azure 数据库',
-    url: 'https://learn.microsoft.com/en-us/azure/?a=b&c=d',
-    content: 'Public excerpt 😀',
+    title: 'Backup and restore in Azure Database for PostgreSQL Flexible Server',
+    url: 'https://learn.microsoft.com/en-us/azure/postgresql/flexible-server/concepts-backup-restore?a=b&c=d',
+    content: 'The backup retention period can be configured from 7 to 35 days.',
   };
   const payload = LearnDocsSearchPayloadSchema.parse({
     kind: toolId,
@@ -141,9 +149,15 @@ test('delegated Learn search preserves an accepted receipt across R3 restore and
   const observation = { view: 'full', invocation_id: invocationId, tool_id: toolId, result };
   const goal = {
     status: 'completed',
-    outcomes: [{ description: query, status: 'achieved', receipt_refs: [invocationId] }],
+    outcomes: [
+      {
+        description: 'Answer with official backup retention guidance',
+        status: 'achieved',
+        receipt_refs: [invocationId],
+      },
+    ],
     clarification: null,
-    answer: item.url,
+    answer: `备份保留期可配置为 7 至 35 天。来源：${item.url}`,
   };
   const measure = {
     value: {
@@ -172,7 +186,7 @@ test('delegated Learn search preserves an accepted receipt across R3 restore and
       },
     },
   });
-  async function search(receipt: unknown, expectedExit = 0) {
+  async function search(searchQuery: string, receipt: unknown, expectedExit = 0) {
     let invoked = false;
     return run(
       start,
@@ -183,15 +197,15 @@ test('delegated Learn search preserves an accepted receipt across R3 restore and
           case 'measure_context':
             return measure;
           case 'model':
-            expect(request.messages).toContainEqual({ role: 'user', content: query });
-            return toolCall(toolId, {});
+            expect(request.messages).toContainEqual({ role: 'user', content: userMessage });
+            return toolCall(toolId, { query: searchQuery });
           case 'reserve':
             expect(request.tool_id).toBe(toolId);
-            expect(request.args).toEqual({});
+            expect(request.args).toEqual({ query: searchQuery });
             return { value: { invocation_id: invocationId } };
           case 'invoke':
             expect(request).toMatchObject({ tool_id: toolId, invocation_id: invocationId });
-            expect(request.args).toEqual({});
+            expect(request.args).toEqual({ query: searchQuery });
             invoked = true;
             return {
               value: { status: 'ok', result: receipt, invocationId, replayed: false },
@@ -206,7 +220,7 @@ test('delegated Learn search preserves an accepted receipt across R3 restore and
     );
   }
   expect(await run({ ...start, trusted_context: null }, () => ({}), 2)).toEqual([]);
-  const requests = await search(payload);
+  const requests = await search(query, payload);
   const pause = requests.find((request) => request.type === 'pause_point');
   if (!pause || pause.context.version !== 4) throw new Error('Missing paused Learn observation');
   expect(pause.context.tool_refs).toEqual([invocationId]);
@@ -235,10 +249,22 @@ test('delegated Learn search preserves an accepted receipt across R3 restore and
   );
   expect(resumed.at(-1)).toMatchObject({ type: 'finish_goal', goal_result: goal });
 
+  const boundaryPayload = LearnDocsSearchPayloadSchema.parse({ ...payload, query: boundaryQuery });
+  expect((await search(boundaryQuery, boundaryPayload)).at(-1)).toMatchObject({
+    type: 'pause_point',
+    context: {
+      native_state: {
+        units: [
+          { observation: { result: { status: 'ok', result: boundaryPayload } }, projected: false },
+        ],
+      },
+    },
+  });
+
   const malformed = [
     { ...payload, query: '' },
     { ...payload, query: ' \t\n\u00a0\u3000\ufeff' },
-    { ...payload, query: query + '😀' },
+    { ...payload, query: boundaryQuery + '😀' },
     { ...payload, query: 'x'.repeat(500) + '\n' },
     { ...payload, query: 'query\uD800' },
     { ...payload, query: '\uDC00query' },
@@ -248,7 +274,7 @@ test('delegated Learn search preserves an accepted receipt across R3 restore and
     { kind: 'effect_evidence', evidence_ref: 'otherwise-valid' },
   ];
   for (const invalid of malformed) {
-    expect((await search(invalid, 2)).at(-1)).toMatchObject({ type: 'invoke' });
+    expect((await search(query, invalid, 2)).at(-1)).toMatchObject({ type: 'invoke' });
   }
 }, 30_000);
 

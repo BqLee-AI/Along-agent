@@ -50,7 +50,6 @@ function composerTask(overrides: Partial<ConversationTask> = {}): ConversationTa
     streaming: false,
     retryResume: null,
     sendUncertain: false,
-    pendingMicrosoftLearnQuery: false,
     ambiguousProposal: null,
     foldChoice: '',
     clarificationReply: false,
@@ -442,28 +441,11 @@ describe('composer consumer states', () => {
     expect(input).not.toMatch(/\sdisabled(?:=|[\s>])/);
   });
 
-  it('keeps the Microsoft Learn full-text disclosure visible and tied to the input', () => {
-    const markup = renderToStaticMarkup(
-      createElement(TaskComposer, {
-        task: composerTask({ intent: 'microsoft-learn', input: '  查询：备份  ' }),
-      }),
-    );
-    expect(markup).toContain('Microsoft Learn 查询');
-    expect(markup).toContain('输入全文将作为查询词发送到 Microsoft Learn。');
-    const input = markup.match(/<textarea\b[^>]*id="task-message"[^>]*>/)?.[0];
-    expect(input).toMatch(/aria-describedby="[^"]*\blearn-query-help\b/);
-    expect(markup).not.toContain('aria-label="资料范围"');
-
-    const ordinary = renderToStaticMarkup(createElement(TaskComposer, { task: composerTask() }));
-    expect(ordinary).not.toContain('learn-query-help');
-  });
-
   it('protects the original draft while a send acknowledgement is unknown', () => {
     const markup = renderToStaticMarkup(
       createElement(TaskComposer, {
         task: composerTask({
           sendUncertain: true,
-          pendingMicrosoftLearnQuery: true,
           active: true,
           eligibility: { allowed: false, reason: '原发送待核实' },
         }),
@@ -473,7 +455,6 @@ describe('composer consumer states', () => {
     expect(input).toBeDefined();
     expect(input).toMatch(/\sdisabled(?:=|[\s>])/);
     expect(openingTag(markup, 'send-message')).toMatch(/\sdisabled(?:=|[\s>])/);
-    expect(markup).toContain('原请求包含 Microsoft Learn 查询全文。');
   });
 
   it('offers compact alongside stop while streaming', () => {

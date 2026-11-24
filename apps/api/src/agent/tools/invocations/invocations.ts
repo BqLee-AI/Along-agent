@@ -27,7 +27,6 @@ import {
   readFeishuBotObservationKey,
   sealFeishuBotObservation,
 } from '../../../features/office-connectors/public.js';
-import { microsoftLearnGrantSchema } from '../../../features/remote-mcp/public.js';
 import { withTransaction } from '../../../db/transaction.js';
 import { forbidden, notFound, stateConflict, ApplicationError } from '../../../platform/errors.js';
 import {
@@ -72,7 +71,6 @@ const frozenSchema = z
     workspaceGrant: workspaceGrantSchema.nullable().optional(),
     documentApprovalId: z.string().uuid().optional(),
     authorizationRevision: z.literal('delegation/1').optional(),
-    microsoftLearn: microsoftLearnGrantSchema.optional(),
     feishuDocx: z
       .union([
         z
@@ -213,7 +211,6 @@ function freezeContext(ctx: ToolContext): z.infer<typeof frozenSchema> {
     workspaceGrant: ctx.workspaceGrant ?? null,
     ...(ctx.authorizationRevision ? { authorizationRevision: ctx.authorizationRevision } : {}),
     ...(ctx.feishuDocx ? { feishuDocx: ctx.feishuDocx } : {}),
-    ...(ctx.microsoftLearn ? { microsoftLearn: ctx.microsoftLearn } : {}),
   };
 }
 function workspaceAuthorized(ctx: ToolContext, row: Invocation): boolean {
@@ -245,12 +242,6 @@ function executionContext(ctx: ToolContext, row: Invocation): ToolContext {
       canonicalJson(ctx.feishuDocx) !== canonicalJson(frozen.feishuDocx))
   )
     throw forbidden('Feishu grant differs from frozen invocation');
-  if (
-    row.tool_id === 'learn_docs_search' &&
-    (!ctx.microsoftLearn ||
-      canonicalJson(ctx.microsoftLearn) !== canonicalJson(frozen.microsoftLearn ?? null))
-  )
-    throw forbidden('Microsoft Learn grant differs from frozen invocation');
   if (
     frozen.workspaceGrant &&
     (ctx.authorizationRevision === 'delegation/1'
@@ -350,8 +341,7 @@ export async function reserveInvocation(
       throw forbidden();
     if (
       input.toolId === 'learn_docs_search' &&
-      (ctx.authorizationRevision !== 'delegation/1' ||
-        !microsoftLearnGrantSchema.safeParse(ctx.microsoftLearn).success)
+      (ctx.authorizationRevision !== 'delegation/1' || !!ctx.feishuDocx)
     )
       throw forbidden();
     let selected = ctx.workspaceGrant ?? null;

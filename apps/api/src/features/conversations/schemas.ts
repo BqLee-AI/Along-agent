@@ -1,10 +1,6 @@
 // Conversation HTTP contracts (issue #9): docs/api/conversations.
 import { z } from 'zod';
-import {
-  LearnDocsQuerySchema,
-  ModelSelectionSchema,
-  workspaceSummarySchema,
-} from '@along/contracts';
+import { ModelSelectionSchema, workspaceSummarySchema } from '@along/contracts';
 
 export const SendMessageBodySchema = z
   .object({
@@ -19,7 +15,6 @@ export const SendMessageBodySchema = z
       .refine((ids) => new Set(ids).size === ids.length)
       .optional(),
     raw_text: z.string().min(1).max(20000),
-    microsoft_learn_query: LearnDocsQuerySchema.optional(),
     card_ref: z.string().min(1).max(200).optional(),
     confirmed_timezone_id: z.string().min(1).max(100).nullable().optional(),
     confirmed_timezone: z.string().min(1).max(100).nullable().optional(),
@@ -53,21 +48,6 @@ export const SendMessageBodySchema = z
         input.authorization_revision === 'delegation/1' &&
         input.workspace_id === undefined),
     { message: 'workspace_ids requires delegation harness execution', path: ['workspace_ids'] },
-  )
-  .refine(
-    (input) =>
-      input.microsoft_learn_query === undefined ||
-      (input.execution === 'harness' &&
-        input.authorization_revision === 'delegation/1' &&
-        input.microsoft_learn_query === input.raw_text &&
-        input.workspace_id === undefined &&
-        input.workspace_ids === undefined &&
-        input.card_ref === undefined &&
-        input.clarification_of_run_id === undefined),
-    {
-      message: 'Microsoft Learn requires an explicit standalone query matching raw_text',
-      path: ['microsoft_learn_query'],
-    },
   );
 
 export type SendMessageBody = z.infer<typeof SendMessageBodySchema>;

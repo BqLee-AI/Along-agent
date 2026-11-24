@@ -8,7 +8,6 @@ import {
   type FeishuBotStatus,
 } from '../model/feishu-connection';
 import { PageHeading } from '@/shared/ui/page';
-import { MicrosoftLearnConnectionCard } from './microsoft-learn-connection-card';
 
 const button =
   'min-h-11 rounded-lg bg-foreground px-4 text-sm font-medium text-background disabled:opacity-50';
@@ -125,7 +124,7 @@ function FeishuBotConnection() {
 export function FeishuConnectionScreen() {
   return (
     <div className="w-full min-w-0">
-      <PageHeading title="连接器" description="管理飞书机器人和 Microsoft Learn 公开资料搜索。" />
+      <PageHeading title="连接器" description="管理 Along 的飞书机器人连接。" />
       <section
         className="max-w-xl space-y-4 rounded-2xl bg-muted p-6"
         aria-labelledby="feishu-heading"
@@ -139,7 +138,6 @@ export function FeishuConnectionScreen() {
           Docx，且须在新对话请求中指定单个直链。不搜索或修改文档。
         </p>
       </section>
-      <MicrosoftLearnConnectionCard />
     </div>
   );
 }

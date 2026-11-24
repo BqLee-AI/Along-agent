@@ -4,13 +4,6 @@ import type { NextRequest } from 'next/server';
 import { EnvelopeSchema } from '@along/contracts';
 
 const API_BASE = process.env.API_BASE ?? 'http://127.0.0.1:3000';
-const CONNECTIONS_PATH = '/api/v1/connections';
-const MICROSOFT_LEARN_PATH = `${CONNECTIONS_PATH}/microsoft-learn`;
-
-function isConnectionsPath(pathname: string): boolean {
-  return pathname === CONNECTIONS_PATH || pathname.startsWith(`${CONNECTIONS_PATH}/`);
-}
-
 const FORWARD_REQUEST = [
   'cookie',
   'authorization',
@@ -35,26 +28,11 @@ interface RouteContext {
 
 async function proxy(req: NextRequest, context: RouteContext): Promise<Response> {
   const { path } = await context.params;
-  const apiPath = `/api/${path.join('/')}`;
-  const target = new URL(apiPath, API_BASE);
-  const browserUrl = new URL(req.url);
-  target.search = browserUrl.search;
-  const connections =
-    isConnectionsPath(browserUrl.pathname) ||
-    isConnectionsPath(apiPath) ||
-    isConnectionsPath(target.pathname);
-  const microsoftLearn =
-    browserUrl.pathname === apiPath &&
-    apiPath === target.pathname &&
-    ((req.method === 'GET' && apiPath === MICROSOFT_LEARN_PATH) ||
-      (req.method === 'POST' &&
-        (apiPath === `${MICROSOFT_LEARN_PATH}/connect` ||
-          apiPath === `${MICROSOFT_LEARN_PATH}/disconnect`)));
+  const target = new URL(`/api/${path.join('/')}`, API_BASE);
+  target.search = new URL(req.url).search;
 
   const headers = new Headers();
   for (const name of FORWARD_REQUEST) {
-    // This namespace contains only the fixed Microsoft Learn connection API.
-    if (connections && !microsoftLearn && (name === 'origin' || name === 'x-csrf-token')) continue;
     const value = req.headers.get(name);
     if (value) headers.set(name, value);
   }
@@ -121,10 +99,7 @@ async function proxy(req: NextRequest, context: RouteContext): Promise<Response>
     for (const cookie of cookies) responseHeaders.append('set-cookie', cookie);
   }
   const feishuBot = path[1] === 'office' && path[2] === 'feishu' && path[3] === 'bot';
-  if (
-    microsoftLearn ||
-    (path[0] === 'v1' && (path[1] === 'auth' || path[1] === 'me' || feishuBot))
-  ) {
+  if (path[0] === 'v1' && (path[1] === 'auth' || path[1] === 'me' || feishuBot)) {
     responseHeaders.set('cache-control', 'no-store');
   }
   if (!upstream.body) {
