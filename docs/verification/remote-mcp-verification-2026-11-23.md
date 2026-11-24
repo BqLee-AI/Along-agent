@@ -97,3 +97,15 @@
 删除未发布迁移后的四个生命周期文件由 DropUnreleasedLearnSchema 完整运行一次：Bun1.4.2、任务自有 PostgreSQL16.15，**80 pass、0 fail、619 assertions**。额外空库观察 supported/0041/target_schema_verified，0012–0041 连续 30 条 ledger，无 0042 行及 Learn 连接表；任务 PG 已删除。日志 `D:/Temp/along-168/zero-setup-lifecycle.log`。不复用旧 0042 库冒充新版本。
 
 真实模型预检由验收负责人执行：现有 DeepSeek 凭据仅向官方 chat/completions 发送合成 Reply OK 请求，实际 HTTP401 authentication_error/invalid_request_error，认证被拒；另一个模型凭据没有绑定 endpoint/model，未向猜测服务发送。未读取 .env 或旧安装。新正式安装采用受控模型与真实 Learn MCP 时，只证明执行链，不证明真实模型自主意图；后续实际结果单列，不用旧产品路径替代。
+
+补齐测试环境与独立 Run 夹具后，聚焦 Learn 网关 **1 pass、56 assertions**，飞书私有网关 **1 pass**、workspace admission **7 pass**；首轮已通过的协议、合同与 Web 92 项不重复运行。Root lint、依赖边界（1629 modules / 6028 dependencies）、本 change strict、全库格式检查通过。新正式镜像内仅运行改动的 native Learn 合同：**1 pass、22 filtered、90 assertions**，验证模型 query、accepted R3 receipt 恢复及坏结果拒绝，日志 `zero-setup-native.log`。
+
+实现已尽早推送 `39cc29388228cc8ac96c4d28836cdfcaef5e15ad`，两份 PR 保持 OPEN/draft。#170 此合同的 [CI 45334653470](https://github.com/BqLee-AI/Along-agent/actions/runs/45334653470) 完成成功。实现 [CI 45336307676](https://github.com/BqLee-AI/Along-agent/actions/runs/45336307676) 观察到 plan/checks/integration 成功、database 运行中；不宣称该时点整条 CI 已绿。
+
+全新正式 local:init --new 实际 exit0；准备内容 digest `bcaf30d73e6266b717b765da206b80634ed79282b1b9adaa72681d7e5301891c`、实际镜像 ID `sha256:3a07e3996d3776de09f611fefb6f447fed8481852ca8052a12c10dac116b5d05`，没有 RepoDigest，不虚称远端镜像。建号前 SQL 观察 0 users、max migration 0041、30 条 ledger、Learn 连接表不存在；之后通过 Web 真实初始化账号。
+
+首次普通输入中模型已产生精炼后的严格 query，但 API 的官方 MCP initialize 实际报 UNKNOWN_CERTIFICATE_VERIFICATION_ERROR，工具记录 REMOTE_MCP_SERVICE_FAILED，Web 出现 STATE_CONFLICT；保留为失败证据。不改生产代码、不关闭 TLS 校验、不变更 CA 或配置；同一探针进程/配置下，新的独立普通 Web Run 实际完成 initialize200、initialized202、tools/list200、microsoft_docs_search200。实际回答备份保留 7–35 天并给出两条微软官方链接，刷新保留历史；随后同线程普通问候 POST200，MCP dispatch 和 DB invocation 增量均为0。后次成功不能解释或抹去首次 TLS 失败；未加入自动重试。该结果为受控模型选择与真实上游执行，不是可用真实 LLM 的自主意图证据。
+
+正式 stop/start 均 exit0，移除观测探针后 readyz200，浏览器再次读取保留两条官方来源。新安装供审查保留；父任务聚焦 PG 与生命周期 PG 均已清理，未恢复或修改旧模型服务/安装。
+
+脱敏完整证据 `D:/Temp/along-168/zero-setup-e2e-result.json` 汇总模型调用、wire、DB 和八张截图；回答图 `zero-setup-learn-answer.png`，普通后续图 `zero-setup-ordinary-follow-up.png`，正式重启历史图 `zero-setup-history-after-restart.png`（均在同目录）。普通中文问题实际模型 query 为 `Azure Database for PostgreSQL Flexible Server backup retention period`，真实上游接收10条摘录；实际显示的备份来源为 [Backup and restore](https://learn.microsoft.com/azure/postgresql/backup-restore/concepts-backup-restore#backup-frequency-and-retention) 和 [Secure your server](https://learn.microsoft.com/azure/postgresql/security/security-overview#backup-and-recovery)。
