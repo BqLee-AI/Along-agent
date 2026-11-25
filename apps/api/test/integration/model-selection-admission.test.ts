@@ -3,11 +3,11 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createContextPolicy } from '../../src/features/conversations/public.js';
-import type { ConversationDeps } from '../../src/agent/runtime/contracts.js';
-import type { HarnessServices } from '../../src/agent/runtime/contracts.js';
-import { getRunView } from '../../src/agent/operations/run.js';
+import type { ConversationDeps } from '../../src/agent/execution/contracts.js';
+import type { HarnessServices } from '../../src/agent/execution/contracts.js';
+import { getRunView } from '../../src/agent/run/run-actions.js';
 import { getConversationRuns } from '../../src/features/conversations/history/history-service.js';
-import { startConversationRun } from '../../src/agent/operations/start.js';
+import { startConversationRun } from '../../src/agent/run/admit-message.js';
 import {
   addModel,
   createProvider,

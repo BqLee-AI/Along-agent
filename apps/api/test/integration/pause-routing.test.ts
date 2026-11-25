@@ -7,10 +7,10 @@ import {
   type HarnessRequest,
 } from '@along/contracts';
 import { createContextPolicy } from '../../src/features/conversations/public.js';
-import { getRunView } from '../../src/agent/operations/run.js';
-import { createHarnessSession } from '../../src/agent/runtime/attempt-session.js';
-import { requestConversationPause } from '../../src/agent/operations/pause.js';
-import { startConversationRun } from '../../src/agent/operations/start.js';
+import { getRunView } from '../../src/agent/run/run-actions.js';
+import { createHarnessSession } from '../../src/agent/execution/attempt/session.js';
+import { requestConversationPause } from '../../src/agent/run/pause.js';
+import { startConversationRun } from '../../src/agent/run/admit-message.js';
 import { routingHash } from '../../src/agent/routing/routing-checkpoints.js';
 import {
   createRoutingRuntime,

@@ -8,8 +8,8 @@ import { responses } from '../../http/model.js';
 import { literalUuidAt } from '../../http/request/path.js';
 import { forbidden } from '../../platform/errors.js';
 import { WorkspaceDeniedError } from '../workspaces/public.js';
-import { confirmDocumentApproval, rejectDocumentApproval } from '../../agent/operations/public.js';
-import { readRunDocumentEvidence } from '../../agent/tools/query.js';
+import { confirmDocumentApproval, rejectDocumentApproval } from '../../agent/run/public.js';
+import { readRunDocumentEvidence } from '../../agent/tools/evidence/run-evidence.js';
 import {
   confirmApproval,
   rejectApproval,

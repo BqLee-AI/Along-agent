@@ -42,8 +42,9 @@ public func uuid(v: JsonValue): String {
     }
     return s
 }
-public func keys(o: JsonObject, names: Array<String>): Unit {
-    require(o.size() == names.size)
+public func keys(o: JsonObject, names: Array<String>, optional!: String = ""): Unit {
+    let extra = if (optional != "" && o.containsKey(optional)) { 1 } else { 0 }
+    require(o.size() == names.size + extra)
     for (name in names) { require(o.containsKey(name)) }
 }
 public func sourceKeys(o: JsonObject, names: Array<String>): Unit {

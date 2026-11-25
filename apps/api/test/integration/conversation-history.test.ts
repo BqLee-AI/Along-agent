@@ -15,10 +15,8 @@ import type {
 } from '@along/contracts';
 import { handleRequest } from '../helpers/http-app.js';
 import { withTransaction } from '../../src/db/transaction.js';
-import {
-  appendCheckpoint,
-  insertAttempt,
-} from '../../src/features/conversations/run/repository.js';
+import { appendCheckpoint } from '../../src/features/conversations/run/checkpoints.js';
+import { insertAttempt } from '../../src/features/conversations/run/repository.js';
 import { loadTimeContext } from '../../src/features/time/context.js';
 import { createIntegrationDatabase, databaseUrl } from './setup.js';
 import type { IntegrationDatabase } from './setup.js';
@@ -490,18 +488,26 @@ maybe('owner-scoped read-only conversation history HTTP', () => {
             ownerId: owner,
             attemptId,
             seq: i,
-            type: 'message.delta',
-            payload: { conversation_id: cid, run_id: runId, delta: `${n}:${i}` },
-            requestId: 'history',
+            kind: 'message.delta',
+            payloadJson: JSON.stringify({
+              type: 'message.delta',
+              payload: { conversation_id: cid, run_id: runId, delta: `${n}:${i}` },
+              request_id: 'history',
+            }),
+            protocol: 'v1',
           });
         }
         await appendCheckpoint(client, {
           ownerId: owner,
           attemptId,
           seq: 999,
-          type: 'thinking',
-          payload: { private: 'snapshot' },
-          requestId: 'history',
+          kind: 'thinking',
+          payloadJson: JSON.stringify({
+            type: 'thinking',
+            payload: { private: 'snapshot' },
+            request_id: 'history',
+          }),
+          protocol: 'v1',
         });
       }
     });

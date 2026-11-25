@@ -1,7 +1,7 @@
 import type { Pool } from 'pg';
 import { withClient } from '../db/transaction.js';
-import { inspectReleaseWaiting } from '../agent/operations/public.js';
-import { loadHarnessServices } from '../agent/runtime/config.js';
+import { inspectReleaseWaiting } from '../agent/run/public.js';
+import { loadHarnessServices } from './harness-services.js';
 import { readReleaseWaitingRun } from '../features/conversations/public.js';
 import { readReleaseApprovalDetail } from '../features/approvals/public.js';
 import { readOwnerDisplayName } from '../features/identity/public.js';

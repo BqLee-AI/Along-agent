@@ -14,9 +14,15 @@ export {
   failCompact,
   failCompactCandidates,
   finishCompactCandidates,
+  insertCompactPause,
   markCompactPublished,
   recordCompactUsage,
 } from './compact/compact-operations.js';
+export {
+  readCompactContinuation,
+  readConsumedCompactContinuation,
+  validateR3SnapshotContext,
+} from './compact/compact-continuation.js';
 export {
   ActionKeySchema,
   ConversationEventsQuerySchema,
@@ -29,22 +35,29 @@ export {
 export type { SendMessageBody } from './schemas.js';
 export {
   insertAttempt,
+  insertPauseSuccessor,
+  activatePauseSuccessor,
   lockRun,
-  getConversation,
+  latestAttemptId,
+  insertRun,
+} from './run/repository.js';
+export {
+  readRunEventCursor,
+  appendCheckpoint,
   listConversationEvents,
   listRunEvents,
-  latestAttemptId,
+} from './run/checkpoints.js';
+export {
+  getConversation,
   createConversation,
-  deleteExpiredIdempotency,
-  findIdempotency,
   freezeConversationTimezone,
-  insertIdempotency,
   insertMessage,
-  insertRun,
   listHarnessMessageRefs,
   readHarnessMessages,
-} from './run/repository.js';
-export type { LockedRun, RunRow, ConversationRow } from './run/repository.js';
+} from './run/messages.js';
+export { deleteExpiredIdempotency, findIdempotency, insertIdempotency } from './run/idempotency.js';
+export type { LockedRun, RunRow } from './run/repository.js';
+export type { ConversationRow } from './run/messages.js';
 export {
   lockDocumentApprovalRun,
   assertToolRunBinding,
@@ -70,13 +83,9 @@ export {
 } from './compact/r3-context.js';
 export { lockIdleCompactRequest, saveIdleCompactRequest } from './compact/idle-compact.js';
 export type { IdleCompactReceipt } from './compact/idle-compact.js';
-export {
-  AutoCompactPolicySchema,
-  createAutoCompactPolicy,
-  shouldAutoCompact,
-} from './compact/auto-compact-policy.js';
+export { AutoCompactPolicySchema, createAutoCompactPolicy } from './compact/auto-compact-policy.js';
 export type { AutoCompactPolicy } from './compact/auto-compact-policy.js';
-export { acceptReminderDate, readReminderDateInput } from './lifecycle/reminder-date.js';
+export { acceptReminderDate, readReminderDateInput } from './run/reminder-date-continuation.js';
 export type { RunContext } from './contracts.js';
 export { listReleaseWaitingRuns, readReleaseWaitingRun } from './history/release-waiting.js';
 export type { ReleaseWaitingRun } from './history/release-waiting.js';
@@ -86,7 +95,7 @@ export {
   getConversationMessages,
   getConversationRuns,
 } from './history/history-service.js';
-export { getConversationDetail } from './lifecycle/service.js';
+export { getConversationDetail } from './history/conversation-detail.js';
 export {
   readRunSnapshotPayload,
   readLatestRunSnapshotPayload,

@@ -3,7 +3,7 @@ import { httpStatusForError } from '@along/contracts';
 import { searchMicrosoftLearn } from '../../../features/remote-mcp/public.js';
 import { lockToolRunBinding } from '../../../features/conversations/public.js';
 import { ApplicationError } from '../../../platform/errors.js';
-import { withRunTransaction } from '../../runtime/run-ownership.js';
+import { withRunTransaction } from '../../execution/driver/ownership.js';
 import type { InvocationInput, ToolContext, ToolResult } from '../contracts.js';
 import { executeReadOnlyInvocation } from '../invocations/invocations.js';
 import { TOOL_INPUT_SCHEMAS } from '../schemas.js';

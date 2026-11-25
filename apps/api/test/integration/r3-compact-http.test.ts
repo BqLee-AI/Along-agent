@@ -7,10 +7,10 @@ import { z } from 'zod';
 import { handleRequest } from '../helpers/http-app.js';
 import { createContextPolicy } from '../../src/features/conversations/public.js';
 import { measureSdkContext } from '../../src/features/model-providers/public.js';
-import { loadHarnessServices } from '../../src/agent/runtime/config.js';
-import type { HarnessServices } from '../../src/agent/runtime/contracts.js';
+import { loadHarnessServices } from '../../src/bootstrap/harness-services.js';
+import type { HarnessServices } from '../../src/agent/execution/contracts.js';
 import { createLocalFixtureModelTransport } from '../helpers/local-fixture-model.js';
-import { createRunDriver, RunDriver } from '../../src/agent/runtime/run-driver.js';
+import { createRunDriver, RunDriver } from '../../src/agent/execution/driver/driver.js';
 import { loadTimeContext } from '../../src/features/time/context.js';
 import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import { frames, jsonBody, listen, sendModelSse } from '../helpers/harness-consumer.js';
@@ -54,6 +54,15 @@ suite('native server-owned compact over HTTP', () => {
       | 'cancel'
       | 'cancel-ignore',
     productionPolicy = false,
+    automatic?: {
+      inputTokens: number;
+      maxTokens?: number;
+      maxIterations?: number;
+      compactCap?: number;
+      knownWindow?: boolean;
+      meterRevision?: string;
+      policyModel?: string;
+    },
   ) {
     const owner = await seedAdmittedSession(db.pool);
     const foreign = await seedAdmittedSession(db.pool);
@@ -214,9 +223,25 @@ suite('native server-owned compact over HTTP', () => {
       harness: {
         binaryPath: binaryPath!,
         libraryPath: process.env.HARNESS_LIBRARY_PATH,
-        maxIterations: 8,
-        maxTokens: 8000,
-        ...(mode === 'idle-limited' ? { compactCompletionCap: 4096 } : {}),
+        maxIterations: automatic?.maxIterations ?? 8,
+        maxTokens: automatic?.maxTokens ?? (automatic ? 20000 : 8000),
+        ...((automatic?.compactCap || mode === 'idle-limited') && {
+          compactCompletionCap: automatic?.compactCap ?? 4096,
+        }),
+        ...(automatic && {
+          autoCompactPolicy: {
+            evidenceId:
+              automatic.knownWindow === false ? 'application-envelope-estimate/1' : 'fixture/1',
+            model: automatic.policyModel ?? 'fixture-transport-only',
+            adapterRevision: 'openai-chat/v1',
+            meterRevision: 'fixture-meter/1',
+            windowTokens: 10000,
+            triggerRatio: 0.8,
+            compactInputTokens: 1000,
+            continuationTokens: 1000,
+            continuationIterations: 2,
+          },
+        }),
         contextPolicy: productionPolicy
           ? loadHarnessServices({
               HARNESS_BINARY: process.execPath,
@@ -225,6 +250,12 @@ suite('native server-owned compact over HTTP', () => {
           : createContextPolicy({
               completionCap: 1024,
               model: 'fixture-transport-only',
+              ...(automatic && {
+                modelWindowTokens: automatic.knownWindow === false ? null : 10000,
+                inputMeter: 'estimated',
+                meterRevision: 'fixture-meter/1',
+                reserveTokens: 100,
+              }),
             }),
         model,
         measure: async (...args: Parameters<typeof measureSdkContext>) => {
@@ -232,6 +263,18 @@ suite('native server-owned compact over HTTP', () => {
             measureEntered.resolve();
             await releaseMeasure.promise;
           }
+          if (automatic && args[0].request_ref !== 'compact-model')
+            return {
+              wire_bytes: 1000,
+              http_bytes: 1000,
+              input_meter: {
+                quality: 'estimated' as const,
+                input_tokens: automatic.inputTokens,
+                meter_revision: automatic.meterRevision ?? 'fixture-meter/1',
+              },
+              output_ceiling: 1024,
+              limit_reason: null,
+            };
           return measureSdkContext(...args);
         },
       },
@@ -375,6 +418,103 @@ suite('native server-owned compact over HTTP', () => {
       await f.close();
     }
   }, 45000);
+
+  for (const { name, options, compacts } of [
+    { name: 'at the trigger threshold', options: { inputTokens: 8000 }, compacts: true },
+    {
+      name: 'using the estimated planning window',
+      options: { inputTokens: 8000, knownWindow: false },
+      compacts: true,
+    },
+    { name: 'below the trigger threshold', options: { inputTokens: 7999 }, compacts: false },
+    {
+      name: 'with insufficient continuation tokens',
+      options: { inputTokens: 8000, maxTokens: 9000, compactCap: 7100 },
+      compacts: false,
+    },
+    {
+      name: 'with insufficient continuation iterations',
+      options: { inputTokens: 8000, maxIterations: 2 },
+      compacts: false,
+    },
+    {
+      name: 'when compact output fills the window',
+      options: { inputTokens: 8000, compactCap: 9900 },
+      compacts: false,
+    },
+    {
+      name: 'with a different meter revision',
+      options: { inputTokens: 8000, meterRevision: 'other/1' },
+      compacts: false,
+    },
+    {
+      name: 'with a different policy model',
+      options: { inputTokens: 8000, policyModel: 'other-model' },
+      compacts: false,
+    },
+  ]) {
+    it(`chooses automatic compact before the model ${name}`, async () => {
+      const f = await fixture('pending-tool', false, options);
+      try {
+        f.releaseCompact.resolve();
+        f.releaseContinuation.resolve();
+        const started = await f.post(
+          '/api/v1/conversations/messages',
+          {
+            conversation_id: f.conversationId,
+            execution: 'harness',
+            authorization_revision: 'delegation/1',
+            raw_text: 'Please read my preferences and answer.',
+          },
+          randomUUID(),
+        );
+        expect(started.status).toBe(200);
+        const runId = started.headers.get('x-run-id');
+        const firstStream = await started.text();
+        let events = frames(firstStream);
+        if (compacts) {
+          const rows = await f.until(
+            async () =>
+              (
+                await db.pool.query<{ state: string; status: string }>(
+                  `SELECT p.state,o.status FROM harness_pauses p
+                   JOIN compact_operations o ON o.pause_id=p.id
+                   WHERE p.run_id=$1 AND p.purpose='automatic_compact'`,
+                  [runId],
+                )
+              ).rows,
+            (rows) =>
+              rows.some(
+                ({ state, status }) =>
+                  state === 'consumed' || state === 'invalidated' || status === 'failed',
+              ),
+          );
+          expect(rows).toEqual([{ state: 'consumed', status: 'published' }]);
+          const path = `/api/v1/conversations/${f.conversationId}/runs/${runId}`;
+          const resumed = await f.get(`${path}/events`);
+          expect(resumed.status).toBe(200);
+          events = frames(await resumed.text());
+          expect(JSON.stringify(f.requests[0])).toContain(
+            'producing a compact, untrusted historical summary',
+          );
+        } else {
+          const operations = await db.pool.query('SELECT id FROM harness_pauses WHERE run_id=$1', [
+            runId,
+          ]);
+          expect(operations.rows).toEqual([]);
+        }
+        expect(events.at(-1)?.type).toBe('thread.completed');
+        expect(f.counts()).toEqual({ compact: compacts ? 1 : 0, task: 2 });
+        const tools = await db.pool.query(
+          "SELECT state FROM tool_invocations WHERE run_id=$1 AND tool_id='get_user_prefs'",
+          [runId],
+        );
+        expect(tools.rows).toEqual([{ state: 'completed' }]);
+      } finally {
+        await f.close();
+      }
+    }, 45000);
+  }
 
   it('continues the same active Run once, retaining sources and reporting candidate failure', async () => {
     const f = await fixture('active');

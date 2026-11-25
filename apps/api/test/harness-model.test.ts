@@ -2,7 +2,7 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { createServer, type Server, type RequestListener, type ServerResponse } from 'node:http';
 import { HARNESS_PROTOCOL_VERSION, httpStatusForError } from '@along/contracts';
 import { createLocalFixtureModelTransport } from './helpers/local-fixture-model.js';
-import { loadHarnessServices } from '../src/agent/runtime/config.js';
+import { loadHarnessServices } from '../src/bootstrap/harness-services.js';
 import { failEnvelope } from '../src/http/errors.js';
 import { ApplicationError } from '../src/platform/errors.js';
 import {

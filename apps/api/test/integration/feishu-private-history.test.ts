@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
-import { commitTerminal } from '../../src/agent/operations/finish.js';
+import { commitTerminal } from '../../src/agent/execution/result/commit.js';
 import { withTransaction } from '../../src/db/transaction.js';
 import {
   lockIdleCompactRequest,
@@ -16,13 +16,12 @@ import {
   conversationMemorySources,
   readMemorySource,
 } from '../../src/features/conversations/history/memory-sources.js';
+import { insertAttempt, insertRun } from '../../src/features/conversations/run/repository.js';
 import {
-  insertAttempt,
   insertMessage,
-  insertRun,
   listHarnessMessageRefs,
   readHarnessMessages,
-} from '../../src/features/conversations/run/repository.js';
+} from '../../src/features/conversations/run/messages.js';
 import { appendEvent } from '../../src/features/conversations/run/run-state.js';
 import { createIntegrationDatabase, databaseUrl, seedAdmittedSession } from './setup.js';
 

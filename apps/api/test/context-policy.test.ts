@@ -1,6 +1,11 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { createContextPolicy, digestContextPolicy } from '../src/features/conversations/public.js';
+import {
+  AutoCompactPolicySchema,
+  type AutoCompactPolicy,
+  createAutoCompactPolicy,
+} from '../src/features/conversations/compact/auto-compact-policy.js';
 
 describe('strict frozen context policy', () => {
   it('keeps completion cap independent of Run budget and freezes unavailable defaults', () => {
@@ -75,5 +80,68 @@ describe('strict frozen context policy', () => {
         model_binding: { ...policy.model_binding, model: 'different' },
       }),
     ).not.toBe(digestContextPolicy(policy));
+  });
+});
+
+const policy = {
+  evidenceId: 'experiment-123',
+  model: 'frozen-model',
+  adapterRevision: 'adapter/1',
+  meterRevision: 'meter/1',
+  windowTokens: 10000,
+  triggerRatio: 0.7,
+  compactInputTokens: 500,
+  continuationTokens: 700,
+  continuationIterations: 2,
+};
+const contextPolicy = {
+  revision: 'r2a/1' as const,
+  completion_cap: 500,
+  model_window_tokens: 10000,
+  input_meter: 'verified' as const,
+  meter_revision: 'meter/1',
+  reserve_tokens: 100,
+  model_binding: { model: 'frozen-model', adapter_revision: 'adapter/1' },
+};
+
+describe('automatic compact policy', () => {
+  test('derives an 80% policy from the selected meter and planning window', () => {
+    const context = { ...contextPolicy, input_meter: 'estimated' as const };
+    const derived = createAutoCompactPolicy(context);
+    expect(derived).toMatchObject({
+      model: 'frozen-model',
+      adapterRevision: 'adapter/1',
+      meterRevision: 'meter/1',
+      windowTokens: 10000,
+      triggerRatio: 0.8,
+    });
+    const fallback = createAutoCompactPolicy({ ...context, model_window_tokens: null });
+    expect(fallback).toMatchObject({
+      evidenceId: 'application-envelope-estimate/1',
+      triggerRatio: 0.8,
+    });
+    expect(
+      createAutoCompactPolicy({ ...context, model_window_tokens: null }, 8192)?.windowTokens,
+    ).toBe(8192);
+    expect(
+      createAutoCompactPolicy({
+        ...context,
+        input_meter: 'unavailable',
+        meter_revision: 'unavailable/1',
+      }),
+    ).toBeNull();
+  });
+
+  test('rejects malformed frozen policies at admission', () => {
+    for (const invalid of [
+      { ...policy, surprise: true },
+      { ...policy, evidenceId: ' ' },
+      { ...policy, triggerRatio: 0 },
+      { ...policy, triggerRatio: 1.01 },
+      { ...policy, compactInputTokens: 0 },
+      { ...policy, continuationTokens: 0 },
+      { ...policy, continuationIterations: 0 },
+    ] satisfies (AutoCompactPolicy & Record<string, unknown>)[])
+      expect(AutoCompactPolicySchema.safeParse(invalid).success).toBe(false);
   });
 });

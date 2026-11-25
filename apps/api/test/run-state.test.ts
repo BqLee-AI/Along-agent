@@ -1,8 +1,8 @@
 import { describe, expect, it, spyOn } from 'bun:test';
 import type { PoolClient } from 'pg';
 import type { LockedRun } from '../src/features/conversations/run/repository.js';
-import { viewOf } from '../src/agent/operations/run-view.js';
-import * as query from '../src/agent/tools/query.js';
+import { viewOf } from '../src/agent/run/run-view.js';
+import * as query from '../src/agent/tools/evidence/run-evidence.js';
 
 const client = { query: async () => ({ rows: [] }) } as unknown as PoolClient;
 const run = {

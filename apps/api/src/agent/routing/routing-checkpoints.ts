@@ -9,8 +9,10 @@ import {
   type RoutingDecisionReply,
 } from '@along/contracts';
 import { stateConflict } from '../../platform/errors.js';
+import { canonicalJson } from '../../platform/canonical-json.js';
+import { appendCheckpoint } from '../../features/conversations/public.js';
 import { digestInvocationArgs } from '../tools/invocations/invocations.js';
-import type { RunContext } from '../runtime/contracts.js';
+import type { RunContext } from '../execution/contracts.js';
 
 export type RoutingBinding = Pick<RunContext, 'ownerId' | 'runId' | 'attemptId' | 'userMessageId'>;
 export interface RoutingRecord<T> {
@@ -58,24 +60,7 @@ export function routingHash(text: string): string {
   return createHash('sha256').update(text, 'utf8').digest('hex');
 }
 export function routingIdentity(value: unknown): string {
-  if (
-    value === null ||
-    typeof value === 'string' ||
-    typeof value === 'boolean' ||
-    (typeof value === 'number' && Number.isFinite(value))
-  )
-    return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(routingIdentity).join(',')}]`;
-  if (
-    typeof value === 'object' &&
-    value !== null &&
-    Object.getPrototypeOf(value) === Object.prototype
-  )
-    return `{${Object.entries(value)
-      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-      .map(([key, entry]) => `${JSON.stringify(key)}:${routingIdentity(entry)}`)
-      .join(',')}}`;
-  throw stateConflict('routing identity requires finite JSON');
+  return canonicalJson(value, 'routing identity requires finite JSON');
 }
 function bindingOf(binding: RoutingBinding) {
   if (!binding.userMessageId) throw stateConflict('routing requires a user message');
@@ -126,19 +111,13 @@ async function appendRoutingRecord<T>(
   payload: T,
 ): Promise<RoutingRecord<T>> {
   const id = randomUUID();
-  const inserted = await client.query(
-    `INSERT INTO run_checkpoints(id,owner_id,attempt_id,seq,kind,payload,stream_protocol_version)
-     SELECT $1,$2,$3,COALESCE(max(seq),0)::int+1,$4,$5::jsonb,$6 FROM run_checkpoints WHERE attempt_id=$3`,
-    [
-      id,
-      binding.ownerId,
-      binding.attemptId,
-      kind,
-      JSON.stringify(payload),
-      'harness/v5', // r2b/1 checkpoint storage schema; independent of native wire.
-    ],
-  );
-  if (inserted.rowCount !== 1) throw new Error('routing checkpoint was not persisted');
+  await appendCheckpoint(client, {
+    ...binding,
+    id,
+    kind,
+    payloadJson: JSON.stringify(payload),
+    protocol: 'harness/v5', // r2b/1 checkpoint storage schema.
+  });
   return { id, payload };
 }
 export async function insertRoutingPolicy(

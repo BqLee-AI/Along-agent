@@ -4,6 +4,7 @@ import type { HarnessSnapshot, HarnessPauseSnapshot, HarnessR3Snapshot } from '@
 import { stateConflict } from '../../../platform/errors.js';
 import type { RunContext } from '../contracts.js';
 import { decodeRunSnapshot, encodeRunSnapshot } from './snapshot-storage.js';
+import { appendCheckpoint } from './checkpoints.js';
 
 type AttemptBinding = Pick<RunContext, 'ownerId' | 'conversationId' | 'runId' | 'attemptId'>;
 type RunBinding = Omit<AttemptBinding, 'attemptId'>;
@@ -73,19 +74,15 @@ export async function writeHarnessSnapshotWithinTransaction(
   snapshot: HarnessSnapshot | HarnessPauseSnapshot | HarnessR3Snapshot,
   protocol: string,
 ): Promise<string> {
-  const seq = (
-    await client.query<{ seq: number }>(
-      'SELECT COALESCE(max(seq),0)::int+1 AS seq FROM run_checkpoints WHERE attempt_id=$1',
-      [binding.attemptId],
-    )
-  ).rows[0]?.seq;
   const id = randomUUID();
   const payload = await encodeRunSnapshot(client, { ...binding, kind: 'checkpoint', id }, snapshot);
-  await client.query(
-    `INSERT INTO run_checkpoints(id,owner_id,attempt_id,seq,kind,payload,stream_protocol_version)
-          VALUES($1,$2,$3,$4,'harness_snapshot',$5::jsonb,$6)`,
-    [id, binding.ownerId, binding.attemptId, seq, payload, protocol],
-  );
+  await appendCheckpoint(client, {
+    ...binding,
+    id,
+    kind: 'harness_snapshot',
+    payloadJson: payload,
+    protocol,
+  });
   return id;
 }
 

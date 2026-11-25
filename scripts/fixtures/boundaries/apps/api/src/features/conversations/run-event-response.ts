@@ -1,4 +1,4 @@
-import type { ConversationDeps } from '../../agent/runtime/contracts.js';
+import type { ConversationDeps } from '../../agent/execution/contracts.js';
 
-export { run } from '../../agent/operations/public.js';
+export { run } from '../../agent/run/public.js';
 export type { ConversationDeps };

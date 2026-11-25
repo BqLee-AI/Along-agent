@@ -4,12 +4,12 @@ import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createContextPolicy } from '../../src/features/conversations/public.js';
-import type { HarnessServices } from '../../src/agent/runtime/contracts.js';
-import { startConversationRun } from '../../src/agent/operations/start.js';
+import type { HarnessServices } from '../../src/agent/execution/contracts.js';
+import { startConversationRun } from '../../src/agent/run/admit-message.js';
 import { loadTimeContext } from '../../src/features/time/context.js';
 import { invokeTool, reserveToolInvocation } from '../../src/agent/tools/gateway.js';
 import { configureWorkspaceRegistry } from '../../src/features/workspaces/public.js';
-import { readRunGoalDocumentEvidence } from '../../src/agent/tools/query.js';
+import { readRunGoalDocumentEvidence } from '../../src/agent/tools/evidence/run-evidence.js';
 import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import {
   createIntegrationDatabase,

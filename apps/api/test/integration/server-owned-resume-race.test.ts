@@ -9,13 +9,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { withTransaction } from '../../src/db/transaction.js';
-import { confirmDocumentApproval } from '../../src/agent/operations/document-decision.js';
+import { confirmDocumentApproval } from '../../src/agent/run/approvals/document-decision.js';
 import { readDocumentApprovalReceipt } from '../../src/features/approvals/decision.js';
 import { configureWorkspaceRegistry } from '../../src/features/workspaces/public.js';
 import { createContextPolicy } from '../../src/features/conversations/public.js';
 import { createLocalFixtureModelTransport } from '../helpers/local-fixture-model.js';
-import { createRunDriver } from '../../src/agent/runtime/run-driver.js';
-import { startConversationRun } from '../../src/agent/operations/start.js';
+import { createRunDriver } from '../../src/agent/execution/driver/driver.js';
+import { startConversationRun } from '../../src/agent/run/admit-message.js';
 import { loadTimeContext } from '../../src/features/time/context.js';
 import { listen, sendModelSse } from '../helpers/harness-consumer.js';
 import {
@@ -269,8 +269,8 @@ maybe('server-owned approval resume across processes', () => {
         import { once } from 'node:events';
         import { createContextPolicy } from './src/features/conversations/public.ts';
         import { createLocalFixtureModelTransport } from './test/helpers/local-fixture-model.ts';
-        import { createRunDriver } from './src/agent/runtime/run-driver.ts';
-        import { resumeConversationRun } from './src/agent/operations/run.ts';
+        import { createRunDriver } from './src/agent/execution/driver/driver.ts';
+        import { resumeConversationRun } from './src/agent/run/run-actions.ts';
         import { loadTimeContext } from './src/features/time/context.ts';
         import { configureWorkspaceRegistry } from './src/features/workspaces/registry/service.ts';
         import { controlledModelDeps } from './test/helpers/model-selection.ts';

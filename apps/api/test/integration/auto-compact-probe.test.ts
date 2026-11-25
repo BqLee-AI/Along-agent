@@ -3,9 +3,9 @@ import { randomUUID } from 'node:crypto';
 import { HARNESS_CONTEXT_PROTOCOL_VERSION, type HarnessRequest } from '@along/contracts';
 import { withTransaction } from '../../src/db/transaction.js';
 import { createContextPolicy } from '../../src/features/conversations/public.js';
-import { createHarnessSession } from '../../src/agent/runtime/attempt-session.js';
+import { createHarnessSession } from '../../src/agent/execution/attempt/session.js';
 import { freezeR3Context } from '../../src/features/conversations/compact/r3-context.js';
-import { startConversationRun } from '../../src/agent/operations/start.js';
+import { startConversationRun } from '../../src/agent/run/admit-message.js';
 import { loadTimeContext } from '../../src/features/time/context.js';
 import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import {
@@ -62,7 +62,6 @@ const frame = <T extends HarnessRequest['type']>(
       configured?: boolean;
       verified?: boolean;
       previousCoverage?: boolean;
-      inputTokens?: number;
     } = {},
   ) {
     const actor = await seedAdmittedSession(db.pool);
@@ -100,7 +99,7 @@ const frame = <T extends HarnessRequest['type']>(
             input_meter: {
               quality:
                 options.verified === false ? ('unavailable' as const) : ('verified' as const),
-              input_tokens: options.verified === false ? null : (options.inputTokens ?? 8000),
+              input_tokens: options.verified === false ? null : 8000,
               meter_revision: 'fixture-meter/1',
             },
             output_ceiling: 512,
@@ -197,7 +196,7 @@ const frame = <T extends HarnessRequest['type']>(
         }),
       );
     const probe = (final = false) =>
-      session.handleRequest(frame('pause_probe', final ? { after_measurement: true } : {}));
+      session.handleRequest(frame('pause_probe', final ? { auto_compact: true } : {}));
     const operations = async () =>
       (
         await db.pool.query(
@@ -219,7 +218,7 @@ const frame = <T extends HarnessRequest['type']>(
     };
   }
 
-  it('creates one durable pause at the 80% threshold and revokes the model permit', async () => {
+  it('accepts a bound native proposal once and revokes the model permit', async () => {
     const f = await fixture();
     try {
       expect(await f.probe()).toEqual({ pending: false });
@@ -245,12 +244,12 @@ const frame = <T extends HarnessRequest['type']>(
     }
   });
 
-  it('does not compact just below the 80% threshold', async () => {
-    const f = await fixture({ inputTokens: 7999 });
+  it('does not turn a fresh measurement into an automatic pause without a native proposal', async () => {
+    const f = await fixture();
     try {
       expect(await f.probe()).toEqual({ pending: false });
       await f.measure();
-      expect(await f.probe(true)).toEqual({ pending: false });
+      expect(await f.probe()).toEqual({ pending: false });
       expect(await f.operations()).toEqual([]);
       expect(f.counts()).toEqual({ modelCalls: 0, measurementCalls: 1 });
     } finally {
@@ -258,7 +257,7 @@ const frame = <T extends HarnessRequest['type']>(
     }
   });
 
-  it('does not trigger without a final marker, a fresh measurement, or a prior safe-point permit', async () => {
+  it('does not register a proposal without fresh measurement and a prior safe-point permit', async () => {
     const f = await fixture();
     try {
       await f.measure();

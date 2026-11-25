@@ -7,9 +7,9 @@ import type { Pool, PoolClient } from 'pg';
 import type { ThreadEvent } from '@along/stream-protocol';
 import { createContextPolicy } from '../../src/features/conversations/public.js';
 import { createLocalFixtureModelTransport } from '../helpers/local-fixture-model.js';
-import { executeRun } from '../../src/agent/operations/execute.js';
-import { startConversationRun } from '../../src/agent/operations/start.js';
-import { listRunEvents } from '../../src/features/conversations/run/repository.js';
+import { executeRun } from '../../src/agent/run/execute-turn.js';
+import { startConversationRun } from '../../src/agent/run/admit-message.js';
+import { listRunEvents } from '../../src/features/conversations/run/checkpoints.js';
 import { loadTimeContext } from '../../src/features/time/context.js';
 import { listen, sendModelSse } from '../helpers/harness-consumer.js';
 import {

@@ -27,7 +27,7 @@ Microsoft Learn 公开资料搜索由普通对话的现有模型按需使用，�
 
 | 序号 | 文档                                                                     | 作用                                                                                                                             |
 | ---- | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
-| 01   | [技术栈与仓库结构](design/01-tech-stack-and-repo-structure.md)           | TS/Bun 依赖方向、Elysia 请求分发、API 功能与生命周期、Web 组件及 RSC 边界                                                        |
+| 01   | [技术栈与仓库结构](design/01-tech-stack-and-repo-structure.md)           | 技术栈、Run 执行与持久事实归属、业务模块目录和 Web 职责边界                                                                      |
 | 02   | [模块化单体与拆分触发](design/02-modular-monolith-and-split-triggers.md) | 模块和运行职责、确认/工具结果的限定原子事务、拆分判据与 D1 边界                                                                  |
 | 03   | [v0 垂直切片](design/03-v0-vertical-slice.md)                            | 简报→卡片→对话→按钮确认→调度→站内通知详情投影→活动账；真实取消回执与七步证据边界                                                 |
 | 04   | [五缝契约](design/04-five-seams-contract.md)                             | 稳定工具调用、原子接受结果、只追加审计与非事务未知边界；其余能力端口                                                             |
@@ -91,7 +91,7 @@ R2-B 的完整目标及多轮自主查询边界见[design/19 §4、§6](design/1
 | 6    | [对话运行与预算](agent/05-chat-runtime-flow-and-budget.md)  | Run/attempt/调用边界、native 累计预算、同 Run 批准恢复与取消       |
 | 7    | [评测夹具](agent/06-eval-fixtures.md)                       | 50 条时间表达集、200 卡片集版本化、指标口径                        |
 
-## 六、实施与演进规划（10 篇）
+## 六、实施与演进规划（11 篇）
 
 规划保留各自基线、状态与取舍；历史计划或 Proposed 建议不代表能力已经上线。
 
@@ -107,6 +107,7 @@ R2-B 的完整目标及多轮自主查询边界见[design/19 §4、§6](design/1
 | 8    | [持续对话与工作区](plans/desktop-experience-plan.md)                           | 全应用双栏工作台、聊天与工作区切换、功能分层与验收范围                                                   |
 | 9    | [Hono API 与后端职责重构计划](plans/hono-backend-migration-plan.md)            | Hono 路线的历史设计依据；目标框架与实施路线由 Elysia 全 API 模块化方案取代                               |
 | 10   | [Elysia API 与全后端模块化重构方案](plans/elysia-api-modular-refactor-plan.md) | Proposed：替换 Hono，重划全 API 功能、执行与事务边界，接入 Eden，并保全 HTTP/SSE、角色与历史合同         |
+| 11   | [API 内部结构重构计划](plans/api-internal-refactoring-plan.md)                 | 拟议。全 API 目标目录、业务链路实施顺序、文件归属、行为验收与仓颉迁移。                                  |
 
 ## 七、操作指南（1 篇）
 

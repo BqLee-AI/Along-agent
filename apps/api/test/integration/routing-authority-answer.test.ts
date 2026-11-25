@@ -2,12 +2,12 @@ import { configureTestModel, controlledModelDeps } from '../helpers/model-select
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { HARNESS_R3_PROTOCOL_VERSION } from '@along/contracts';
-import type { ConversationDeps } from '../../src/agent/runtime/contracts.js';
-import type { HarnessServices } from '../../src/agent/runtime/contracts.js';
+import type { ConversationDeps } from '../../src/agent/execution/contracts.js';
+import type { HarnessServices } from '../../src/agent/execution/contracts.js';
 import { createContextPolicy } from '../../src/features/conversations/public.js';
-import { createHarnessSession } from '../../src/agent/runtime/attempt-session.js';
-import { startConversationRun } from '../../src/agent/operations/start.js';
-import { listRunEvents } from '../../src/features/conversations/run/repository.js';
+import { createHarnessSession } from '../../src/agent/execution/attempt/session.js';
+import { startConversationRun } from '../../src/agent/run/admit-message.js';
+import { listRunEvents } from '../../src/features/conversations/run/checkpoints.js';
 import { seedAdmittedSession as seedSession } from './setup.js';
 import { loadTimeContext } from '../../src/features/time/context.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';

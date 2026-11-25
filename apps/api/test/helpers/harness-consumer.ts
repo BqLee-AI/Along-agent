@@ -19,21 +19,21 @@ import { ApplicationError } from '../../src/platform/errors.js';
 import { confirmApproval, rejectApproval } from '../../src/features/approvals/reminder/confirm.js';
 import type { ConfirmResult, RejectResult } from '../../src/features/approvals/reminder/confirm.js';
 import { getApprovalDetail } from '../../src/features/approvals/reminder/service.js';
-import { executeRun } from '../../src/agent/operations/execute.js';
-import { getConversationDetail } from '../../src/features/conversations/lifecycle/service.js';
+import { executeRun } from '../../src/agent/run/execute-turn.js';
+import { getConversationDetail } from '../../src/features/conversations/history/conversation-detail.js';
 import {
   cancelConversationRun,
   getRunView,
   resumeConversationRun,
-} from '../../src/agent/operations/run.js';
-import { startConversationRun } from '../../src/agent/operations/start.js';
+} from '../../src/agent/run/run-actions.js';
+import { startConversationRun } from '../../src/agent/run/admit-message.js';
 import type {
   ConversationDeps,
   RunContext,
   StartResult,
-} from '../../src/agent/runtime/contracts.js';
+} from '../../src/agent/execution/contracts.js';
 import { createLocalFixtureModelTransport } from './local-fixture-model.js';
-import type { HarnessServices } from '../../src/agent/runtime/contracts.js';
+import type { HarnessServices } from '../../src/agent/execution/contracts.js';
 import { createContextPolicy } from '../../src/features/conversations/public.js';
 import { measureSdkContext } from '../../src/features/model-providers/public.js';
 import { configureTestModel } from './model-selection.js';

@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createContextPolicy } from '../../src/features/conversations/public.js';
-import { startConversationRun } from '../../src/agent/operations/start.js';
+import { startConversationRun } from '../../src/agent/run/admit-message.js';
 import { loadTimeContext } from '../../src/features/time/context.js';
 import { invokeTool, reserveToolInvocation } from '../../src/agent/tools/gateway.js';
 import { configureWorkspaceRegistry } from '../../src/features/workspaces/public.js';

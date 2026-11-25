@@ -9,11 +9,11 @@ import {
   ensureRunContextPolicy,
   readRunContextPolicy,
 } from '../../src/features/conversations/public.js';
-import { readHarnessMessages } from '../../src/features/conversations/run/repository.js';
-import { getRunView } from '../../src/agent/operations/run.js';
-import type { ConversationDeps } from '../../src/agent/runtime/contracts.js';
-import type { HarnessServices } from '../../src/agent/runtime/contracts.js';
-import { startConversationRun } from '../../src/agent/operations/start.js';
+import { readHarnessMessages } from '../../src/features/conversations/run/messages.js';
+import { getRunView } from '../../src/agent/run/run-actions.js';
+import type { ConversationDeps } from '../../src/agent/execution/contracts.js';
+import type { HarnessServices } from '../../src/agent/execution/contracts.js';
+import { startConversationRun } from '../../src/agent/run/admit-message.js';
 import { measureSdkContext } from '../../src/features/model-providers/public.js';
 import {
   addModel,

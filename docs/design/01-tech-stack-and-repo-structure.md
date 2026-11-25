@@ -85,16 +85,17 @@ Along-agent/
 
 [Required] API 按功能组织 MVC：Elysia 控制器直接声明路由与 Zod 输入输出契约，并调用具体用例；Service 接收明确参数，持有业务判断、事务与锁，不接收框架 Context；Model 是请求与响应契约，不是数据库实体。JSON、Cookie 和 SSE 编码留在 HTTP 边界。不为目录对称增加空壳层。
 
-`agent/operations/` 编排接纳、暂停、继续与终结；`agent/runtime/` 持有跨请求 Run 的 driver、执行权和单 attempt 会话；`agent/harness/` 负责仓颉进程与帧协议。会话历史和事务内持久化不归 driver。
+`agent/run/` 编排消息接纳、暂停、继续、取消和批准恢复。`agent/compact/` 编排压缩及其后继执行。`agent/execution/driver/` 持有跨请求执行权，`attempt/` 管单次执行与帧分派，`result/` 负责目标证据、披露和终态组装。`agent/harness/` 负责仓颉进程与帧协议。`features/conversations/` 保存会话历史，按 Run 状态、消息、checkpoint 和幂等账本提供事务内操作。
 
 其他 API 功能按能力和生命周期组织：
 
 - `identity/account/` 负责账户用例及 HTTP；`identity/session/` 管认证与会话，`security/` 管密钥、资格凭据与限流，`delivery/` 管邮件处理及传输，`profile/` 管偏好和资格投影。
-- `model-providers/http/` 接入请求，`configuration/` 管配置及密钥，`outbound/` 管网络限制和连接探测，`runtime/` 管 Run 绑定和模型传输。
+- `model-providers/http/` 接入请求，`configuration/` 管配置及密钥，`outbound/` 管网络限制和连接探测。`run-binding.ts` 持久化 Run 冻结的模型选择，`inference/` 管计量和流式模型传输。纪要摘要使用当前默认模型。
 - `workspaces/registry/` 是工作区与 grant 权威；`read/`、`write/` 分别拥有读取及受控写入，`http/` 和 `mcp/` 是入口。
-- `approvals/reminder/` 与 `approvals/document/` 分别持有提醒批准和文档批准；共享决议和 HTTP 装配留在 approvals 根目录。`tasks/cancellation/` 拥有取消用例及存取，`tasks/scheduler/` 拥有调度生命周期。
+- `approvals/reminder/` 与 `approvals/document/` 分别持有提醒批准和文档批准；共享决议和 HTTP 装配留在 approvals 根目录。`tasks/read/` 聚合任务活动、简报和工具读模型，`tasks/cancellation/` 拥有取消用例及存取，`tasks/scheduler/` 拥有调度生命周期。
+- `office-connectors/feishu/` 按连接、Docx grant 与读取、观察凭据分组。
 - `agent/tools/` 按工具能力归置；`invocations/` 管调用账、效果许可和接受结果，文档目标判断复用调用者持有的 Run 锁。
-- `memory/recall/` 管召回资格、语义检索及回执；记忆写入服务留在根目录。简报、通知和时间各自只有一个聚合生命周期，控制器、服务和存取保持就近，不建立空子目录。
+- `memory/recall/` 管召回资格、语义检索及回执；`memory/records/` 持有 revision 写入，记忆用例留在功能根目录。简报、通知和时间各自只有一个聚合生命周期，控制器、服务和存取保持就近，不建立空子目录。
 
 `http/app.ts` 组装 Elysia 功能控制器；`access.ts` 和 `request/` 保持认证、端点识别、CSRF、连接资格与有限 body 解析的顺序。未匹配交给 `routing/fallback-controller.ts`，不执行另一套业务路由。`transport/` 负责 Node socket 与 Web Request/Response 桥接、连接收尾和 SSE 背压；`errors.ts` 映射公共错误。Next.js 继续提供同源代理，JSON 网关通过 Eden 从 API 声明推导类型，SSE 继续使用独立事件协议。
 

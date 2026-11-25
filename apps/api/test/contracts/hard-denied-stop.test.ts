@@ -11,12 +11,12 @@ import {
 } from '@along/contracts';
 import { ThreadEventSchema, type ThreadEvent } from '@along/stream-protocol';
 import { handleRequest } from '../helpers/http-app.js';
-import { executeRun } from '../../src/agent/operations/execute.js';
-import { startConversationRun } from '../../src/agent/operations/start.js';
-import type { ConversationDeps } from '../../src/agent/runtime/contracts.js';
+import { executeRun } from '../../src/agent/run/execute-turn.js';
+import { startConversationRun } from '../../src/agent/run/admit-message.js';
+import type { ConversationDeps } from '../../src/agent/execution/contracts.js';
 import { createContextPolicy } from '../../src/features/conversations/public.js';
 import { createLocalFixtureModelTransport } from '../helpers/local-fixture-model.js';
-import type { HarnessServices } from '../../src/agent/runtime/contracts.js';
+import type { HarnessServices } from '../../src/agent/execution/contracts.js';
 import { seedAdmittedSession as seedSession } from '../integration/setup.js';
 import { invokeTool, reserveToolInvocation } from '../../src/agent/tools/gateway.js';
 import type { ToolContext } from '../../src/agent/tools/contracts.js';

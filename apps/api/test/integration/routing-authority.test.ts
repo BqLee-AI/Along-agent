@@ -18,19 +18,16 @@ import type {
   ConversationDeps,
   RunContext,
   StartResult,
-} from '../../src/agent/runtime/contracts.js';
-import type { HarnessServices } from '../../src/agent/runtime/contracts.js';
+} from '../../src/agent/execution/contracts.js';
+import type { HarnessServices } from '../../src/agent/execution/contracts.js';
 import { createContextPolicy } from '../../src/features/conversations/public.js';
-import { cancelConversationRun, getRunView } from '../../src/agent/operations/run.js';
-import {
-  requestConversationPause,
-  continueConversationPause,
-} from '../../src/agent/operations/pause.js';
+import { cancelConversationRun, getRunView } from '../../src/agent/run/run-actions.js';
+import { requestConversationPause, continueConversationPause } from '../../src/agent/run/pause.js';
 import {
   createHarnessSession,
   type HarnessSession,
-} from '../../src/agent/runtime/attempt-session.js';
-import { startConversationRun } from '../../src/agent/operations/start.js';
+} from '../../src/agent/execution/attempt/session.js';
+import { startConversationRun } from '../../src/agent/run/admit-message.js';
 import {
   insertRoutingPolicy,
   readRoutingPolicy,
@@ -41,8 +38,8 @@ import {
 import {
   listRunEvents,
   listConversationEvents,
-  lockRun,
-} from '../../src/features/conversations/run/repository.js';
+} from '../../src/features/conversations/run/checkpoints.js';
+import { lockRun } from '../../src/features/conversations/run/repository.js';
 import {
   createRoutingRuntime,
   type RoutingRuntime,

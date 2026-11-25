@@ -7,10 +7,25 @@ import std.collection.*
 import stdx.encoding.json.*
 
 extend Harness {
+    func startContext(start: JsonObject): JsonObject {
+        let supplied = field(start, "r3_context")
+        if (!isNull(supplied) && !supplied.asObject().containsKey("compact_summary")) { return supplied.asObject() }
+        require(!pipe.measureOnly)
+        let snapshot = field(start, "snapshot").asObject()
+        let previous = field(snapshot, "context").asObject()
+        if (isNull(supplied)) { return previous }
+        let patch = supplied.asObject()
+        keys(patch, ["compact_summary"])
+        require(isNull(field(snapshot, "waiting")) && isNull(field(start, "approval")))
+        return replaceCompactSummary(previous, field(patch, "compact_summary").asObject())
+    }
+
     func bootstrapInput(start: JsonObject, trusted: JsonValue): JsonArray {
         var input = JsonArray()
         if (pipe.protocol == "harness/v8") {
-            contextState.r3Context = field(start, "r3_context").asObject()
+            contextState.r3Context = if (start.containsKey("compact_preview")) {
+                compactPreviewContext(start)
+            } else { startContext(start) }
             r3Check(contextState.r3Context)
             contextState.originalManifest = field(contextState.r3Context, "manifest").asObject()
             let summary = field(contextState.r3Context, "summary")
@@ -162,6 +177,12 @@ extend Harness {
             budgetState.iterations = integer(field(u, "iterations"), 0)
             budgetState.tokensKnown = !isNull(field(u, "tokens"))
             if (budgetState.tokensKnown) { budgetState.knownTokens = integer(field(u, "tokens"), 0) }
+            if (start.containsKey("compact_preview")) {
+                let preview = field(start, "compact_preview").asObject()
+                require(budgetState.iterations < SAFE_INTEGER)
+                budgetState.iterations++
+                budgetState.acceptUsage(obj([("total_tokens", field(preview, "used_tokens"))]), budgetState.tokensKnown)
+            }
             waiting = field(s, "waiting")
             if (version == 3 || version == 4) {
                 require((version == 3 && pipe.protocol == "harness/v7" && isNull(waiting)) || (version == 4 && pipe.protocol == "harness/v8"))

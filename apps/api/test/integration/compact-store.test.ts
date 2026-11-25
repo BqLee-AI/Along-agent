@@ -12,7 +12,7 @@ import {
   freezeR3Context,
   freezeR3ControlContext,
 } from '../../src/features/conversations/compact/r3-context.js';
-import { RunOwnership } from '../../src/agent/runtime/run-ownership.js';
+import { RunOwnership } from '../../src/agent/execution/driver/ownership.js';
 import {
   admitTestUser,
   createIntegrationDatabase,

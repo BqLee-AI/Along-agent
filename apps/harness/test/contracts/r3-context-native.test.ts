@@ -973,7 +973,7 @@ for (const pendingAfterMeasure of [false, true])
     const requests = await run({ ...base, protocol: 'harness/v8', r3_context: context }, (r) => {
       if (r.type === 'pause_probe')
         return {
-          value: { pending: measured && pendingAfterMeasure && r.after_measurement === true },
+          value: { pending: measured && pendingAfterMeasure },
         };
       if (r.type === 'pause_point') return { value: { paused: true } };
       if (r.type === 'measure_context') {
@@ -1025,7 +1025,7 @@ for (const pendingAfterMeasure of [false, true])
           ],
     );
     const probes = requests.filter((r) => r.type === 'pause_probe');
-    expect(probes.map((r) => r.after_measurement)).toEqual([undefined, undefined, true]);
+    expect(probes.every((r) => r.auto_compact === undefined)).toBe(true);
     if (pendingAfterMeasure) {
       const point = requests.find((r) => r.type === 'pause_point');
       expect(point?.context).toMatchObject({ version: 4, usage: { iterations: 0, tokens: 0 } });

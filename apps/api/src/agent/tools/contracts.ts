@@ -9,7 +9,7 @@ import type {
   ElapsedTimeBasis,
   HarnessMemorySourceSchema,
 } from '@along/contracts';
-import type { RunOwnership } from '../runtime/run-ownership.js';
+import type { RunOwnership } from '../execution/driver/ownership.js';
 import type { z } from 'zod';
 
 export const BUSINESS_TOOL_IDS = [

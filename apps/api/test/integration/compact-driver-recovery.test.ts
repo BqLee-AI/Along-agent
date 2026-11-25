@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
-import { cancelConversationRun } from '../../src/agent/operations/run.js';
-import { getCompactReceipt } from '../../src/agent/operations/compact.js';
-import { createRunDriver } from '../../src/agent/runtime/run-driver.js';
+import { cancelConversationRun } from '../../src/agent/run/run-actions.js';
+import { getCompactReceipt } from '../../src/agent/compact/runtime-compact.js';
+import { createRunDriver } from '../../src/agent/execution/driver/driver.js';
 import { loadTimeContext } from '../../src/features/time/context.js';
 import {
   admitTestUser,

@@ -10,7 +10,7 @@ import {
   type DocumentReadEvidence,
 } from '../../../features/approvals/public.js';
 import type { ToolContext } from '../contracts.js';
-import { readRunDocumentEvidence } from '../query.js';
+import { readRunDocumentEvidence } from '../evidence/run-evidence.js';
 import { parseResult } from '../result-schema.js';
 import { hydrateWorkspaceReadResult } from './accepted-result.js';
 

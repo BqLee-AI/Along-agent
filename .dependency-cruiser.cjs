@@ -33,8 +33,8 @@ const featureAdapters = exactPaths([
   'apps/api/src/features/tasks/controller.ts',
   'apps/api/src/features/workspaces/http/controller.ts',
 ]);
-const agentOperations = 'apps/api/src/agent/operations/public.ts';
-const agentRuntimeContracts = 'apps/api/src/agent/runtime/contracts.ts';
+const agentOperations = 'apps/api/src/agent/run/public.ts';
+const agentRuntimeContracts = 'apps/api/src/agent/execution/contracts.ts';
 
 /** @type {import('dependency-cruiser').IConfiguration} */
 module.exports = {
@@ -134,7 +134,7 @@ module.exports = {
       to: {
         path: '^apps/api/src/agent/',
         // Existing document evidence read. This exception is specific to this adapter and file.
-        pathNot: exactPaths([agentOperations, 'apps/api/src/agent/tools/query.ts']),
+        pathNot: exactPaths([agentOperations, 'apps/api/src/agent/tools/evidence/run-evidence.ts']),
       },
     },
     {

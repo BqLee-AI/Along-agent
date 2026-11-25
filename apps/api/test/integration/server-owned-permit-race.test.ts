@@ -3,8 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { RunOwnership } from '../../src/agent/runtime/run-ownership.js';
-import { cancelConversationRun } from '../../src/agent/operations/run.js';
+import { RunOwnership } from '../../src/agent/execution/driver/ownership.js';
+import { cancelConversationRun } from '../../src/agent/run/run-actions.js';
 import {
   executeNonTransactionalInvocation,
   reserveInvocation,

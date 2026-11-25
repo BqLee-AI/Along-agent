@@ -10,7 +10,7 @@ import { withTransaction } from '../../src/db/transaction.js';
 import {
   confirmDocumentApproval,
   rejectDocumentApproval,
-} from '../../src/agent/operations/document-decision.js';
+} from '../../src/agent/run/approvals/document-decision.js';
 import {
   bindDocumentApprovalApply,
   createDocumentApproval,
@@ -35,11 +35,11 @@ import {
   executeReadOnlyInvocation,
   reserveInvocation,
 } from '../../src/agent/tools/invocations/invocations.js';
-import { readRunDocumentEvidence } from '../../src/agent/tools/query.js';
+import { readRunDocumentEvidence } from '../../src/agent/tools/evidence/run-evidence.js';
 import { seedAdmittedSession as seedSession } from './setup.js';
-import { startConversationRun } from '../../src/agent/operations/start.js';
+import { startConversationRun } from '../../src/agent/run/admit-message.js';
 import { createContextPolicy } from '../../src/features/conversations/public.js';
-import type { HarnessServices } from '../../src/agent/runtime/contracts.js';
+import type { HarnessServices } from '../../src/agent/execution/contracts.js';
 import { loadTimeContext } from '../../src/features/time/context.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';

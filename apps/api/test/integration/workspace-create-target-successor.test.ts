@@ -6,18 +6,18 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createContextPolicy } from '../../src/features/conversations/public.js';
-import type { HarnessServices } from '../../src/agent/runtime/contracts.js';
+import type { HarnessServices } from '../../src/agent/execution/contracts.js';
 import {
   validateGoalDocuments,
   validateGoalResult,
-} from '../../src/agent/operations/goal-result.js';
-import { startConversationRun } from '../../src/agent/operations/start.js';
+} from '../../src/agent/execution/result/goal-result.js';
+import { startConversationRun } from '../../src/agent/run/admit-message.js';
 import { loadTimeContext } from '../../src/features/time/context.js';
 import { invokeTool, reserveToolInvocation } from '../../src/agent/tools/gateway.js';
 import {
   readRunGoalDocumentEvidence,
   validateCreateResolutionEvidence,
-} from '../../src/agent/tools/query.js';
+} from '../../src/agent/tools/evidence/run-evidence.js';
 import { configureWorkspaceRegistry } from '../../src/features/workspaces/public.js';
 import {
   createIntegrationDatabase,

@@ -3,15 +3,15 @@ import { randomUUID } from 'node:crypto';
 import { setImmediate } from 'node:timers/promises';
 import { Pool } from 'pg';
 import { HARNESS_PROTOCOL_VERSION } from '@along/contracts';
-import { cancelConversationRun, getRunView } from '../../src/agent/operations/run.js';
-import { createHarnessSession } from '../../src/agent/runtime/attempt-session.js';
-import { loadHarnessSession } from '../../src/agent/runtime/attempt-load.js';
-import { createModelHandlers } from '../../src/agent/runtime/attempt-model.js';
-import type { AttemptState } from '../../src/agent/runtime/attempt-state.js';
-import type { ConversationDeps, RunContext } from '../../src/agent/runtime/contracts.js';
-import { RunOwnership } from '../../src/agent/runtime/run-ownership.js';
+import { cancelConversationRun, getRunView } from '../../src/agent/run/run-actions.js';
+import { createHarnessSession } from '../../src/agent/execution/attempt/session.js';
+import { loadHarnessSession } from '../../src/agent/execution/attempt/load.js';
+import { createModelHandlers } from '../../src/agent/execution/attempt/model.js';
+import type { AttemptState } from '../../src/agent/execution/attempt/state.js';
+import type { ConversationDeps, RunContext } from '../../src/agent/execution/contracts.js';
+import { RunOwnership } from '../../src/agent/execution/driver/ownership.js';
 import { withTransaction } from '../../src/db/transaction.js';
-import { startConversationRun } from '../../src/agent/operations/start.js';
+import { startConversationRun } from '../../src/agent/run/admit-message.js';
 import { invokeTool, reserveToolInvocation } from '../../src/agent/tools/gateway.js';
 import {
   createContextPolicy,
@@ -268,7 +268,7 @@ run(
           modelToolCount: 0,
           nextPermit: true,
           lastModelInputTokens: null,
-          lastMeasurement: null,
+          measuredForCompact: false,
           modelStream: null,
         };
         const session = new AbortController();

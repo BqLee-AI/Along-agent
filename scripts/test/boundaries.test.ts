@@ -278,17 +278,17 @@ describe.concurrent('D1 dependency boundaries (real depcruise)', () => {
       ['features/identity/controller.ts', 'http/auth.ts', 'api-business-no-http-implementation'],
       [
         'features/identity/controller.ts',
-        'agent/runtime/driver.ts',
+        'agent/execution/driver/driver.ts',
         'feature-no-agent-implementation',
       ],
       [
         'features/conversations/controller.ts',
-        'agent/tools/query.ts',
+        'agent/tools/evidence/run-evidence.ts',
         'conversation-adapter-agent-entrypoints',
       ],
       [
         'features/conversations/controller.ts',
-        'agent/runtime/contracts.ts',
+        'agent/execution/contracts.ts',
         'conversation-adapter-agent-contract-types-only',
       ],
       [

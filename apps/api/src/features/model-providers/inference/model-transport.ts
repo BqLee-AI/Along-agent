@@ -4,7 +4,7 @@ import { measureSdkContext } from './sdk-context.js';
 import { outboundFetch } from '../outbound/outbound.js';
 
 // A heuristic over the serialized request, not a provider tokenizer or usage.
-const ESTIMATED_METER_REVISION = 'openai-json-utf8-estimate/1';
+export const ESTIMATED_METER_REVISION = 'openai-json-utf8-estimate/1';
 
 /** The selected version is the only model source for Run and probe calls. */
 export const createUserModelTransport: ModelTransportFactory = async (config, diagnostic) => ({

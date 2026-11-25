@@ -18,7 +18,7 @@ import {
   readRunContextObservations,
   readRunContextSource,
 } from '../../src/agent/tools/invocations/context-query.js';
-import { readRunDocumentEvidence } from '../../src/agent/tools/query.js';
+import { readRunDocumentEvidence } from '../../src/agent/tools/evidence/run-evidence.js';
 import type {
   InvocationInput,
   ToolContext,

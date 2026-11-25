@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import type { Pool } from 'pg';
-import { startConversationRun } from '../../src/agent/operations/start.js';
+import { startConversationRun } from '../../src/agent/run/admit-message.js';
 import { confirmApproval } from '../../src/features/approvals/reminder/confirm.js';
 import { invokeTool, reserveToolInvocation } from '../../src/agent/tools/gateway.js';
 import type { ToolContext, ToolOutcome } from '../../src/agent/tools/contracts.js';

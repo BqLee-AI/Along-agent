@@ -7,10 +7,10 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { createContextPolicy } from '../../src/features/conversations/public.js';
 import { createLocalFixtureModelTransport } from '../helpers/local-fixture-model.js';
-import { createRunDriver } from '../../src/agent/runtime/run-driver.js';
+import { createRunDriver } from '../../src/agent/execution/driver/driver.js';
 import { handleRequest } from '../helpers/http-app.js';
 import { ThreadEventSchema } from '@along/stream-protocol';
-import { startConversationRun } from '../../src/agent/operations/start.js';
+import { startConversationRun } from '../../src/agent/run/admit-message.js';
 import { loadTimeContext } from '../../src/features/time/context.js';
 import { listen, sendModelSse } from '../helpers/harness-consumer.js';
 import {
@@ -361,7 +361,7 @@ maybe('server-owned native execution', () => {
         await received.promise;
         const childSource = `
         import { Pool } from 'pg';
-        import { cancelConversationRun } from './src/agent/operations/run.ts';
+        import { cancelConversationRun } from './src/agent/run/run-actions.ts';
         import { loadTimeContext } from './src/features/time/context.ts';
         import { randomUUID } from 'node:crypto';
         const pool = new Pool({ connectionString: process.env.OWNERSHIP_TEST_DATABASE });

@@ -2,8 +2,8 @@ import type { Pool } from 'pg';
 import type { ActorResolver } from './auth.js';
 import type { TimeContext } from '../features/time/public.js';
 import type { RoutingRuntime } from '../agent/routing/index.js';
-import type { RunDriver } from '../agent/runtime/run-driver.js';
-import type { ConversationDeps } from '../agent/runtime/contracts.js';
+import type { RunDriver } from '../agent/execution/driver/driver.js';
+import type { ConversationDeps } from '../agent/execution/contracts.js';
 import type { MemoryService } from '../features/memory/public.js';
 import type { AccountService, InvitedAccountService } from '../features/identity/public.js';
 

@@ -4,7 +4,7 @@ import type { ConversationDeps } from '../contracts.js';
 
 export const CANCEL_INTENT = /取消|删掉|别再提醒/;
 
-export function requirePool(deps: ConversationDeps): Pool {
+export function requirePool(deps: Pick<ConversationDeps, 'pool'>): Pool {
   if (!deps.pool) throw notReady();
   return deps.pool;
 }

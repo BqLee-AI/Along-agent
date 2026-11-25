@@ -4,7 +4,7 @@ import {
 } from '../../src/agent/tools/reminders/reminder-source.js';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import { acceptReminderDate } from '../../src/features/conversations/lifecycle/reminder-date.js';
+import { acceptReminderDate } from '../../src/features/conversations/run/reminder-date-continuation.js';
 import { admitTestUser, createIntegrationDatabase, type IntegrationDatabase } from './setup.js';
 import { reserveToolInvocation, invokeTool } from '../../src/agent/tools/gateway.js';
 import { loadTimeContext } from '../../src/features/time/context.js';

@@ -22,7 +22,7 @@ import {
 } from '../../src/agent/tools/invocations/invocations.js';
 import { readRunInvocationStates } from '../../src/agent/tools/invocations/run-state.js';
 import { callWorkspaceMcp } from '../../src/agent/tools/workspace/mcp-workspace.js';
-import { readRunDocumentEvidence } from '../../src/agent/tools/query.js';
+import { readRunDocumentEvidence } from '../../src/agent/tools/evidence/run-evidence.js';
 import {
   WORKSPACE_TOOL_IDS,
   type ToolContext,

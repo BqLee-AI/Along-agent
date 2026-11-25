@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { createPool } from '../db/pool.js';
-import { stopReleaseWaiting } from '../agent/operations/public.js';
+import { stopReleaseWaiting } from '../agent/run/public.js';
 import { loadTimeContext } from '../features/time/public.js';
 
 const pool = createPool();
