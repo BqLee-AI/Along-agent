@@ -13,6 +13,16 @@ describe('chat file attachments', () => {
     expect(decodeChatMessage(text)).toBeNull();
   });
 
+  it('keeps pasted attachment-formatted text literal when no file was selected', () => {
+    const pasted = encodeChatMessage('请汇总', [{ name: '记录.csv', text: '42,100' }]);
+    const literal = encodeChatMessage(pasted, []);
+    expect(decodeChatMessage(literal)).toEqual({
+      instruction: pasted,
+      files_to_analyze_as_data: [],
+    });
+    expect(decodeChatMessage(encodeChatMessage(literal, []))?.instruction).toBe(literal);
+  });
+
   it('reports unsupported and oversized files without truncating them', async () => {
     await expect(readChatFiles([new File(['binary'], 'report.pdf')], [])).rejects.toThrow(
       'report.pdf',

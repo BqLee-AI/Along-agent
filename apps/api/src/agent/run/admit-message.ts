@@ -164,7 +164,7 @@ export async function startConversationRun(
   const key = idempotencyKeyHeader ?? input.idempotency_key ?? requestId;
   const requestHash = requestHashOf({
     conversationId: input.conversation_id,
-    text: content,
+    text: input.files ? content : text,
     ...(input.files ? { hasFiles: true } : {}),
     timezone,
     fold: input.fold_choice,

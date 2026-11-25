@@ -18,7 +18,7 @@ function UserMessage({ content }: { content: string }) {
   const attached = decodeChatMessage(content);
   return (
     <>
-      {attached ? (
+      {attached?.files_to_analyze_as_data.length ? (
         <ul aria-label="附件" className="mb-1 space-y-1 text-xs">
           {attached.files_to_analyze_as_data.map((file, index) => (
             <li key={index}>

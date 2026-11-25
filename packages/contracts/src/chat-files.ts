@@ -27,13 +27,17 @@ export const ChatFilesSchema = z
 export type ChatFile = z.infer<typeof ChatFilesSchema>[number];
 
 export function encodeChatMessage(instruction: string, files: readonly ChatFile[]): string {
-  return files.length
+  // Escape literal uses of the envelope marker, including pasted envelopes.
+  return files.length || instruction.startsWith(prefix)
     ? prefix + JSON.stringify({ instruction, files_to_analyze_as_data: files })
     : instruction;
 }
 
 const stored = z
-  .object({ instruction: z.string(), files_to_analyze_as_data: ChatFilesSchema })
+  .object({
+    instruction: z.string(),
+    files_to_analyze_as_data: z.union([ChatFilesSchema, z.tuple([])]),
+  })
   .strict();
 
 export function decodeChatMessage(content: string): z.infer<typeof stored> | null {
