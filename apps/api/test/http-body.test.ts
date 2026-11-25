@@ -206,9 +206,12 @@ describe('HTTP request body boundary', () => {
       envelope(reply, 401, 'UNAUTHENTICATED', 'finite-upload-43');
       await closes(reply);
     }
-    console.info(
-      '[finite upload] three protected routes: 1035-byte unfinished uploads -> 401 and closed',
-    );
+    const documentConfirm = `/api/v1/document-approvals/${id}/actions/confirm`;
+    const reply = await upload(base, documentConfirm, [], false, {
+      'content-length': String(LIMIT + 1),
+    });
+    envelope(reply, 401, 'UNAUTHENTICATED');
+    await closes(reply);
   });
 
   it('rejects missing and invalid CSRF before upload end using the existing session actor', async () => {

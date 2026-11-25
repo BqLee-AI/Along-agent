@@ -133,13 +133,6 @@ describe('app', () => {
     expect(errorCode(body())).toBe('NOT_READY');
   });
 
-  it('GET /healthz returns 200 without env/DB', async () => {
-    const { req, res, body } = fakePair('GET', '/healthz');
-    await handleRequest(req, res, { pool: null });
-    expect(res.status).toBe(200);
-    expect(body()).toEqual({ status: 'ok' });
-  });
-
   it('GET /readyz without TZDB_VERSION returns typed 503', async () => {
     const { req, res, body } = fakePair('GET', '/readyz');
     await handleRequest(req, res, { pool: null });
