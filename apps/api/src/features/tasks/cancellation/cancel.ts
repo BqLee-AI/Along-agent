@@ -16,10 +16,10 @@ import {
   type ApplicationError,
 } from '../../../platform/errors.js';
 import {
-  appendTaskEvent,
   completeCancelFromReceipt,
   supersedeStaleTaskWork,
 } from '../scheduler/scheduler-repository.js';
+import { appendTaskEvent } from '../task-event-ledger.js';
 import { findCancelRowByKey, insertCancelCommand, lockTaskForCancel } from './cancel-repository.js';
 
 export const CancelBodySchema = z.object({

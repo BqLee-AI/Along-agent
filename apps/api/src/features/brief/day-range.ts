@@ -1,6 +1,6 @@
 import { normalize, utcInCoverage } from '@along/time-core';
 import { ApplicationError, validationError } from '../../platform/errors.js';
-import type { TimeContext } from '../time/public.js';
+import { utcSecondIso, type TimeContext } from '../time/public.js';
 
 export function briefDayRange(
   date: string | undefined,
@@ -16,7 +16,7 @@ export function briefDayRange(
     if (!Object.hasOwn(context.ruleset.zones, timezoneId))
       throw validationError('confirmed timezone is not supported');
     if (!date) {
-      const nowText = now.toISOString().replace(/\.\d{3}Z$/, 'Z');
+      const nowText = utcSecondIso(now);
       if (!utcInCoverage(context.ruleset, timezoneId, nowText))
         throw new ApplicationError(400006, 'TZDB_UNAVAILABLE', '日期超出时区规则范围。');
       offsetSeconds = zone.base_offset_seconds;

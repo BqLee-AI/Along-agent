@@ -1,6 +1,6 @@
 import type { Pool, PoolClient } from 'pg';
-import { withClient } from '../../db/transaction.js';
-import { getTaskNotifications, type TaskNotification } from '../notifications/public.js';
+import { withClient } from '../../../db/transaction.js';
+import { getTaskNotifications, type TaskNotification } from '../../notifications/public.js';
 import {
   decodeCursor,
   encodeCursor,
@@ -10,10 +10,10 @@ import {
   notReady,
   validationError,
   type ApplicationError,
-} from '../../platform/errors.js';
+} from '../../../platform/errors.js';
 import { getTask, listTaskEvents, listTasks } from './repository.js';
-import type { ElapsedTimeBasis } from './create.js';
-import { TaskEventsQuerySchema, TaskListQuerySchema } from './schemas.js';
+import type { ElapsedTimeBasis } from '../create.js';
+import { TaskEventsQuerySchema, TaskListQuerySchema } from '../schemas.js';
 
 // Reads the task associated with a scheduling outbox key on the caller's transaction.
 export async function findOutboxTaskByKey(
@@ -47,23 +47,10 @@ export interface TaskListItem {
   schedule_receipt: string | null;
 }
 
-export interface TaskDetail {
-  task_id: string;
+export interface TaskDetail extends TaskListItem {
   kind: string;
-  state: string;
   state_version: number;
-  fire_at_utc: string;
-  fire_at_local: string;
-  timezone_id: string;
-  fold: number;
-  resolved_utc_offset_seconds: number;
-  tzdb_version: string | null;
-  time_basis: ElapsedTimeBasis | null;
-  display_version: 'elapsed/1' | null;
-  source_approval_id: string | null;
-  source_invocation_id: string | null;
   recreated_from: string | null;
-  schedule_receipt: string | null;
   created_at: string;
   notifications: TaskNotification[];
 }
@@ -79,6 +66,24 @@ export interface TaskEventItem {
 function requirePool(deps: Deps): Pool {
   if (!deps.pool) throw notReady();
   return deps.pool;
+}
+
+function taskListItem(row: Awaited<ReturnType<typeof listTasks>>[number]): TaskListItem {
+  return {
+    task_id: row.id,
+    state: row.state,
+    fire_at_utc: row.fire_at_utc.toISOString(),
+    fire_at_local: row.wall_time,
+    timezone_id: row.timezone_id,
+    fold: row.fold,
+    resolved_utc_offset_seconds: row.resolved_utc_offset_seconds,
+    tzdb_version: row.tzdb_version,
+    time_basis: row.time_basis,
+    display_version: row.display_version,
+    source_approval_id: row.source_approval_id,
+    source_invocation_id: row.source_invocation_id,
+    schedule_receipt: row.schedule_receipt,
+  };
 }
 
 export async function listTasksForOwner(
@@ -116,22 +121,7 @@ export async function listTasksForOwner(
   );
   const hasMore = rows.length > parsed.data.limit;
   const page = hasMore ? rows.slice(0, parsed.data.limit) : rows;
-  const items: TaskListItem[] = page.map((row) => ({
-    task_id: row.id,
-    state: row.state,
-    fire_at_utc: row.fire_at_utc.toISOString(),
-    // fire_at_local is display-only: wall_time as stored (design/03 §5-§7).
-    fire_at_local: row.wall_time,
-    timezone_id: row.timezone_id,
-    fold: row.fold,
-    resolved_utc_offset_seconds: row.resolved_utc_offset_seconds,
-    tzdb_version: row.tzdb_version,
-    time_basis: row.time_basis,
-    display_version: row.display_version,
-    source_approval_id: row.source_approval_id,
-    source_invocation_id: row.source_invocation_id,
-    schedule_receipt: row.schedule_receipt,
-  }));
+  const items = page.map(taskListItem);
   const lastRow = page[page.length - 1] as
     | { id: string; fire_at_utc: Date; fire_at_cursor?: string }
     | undefined;
@@ -157,22 +147,10 @@ export async function getTaskDetail(
     const row = lookup.row;
     const notifications = await getTaskNotifications(client, ownerId, taskId);
     return {
-      task_id: row.id,
+      ...taskListItem(row),
       kind: row.kind,
-      state: row.state,
       state_version: row.state_version,
-      fire_at_utc: row.fire_at_utc.toISOString(),
-      fire_at_local: row.wall_time,
-      timezone_id: row.timezone_id,
-      fold: row.fold,
-      resolved_utc_offset_seconds: row.resolved_utc_offset_seconds,
-      tzdb_version: row.tzdb_version,
-      time_basis: row.time_basis,
-      display_version: row.display_version,
-      source_approval_id: row.source_approval_id,
-      source_invocation_id: row.source_invocation_id,
       recreated_from: row.recreated_from_task_id,
-      schedule_receipt: row.schedule_receipt,
       created_at: row.created_at.toISOString(),
       notifications,
     };

@@ -1,5 +1,5 @@
-export { listBriefTasks, listToolBriefTasks } from './brief-query.js';
-export type { BriefTaskRow } from './brief-query.js';
+export { listBriefTasks, listToolBriefTasks } from './read/brief.js';
+export type { BriefTaskRow } from './read/brief.js';
 export {
   readCreatedTaskReceipt,
   createTaskWithinTransaction,
@@ -11,10 +11,15 @@ export {
   readCancelTaskCandidate,
   readToolTaskList,
   readRepeatedNotesMentioned,
-} from './tool-query.js';
+} from './read/tools.js';
 export { cancelTaskWithinTransaction, requestCancel } from './cancellation/cancel.js';
 export type { CancelResult, CancelDeps } from './cancellation/cancel.js';
-export { findOutboxTaskByKey, getTaskDetail, listTasksForOwner, getTaskEvents } from './service.js';
+export {
+  findOutboxTaskByKey,
+  getTaskDetail,
+  listTasksForOwner,
+  getTaskEvents,
+} from './read/queries.js';
 export { listHistoricalOwners } from './owner-history.js';
 export { runCancelPhase } from './scheduler/cancel-phase.js';
 export { runSchedulePhase } from './scheduler/schedule.js';

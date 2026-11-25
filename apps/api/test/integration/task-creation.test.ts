@@ -11,7 +11,7 @@ import {
 } from '../../src/features/tasks/create.js';
 import { getTaskNotificationSource } from '../../src/features/tasks/notification-source.js';
 import { runSchedulePhase } from '../../src/features/tasks/scheduler/schedule.js';
-import { getTaskDetail, listTasksForOwner } from '../../src/features/tasks/service.js';
+import { getTaskDetail, listTasksForOwner } from '../../src/features/tasks/read/queries.js';
 import { createIntegrationDatabase, databaseUrl, seedApproval } from './setup.js';
 import type { IntegrationDatabase } from './setup.js';
 

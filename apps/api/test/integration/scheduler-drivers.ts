@@ -1,6 +1,6 @@
 import { expect } from 'bun:test';
 import type { Pool } from 'pg';
-import { getTaskDetail } from '../../src/features/tasks/service.js';
+import { getTaskDetail } from '../../src/features/tasks/read/queries.js';
 import { runClaimPhase } from '../../src/features/tasks/scheduler/claim.js';
 import { runSendPhase } from '../../src/features/tasks/scheduler/send.js';
 import type { InAppProvider } from '../../src/features/notifications/service.js';

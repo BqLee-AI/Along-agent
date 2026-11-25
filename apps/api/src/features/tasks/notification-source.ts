@@ -1,7 +1,7 @@
 // Public read-only task port for notification intake. Keep this independent
-// of tasks/service.ts, which consumes notifications for task-detail reads.
+// of tasks/read/queries.ts, which consumes notifications for task-detail reads.
 import type { PoolClient } from 'pg';
-import { getTask } from './repository.js';
+import { getTask } from './read/repository.js';
 
 export interface TaskNotificationSource {
   fireAtUtc: string;

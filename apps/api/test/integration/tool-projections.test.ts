@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
-import { readCancelTaskCandidate, readToolTaskList } from '../../src/features/tasks/tool-query.js';
+import { readCancelTaskCandidate, readToolTaskList } from '../../src/features/tasks/read/tools.js';
 import { readToolBriefCards } from '../../src/features/brief/tool-query.js';
 import {
   isActiveOwner,

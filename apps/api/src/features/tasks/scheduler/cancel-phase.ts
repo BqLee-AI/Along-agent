@@ -3,12 +3,12 @@
 // cancelled event and complete the command in the same transaction.
 import { backoffMsForAttempt } from '@along/scheduler-core';
 import type { Pool, PoolClient } from 'pg';
-import { withTransaction } from '../../../db/transaction.js';
+import { withClient, withTransaction } from '../../../db/transaction.js';
 import {
   bumpOutboxAttempt,
   completeCancelFromReceipt,
   listDueCancelRows,
-  lockOutboxRow,
+  lockPendingTaskCommand,
   lockTaskRow,
   markOutboxSuperseded,
   revokeLocalTaskQueue,
@@ -85,24 +85,11 @@ export async function runCancelPhase(pool: Pool): Promise<CancelPhaseSummary> {
     pending: 0,
     superseded: 0,
   };
-  const client = await pool.connect();
-  let rows: OutboxRow[];
-  try {
-    rows = await listDueCancelRows(client, CANCEL_BATCH_LIMIT);
-  } finally {
-    client.release();
-  }
+  const rows = await withClient(pool, (client) => listDueCancelRows(client, CANCEL_BATCH_LIMIT));
   for (const row of rows) {
     const disposition = await withTransaction(pool, async (txn: PoolClient) => {
-      // Lock order (task before outbox). See runSendPhase.
-      const probe = await txn.query<{ status: string }>('SELECT status FROM outbox WHERE id = $1', [
-        row.id,
-      ]);
-      if (!probe.rows[0] || probe.rows[0].status !== 'pending') return null;
-      await txn.query('SELECT id FROM tasks WHERE id = $1 FOR UPDATE', [row.task_id]);
-      const locked = await lockOutboxRow(txn, row.id);
-      if (!locked || locked.status !== 'pending') return null;
-      return cancelOne(txn, locked, Date.now());
+      const locked = await lockPendingTaskCommand(txn, row);
+      return locked ? cancelOne(txn, locked, Date.now()) : null;
     });
     if (!disposition) continue;
     summary.scanned += 1;

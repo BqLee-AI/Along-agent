@@ -3,9 +3,9 @@
 import { isPastFireWindow, sendKeyFor } from '@along/scheduler-core';
 import type { Pool, PoolClient } from 'pg';
 import { withTransaction } from '../../../db/transaction.js';
+import { appendTaskEvent } from '../task-event-ledger.js';
 import { reconcileReceivedSend } from './delivery.js';
 import {
-  appendTaskEvent,
   completeUnscheduledMissed,
   listMissedCandidates,
   lockTaskRow,

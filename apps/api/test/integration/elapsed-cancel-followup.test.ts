@@ -5,7 +5,7 @@ import { getApprovalDetail } from '../../src/features/approvals/reminder/service
 import { executeRun } from '../../src/agent/operations/execute.js';
 import { startConversationRun } from '../../src/agent/operations/start.js';
 import type { ThreadEvent } from '@along/stream-protocol';
-import { getTaskDetail } from '../../src/features/tasks/service.js';
+import { getTaskDetail } from '../../src/features/tasks/read/queries.js';
 import { runCancelPhase } from '../../src/features/tasks/scheduler/cancel-phase.js';
 import { runSchedulePhase } from '../../src/features/tasks/scheduler/schedule.js';
 import { loadTimeContext } from '../../src/features/time/context.js';

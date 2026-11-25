@@ -7,7 +7,8 @@ import type { AddressInfo } from 'node:net';
 import { sendKeyFor } from '@along/scheduler-core';
 import { handleRequest } from '../helpers/http-app.js';
 import type { ActorResolver } from '../../src/http/auth.js';
-import { TaskDetailSchema } from '../../src/features/tasks/schemas.js';
+import { z } from 'zod';
+import { TaskDetailSchema as HttpTaskDetailSchema } from '../../src/features/tasks/model.js';
 import {
   createLocalInAppProvider,
   deliverInApp,
@@ -18,7 +19,7 @@ import {
   getTaskDetail,
   getTaskEvents,
   listTasksForOwner,
-} from '../../src/features/tasks/service.js';
+} from '../../src/features/tasks/read/queries.js';
 import {
   admitTestUser,
   createIntegrationDatabase,
@@ -26,6 +27,18 @@ import {
   seedApproval,
   type IntegrationDatabase,
 } from './setup.js';
+
+const TaskDetailSchema = HttpTaskDetailSchema.extend({
+  task_id: z.string().uuid(),
+  fold: z.number().int(),
+  resolved_utc_offset_seconds: z.number().int(),
+  notifications: z.array(
+    HttpTaskDetailSchema.shape.notifications.element.extend({
+      id: z.string().uuid(),
+      sent_at: z.string().datetime().nullable(),
+    }),
+  ),
+});
 
 const maybe = databaseUrl ? describe : describe.skip;
 

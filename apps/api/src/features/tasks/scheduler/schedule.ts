@@ -1,14 +1,14 @@
 // Schedule phase: consumes durable PG schedule commands. Under task/outbox
 // locks, the transaction stores the schedule receipt, state and event; PG is
 // the schedule registry and survives worker process restarts.
-import { FIRE_WINDOW_MS, isPastFireWindow, scheduleReceiptFor } from '@along/scheduler-core';
+import { isPastFireWindow, scheduleReceiptFor } from '@along/scheduler-core';
 import type { Pool, PoolClient } from 'pg';
-import { withTransaction } from '../../../db/transaction.js';
+import { withClient, withTransaction } from '../../../db/transaction.js';
+import { appendTaskEvent } from '../task-event-ledger.js';
 import {
-  appendTaskEvent,
   completeUnscheduledMissed,
   listDueScheduleRows,
-  lockOutboxRow,
+  lockPendingTaskCommand,
   lockTaskRow,
   markOutboxSuperseded,
   transitionTask,
@@ -92,7 +92,6 @@ export async function scheduleOne(
     await completeUnscheduledMissed(client, task);
     return 'failed_deadline';
   }
-  void FIRE_WINDOW_MS;
   const receipt = scheduleReceiptFor(task.id);
   const moved = await transitionTask(client, {
     taskId: task.id,
@@ -118,24 +117,13 @@ export async function scheduleOne(
 
 export async function runSchedulePhase(pool: Pool): Promise<ScheduleSummary> {
   const summary: ScheduleSummary = { scanned: 0, scheduled: 0, superseded: 0, failedDeadline: 0 };
-  const client = await pool.connect();
-  let rows: OutboxRow[];
-  try {
-    rows = await listDueScheduleRows(client, SCHEDULE_BATCH_LIMIT);
-  } finally {
-    client.release();
-  }
+  const rows = await withClient(pool, (client) =>
+    listDueScheduleRows(client, SCHEDULE_BATCH_LIMIT),
+  );
   for (const row of rows) {
     const disposition = await withTransaction(pool, async (txn: PoolClient) => {
-      // Lock order (task before outbox). See runSendPhase.
-      const probe = await txn.query<{ status: string }>('SELECT status FROM outbox WHERE id = $1', [
-        row.id,
-      ]);
-      if (!probe.rows[0] || probe.rows[0].status !== 'pending') return null;
-      await txn.query('SELECT id FROM tasks WHERE id = $1 FOR UPDATE', [row.task_id]);
-      const locked = await lockOutboxRow(txn, row.id);
-      if (!locked || locked.status !== 'pending') return null;
-      return scheduleOne(txn, locked);
+      const locked = await lockPendingTaskCommand(txn, row);
+      return locked ? scheduleOne(txn, locked) : null;
     });
     if (!disposition) continue;
     summary.scanned += 1;
