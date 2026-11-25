@@ -66,8 +66,6 @@ export async function insertCancelCommand(
     ],
   );
   if (rows[0]) return rows[0].id;
-  const existing = await findCancelRowByKey(client, args.idempotencyKey);
-  void existing;
   const { rows: again } = await client.query<{ id: string }>(
     'SELECT id FROM outbox WHERE idempotency_key = $1',
     [args.idempotencyKey],

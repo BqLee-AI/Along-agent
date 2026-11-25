@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { stateConflict } from '../../platform/errors.js';
+import { appendTaskEvent } from './task-event-ledger.js';
 
 export type TaskCreationSource =
   | { approvalId: string; invocationId?: never }
@@ -96,11 +97,13 @@ export async function createTaskWithinTransaction(
     ],
   );
   const fireAtUtc = rows[0]!.fire_at_utc.toISOString();
-  await client.query(
-    `INSERT INTO task_events (id, owner_id, task_id, state_version, type, evidence_ref)
-     VALUES (gen_random_uuid(), $1, $2, 1, 'created', 'local')`,
-    [input.ownerId, taskId],
-  );
+  await appendTaskEvent(client, {
+    ownerId: input.ownerId,
+    taskId,
+    stateVersion: 1,
+    type: 'created',
+    evidenceRef: 'local',
+  });
   await client.query(
     `INSERT INTO outbox (id, owner_id, task_id, expected_state_version, command,
        idempotency_key, status)

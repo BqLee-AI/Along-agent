@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
 import { confirmApproval } from '../../src/features/approvals/reminder/confirm.js';
 import { getApprovalDetail } from '../../src/features/approvals/reminder/service.js';
-import { getTaskDetail } from '../../src/features/tasks/service.js';
+import { getTaskDetail } from '../../src/features/tasks/read/queries.js';
 import { requestCancel, type CancelResult } from '../../src/features/tasks/cancellation/cancel.js';
 import { runCancelPhase } from '../../src/features/tasks/scheduler/cancel-phase.js';
 import { runClaimPhase } from '../../src/features/tasks/scheduler/claim.js';

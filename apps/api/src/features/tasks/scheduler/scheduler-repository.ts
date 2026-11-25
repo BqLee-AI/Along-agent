@@ -1,6 +1,7 @@
 // Scheduler repository: raw SQL for the worker role. All phase entry points
 // run inside caller-owned transactions; this module owns no BEGIN/COMMIT.
 import type { PoolClient } from 'pg';
+import { appendTaskEvent } from '../task-event-ledger.js';
 
 export interface SchedulerTaskRow {
   id: string;
@@ -54,22 +55,23 @@ export async function lockOutboxRow(
   return rows[0] ?? null;
 }
 
+/** Schedule and cancel both lock task before taking the pending command. */
+export async function lockPendingTaskCommand(
+  client: PoolClient,
+  row: Pick<OutboxRow, 'id' | 'task_id'>,
+): Promise<OutboxRow | null> {
+  const probe = await client.query<{ status: string }>('SELECT status FROM outbox WHERE id = $1', [
+    row.id,
+  ]);
+  if (probe.rows[0]?.status !== 'pending') return null;
+  await client.query('SELECT id FROM tasks WHERE id = $1 FOR UPDATE', [row.task_id]);
+  const locked = await lockOutboxRow(client, row.id);
+  return locked?.status === 'pending' ? locked : null;
+}
+
 /** Due schedule rows: pending, and either never attempted or backoff elapsed. */
 export async function listDueScheduleRows(client: PoolClient, limit: number): Promise<OutboxRow[]> {
-  const { rows } = await client.query<OutboxRow>(
-    `SELECT id, owner_id, task_id, expected_state_version, command,
-       idempotency_key, attempt_no, status, created_at, updated_at,
-       last_attempt_at, ack_check_no, provider_receipt_id, last_error
-     FROM outbox
-     WHERE status = 'pending'
-       AND command->>'kind' = 'schedule'
-       AND (last_attempt_at IS NULL OR last_attempt_at <= now())
-     ORDER BY created_at ASC
-     LIMIT $1
-     FOR UPDATE SKIP LOCKED`,
-    [limit],
-  );
-  return rows;
+  return listDueOutboxRows(client, limit, 'schedule');
 }
 
 /** Send must not block the independent receiver's task-FK KEY SHARE check. */
@@ -188,31 +190,31 @@ export async function listDueSendRows(client: PoolClient, limit: number): Promis
 
 /** Due ack re-check rows: acked_unknown with an elapsed check schedule. */
 export async function listDueAckRows(client: PoolClient, limit: number): Promise<OutboxRow[]> {
-  const { rows } = await client.query<OutboxRow>(
-    `SELECT id, owner_id, task_id, expected_state_version, command,
-       idempotency_key, attempt_no, status, created_at, updated_at,
-       last_attempt_at, ack_check_no, provider_receipt_id, last_error
-     FROM outbox
-     WHERE status = 'acked_unknown'
-       AND ack_check_no <= 3
-       AND (last_attempt_at IS NULL OR last_attempt_at <= now())
-     ORDER BY created_at ASC
-     LIMIT $1
-     FOR UPDATE SKIP LOCKED`,
-    [limit],
-  );
-  return rows;
+  return listDueOutboxRows(client, limit, 'ack');
 }
 
 /** Due cancel rows: pending cancel commands. */
 export async function listDueCancelRows(client: PoolClient, limit: number): Promise<OutboxRow[]> {
+  return listDueOutboxRows(client, limit, 'cancel');
+}
+
+const dueOutboxPredicate = {
+  schedule: "status = 'pending' AND command->>'kind' = 'schedule'",
+  cancel: "status = 'pending' AND command->>'kind' = 'cancel'",
+  ack: "status = 'acked_unknown' AND ack_check_no <= 3",
+} as const;
+
+async function listDueOutboxRows(
+  client: PoolClient,
+  limit: number,
+  kind: keyof typeof dueOutboxPredicate,
+): Promise<OutboxRow[]> {
   const { rows } = await client.query<OutboxRow>(
     `SELECT id, owner_id, task_id, expected_state_version, command,
        idempotency_key, attempt_no, status, created_at, updated_at,
        last_attempt_at, ack_check_no, provider_receipt_id, last_error
      FROM outbox
-     WHERE status = 'pending'
-       AND command->>'kind' = 'cancel'
+     WHERE ${dueOutboxPredicate[kind]}
        AND (last_attempt_at IS NULL OR last_attempt_at <= now())
      ORDER BY created_at ASC
      LIMIT $1
@@ -493,23 +495,6 @@ export async function transitionTask(
     ],
   );
   return rows.length > 0;
-}
-
-export async function appendTaskEvent(
-  client: PoolClient,
-  args: {
-    ownerId: string;
-    taskId: string;
-    stateVersion: number;
-    type: string;
-    evidenceRef: string;
-  },
-): Promise<void> {
-  await client.query(
-    `INSERT INTO task_events (id, owner_id, task_id, state_version, type, evidence_ref)
-     VALUES (gen_random_uuid(), $1, $2, $3, $4, $5)`,
-    [args.ownerId, args.taskId, args.stateVersion, args.type, args.evidenceRef],
-  );
 }
 
 export async function recordCancelBreach(

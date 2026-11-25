@@ -11,8 +11,12 @@ import {
   stateConflict,
   validationError,
 } from '../../../platform/errors.js';
-import { requireTimeContext, type TimeContext } from '../../time/public.js';
-import { normalizeTime } from '../../time/public.js';
+import {
+  normalizeTime,
+  requireTimeContext,
+  utcSecondIso,
+  type TimeContext,
+} from '../../time/public.js';
 import { createTaskApproval, wallTextOf } from './create.js';
 import {
   findSuccessorId,
@@ -162,7 +166,7 @@ export async function reviseApproval(
       if (await persistExpiredIfDue(client, row.id)) return null;
 
       const context = requireContext(deps.timeContext);
-      const anchor = request.anchor_received_at_utc.toISOString().replace(/\.\d{3}Z$/, 'Z');
+      const anchor = utcSecondIso(request.anchor_received_at_utc);
       const time = normalizeTime(context, {
         raw_text: input.raw_text,
         anchorReceivedAtUtc: anchor,

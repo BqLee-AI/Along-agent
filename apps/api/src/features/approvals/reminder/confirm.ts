@@ -18,11 +18,14 @@ import {
   markConsumed,
   markRejected,
   persistExpiredIfDue,
+  type ApprovalRow,
 } from './repository.js';
 import { ConfirmBodySchema, RejectBodySchema } from './schemas.js';
-import { cancelTaskWithinTransaction } from '../../tasks/public.js';
-import { createTaskWithinTransaction } from '../../tasks/public.js';
-import { findOutboxTaskByKey } from '../../tasks/public.js';
+import {
+  cancelTaskWithinTransaction,
+  createTaskWithinTransaction,
+  findOutboxTaskByKey,
+} from '../../tasks/public.js';
 
 export interface ConfirmDeps {
   pool: Pool | null;
@@ -71,6 +74,23 @@ function snapshotOf(row: {
   };
 }
 
+async function lockOwnedApproval(client: PoolClient, ownerId: string, approvalId: string) {
+  const row = await getApprovalForUpdate(client, approvalId);
+  if (!row) throw notFound('approval not found');
+  if (row.owner_id !== ownerId) throw forbidden('approval not found');
+  return row;
+}
+
+async function expirePendingApproval(client: PoolClient, row: ApprovalRow) {
+  if (row.state === 'superseded') throw approvalSuperseded(await findSuccessorId(client, row.id));
+  if (row.state === 'expired') throw approvalExpired();
+  return persistExpiredIfDue(client, row.id);
+}
+
+function consumed(approvalId: string, taskId: string, duplicate: boolean): ConfirmResult {
+  return { approval_id: approvalId, status: 'consumed', task_id: taskId, duplicate };
+}
+
 // POST /approvals/{id}/actions/confirm. Single transaction: row lock ->
 // owner/state/expiry -> hash+seen -> idempotency -> task + created event +
 // outbox -> consumed. Any failure rolls back; no task is created.
@@ -85,39 +105,18 @@ export async function confirmApproval(
   const { presentation_hash, seen_content, idempotency_key } = parsed.data;
   const pool = requirePool(deps);
   const result = await withTransaction(pool, async (client: PoolClient) => {
-    const row = await getApprovalForUpdate(client, approvalId);
-    if (!row) throw notFound('approval not found') as ApplicationError;
-    if (row.owner_id !== ownerId) throw forbidden('approval not found') as ApplicationError;
+    const row = await lockOwnedApproval(client, ownerId, approvalId);
 
     // Terminal states first: repeat confirm returns the original task.
     if (row.state === 'consumed') {
-      if (row.kind === 'cancel_task') {
-        return {
-          approval_id: row.id,
-          status: 'consumed' as const,
-          task_id: row.target_task_id ?? '',
-          duplicate: true,
-        };
-      }
+      if (row.kind === 'cancel_task') return consumed(row.id, row.target_task_id ?? '', true);
       if (!row.consumed_task_id) throw stateConflict('approval consumed without task');
-      return {
-        approval_id: row.id,
-        status: 'consumed' as const,
-        task_id: row.consumed_task_id,
-        duplicate: true,
-      };
+      return consumed(row.id, row.consumed_task_id, true);
     }
     if (row.state === 'rejected') {
       throw stateConflict('approval already rejected') as ApplicationError;
     }
-    if (row.state === 'superseded') {
-      const successorId = await findSuccessorId(client, row.id);
-      throw approvalSuperseded(successorId) as ApplicationError;
-    }
-    if (row.state === 'expired') {
-      throw approvalExpired() as ApplicationError;
-    }
-    if (await persistExpiredIfDue(client, row.id)) return null;
+    if (await expirePendingApproval(client, row)) return null;
 
     // Frozen-snapshot comparison: recompute hash, then seen content.
     const snapshot = snapshotOf(row);
@@ -140,11 +139,11 @@ export async function confirmApproval(
 
     // cancel_task approvals commit the cancel request in the same transaction
     // as the approval consume (single sanctioned cross-module transaction).
+    const key = outboxKey(ownerId, row.id, idempotency_key);
     if (row.kind === 'cancel_task') {
       if (!row.target_task_id) {
         throw stateConflict('cancel approval without target task') as ApplicationError;
       }
-      const key = outboxKey(ownerId, row.id, idempotency_key);
       const cancel = await cancelTaskWithinTransaction(client, {
         ownerId,
         taskId: row.target_task_id,
@@ -152,25 +151,12 @@ export async function confirmApproval(
         idempotencyKey: key,
       });
       await markConsumed(client, row.id, null);
-      return {
-        approval_id: row.id,
-        status: 'consumed' as const,
-        task_id: cancel.task_id,
-        duplicate: cancel.duplicate,
-      };
+      return consumed(row.id, cancel.task_id, cancel.duplicate);
     }
 
     // Idempotency: same key on the same approval replays the original task.
-    const key = outboxKey(ownerId, row.id, idempotency_key);
     const replayTaskId = await findOutboxTaskByKey(client, key);
-    if (replayTaskId) {
-      return {
-        approval_id: row.id,
-        status: 'consumed' as const,
-        task_id: replayTaskId,
-        duplicate: true,
-      };
-    }
+    if (replayTaskId) return consumed(row.id, replayTaskId, true);
 
     const task = await createTaskWithinTransaction(client, {
       ownerId,
@@ -185,12 +171,7 @@ export async function confirmApproval(
       idempotencyKey: key,
     });
     await markConsumed(client, row.id, task.task_id);
-    return {
-      approval_id: row.id,
-      status: 'consumed' as const,
-      task_id: task.task_id,
-      duplicate: false,
-    };
+    return consumed(row.id, task.task_id, false);
   });
   if (!result) throw approvalExpired();
   return result;
@@ -208,9 +189,7 @@ export async function rejectApproval(
   if (!parsed.success) throw validationError('invalid reject body');
   const pool = requirePool(deps);
   const result = await withTransaction(pool, async (client: PoolClient) => {
-    const row = await getApprovalForUpdate(client, approvalId);
-    if (!row) throw notFound('approval not found') as ApplicationError;
-    if (row.owner_id !== ownerId) throw forbidden('approval not found') as ApplicationError;
+    const row = await lockOwnedApproval(client, ownerId, approvalId);
 
     if (row.state === 'rejected') {
       return { approval_id: row.id, status: 'rejected' as const, duplicate: true };
@@ -220,14 +199,7 @@ export async function rejectApproval(
         task_id: row.kind === 'cancel_task' ? row.target_task_id : row.consumed_task_id,
       }) as ApplicationError;
     }
-    if (row.state === 'superseded') {
-      const successorId = await findSuccessorId(client, row.id);
-      throw approvalSuperseded(successorId) as ApplicationError;
-    }
-    if (row.state === 'expired') {
-      throw approvalExpired() as ApplicationError;
-    }
-    if (await persistExpiredIfDue(client, row.id)) return null;
+    if (await expirePendingApproval(client, row)) return null;
     await markRejected(client, row.id);
     return { approval_id: row.id, status: 'rejected' as const, duplicate: false };
   });

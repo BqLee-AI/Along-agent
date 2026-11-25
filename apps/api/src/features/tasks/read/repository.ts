@@ -1,5 +1,5 @@
 import type { PoolClient } from 'pg';
-import type { ElapsedTimeBasis } from './create.js';
+import type { ElapsedTimeBasis } from '../create.js';
 
 export interface TaskRow {
   id: string;

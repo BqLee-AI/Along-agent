@@ -12,32 +12,28 @@ import {
 
 const APPROVAL_TTL_HOURS = 24;
 
-export interface CreateTaskApprovalInput {
+interface FrozenTaskApproval {
   ownerId: string;
   conversationId: string | null;
   originalText: string;
   wallTime: string; // "YYYY-MM-DD HH:mm" (minute precision, frozen)
   timezoneId: string;
   fold: 0 | 1;
-  foldChoice: 'first' | 'second' | 'none';
   offsetSeconds: number;
-  fireAtUtc: string; // ISO-8601 UTC
+  fireAtUtc: string;
+  tzdbVersion: string | null;
+}
+
+export interface CreateTaskApprovalInput extends FrozenTaskApproval {
+  foldChoice: 'first' | 'second' | 'none';
   tzdbVersion: string;
   supersedesApprovalId?: string;
 }
 
-export interface CancelTaskApprovalInput {
-  ownerId: string;
+export interface CancelTaskApprovalInput extends FrozenTaskApproval {
   conversationId: string;
-  originalText: string;
   targetTaskId: string;
   expectedStateVersion: number;
-  wallTime: string;
-  timezoneId: string;
-  fold: 0 | 1;
-  offsetSeconds: number;
-  fireAtUtc: string;
-  tzdbVersion: string | null;
 }
 
 export interface CreatedApproval {
@@ -53,16 +49,7 @@ export interface CreatedApproval {
   fireAtUtc: string;
 }
 
-function snapshotOf(
-  input: {
-    originalText: string;
-    wallTime: string;
-    timezoneId: string;
-    fold: 0 | 1;
-    offsetSeconds: number;
-  },
-  presentationVersion: string,
-) {
+function snapshotOf(input: FrozenTaskApproval, presentationVersion: string) {
   return {
     originalText: input.originalText,
     localDatetime: input.wallTime,
@@ -84,20 +71,34 @@ export async function createTaskApproval(
   client: Pick<Pool | PoolClient, 'query'>,
   input: CreateTaskApprovalInput,
 ): Promise<CreatedApproval> {
-  const approvalId = randomUUID();
-  const presentationVersion =
+  return insertTaskApproval(
+    client,
+    input,
     input.fold === 0 && input.foldChoice === 'first'
       ? PRESENTATION_VERSION_FIRST_V2
-      : PRESENTATION_VERSION_V1;
+      : PRESENTATION_VERSION_V1,
+    { kind: 'create_task', supersedes: input.supersedesApprovalId ?? null },
+  );
+}
+
+async function insertTaskApproval(
+  client: Pick<Pool | PoolClient, 'query'>,
+  input: FrozenTaskApproval,
+  presentationVersion: string,
+  operation:
+    | { kind: 'create_task'; supersedes: string | null }
+    | { kind: 'cancel_task'; target: string; version: number },
+): Promise<CreatedApproval> {
+  const approvalId = randomUUID();
   const presentationHash = computePresentationHash(snapshotOf(input, presentationVersion));
   const { rows } = await client.query<{ expires_at: Date }>(
-    `WITH creation AS (SELECT clock_timestamp() AS at)
+    `WITH creation AS (SELECT CASE WHEN $14::text='create_task' THEN clock_timestamp() ELSE now() END AS at)
      INSERT INTO approvals (id, owner_id, conversation_id, original_text,
        fire_at_utc, wall_time, timezone_id, fold, resolved_utc_offset_seconds,
        tzdb_version, occurrence, presentation_hash, presentation_version,
-       state, created_at, expires_at, kind, supersedes_approval_id)
+       state, created_at, expires_at, kind, supersedes_approval_id, target_task_id, expected_state_version)
      SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'single',$11,$12,'pending',
-       at, at + ($13 || ' hours')::interval, 'create_task', $14 FROM creation
+       at, at + ($13 || ' hours')::interval, $14, $15, $16, $17 FROM creation
      RETURNING expires_at`,
     [
       approvalId,
@@ -113,7 +114,10 @@ export async function createTaskApproval(
       presentationHash,
       presentationVersion,
       String(APPROVAL_TTL_HOURS),
-      input.supersedesApprovalId ?? null,
+      operation.kind,
+      operation.kind === 'create_task' ? operation.supersedes : null,
+      operation.kind === 'cancel_task' ? operation.target : null,
+      operation.kind === 'cancel_task' ? operation.version : null,
     ],
   );
   const expiresAt = rows[0]?.expires_at;
@@ -175,46 +179,9 @@ export async function createCancelTaskApproval(
     };
   }
 
-  const approvalId = randomUUID();
-  const presentationHash = computePresentationHash(snapshotOf(input, PRESENTATION_VERSION_V1));
-  const { rows } = await client.query<{ expires_at: Date }>(
-    `INSERT INTO approvals (id, owner_id, conversation_id, original_text,
-       fire_at_utc, wall_time, timezone_id, fold, resolved_utc_offset_seconds,
-       tzdb_version, occurrence, presentation_hash, presentation_version,
-       state, expires_at, kind, target_task_id, expected_state_version)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'single',$11,$12,'pending',
-       now() + ($13 || ' hours')::interval, 'cancel_task', $14, $15)
-     RETURNING expires_at`,
-    [
-      approvalId,
-      input.ownerId,
-      input.conversationId,
-      input.originalText,
-      input.fireAtUtc,
-      input.wallTime,
-      input.timezoneId,
-      input.fold,
-      input.offsetSeconds,
-      input.tzdbVersion,
-      presentationHash,
-      PRESENTATION_VERSION_V1,
-      String(APPROVAL_TTL_HOURS),
-      input.targetTaskId,
-      input.expectedStateVersion,
-    ],
-  );
-  const expiresAt = rows[0]?.expires_at;
-  if (!expiresAt) throw new Error('approval insert returned no row');
-  return {
-    approvalId,
-    originalText: input.originalText,
-    presentationHash,
-    presentationVersion: PRESENTATION_VERSION_V1,
-    expiresAt: expiresAt.toISOString(),
-    wallTime: input.wallTime,
-    timezoneId: input.timezoneId,
-    fold: input.fold,
-    offsetSeconds: input.offsetSeconds,
-    fireAtUtc: input.fireAtUtc,
-  };
+  return insertTaskApproval(client, input, PRESENTATION_VERSION_V1, {
+    kind: 'cancel_task',
+    target: input.targetTaskId,
+    version: input.expectedStateVersion,
+  });
 }

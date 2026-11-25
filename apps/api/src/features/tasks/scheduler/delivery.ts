@@ -3,8 +3,8 @@ import { channel } from 'node:diagnostics_channel';
 import { sendKeyFor } from '@along/scheduler-core';
 import type { PoolClient } from 'pg';
 import { getReceivedInApp } from '../../notifications/public.js';
+import { appendTaskEvent } from '../task-event-ledger.js';
 import {
-  appendTaskEvent,
   markOutboxSuperseded,
   supersedeQueuedOutboxForTask,
   transitionTask,

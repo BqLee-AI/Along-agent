@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { confirmApproval } from '../../src/features/approvals/reminder/confirm.js';
 import { getApprovalDetail } from '../../src/features/approvals/reminder/service.js';
-import { getTaskDetail } from '../../src/features/tasks/service.js';
+import { getTaskDetail } from '../../src/features/tasks/read/queries.js';
 import { requestCancel } from '../../src/features/tasks/cancellation/cancel.js';
 import { runSchedulePhase } from '../../src/features/tasks/scheduler/schedule.js';
 import { runSendPhase } from '../../src/features/tasks/scheduler/send.js';

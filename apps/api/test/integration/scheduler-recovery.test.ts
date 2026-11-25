@@ -8,7 +8,7 @@ import { sendKeyFor } from '@along/scheduler-core';
 import { confirmApproval } from '../../src/features/approvals/reminder/confirm.js';
 import { getApprovalDetail } from '../../src/features/approvals/reminder/service.js';
 import { requestCancel } from '../../src/features/tasks/cancellation/cancel.js';
-import { getTaskDetail } from '../../src/features/tasks/service.js';
+import { getTaskDetail } from '../../src/features/tasks/read/queries.js';
 import { runSchedulePhase } from '../../src/features/tasks/scheduler/schedule.js';
 import { runClaimPhase } from '../../src/features/tasks/scheduler/claim.js';
 import { runSendPhase } from '../../src/features/tasks/scheduler/send.js';
