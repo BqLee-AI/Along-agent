@@ -208,11 +208,16 @@ async function runtimeReport(config, directory) {
   };
 }
 
-export function assertInstallationSchema(state, targetVersion, { adopting = false } = {}) {
+export function assertInstallationSchema(
+  state,
+  targetVersion,
+  { adopting = false, minimumVersion, unsupportedCode } = {},
+) {
   // Only first-time adoption may prepare a verified older baseline. Every
   // writer-starting path uses the strict default and requires the target.
   if (
     state.kind === 'supported' &&
+    (minimumVersion === undefined || state.version >= minimumVersion) &&
     (state.version === targetVersion || (adopting === true && state.version < targetVersion))
   ) {
     return {
@@ -222,7 +227,9 @@ export function assertInstallationSchema(state, targetVersion, { adopting = fals
     };
   }
   throw failure(
-    state.kind === 'supported' ? 'UPGRADE_REQUIRED' : `DATABASE_${state.reason.toUpperCase()}`,
+    state.kind === 'supported'
+      ? 'UPGRADE_REQUIRED'
+      : (unsupportedCode ?? `DATABASE_${state.reason.toUpperCase()}`),
   );
 }
 
