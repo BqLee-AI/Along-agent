@@ -32,7 +32,7 @@ async function invokeInProcess(): Promise<{ status: number; body: unknown }> {
       resolve({ status, body: JSON.parse(payload) });
     },
   } as unknown as ServerResponse;
-  await handleRequest(req, res, { pool: null, tzdbVersion: '2024a' });
+  await handleRequest(req, res, { pool: null });
   return promise;
 }
 
