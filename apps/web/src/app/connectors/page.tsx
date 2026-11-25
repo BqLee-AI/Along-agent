@@ -1,4 +1,11 @@
 import { FeishuConnectionScreen } from '@/features/capabilities/view/feishu-connection-screen';
-export default function ConnectorsPage() {
-  return <FeishuConnectionScreen />;
+import type { PageQuery } from '@/shared/session/navigation';
+
+export default async function ConnectorsPage({
+  searchParams,
+}: {
+  searchParams: Promise<PageQuery>;
+}) {
+  const { app } = await searchParams;
+  return <FeishuConnectionScreen showConnection={app === 'feishu'} />;
 }

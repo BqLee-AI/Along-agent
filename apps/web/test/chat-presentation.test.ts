@@ -2,9 +2,12 @@ import { describe, expect, it } from 'bun:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { RunViewSchema, type GoalResult } from '@along/contracts';
-import { ThreadEventSchema } from '@along/stream-protocol';
-import { collectRunTranscripts } from '../src/features/conversations/model/conversation-run';
+import { archivedReplyRuns } from '../src/features/conversations/model/presentation';
 import { AssistantMarkdown } from '../src/features/conversations/view/assistant-markdown';
+import {
+  MessageRow,
+  StreamingMessage,
+} from '../src/features/conversations/view/conversation-messages';
 import { RunStatusPanel, TaskComposer } from '../src/features/conversations/view/task-views';
 import type { ConversationTask } from '../src/features/conversations/viewmodel/use-conversation-task';
 import { RunResults } from '../src/features/conversations/view/run-results';
@@ -13,6 +16,12 @@ function composerTask(overrides: Partial<ConversationTask> = {}): ConversationTa
   return {
     input: 'A real message',
     setInput() {},
+    files: [],
+    fileError: null,
+    fileBlockedReason: null,
+    async addFiles() {},
+    removeFile() {},
+    clearFiles() {},
     intent: 'chat',
     setIntent() {},
     workspaces: [],
@@ -50,11 +59,12 @@ function composerTask(overrides: Partial<ConversationTask> = {}): ConversationTa
     streaming: false,
     retryResume: null,
     sendUncertain: false,
-    ambiguousProposal: null,
-    foldChoice: '',
+    admitting: false,
+    clarificationSourceId: null,
     clarificationReply: false,
     setClarificationReply() {},
-    canReplyToClarification: false,
+    ambiguousProposal: null,
+    foldChoice: '',
     setFoldChoice() {},
     eligibility: { allowed: true, reason: null },
     active: false,
@@ -127,6 +137,51 @@ describe('assistant Markdown consumer', () => {
   });
 });
 
+it('renders assistant Markdown in both streaming and saved messages', () => {
+  const saved = renderToStaticMarkup(
+    createElement(MessageRow, {
+      message: {
+        message_id: 'reply',
+        role: 'assistant',
+        content: '**An answer**',
+        created_at: '2026-11-11T00:00:00.000000Z',
+      },
+    }),
+  );
+  const streaming = renderToStaticMarkup(
+    createElement(StreamingMessage, { original: null, text: '**An answer**', streaming: true }),
+  );
+  for (const markup of [saved, streaming]) {
+    expect(markup).toContain('<strong>An answer</strong>');
+  }
+});
+
+it('associates a saved reply with its own run and leaves ambiguous legacy replies unlabelled', () => {
+  const created_at = '2026-11-11T00:00:00.000000Z';
+  const matches = archivedReplyRuns(
+    [
+      { message_id: 'match', role: 'assistant', content: 'Unique reply', created_at },
+      { message_id: 'ambiguous', role: 'assistant', content: 'Duplicate reply', created_at },
+      {
+        message_id: 'explicit',
+        role: 'assistant',
+        content: 'Duplicate reply',
+        created_at,
+        source_run_id: 'run-3',
+      },
+    ],
+    new Map([
+      ['run-1', { text: 'Unique reply', approvals: [] }],
+      ['run-2', { text: 'Duplicate reply', approvals: [] }],
+      ['run-3', { text: 'Duplicate reply', approvals: [] }],
+    ]),
+  );
+  expect([...matches]).toEqual([
+    ['match', 'run-1'],
+    ['explicit', 'run-3'],
+  ]);
+});
+
 describe('durable goal result consumer', () => {
   const cid = '11111111-1111-4111-8111-111111111111';
   const rid = '22222222-2222-4222-8222-222222222222';
@@ -155,117 +210,17 @@ describe('durable goal result consumer', () => {
     goal_result: result,
   });
 
-  it('renders the server-frozen model, never the current provider or default', () => {
-    const markup = renderToStaticMarkup(
-      createElement(RunStatusPanel, {
-        task: composerTask({
-          selected: { conversationId: cid, runId: rid },
-          run: {
-            ...run,
-            model_selection: {
-              state: 'available',
-              provider_id: cid,
-              provider_name: '接纳时名称',
-              model_id: 'vendor/完整-ID',
-            },
-          },
-          defaultSelection: { provider_id: receipt, model_id: 'different' },
-        }),
-      }),
-    );
-    expect(markup).toContain('接纳时名称 · vendor/完整-ID');
-    expect(markup).not.toContain('different');
-  });
-
-  it('shows a historical frozen model without a selected run or approvals', () => {
+  it('does not render approval history when there are no approval entries', () => {
     const markup = renderToStaticMarkup(
       createElement(RunResults, {
         task: composerTask(),
         conversationId: cid,
-        entries: [
-          {
-            runId: rid,
-            history: {
-              run_id: rid,
-              conversation_id: cid,
-              execution: 'harness',
-              status: 'done',
-              created_at: '2026-11-11T00:00:00.000000Z',
-              ended_at: '2026-11-11T00:00:01.000000Z',
-              model_selection: {
-                state: 'available',
-                provider_id: cid,
-                provider_name: '历史接入',
-                model_id: 'vendor/history',
-              },
-              original: { state: 'legacy_unavailable' },
-            },
-          },
-        ],
+        entries: [],
         needsAction: false,
         showReminderResult: false,
       }),
     );
-    expect(markup).toContain('历史接入 · vendor/history');
-  });
-
-  it('renders the admitted lifecycle immediately from a started event before a RunView read', () => {
-    const started = ThreadEventSchema.parse({
-      protocol_version: 'v2',
-      seq: 1,
-      type: 'thread.started',
-      payload: {
-        conversation_id: cid,
-        run_id: rid,
-        stream_protocol_version: 'v2',
-        ruleset_id: 'rules-v1',
-        tzdb_version: '2026a',
-        authorization_revision: 'delegation/1',
-        execution_lifecycle: 'request-bound',
-      },
-      request_id: 'lifecycle-render',
-    });
-    const markup = renderToStaticMarkup(
-      createElement(RunStatusPanel, {
-        task: composerTask({
-          selected: { conversationId: cid, runId: rid },
-          streaming: true,
-          transcript: collectRunTranscripts([started]),
-        }),
-      }),
-    );
-    expect(openingTag(markup, 'request-bound-lifecycle')).not.toContain('<details');
-    expect(markup).not.toContain('data-testid="goal-result"');
-  });
-
-  it('shows server-owned lifecycle from the admitted started event without request-bound warning', () => {
-    const started = ThreadEventSchema.parse({
-      protocol_version: 'v2',
-      seq: 1,
-      type: 'thread.started',
-      payload: {
-        conversation_id: cid,
-        run_id: rid,
-        stream_protocol_version: 'v2',
-        ruleset_id: 'rules-v1',
-        tzdb_version: '2026a',
-        authorization_revision: 'delegation/1',
-        execution_lifecycle: 'server-owned',
-      },
-      request_id: 'lifecycle-render',
-    });
-    const markup = renderToStaticMarkup(
-      createElement(RunStatusPanel, {
-        task: composerTask({
-          selected: { conversationId: cid, runId: rid },
-          streaming: true,
-          transcript: collectRunTranscripts([started]),
-        }),
-      }),
-    );
-    expect(markup).toContain('data-testid="server-owned-lifecycle"');
-    expect(markup).not.toContain('data-testid="request-bound-lifecycle"');
-    expect(markup).toContain('停止请使用停止按钮');
+    expect(markup).toBe('');
   });
 
   it('renders user pause controls separately from approval resume without executing actions', () => {
@@ -338,7 +293,6 @@ describe('durable goal result consumer', () => {
         }),
       );
       expect(openingTag(markup, 'goal-result')).toContain(`data-goal-status="${status}"`);
-      expect(openingTag(markup, 'request-bound-lifecycle')).not.toContain('<details');
       expect(markup).toContain('data-outcome-status="achieved"');
       expect(markup).toContain('data-outcome-status="blocked"');
       expect(markup).toContain(result.outcomes[0]!.description);
@@ -361,18 +315,26 @@ describe('durable goal result consumer', () => {
     expect(markup).not.toContain('<strong>Accepted setting remains saved.</strong>');
   });
 
-  it('omits a completed result without an open question only when its answer is visible', () => {
-    const completed = {
-      ...run,
-      goal_result: { ...result, status: 'completed' as const, clarification: null },
+  it('shows the separate destination question without repeating the visible answer', () => {
+    const goal_result: GoalResult = {
+      ...result,
+      status: 'blocked',
+      outcomes: [{ description: 'Destination unresolved', status: 'blocked', receipt_refs: [] }],
     };
     const task = composerTask({
       selected: { conversationId: cid, runId: rid },
-      run: completed,
+      run: { ...run, goal_result },
       liveReply: true,
     });
     const visible = renderToStaticMarkup(createElement(RunStatusPanel, { task }));
-    expect(visible).not.toContain('data-testid="goal-result"');
+    expect(visible).toContain('Which destination?');
+    expect(visible).not.toContain('Accepted setting remains saved.');
+    expect(visible).not.toContain('本次运行模型');
+    expect(visible).not.toContain('此运行绑定当前连接');
+    const composer = renderToStaticMarkup(
+      createElement(TaskComposer, { task: { ...task, clarificationSourceId: rid } }),
+    );
+    expect(composer).toContain('补充上一个问题');
     const unavailable = renderToStaticMarkup(
       createElement(RunStatusPanel, { task: { ...task, liveReply: false } }),
     );
@@ -494,6 +456,21 @@ describe('composer consumer states', () => {
     expect(markup).toContain('状态读取失败');
     expect(markup).toContain('重新读取压缩状态');
     expect(markup).not.toContain('压缩已完成');
+  });
+
+  it('explains why an oversized attachment draft cannot be sent', () => {
+    const reason = '消息和文件内容超出单条消息的容量。';
+    const markup = renderToStaticMarkup(
+      createElement(TaskComposer, {
+        task: composerTask({
+          active: false,
+          eligibility: { allowed: false, reason },
+          fileBlockedReason: reason,
+        }),
+      }),
+    );
+    expect(openingTag(markup, 'send-message')).toContain('disabled');
+    expect(markup).toContain(reason);
   });
 
   it('disables new sends for controller-blocked and unresolved DST choices', () => {

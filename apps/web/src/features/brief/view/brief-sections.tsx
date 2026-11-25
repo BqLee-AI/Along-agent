@@ -2,7 +2,7 @@
 
 import { use } from 'react';
 import Link from '@/shell/view/workspace-link';
-import { ArrowRight, RefreshCw } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 import { Alert } from '@lorelum/lumen-ui/components/alert';
 import { Badge } from '@lorelum/lumen-ui/components/badge';
 import { ErrorNotice } from '@/shared/ui/page';
@@ -28,48 +28,42 @@ export function BriefSections({ workspace }: { workspace: TodayWorkspace }) {
   }
   const { brief, groups } = response.data;
   return (
-    <div className="min-w-0 space-y-8 [overflow-wrap:anywhere]">
+    <div className="min-w-0 space-y-6 [overflow-wrap:anywhere]">
       <div>
         <div className="mb-3 flex items-center justify-between gap-3">
-          <h2 className="text-[13px] leading-5 font-medium text-muted-foreground">日期简报</h2>
-          <Link href={workspace.refreshHref} className={linkClass}>
-            <RefreshCw className="size-3.5" aria-hidden="true" />
-            刷新
+          <h2 className="text-sm font-semibold">
+            <time dateTime={brief.date}>{brief.date}</time>
+            <span className="ml-2 text-xs font-normal text-secondary-foreground">
+              {brief.timezone_id}
+            </span>
+          </h2>
+          <Link
+            href={workspace.refreshHref}
+            aria-label="刷新简报"
+            title="刷新简报"
+            className={`${linkClass} size-8 justify-center hover:bg-muted max-lg:size-11`}
+          >
+            <RefreshCw className="size-4" aria-hidden="true" />
           </Link>
         </div>
-        <dl className="grid grid-cols-1 gap-3 @md/workspace:grid-cols-[1.5fr_1fr_1fr]">
-          <div className={`${panelClass} min-w-0 px-4 py-4`}>
-            <dt className={helperClass}>日期</dt>
-            <dd className="mt-2 font-mono text-lg leading-7 font-semibold tabular-nums">
-              {brief.date}
-              <span className="ml-2 text-[13px] font-normal text-muted-foreground">
-                {brief.timezone_id}
-              </span>
-            </dd>
-          </div>
-          <div className={`${panelClass} min-w-0 px-4 py-4`}>
+        <dl className={`grid grid-cols-2 divide-x divide-separator ${panelClass}`}>
+          <div className="min-w-0 px-4 py-3">
             <dt className={helperClass}>待确认</dt>
-            <dd className="mt-2 text-3xl leading-8 font-semibold tabular-nums">
+            <dd className="text-2xl leading-8 font-semibold tabular-nums">
               {brief.summary.pending_count}
             </dd>
           </div>
-          <div className={`${panelClass} min-w-0 px-4 py-4`}>
+          <div className="min-w-0 px-4 py-3">
             <dt className={helperClass}>已记录触发</dt>
-            <dd className="mt-2 text-3xl leading-8 font-semibold tabular-nums">
+            <dd className="text-2xl leading-8 font-semibold tabular-nums">
               {brief.summary.fired_count}
             </dd>
           </div>
         </dl>
-        <p className={`mt-3 ${helperClass}`}>仅显示当日简报。</p>
       </div>
       {brief.meta.timezone_note && (
         <Alert variant="glass">
-          <Alert.Content>
-            <Alert.Title>时间说明</Alert.Title>
-            <Alert.Description className={helperClass}>
-              {brief.meta.timezone_note}
-            </Alert.Description>
-          </Alert.Content>
+          <Alert.Content>{brief.meta.timezone_note}</Alert.Content>
         </Alert>
       )}
       {brief.meta.brief_state === 'stale' && (
@@ -77,13 +71,12 @@ export function BriefSections({ workspace }: { workspace: TodayWorkspace }) {
           <Alert.Content>
             <Alert.Title>简报可能过期</Alert.Title>
             <Alert.Description className={helperClass}>
-              <p>保留先前获取的内容；请刷新核对最新记录，此处不代表完整范围。</p>
+              <p>显示上次读取的记录，请刷新。</p>
               {brief.meta.stale_reason && <p className="mt-1">{brief.meta.stale_reason}</p>}
             </Alert.Description>
           </Alert.Content>
         </Alert>
       )}
-      {brief.meta.brief_state === 'empty' && <p className={helperClass}>当日暂无简报记录。</p>}
       {groups.map(({ id, title, href, items, empty }) => (
         <section key={id} aria-labelledby={`brief-${id}`} className="min-w-0">
           <div className="mb-3 flex items-center justify-between gap-3">
@@ -98,12 +91,11 @@ export function BriefSections({ workspace }: { workspace: TodayWorkspace }) {
             {href && (
               <Link href={href} aria-label={`查看全部${title}`} className={`shrink-0 ${linkClass}`}>
                 查看全部
-                <ArrowRight className="size-3.5" aria-hidden="true" />
               </Link>
             )}
           </div>
           {items.length === 0 ? (
-            <p className={`${panelClass} px-4 py-5 ${helperClass}`}>{empty}</p>
+            <p className={`border-t border-separator pt-3 ${helperClass}`}>{empty}</p>
           ) : (
             <ul className={`${panelClass} divide-y divide-separator`}>
               {items.map((item) => (
@@ -142,7 +134,6 @@ export function BriefSections({ workspace }: { workspace: TodayWorkspace }) {
       <p className={helperClass}>
         <Link href="/conversations" className={linkClass}>
           找回会话与结果
-          <ArrowRight className="size-3.5" aria-hidden="true" />
         </Link>
       </p>
     </div>

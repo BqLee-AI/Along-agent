@@ -73,9 +73,9 @@ maybe('R1 account application service and public HTTP', () => {
     }
     await database?.close();
   });
-  async function listen(): Promise<void> {
+  async function listen(tzdbVersion = '2024a'): Promise<void> {
     server = createServer((req, res) => {
-      void handleRequest(req, res, { pool, accountService: service, tzdbVersion: '2024a' });
+      void handleRequest(req, res, { pool, accountService: service, tzdbVersion });
     });
     await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', resolve));
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -497,6 +497,44 @@ maybe('R1 account application service and public HTTP', () => {
     });
     expect(missingCredential.status).toBe(401);
     expect(publicFailure(await missingCredential.json())).toEqual(bodies[0]);
+  });
+
+  it('updates only the signed-in profile and saves or clears the canonical default timezone', async () => {
+    const result = await service.initialize(fields);
+    await listen('fixture-v1');
+    const cookie = sessionCookie(result.cookies);
+    const readMe = async () => (await fetch(`${base}/api/v1/me`, { headers: { cookie } })).json();
+    const me = signedMeSchema.parse(await readMe());
+    const headers = { cookie, 'x-csrf-token': me.data.csrf_token };
+
+    const unauthorized = await post('account/profile', { display_name: 'Denied' }, { cookie });
+    expect(unauthorized.status).toBe(403);
+    const invalid = await post(
+      'account/profile',
+      { display_name: 'Not saved', timezone_id: 'Unsupported/Zone' },
+      headers,
+    );
+    expect(invalid.status).toBe(422);
+    expect(await readMe()).toMatchObject({ data: { user: { display_name: fields.display_name } } });
+
+    const saved = await post(
+      'account/profile',
+      { display_name: ' Along Tester ', timezone_id: '北京时间' },
+      headers,
+    );
+    expect(saved.status).toBe(200);
+    expect(await saved.json()).toMatchObject({
+      data: { display_name: 'Along Tester', timezone_id: 'Asia/Shanghai' },
+    });
+    expect(await readMe()).toMatchObject({
+      data: { user: { display_name: 'Along Tester' }, confirmed_timezone: 'Asia/Shanghai' },
+    });
+
+    const cleared = await post('account/profile', { timezone_id: null }, headers);
+    expect(cleared.status).toBe(200);
+    expect(await readMe()).toMatchObject({
+      data: { user: { display_name: 'Along Tester' }, confirmed_timezone: null },
+    });
   });
 
   it('normal signout commits soft revocation without changing expiry; fault returns503, no clear Cookie and old session still resolves', async () => {

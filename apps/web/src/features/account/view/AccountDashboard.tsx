@@ -105,17 +105,19 @@ function Collection<T extends { id: string }>({
   );
 }
 
-/** Self-service and installation-admin account management, shown beneath the profile. */
+/** Renders only the selected self-service or installation-admin setting. */
 export default function AccountDashboard({
   account,
   csrfToken,
+  section,
 }: {
   account: auth.AccountView;
   csrfToken: string;
+  section: 'contact' | 'password' | 'sessions' | 'admin' | 'deletion';
 }) {
-  return (
-    <div className="min-w-0 space-y-7 [overflow-wrap:anywhere]">
-      <Section title="联系邮箱">
+  if (section === 'contact')
+    return (
+      <div className="space-y-4">
         <p className="text-sm leading-6">
           {account.contact.state === 'verified'
             ? `已验证：${account.contact.masked_email}`
@@ -149,27 +151,33 @@ export default function AccountDashboard({
           csrfToken={csrfToken}
           success="验证请求已接受，请读取账户状态并检查邮件；不表示已经送达。"
         />
-      </Section>
-      <Section title="密码">
-        <AccountActionForm
-          path="password/change"
-          title="修改密码并退出所有会话"
-          fields={[
-            currentPassword,
-            {
-              name: 'new_password',
-              label: '新密码（8–128 位）',
-              type: 'password',
-              autoComplete: 'new-password',
-            },
-          ]}
-          inputSchema={auth.authPasswordChangeSchema}
-          resultSchema={auth.authPasswordChangedSchema}
-          csrfToken={csrfToken}
-          success="密码已更新，所有会话已撤销，请正式登录。"
-        />
-      </Section>
-      <Section title="批量撤销会话">
+      </div>
+    );
+
+  if (section === 'password')
+    return (
+      <AccountActionForm
+        path="password/change"
+        title="修改密码并退出所有会话"
+        fields={[
+          currentPassword,
+          {
+            name: 'new_password',
+            label: '新密码（8–128 位）',
+            type: 'password',
+            autoComplete: 'new-password',
+          },
+        ]}
+        inputSchema={auth.authPasswordChangeSchema}
+        resultSchema={auth.authPasswordChangedSchema}
+        csrfToken={csrfToken}
+        success="密码已更新，所有会话已撤销，请正式登录。"
+      />
+    );
+
+  if (section === 'sessions')
+    return (
+      <div className="space-y-4">
         {(['others', 'all'] as const).map((scope) => (
           <AccountActionForm
             key={scope}
@@ -185,120 +193,124 @@ export default function AccountDashboard({
             }
           />
         ))}
-      </Section>
-      {account.installation_admin ? (
-        <>
-          <Section title="邀请普通账户">
-            <p className="text-sm leading-6 text-muted-foreground">
-              邀请不会授予跨用户资料访问权。接受者必须独立设置密码并正式登录。
-            </p>
-            {account.contact.state === 'verified' ? (
-              <AccountActionForm
-                path="invitations"
-                title="创建邀请"
-                values={{ idempotency_key: null }}
-                fields={[
-                  { name: 'email', label: '受邀邮箱', type: 'email', autoComplete: 'email' },
-                  currentPassword,
-                ]}
-                inputSchema={auth.authInvitationCreateSchema}
-                resultSchema={auth.authInvitationCreatedSchema}
-                csrfToken={csrfToken}
-                success="邀请已创建。请读取列表查看邮件状态，不代表已送达。"
-              />
-            ) : (
-              <p className="text-sm leading-6">请先验证本人的联系邮箱，再创建邀请。</p>
-            )}
-          </Section>
-          <Collection
-            path="invitations"
-            schema={auth.authInvitationsSchema}
-            title="邀请记录"
-            render={(invitation) => (
-              <>
-                <h3 className="font-semibold">{invitation.masked_email}</h3>
-                <p>
-                  状态：{invitationLabels[invitation.state]} · 第 {invitation.generation} 代
-                </p>
-                <p>到期：{invitation.expires_at}</p>
-                <Delivery delivery={invitation.delivery} />
-                {invitation.state === 'pending' || invitation.state === 'expired' ? (
-                  <>
-                    <AccountActionForm
-                      path={{ kind: 'invitation-resend', id: invitation.id }}
-                      title="发送新一代邀请"
-                      values={{ idempotency_key: null }}
-                      fields={[currentPassword]}
-                      inputSchema={auth.authInvitationResendSchema}
-                      resultSchema={auth.authInvitationCreatedSchema}
-                      csrfToken={csrfToken}
-                      success="新一代邀请已接受，旧链接失效。请只读核对邮件状态。"
-                    />
-                    <AccountActionForm
-                      path={{ kind: 'invitation-revoke', id: invitation.id }}
-                      title="撤销邀请"
-                      fields={[currentPassword]}
-                      inputSchema={auth.authInvitationRevokeSchema}
-                      resultSchema={auth.authInvitationRevokedSchema}
-                      csrfToken={csrfToken}
-                      success="邀请已撤销。"
-                    />
-                  </>
-                ) : null}
-              </>
-            )}
-          />
-          <Collection
-            path="users"
-            schema={auth.authUsersSchema}
-            title="账户管理"
-            render={(user) => (
-              <>
-                <h3 className="font-semibold">{user.display_name}</h3>
-                <p>
-                  {userStatusLabels[user.status]} · {user.masked_email ?? '无已验证邮箱'} ·{' '}
-                  {user.admitted ? '已准入' : '未准入'}
-                </p>
-                {user.installation_admin ? (
-                  <p>唯一管理员受保护，不可在线停用或申请删除。</p>
-                ) : user.status === 'active' ? (
+      </div>
+    );
+
+  if (section === 'admin')
+    return account.installation_admin ? (
+      <div className="min-w-0 space-y-7">
+        <Section title="邀请普通账户">
+          <p className="text-sm leading-6 text-muted-foreground">
+            邀请不会授予跨用户资料访问权。接受者必须独立设置密码并正式登录。
+          </p>
+          {account.contact.state === 'verified' ? (
+            <AccountActionForm
+              path="invitations"
+              title="创建邀请"
+              values={{ idempotency_key: null }}
+              fields={[
+                { name: 'email', label: '受邀邮箱', type: 'email', autoComplete: 'email' },
+                currentPassword,
+              ]}
+              inputSchema={auth.authInvitationCreateSchema}
+              resultSchema={auth.authInvitationCreatedSchema}
+              csrfToken={csrfToken}
+              success="邀请已创建。请读取列表查看邮件状态，不代表已送达。"
+            />
+          ) : (
+            <p className="text-sm leading-6">请先验证本人的联系邮箱，再创建邀请。</p>
+          )}
+        </Section>
+        <Collection
+          path="invitations"
+          schema={auth.authInvitationsSchema}
+          title="邀请记录"
+          render={(invitation) => (
+            <>
+              <h3 className="font-semibold">{invitation.masked_email}</h3>
+              <p>
+                状态：{invitationLabels[invitation.state]} · 第 {invitation.generation} 代
+              </p>
+              <p>到期：{invitation.expires_at}</p>
+              <Delivery delivery={invitation.delivery} />
+              {invitation.state === 'pending' || invitation.state === 'expired' ? (
+                <>
                   <AccountActionForm
-                    path={{ kind: 'user-disable', id: user.id }}
-                    title="停用此普通账户"
-                    fields={[currentPassword, confirmed]}
-                    inputSchema={auth.authDisableUserSchema}
-                    resultSchema={auth.authUserDisabledSchema}
+                    path={{ kind: 'invitation-resend', id: invitation.id }}
+                    title="发送新一代邀请"
+                    values={{ idempotency_key: null }}
+                    fields={[currentPassword]}
+                    inputSchema={auth.authInvitationResendSchema}
+                    resultSchema={auth.authInvitationCreatedSchema}
                     csrfToken={csrfToken}
-                    success="账户已停用，其访问资格已撤销。"
+                    success="新一代邀请已接受，旧链接失效。请只读核对邮件状态。"
                   />
-                ) : null}
-              </>
-            )}
+                  <AccountActionForm
+                    path={{ kind: 'invitation-revoke', id: invitation.id }}
+                    title="撤销邀请"
+                    fields={[currentPassword]}
+                    inputSchema={auth.authInvitationRevokeSchema}
+                    resultSchema={auth.authInvitationRevokedSchema}
+                    csrfToken={csrfToken}
+                    success="邀请已撤销。"
+                  />
+                </>
+              ) : null}
+            </>
+          )}
+        />
+        <Collection
+          path="users"
+          schema={auth.authUsersSchema}
+          title="账户管理"
+          render={(user) => (
+            <>
+              <h3 className="font-semibold">{user.display_name}</h3>
+              <p>
+                {userStatusLabels[user.status]} · {user.masked_email ?? '无已验证邮箱'} ·{' '}
+                {user.admitted ? '已准入' : '未准入'}
+              </p>
+              {user.installation_admin ? (
+                <p>唯一管理员受保护，不可在线停用或申请删除。</p>
+              ) : user.status === 'active' ? (
+                <AccountActionForm
+                  path={{ kind: 'user-disable', id: user.id }}
+                  title="停用此普通账户"
+                  fields={[currentPassword, confirmed]}
+                  inputSchema={auth.authDisableUserSchema}
+                  resultSchema={auth.authUserDisabledSchema}
+                  csrfToken={csrfToken}
+                  success="账户已停用，其访问资格已撤销。"
+                />
+              ) : null}
+            </>
+          )}
+        />
+      </div>
+    ) : null;
+
+  return (
+    <div className="space-y-4">
+      {account.installation_admin ? (
+        <p className="text-sm leading-6">
+          唯一管理员受保护，不能在线申请删除。请联系部署者使用正式本机维护流程。
+        </p>
+      ) : (
+        <>
+          <p className="text-sm leading-6 text-muted-foreground">
+            申请后账户立即失去访问资格；这不表示历史数据已物理删除。
+          </p>
+          <AccountActionForm
+            path="deletion-request"
+            title="提交删除申请并退出"
+            fields={[currentPassword, confirmed]}
+            inputSchema={auth.authDeletionRequestSchema}
+            resultSchema={auth.authDeletionRequestedSchema}
+            csrfToken={csrfToken}
+            success="删除申请已记录，所有会话已撤销。此回执不是物理删除完成证明。"
           />
         </>
-      ) : null}
-      <Section title="删除申请">
-        {account.installation_admin ? (
-          <p className="text-sm leading-6">
-            唯一管理员受保护，不能在线申请删除。请联系部署者使用正式本机维护流程。
-          </p>
-        ) : (
-          <>
-            <p className="text-sm leading-6 text-muted-foreground">
-              申请后账户立即失去访问资格；这不表示历史数据已物理删除。
-            </p>
-            <AccountActionForm
-              path="deletion-request"
-              title="提交删除申请并退出"
-              fields={[currentPassword, confirmed]}
-              inputSchema={auth.authDeletionRequestSchema}
-              resultSchema={auth.authDeletionRequestedSchema}
-              csrfToken={csrfToken}
-              success="删除申请已记录，所有会话已撤销。此回执不是物理删除完成证明。"
-            />
-          </>
-        )}
-      </Section>
+      )}
     </div>
   );
 }

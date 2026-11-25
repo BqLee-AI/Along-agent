@@ -1,14 +1,15 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import Link from '@/shell/view/workspace-link';
 import { Brand } from '@/shared/ui/brand';
-import { ArrowDown, Bell, Files, Info, MessageSquareText, PanelLeftOpen, Plus } from 'lucide-react';
+import { ArrowDown, Bell, MessageSquareText, PanelLeftOpen, Plus } from 'lucide-react';
 import { Button } from '@lorelum/lumen-ui/components/button';
 import { AnimatePresence, m, useReducedMotion } from 'motion/react';
 import type { TaskIntent } from '../model/task';
 import { conversationHref, runStatusLabel } from '../model/conversation-run';
+import { archivedReplyRuns } from '../model/presentation';
 import { useConversationTask } from '../viewmodel/use-conversation-task';
 import { useConversationPresentation } from '../viewmodel/use-conversation-presentation';
 import { useConversationScroll } from '../viewmodel/use-conversation-scroll';
@@ -16,11 +17,9 @@ import { useComposerFocus } from '../viewmodel/use-composer-display';
 import { useConversationHistory } from '../viewmodel/use-conversation-history';
 import { ConversationHistory } from './conversation-history';
 import { ConversationSidebar } from './conversation-sidebar';
-import { ConversationContext } from './conversation-context';
 import { MessageRow, StreamingMessage } from './conversation-messages';
 import { RunResults } from './run-results';
 import { LeaveRunDialog, RunStatusPanel, TaskComposer } from './task-views';
-import { OfficeMaterials } from './office-materials';
 
 export interface ConversationPaneProps {
   conversationId?: string | null;
@@ -40,26 +39,24 @@ export default function ConversationPane({
 }: ConversationPaneProps) {
   const task = useConversationTask({ conversationId, runId, initialIntent });
   const history = useConversationHistory();
-  const { entries, blockedRuns, context, needsAction, showReminderResult } =
+  const { entries, blockedRuns, needsAction, showReminderResult } =
     useConversationPresentation(task);
   const selected = task.selected;
+  const currentRun = task.run?.run_id === selected?.runId ? task.run : null;
+  const runsById = useMemo(() => new Map(task.runs.map((run) => [run.run_id, run])), [task.runs]);
+  const replyRuns = useMemo(
+    () => archivedReplyRuns(task.messages, task.transcript),
+    [task.messages, task.transcript],
+  );
   const transcript = selected ? task.transcript.get(selected.runId) : null;
-  const goalResult = task.run?.goal_result ?? transcript?.goal_result;
+  const goalResult = currentRun?.goal_result ?? transcript?.goal_result;
   const replyText = goalResult ? goalResult.answer : transcript?.text;
   const scroll = useConversationScroll(selected ? selected.conversationId : conversationId);
-  const inspector = useRef<HTMLDetailsElement>(null);
   const focusComposer = useComposerFocus();
-  const locateResult = scroll.locate;
-  const locate = useCallback(
-    (id: string) => {
-      if (inspector.current) inspector.current.open = false;
-      locateResult(id);
-    },
-    [locateResult],
-  );
   const startNewConversation = useCallback(() => {
     if (!task.selected && !task.active) {
       task.setInput('');
+      task.clearFiles();
       task.setIntent('chat');
       focusComposer();
     }
@@ -67,10 +64,8 @@ export default function ConversationPane({
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const sidebarShown = sidebar && sidebarOpen;
   const reduceMotion = useReducedMotion();
-  const prepareOfficeReminder = () => {
-    task.setIntent('reminder');
-    focusComposer();
-  };
+  const fileDragDepth = useRef(0);
+  const [fileDrag, setFileDrag] = useState(false);
   return (
     <div className="flex h-full min-h-0 w-full min-w-0">
       <AnimatePresence initial={false}>
@@ -93,11 +88,41 @@ export default function ConversationPane({
         ) : null}
       </AnimatePresence>
       <section
-        className="flex h-full min-h-0 w-full min-w-0 flex-col bg-background [&_[data-slot=markdown]]:text-sm! [&_[data-slot=markdown]]:leading-6! [&_[data-slot=markdown]_a]:text-brand-ink!"
+        className="relative flex h-full min-h-0 w-full min-w-0 flex-col bg-background [&_[data-slot=markdown]]:text-sm! [&_[data-slot=markdown]]:leading-6! [&_[data-slot=markdown]_a]:text-brand-ink!"
         data-testid="conversation-chat"
         aria-label="Along 对话"
+        onDragEnter={(event) => {
+          if (!event.dataTransfer.types.includes('Files')) return;
+          event.preventDefault();
+          fileDragDepth.current++;
+          setFileDrag(true);
+        }}
+        onDragOver={(event) => {
+          if (!event.dataTransfer.types.includes('Files')) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = task.active ? 'none' : 'copy';
+        }}
+        onDragLeave={() => {
+          fileDragDepth.current = Math.max(0, fileDragDepth.current - 1);
+          if (!fileDragDepth.current) setFileDrag(false);
+        }}
+        onDrop={(event) => {
+          if (!event.dataTransfer.types.includes('Files')) return;
+          event.preventDefault();
+          fileDragDepth.current = 0;
+          setFileDrag(false);
+          if (!task.active && event.dataTransfer.files.length) {
+            void task.addFiles(Array.from(event.dataTransfer.files));
+            focusComposer();
+          }
+        }}
       >
-        <header className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-separator bg-background px-3 sm:px-4">
+        {fileDrag && !task.active ? (
+          <div className="pointer-events-none absolute inset-2 z-20 grid place-items-center rounded-xl border-2 border-dashed border-brand-ink bg-background/85 font-medium text-foreground">
+            松开以添加文件
+          </div>
+        ) : null}
+        <header className="flex shrink-0 items-center justify-between gap-2 px-3 py-2.5 sm:px-4">
           <div className="flex min-w-0 items-center gap-2">
             {sidebar && !sidebarOpen ? (
               <button
@@ -110,11 +135,16 @@ export default function ConversationPane({
                 <PanelLeftOpen className="size-4" aria-hidden="true" />
               </button>
             ) : null}
-            <h1 className={`text-sm leading-5 font-semibold ${sidebar ? 'lg:sr-only' : ''}`}>
+            <h1
+              className={`text-sm leading-5 font-semibold max-[400px]:sr-only ${sidebar ? 'lg:sr-only' : ''}`}
+            >
               <Brand height={20} />
             </h1>
           </div>
-          <nav className="flex shrink-0 items-center gap-1" aria-label="会话操作">
+          <nav
+            className="chat-dock relative flex shrink-0 items-center gap-0.5 rounded-full p-1"
+            aria-label="会话操作"
+          >
             <div className={sidebar ? 'contents lg:hidden' : 'contents'}>
               <ConversationHistory history={history} />
               <Link
@@ -127,30 +157,6 @@ export default function ConversationPane({
                 <span className="hidden sm:inline">新对话</span>
               </Link>
             </div>
-            <details
-              ref={inspector}
-              className="relative"
-              onKeyDown={(event) => {
-                if (event.key === 'Escape' && inspector.current?.open) {
-                  inspector.current.open = false;
-                  inspector.current.querySelector('summary')?.focus();
-                }
-              }}
-            >
-              <summary
-                aria-label="运行与资料范围"
-                className="flex min-h-8 min-w-8 cursor-pointer list-none items-center justify-center rounded-control text-secondary-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring max-lg:min-h-11 max-lg:min-w-11 [&::-webkit-details-marker]:hidden"
-              >
-                <Info className="size-4" aria-hidden="true" />
-              </summary>
-              <section
-                aria-label="对话关联信息"
-                className="absolute top-full right-0 z-30 mt-1 max-h-[65dvh] w-[min(360px,calc(100vw-2rem))] overflow-y-auto overscroll-contain rounded-lg border border-separator bg-background p-4 shadow-lg"
-              >
-                <h2 className="mb-4 text-sm leading-5 font-semibold">运行与资料范围</h2>
-                <ConversationContext context={context} locate={locate} />
-              </section>
-            </details>
             {headerActions}
           </nav>
         </header>
@@ -175,10 +181,6 @@ export default function ConversationPane({
                     className="relative flex min-h-[min(56dvh,520px)] flex-col items-center justify-center gap-6 py-10 text-center"
                     data-testid="chat-greeting"
                   >
-                    <div
-                      aria-hidden="true"
-                      className="pointer-events-none absolute inset-x-0 top-1/2 -z-0 mx-auto h-56 max-w-sm -translate-y-1/2 rounded-full bg-[radial-gradient(ellipse,color-mix(in_oklab,var(--brand-ink)_7%,transparent),transparent_70%)] dark:bg-[radial-gradient(ellipse,color-mix(in_oklab,var(--brand-ink)_10%,transparent),transparent_70%)]"
-                    />
                     <div aria-hidden="true" className="relative">
                       <Brand height={28} />
                     </div>
@@ -194,7 +196,6 @@ export default function ConversationPane({
                           icon: MessageSquareText,
                         },
                         { intent: 'reminder', title: '安排提醒', input: '', icon: Bell },
-                        { intent: 'document', title: '处理资料', input: '', icon: Files },
                       ].map(({ intent, title, input, icon: Icon }) => (
                         <button
                           key={intent}
@@ -216,9 +217,22 @@ export default function ConversationPane({
                 ) : null}
                 {task.messages.length ? (
                   <ol className="space-y-6" data-testid="chat-messages">
-                    {task.messages.map((message) => (
-                      <MessageRow key={message.message_id} message={message} />
-                    ))}
+                    {task.messages.map((message) => {
+                      const runId = replyRuns.get(message.message_id);
+                      const run = runId
+                        ? currentRun?.run_id === runId
+                          ? currentRun
+                          : runsById.get(runId)
+                        : undefined;
+                      return (
+                        <MessageRow
+                          key={message.message_id}
+                          message={message}
+                          run={run}
+                          facts={runId ? task.transcript.get(runId) : undefined}
+                        />
+                      );
+                    })}
                   </ol>
                 ) : null}
                 {task.reading && !task.messages.length ? (
@@ -228,6 +242,8 @@ export default function ConversationPane({
                 ) : null}
                 {task.liveReply ? (
                   <StreamingMessage
+                    run={currentRun ?? (selected ? runsById.get(selected.runId) : undefined)}
+                    facts={transcript ?? undefined}
                     original={task.liveOriginal}
                     text={replyText ?? ''}
                     streaming={task.streaming}
@@ -279,11 +295,10 @@ export default function ConversationPane({
           ) : null}
         </div>
         <div
-          className="shrink-0 bg-background px-3 pt-0 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4"
+          className="shrink-0 px-3 pt-0 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4"
           data-testid="composer-dock"
         >
           <div className="mx-auto w-full max-w-[720px]">
-            <OfficeMaterials onReminder={prepareOfficeReminder} />
             <TaskComposer task={task} />
           </div>
         </div>

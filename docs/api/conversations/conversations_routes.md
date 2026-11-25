@@ -42,6 +42,7 @@
 - `conversation_id`：缺省则服务端新建并在首个 SSE 事件返回；传入则续写（跨用户 id 返回 `403`）。
 - `card_ref`：可选，围绕某卡片追问时带；服务端只做关联，不做授权旁路。
 - `raw_text`：用户原话，按不可信输入解析，原样进回显引用。
+- `files` 可选。普通 `delegation/1` Harness 消息可随指令提交 1–5 项 `{name,text}`。文件正文作为分析数据随消息保存并参与幂等校验，序列化后的完整消息上限为 20,000 字符。带文件的 Run 使用只读工具范围，不接纳目录绑定、运行澄清引用、飞书读取或 Microsoft Learn 搜索。
 - `execution`：可选 `business | harness`，省略为兼容的确定性业务。harness 明确进入正式仓颉，`mode=chat` 不作隐式分派；缺实际依赖在任何新写入/SSE 前503 `HARNESS_UNAVAILABLE`，不自动改走 TS/fixture。
 - Web 默认 Agent 对话显式传 `execution:'harness',authorization_revision:'delegation/1'`；提醒快捷入口仍为 business，资料快捷入口传 harness 与显式 `workspace_id`，均保持 legacy。HTTP 省略 execution 的默认值不变。
 - `authorization_revision`：可选，唯一值 `delegation/1`；必须显式 `execution:'harness'` 且省略单数 `workspace_id`，否则400。省略按 legacy 合同执行，不能从部署、wire 或历史推断升级。实际工具以该 Run 冻结 allowlist 和资源为准。
@@ -66,6 +67,8 @@ Harness 正文来自真实 provider SSE：原生逐次提交增量，TS 持久�
 名称未固定时，目标结果可附带创建撞名恢复声明，引用真实用户消息、零写冲突、后续创建和独立全文回读。服务端验证来源和效果事实；声明反映模型对委托的理解，不能单凭引用或相同内容独立证明语义授权。原冲突不会改写为成功。
 
 新委托事件显式 `protocol_version:'v2'`：`thread.started` 带 `stream_protocol_version:'v2'`、`authorization_revision` 和 `execution_lifecycle`，三个终结事件均带持久 `goal_result`；legacy 和历史 `v1` 保持原 strict shape 可读，不能往 v1 暗塞字段。事件词和游标语义不变。
+
+原生委托终结事件可带 `usage:{iterations,tokens}`，取自本次运行已记录的累计模型用量。`tokens:null` 表示累计 Token 未知，缺少 `usage` 表示事件未记录用量。协议不包含实扣费用。
 
 GET/同入站键是只读补读，既不分配 attempt 也不启动 native/工具。running 同键409；suspended 可回已存前缀而不恢复。执行恢复只经 §3 的明确等待接口；checkpoint/fencing 不保证任意外部写恰好一次，unknown 不盲重放。
 

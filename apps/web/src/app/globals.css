@@ -46,6 +46,18 @@
   --brand-ink: #47b585;
 }
 
+.chat-dock {
+  border: 1px solid rgb(24 24 24 / 7%);
+  background: rgb(255 255 255 / 84%);
+  box-shadow: 0 4px 14px rgb(24 24 24 / 7%);
+}
+
+.lumen-ui.dark .chat-dock {
+  border-color: rgb(255 255 255 / 12%);
+  background: rgb(43 43 44 / 90%);
+  box-shadow: 0 4px 14px rgb(0 0 0 / 24%);
+}
+
 /* 桌面端控件采用紧凑尺寸；触控屏保持 46px 的组件库默认值。 */
 @media (min-width: 1024px) {
   [data-slot='button'] {
@@ -66,13 +78,40 @@
   }
 }
 
-/* 输入框表面由自身白底和边框表达，组件库的材质叠层会在其上罩一层灰色渐变。 */
-[data-slot='prompt-input'] > .lumen-material-focus {
+.chat-composer[data-slot='prompt-input'] {
+  --composer-fill: rgb(255 255 255 / 78%);
+  --composer-rim: rgb(255 255 255 / 90%);
+  --composer-control: rgb(0 0 0 / 6%);
+  --composer-send: #343431;
+  --composer-send-ink: #fff;
+  border: 1px solid var(--composer-rim);
+  border-radius: 28px;
+  background: var(--composer-fill);
+  box-shadow: 0 3px 10px rgb(0 0 0 / 4%);
+}
+
+.lumen-ui.dark .chat-composer[data-slot='prompt-input'] {
+  --composer-fill: rgb(49 49 49 / 82%);
+  --composer-rim: rgb(255 255 255 / 13%);
+  --composer-control: rgb(255 255 255 / 9%);
+  --composer-send: #e3e3e0;
+  --composer-send-ink: #222;
+}
+
+/* The composer supplies its own glass tint and rim; don't stack the library's highlights. */
+.chat-composer[data-slot='prompt-input']::before,
+.chat-composer[data-slot='prompt-input'] > .lumen-material-focus {
   display: none;
 }
-/* 组件库用 ::before 画边缘高光，悬停和聚焦时会变色；输入栏边缘固定，由自身的环形阴影表达。 */
-[data-slot='prompt-input']::before {
-  display: none;
+
+.chat-composer .chat-composer-tool {
+  background-color: var(--composer-control);
+  color: var(--foreground);
+}
+
+.chat-composer .chat-composer-send {
+  background-color: var(--composer-send);
+  color: var(--composer-send-ink);
 }
 
 /* 背景模糊在过渡中逐帧重算，实测会掉帧：设置面板打开时页面与遮罩不模糊，面板自身仅在静止后模糊。 */

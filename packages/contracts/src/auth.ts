@@ -5,11 +5,22 @@ const loginName = z
   .transform((value) => value.trim().toLowerCase())
   .pipe(z.string().min(1).max(128));
 const password = z.string().min(8).max(128);
+const displayName = z.string().trim().min(1).max(128);
 export const authInitializeSchema = z
-  .object({ login_name: loginName, password, display_name: z.string().trim().min(1).max(128) })
+  .object({ login_name: loginName, password, display_name: displayName })
   .strict();
 export const authClaimSchema = z
   .object({ login_name: loginName, password, confirmed: z.literal(true) })
+  .strict();
+export const authAccountProfileUpdateSchema = z
+  .object({
+    display_name: displayName.optional(),
+    timezone_id: z.string().trim().min(1).max(100).nullable().optional(),
+  })
+  .strict()
+  .refine((value) => value.display_name !== undefined || value.timezone_id !== undefined);
+export const authAccountProfileSchema = z
+  .object({ display_name: z.string(), timezone_id: z.string().nullable() })
   .strict();
 // Syntax only here; identity owns the single mailbox policy and normalization.
 const email = z

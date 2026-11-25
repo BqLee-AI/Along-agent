@@ -1,5 +1,5 @@
-import type { ConversationRunHistoryItem, RunView } from '@along/contracts';
-import type { HistoryApprovalReference } from './conversation-run';
+import type { ConversationRunHistoryItem, MessageHistoryItem, RunView } from '@along/contracts';
+import type { HistoryApprovalReference, RunTranscript } from './conversation-run';
 
 export interface ConversationSelection {
   conversationId: string;
@@ -50,13 +50,30 @@ export function runApprovalReferences(
   return approvals;
 }
 
-export interface ConversationContextProjection {
-  selected: ConversationSelection | null;
-  status: RunView['status'] | null;
-  workspace: RunView['workspace'] | null;
-  waiting: boolean;
-  effectsUnknown: boolean;
-  streaming: boolean;
+/** Older public replies have no source ID. Only use a unique persisted answer match. */
+export function archivedReplyRuns(
+  messages: readonly MessageHistoryItem[],
+  transcripts: ReadonlyMap<string, RunTranscript>,
+): ReadonlyMap<string, string> {
+  const byAnswer = new Map<string, string | null>();
+  for (const [runId, transcript] of transcripts) {
+    const answer = transcript.goal_result?.answer ?? transcript.text;
+    if (answer) byAnswer.set(answer, byAnswer.has(answer) ? null : runId);
+  }
+  const counts = new Map<string, number>();
+  for (const message of messages) {
+    if (message.role === 'assistant')
+      counts.set(message.content, (counts.get(message.content) ?? 0) + 1);
+  }
+  const result = new Map<string, string>();
+  for (const message of messages) {
+    if (message.role !== 'assistant') continue;
+    const runId =
+      message.source_run_id ??
+      (counts.get(message.content) === 1 ? byAnswer.get(message.content) : undefined);
+    if (runId) result.set(message.message_id, runId);
+  }
+  return result;
 }
 
 export function composerBlockedReason(input: {

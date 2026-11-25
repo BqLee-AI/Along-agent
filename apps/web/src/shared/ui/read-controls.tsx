@@ -1,5 +1,6 @@
 'use client';
 
+import { RefreshCw } from 'lucide-react';
 import { Button } from '@lorelum/lumen-ui/components/button';
 import { ErrorNotice } from '@/shared/ui/page';
 import type { HistoryPageState } from '../http/page';
@@ -8,6 +9,7 @@ export function ReadControls({
   state,
   read,
   label,
+  compact = false,
 }: {
   state: Pick<
     HistoryPageState<unknown>,
@@ -15,9 +17,10 @@ export function ReadControls({
   >;
   read: (reset: boolean) => Promise<void>;
   label: string;
+  compact?: boolean;
 }) {
   return (
-    <div className="space-y-3 py-4">
+    <div className={compact ? 'space-y-3' : 'space-y-3 py-4'}>
       {state.reading ? (
         <p role="status" className="text-sm text-muted-foreground">
           正在读取{label}…
@@ -43,10 +46,13 @@ export function ReadControls({
           variant="glass"
           color="default"
           type="button"
+          size={compact ? 'icon' : undefined}
+          aria-label={compact ? `刷新${label}` : undefined}
+          title={compact ? `刷新${label}` : undefined}
           disabled={state.reading}
           onClick={() => void read(true)}
         >
-          刷新{label}
+          {compact ? <RefreshCw className="size-4" aria-hidden="true" /> : `刷新${label}`}
         </Button>
         {state.loaded && state.nextCursor !== null ? (
           <Button
@@ -60,7 +66,7 @@ export function ReadControls({
           </Button>
         ) : null}
       </div>
-      {state.loaded ? (
+      {state.loaded && (!compact || state.reading || state.error) ? (
         <p className="text-xs leading-6 text-muted-foreground">
           {state.reading || state.error
             ? `${label}保留上次获取的内容；本次读取尚未确认完整。`

@@ -5,7 +5,11 @@ import {
 } from '../tools/reminders/reminder-source.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
-import { TrustedExecutionContextSchema, type ExecutionKind } from '@along/contracts';
+import {
+  encodeChatMessage,
+  TrustedExecutionContextSchema,
+  type ExecutionKind,
+} from '@along/contracts';
 import type { ConversationDeps, RunContext, StartResult } from '../execution/contracts.js';
 import { AGENT_REVISION, buildHarnessStart } from '../execution/attempt/context.js';
 import {
@@ -95,6 +99,7 @@ function pgErrorOf(err: unknown): { code?: string; constraint?: string } | null 
 function requestHashOf(input: {
   conversationId: string | undefined;
   text: string;
+  hasFiles?: boolean;
   timezone: string | null;
   fold: string;
   execution: ExecutionKind;
@@ -110,6 +115,7 @@ function requestHashOf(input: {
     input.timezone,
     input.fold,
   ];
+  if (input.hasFiles) material.push({ files: true });
   if (input.workspaceId !== undefined) material.push(input.workspaceId);
   if (input.workspaceIds !== undefined) material.push([...input.workspaceIds].sort());
   if (input.clarificationOfRunId !== undefined) material.push(input.clarificationOfRunId);
@@ -153,11 +159,13 @@ export async function startConversationRun(
   const input = parsed.data;
   const execution = input.execution ?? 'business';
   const text = textOf(input);
+  const content = encodeChatMessage(text, input.files ?? []);
   const timezone = input.confirmed_timezone_id ?? input.confirmed_timezone ?? null;
   const key = idempotencyKeyHeader ?? input.idempotency_key ?? requestId;
   const requestHash = requestHashOf({
     conversationId: input.conversation_id,
-    text,
+    text: input.files ? content : text,
+    ...(input.files ? { hasFiles: true } : {}),
     timezone,
     fold: input.fold_choice,
     execution,
@@ -278,7 +286,7 @@ export async function startConversationRun(
         ownerId,
         conversationId: conversation.id,
         role: 'user',
-        content: text,
+        content,
         requestId,
       });
       let targetContinuation =
@@ -386,7 +394,9 @@ export async function startConversationRun(
       if (execution === 'harness') allowlist = [...allowlist, ...R3_MEMORY_TOOL_IDS];
       if (delegation && execution === 'harness') allowlist = [...allowlist, 'learn_docs_search'];
       const feishuUrl =
-        delegation && execution === 'harness' && sessionId ? suppliedFeishuDocxUrl(text) : null;
+        !input.files && delegation && execution === 'harness' && sessionId
+          ? suppliedFeishuDocxUrl(text)
+          : null;
       const feishuConfig = feishuUrl ? loadFeishuBotDocxConfiguration() : null;
       const feishuDocx =
         feishuConfig &&
@@ -396,8 +406,8 @@ export async function startConversationRun(
         (await lockViewerAccess(client, ownerId, sessionId))
           ? await freezeFeishuBotDocxGrant(client, feishuConfig, { ownerId, sessionId }, feishuUrl)
           : null;
-      if (feishuDocx) {
-        // Private text is model input, not authorization to publish that text via another tool.
+      if (feishuDocx || input.files) {
+        // Private source text may inform the reply without granting tools new authority.
         const privateReadTools: Partial<Record<string, true>> = {
           list_tasks: true,
           get_task: true,
@@ -407,7 +417,7 @@ export async function startConversationRun(
         };
         allowlist = [
           ...allowlist.filter((tool) => privateReadTools[tool] === true),
-          'feishu_docx_read',
+          ...(feishuDocx ? ['feishu_docx_read'] : []),
         ];
       }
       if (
@@ -624,7 +634,7 @@ export async function startConversationRun(
         attemptId,
         requestId,
         ...(ownership ? { ownership } : {}),
-        inputText: text,
+        inputText: content,
         ...(reminderDate.originalText ? { reminderInputText: reminderDate.originalText } : {}),
         ...(reminderDate.source.kind === 'unresolved' ? { reminderNeedsRestatement: true } : {}),
         confirmedTimezone,
@@ -651,7 +661,7 @@ export async function startConversationRun(
               r3Context,
               messages: [
                 ...r3Context.messages,
-                { message_id: userMessageId, role: 'user' as const, content: text },
+                { message_id: userMessageId, role: 'user' as const, content },
               ],
             }
           : {}),

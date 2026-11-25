@@ -2,7 +2,10 @@
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Button } from '@lorelum/lumen-ui/components/button';
+import { Accordion } from '@lorelum/lumen-ui/components/accordion';
+import { ClipboardList } from 'lucide-react';
 import { z } from 'zod';
+import Link from 'next/link';
 import { readEnvelope } from '@/shared/http/client';
 import { api, writeOptions } from '@/shared/http/eden';
 import { MeSchema } from '@/shared/session/identity';
@@ -30,18 +33,29 @@ function download(filename: string, type: string, text: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function OfficeMaterials({ onReminder }: { onReminder: () => void }) {
+export function OfficeMaterials() {
   return (
-    <details className="mb-2 text-sm">
-      <summary className="w-fit cursor-pointer rounded-control px-2 py-1 text-secondary-foreground focus-visible:outline-2 focus-visible:outline-ring">
-        处理纪要和任务表
-      </summary>
-      <OfficeForm onReminder={onReminder} />
-    </details>
+    <Accordion>
+      <Accordion.Item value="office-materials">
+        <Accordion.Header>
+          <Accordion.Trigger className="px-4 py-3 [&>svg]:hidden">
+            <span className="flex items-center gap-3">
+              <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted text-secondary-foreground">
+                <ClipboardList className="size-4" aria-hidden="true" />
+              </span>
+              纪要和任务表
+            </span>
+          </Accordion.Trigger>
+        </Accordion.Header>
+        <Accordion.Panel className="px-4 pb-4" keepMounted>
+          <OfficeForm />
+        </Accordion.Panel>
+      </Accordion.Item>
+    </Accordion>
   );
 }
 
-function OfficeForm({ onReminder }: { onReminder: () => void }) {
+function OfficeForm() {
   const [report, setReport] = useState<Report | null>(null);
   const [summary, setSummary] = useState('');
   const [error, setError] = useState('');
@@ -118,14 +132,11 @@ function OfficeForm({ onReminder }: { onReminder: () => void }) {
 
   return (
     <form
-      className="mt-1 grid max-h-[46dvh] gap-2 overflow-y-auto rounded-lg border border-separator bg-background p-3"
+      className="grid gap-3 rounded-lg border border-separator bg-background p-3 text-sm"
       onSubmit={generate}
       onChange={clear}
       onReset={clear}
     >
-      <p className="text-muted-foreground">
-        资料留在当前页面。刷新后需重新选择，下载的文件请自行保存。
-      </p>
       <div className="grid gap-2 sm:grid-cols-3">
         <label className="grid min-w-0 gap-1">
           纪要（TXT / Markdown）
@@ -136,16 +147,16 @@ function OfficeForm({ onReminder }: { onReminder: () => void }) {
           <input className={controlClass} type="file" name="tasks" accept=".csv,text/csv" />
         </label>
         <label className="grid min-w-0 gap-1">
-          统计截至日
+          截至日
           <input className={controlClass} type="date" name="cutoff" />
         </label>
       </div>
       <div className="flex flex-wrap gap-2">
         <Button type="submit" disabled={pending !== null}>
-          {pending === 'files' ? '正在处理…' : '生成资料报告'}
+          {pending === 'files' ? '正在处理…' : '生成报告'}
         </Button>
         <Button type="reset" variant="flat">
-          清除资料
+          清空
         </Button>
       </div>
       {error && (
@@ -183,15 +194,16 @@ function OfficeForm({ onReminder }: { onReminder: () => void }) {
                 下载 CSV 汇总
               </Button>
             )}
-            <Button type="button" variant="flat" onClick={onReminder}>
-              在对话中填写提醒
-            </Button>
+            <Link
+              href="/conversations?intent=reminder"
+              className="inline-flex min-h-9 items-center px-2 underline"
+            >
+              在新对话中填写提醒
+            </Link>
           </div>
           {report.notes && (
             <div className="grid justify-items-start gap-1">
-              <p className="text-muted-foreground">
-                摘要会将本次纪要文本发送给你的默认模型，供应商的数据保留规则适用。任务表留在浏览器。
-              </p>
+              <p className="text-muted-foreground">纪要会发送给默认模型生成摘要。</p>
               {pending === 'summary' ? (
                 <Button
                   type="button"

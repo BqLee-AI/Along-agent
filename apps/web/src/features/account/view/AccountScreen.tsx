@@ -1,12 +1,14 @@
 import WorkspaceLink from '@/shell/view/workspace-link';
 import type { ReactNode } from 'react';
 import { Badge } from '@lorelum/lumen-ui/components/badge';
+import { ChevronRight } from 'lucide-react';
 import { Button } from '@lorelum/lumen-ui/components/button';
 import { loginHref } from '@/shared/session/navigation';
 import type { AccountScreenState, AccountView } from '../model/account';
 import AccountDashboard from './AccountDashboard';
 import AccountForm from './AccountForm';
 import { AccountFrame } from './AccountFrame';
+import { AccountProfileForm } from './AccountProfileForm';
 import { AccountMaintenance, AccountReadError, AccountStatusNotice } from './AccountSupport';
 
 const titles: Record<AccountView, string> = {
@@ -39,6 +41,29 @@ function AccountLink({
   );
 }
 
+function AccountSectionLink({
+  section,
+  children,
+  summary,
+}: {
+  section: string;
+  children: ReactNode;
+  summary?: string | null;
+}) {
+  return (
+    <WorkspaceLink
+      href={`/account?section=${section}`}
+      className="flex min-h-12 items-center justify-between gap-3 px-4 py-2 text-sm transition-colors hover:bg-foreground/5 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+    >
+      <span className="font-medium">{children}</span>
+      <span className="flex min-w-0 items-center gap-2 text-right text-muted-foreground">
+        {summary ? <span className="wrap-anywhere">{summary}</span> : null}
+        <ChevronRight className="size-4 shrink-0" aria-hidden="true" />
+      </span>
+    </WorkspaceLink>
+  );
+}
+
 function AccountRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex min-h-12 items-center justify-between gap-6 py-3">
@@ -49,7 +74,13 @@ function AccountRow({ label, children }: { label: string; children: ReactNode })
 }
 
 /** Presentation only: the server viewmodel owns all reads and eligibility decisions. */
-export default function AccountScreen({ state }: { state: AccountScreenState }) {
+export default function AccountScreen({
+  state,
+  requestedSection,
+}: {
+  state: AccountScreenState;
+  requestedSection?: string | string[];
+}) {
   const { view, destination, retryHref } = state;
   if (state.mode === 'account-error') {
     return (
@@ -275,6 +306,73 @@ export default function AccountScreen({ state }: { state: AccountScreenState }) 
     );
   }
   const name = actor.user.display_name;
+  const account = state.account;
+  const csrfToken = actor.csrf_token;
+  const signed = account !== null && csrfToken !== null;
+  const workspaceSummary =
+    state.workspaces === null
+      ? '暂不可用'
+      : state.workspaces.length
+        ? `${state.workspaces.length} 个已登记`
+        : '未登记';
+  const section = typeof requestedSection === 'string' ? requestedSection : null;
+
+  if (section === 'profile') {
+    return (
+      <AccountFrame view="account" title="个人资料" description="">
+        <AccountLink href="/account">返回账户</AccountLink>
+        {signed ? (
+          <AccountProfileForm
+            key={actor.user.id}
+            displayName={name}
+            timezone={actor.confirmed_timezone}
+            csrfToken={csrfToken}
+          />
+        ) : null}
+        <dl className="divide-y divide-separator rounded-xl bg-foreground/5 px-4 text-sm">
+          {!signed ? (
+            <AccountRow label="默认时区">{actor.confirmed_timezone ?? '未设置'}</AccountRow>
+          ) : null}
+          <AccountRow label="账户编号">
+            <span className="select-text font-mono text-xs">{actor.user.id}</span>
+          </AccountRow>
+        </dl>
+      </AccountFrame>
+    );
+  }
+
+  if (section === 'workspace') {
+    return (
+      <AccountFrame view="account" title="工作区登记" description="">
+        <AccountLink href="/account">返回账户</AccountLink>
+        <WorkspaceRegistration workspaces={state.workspaces} />
+      </AccountFrame>
+    );
+  }
+
+  if (
+    signed &&
+    (section === 'contact' ||
+      section === 'password' ||
+      section === 'sessions' ||
+      section === 'deletion' ||
+      (section === 'admin' && account.installation_admin))
+  ) {
+    const title = {
+      contact: '联系邮箱',
+      password: '修改密码',
+      sessions: '会话管理',
+      deletion: '删除申请',
+      admin: '账户管理',
+    }[section];
+    return (
+      <AccountFrame view="account" title={title} description="">
+        <AccountLink href="/account">返回账户</AccountLink>
+        <AccountDashboard key={section} account={account} csrfToken={csrfToken} section={section} />
+      </AccountFrame>
+    );
+  }
+
   return (
     <AccountFrame view="account" title={titles.account} description="">
       <section className="flex items-center gap-4" aria-label="当前用户">
@@ -289,36 +387,49 @@ export default function AccountScreen({ state }: { state: AccountScreenState }) 
           <Badge variant="glass">{canSignOut ? '已登录' : '临时身份'}</Badge>
         </div>
       </section>
-      <dl className="divide-y divide-separator rounded-xl bg-foreground/5 px-4 text-sm">
-        <AccountRow label="显示名称">{name}</AccountRow>
-        <AccountRow label="时区">{actor.confirmed_timezone ?? '未设置'}</AccountRow>
-        {state.account ? (
-          <AccountRow label="联系邮箱">
-            {state.account.contact.state === 'verified'
-              ? (state.account.contact.masked_email ?? '已验证')
-              : '未绑定'}
-          </AccountRow>
+      <nav aria-label="账户设置分区" className="space-y-5">
+        <div className="divide-y divide-separator rounded-xl border border-separator bg-foreground/5">
+          <AccountSectionLink section="profile" summary={actor.confirmed_timezone ?? '时区未设置'}>
+            个人资料
+          </AccountSectionLink>
+          <AccountSectionLink section="workspace" summary={workspaceSummary}>
+            工作区登记
+          </AccountSectionLink>
+        </div>
+        {signed ? (
+          <section className="space-y-2" aria-labelledby="account-security">
+            <h2 id="account-security" className="text-sm font-semibold text-muted-foreground">
+              账户安全
+            </h2>
+            <div className="divide-y divide-separator rounded-xl border border-separator bg-foreground/5">
+              <AccountSectionLink
+                section="contact"
+                summary={
+                  account.pending_contact
+                    ? '待验证'
+                    : account.contact.state === 'verified'
+                      ? account.contact.masked_email
+                      : '未绑定'
+                }
+              >
+                联系邮箱
+              </AccountSectionLink>
+              <AccountSectionLink section="password">修改密码</AccountSectionLink>
+              <AccountSectionLink section="sessions">会话管理</AccountSectionLink>
+              {!account.installation_admin ? (
+                <AccountSectionLink section="deletion">删除申请</AccountSectionLink>
+              ) : null}
+            </div>
+          </section>
         ) : null}
-        <AccountRow label="可处理的资料">
-          <span className="inline-flex items-center gap-2">
-            <Badge variant="glass">{state.workspaceLabel}</Badge>
-          </span>
-        </AccountRow>
-        <AccountRow label="账户编号">
-          <span className="select-text font-mono text-xs">{actor.user.id}</span>
-        </AccountRow>
-      </dl>
-      <div className="space-y-1 text-[13px] leading-5 text-muted-foreground">
-        {actor.confirmed_timezone ? null : (
-          <p>还没设置时区。Along 不会用浏览器的时区替你设置提醒时间。</p>
-        )}
-        <p>{state.workspaceMessage}</p>
-        <p>
-          {canSignOut
-            ? '登录有效期七天，到期后需要重新登录。退出登录只结束当前登录，不会删除账户或聊天记录。'
-            : '当前是开发用的临时身份，不能退出登录，也不能升级为正式登录。请联系部署者关闭它，改用正式登录。'}
-        </p>
-      </div>
+        {signed && account.installation_admin ? (
+          <div className="rounded-xl border border-separator bg-foreground/5">
+            <AccountSectionLink section="admin" summary="邀请与账户">
+              管理员设置
+            </AccountSectionLink>
+          </div>
+        ) : null}
+      </nav>
       <div className="flex flex-wrap gap-3">
         {canSignOut ? (
           <AccountLink href="/logout">退出登录</AccountLink>
@@ -326,11 +437,60 @@ export default function AccountScreen({ state }: { state: AccountScreenState }) 
           <AccountLink href={loginHref('/account')}>改用正式登录</AccountLink>
         )}
       </div>
-      {state.account && actor.csrf_token !== null ? (
-        <AccountDashboard account={state.account} csrfToken={actor.csrf_token} />
-      ) : (
-        <AccountMaintenance />
-      )}
+      {!signed ? <AccountMaintenance /> : null}
     </AccountFrame>
+  );
+}
+
+function WorkspaceRegistration({
+  workspaces,
+}: {
+  workspaces: Extract<AccountScreenState, { workspaces: unknown }>['workspaces'];
+}) {
+  return (
+    <section
+      id="workspace-registration"
+      aria-label="登记的工作区"
+      className="space-y-3 rounded-xl border border-separator bg-foreground/5 p-4 text-sm"
+    >
+      {workspaces === null ? (
+        <p className="text-muted-foreground">暂时无法读取登记。</p>
+      ) : workspaces.length === 0 ? (
+        <p className="text-muted-foreground">还没有登记工作区。</p>
+      ) : (
+        <ul className="divide-y divide-separator">
+          {workspaces.map((workspace) => (
+            <li key={workspace.workspace_id} className="space-y-1 py-2">
+              <p className="font-medium">{workspace.label}</p>
+              <dl className="space-y-1 text-xs text-muted-foreground">
+                <div className="flex gap-2">
+                  <dt className="shrink-0">可读</dt>
+                  <dd>
+                    {workspace.readable_paths.map((path) => path || '工作区根目录').join('、') ||
+                      '无'}
+                  </dd>
+                </div>
+                <div className="flex gap-2">
+                  <dt className="shrink-0">可写</dt>
+                  <dd>
+                    {workspace.writable_paths.map((path) => path || '工作区根目录').join('、') ||
+                      '无'}
+                  </dd>
+                </div>
+              </dl>
+            </li>
+          ))}
+        </ul>
+      )}
+      <details>
+        <summary className="w-fit cursor-pointer font-medium text-brand-ink">登记目录</summary>
+        <p className="mt-2 text-muted-foreground">
+          在 Along 所在的主机运行以下命令，并按提示选择账户和目录。
+        </p>
+        <code className="mt-2 block rounded-lg bg-background p-2 text-xs">
+          {'bun --no-env-file run local:account --workspace --config "<安装配置文件>"'}
+        </code>
+      </details>
+    </section>
   );
 }

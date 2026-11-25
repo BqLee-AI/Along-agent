@@ -1,52 +1,34 @@
 import { Suspense } from 'react';
 import Link from '@/shell/view/workspace-link';
-import { ArrowUpRight, CheckCheck, Clock3, History } from 'lucide-react';
+import { History } from 'lucide-react';
 import { PageHeading } from '@/shared/ui/page';
 import type { PageQuery } from '@/shared/session/navigation';
 import { loadTodayWorkspace } from '../model/brief-server';
 import { BriefSections } from './brief-sections';
 import { BriefLoading } from './today-workspace-loading-screen';
 
-const destinations = [
-  { href: '/tasks', title: '我的提醒', icon: Clock3 },
-  { href: '/approvals', title: '待我确认', icon: CheckCheck },
-  { href: '/activity', title: '活动记录', icon: History },
-];
-
 export function TodayWorkspaceScreen({ query }: { query: PageQuery }) {
   const workspace = loadTodayWorkspace(query);
   return (
-    <div className="w-full min-w-0 space-y-8 [overflow-wrap:anywhere]">
-      <PageHeading title="工作台" />
+    <div className="w-full min-w-0 [overflow-wrap:anywhere]">
+      <PageHeading
+        title="概览"
+        actions={
+          <Link
+            href="/activity"
+            aria-label="活动记录"
+            title="活动记录"
+            className="inline-flex size-8 items-center justify-center rounded-control text-secondary-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring max-lg:size-11"
+          >
+            <History className="size-4" aria-hidden="true" />
+          </Link>
+        }
+      />
       <section aria-label="日期简报" className="min-w-0">
         <Suspense fallback={<BriefLoading />}>
           <BriefSections workspace={workspace} />
         </Suspense>
       </section>
-      <nav aria-label="事项与记录" className="min-w-0">
-        <h2 className="mb-3 text-[13px] leading-5 font-medium text-muted-foreground">继续处理</h2>
-        <ul className="grid gap-3 @md/workspace:grid-cols-3">
-          {destinations.map(({ href, title, icon: Icon }) => (
-            <li key={href} className="min-w-0">
-              <Link
-                href={href}
-                className="group relative flex h-full min-w-0 flex-col gap-4 rounded-xl bg-muted p-4 ring-1 ring-foreground/[0.05] transition-colors hover:bg-secondary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring max-lg:min-h-14"
-              >
-                <span className="flex size-9 items-center justify-center rounded-lg bg-foreground/[0.06] text-foreground">
-                  <Icon className="size-4" strokeWidth={1.75} aria-hidden="true" />
-                </span>
-                <span className="min-w-0">
-                  <span className="block text-sm leading-5 font-medium">{title}</span>
-                </span>
-                <ArrowUpRight
-                  className="absolute top-4 right-4 size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-foreground"
-                  aria-hidden="true"
-                />
-              </Link>
-            </li>
-          ))}
-        </ul>
-      </nav>
     </div>
   );
 }

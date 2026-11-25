@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ChatFilesSchema,
+  chatMessageLimit,
+  encodeChatMessage,
   ConversationMessagePageSchema,
   ConversationRunPageSchema,
   DocumentApprovalDetailSchema,
@@ -9,6 +12,7 @@ import {
 } from '@along/contracts';
 import type {
   ApprovalDetail,
+  ChatFile,
   DocumentApprovalDetail,
   ConversationRunHistoryItem,
   MessageHistoryItem,
@@ -49,7 +53,6 @@ import type {
 } from '@/features/conversations/model/conversation-run';
 import {
   conversationSendBlocked,
-  clarificationReplyReference,
   selectResumeRequest,
   compactCommand,
   taskAdmission,
@@ -67,6 +70,7 @@ import {
 } from '@/features/approvals/model/inline-document';
 import { useConversationApprovalResults } from '@/features/approvals/viewmodel/use-conversation-approval-results';
 import { useModelCatalog } from '@/features/model-settings/viewmodel/model-catalog-context';
+import { readChatFiles } from '../model/chat-files';
 import { useConversationComposer } from './use-conversation-composer';
 import { useConversationNavigationGuard } from './use-conversation-navigation-guard';
 import { useWorkspaceRegistration } from './use-workspace-registration';
@@ -82,6 +86,12 @@ const PendingSendSchema = z.object({ text: z.string(), body: z.record(z.unknown(
 export interface ConversationTask {
   input: string;
   setInput: (value: string) => void;
+  files: readonly ChatFile[];
+  fileError: { message: string } | null;
+  fileBlockedReason: string | null;
+  addFiles: (files: readonly File[]) => Promise<void>;
+  removeFile: (index: number) => void;
+  clearFiles: () => void;
   intent: TaskIntent;
   setIntent: (value: TaskIntent) => void;
   workspaces: WorkspaceSummary[];
@@ -112,11 +122,12 @@ export interface ConversationTask {
   streaming: boolean;
   retryResume: ResumeRequest | null;
   sendUncertain: boolean;
-  ambiguousProposal: AmbiguousProposal | null;
-  foldChoice: 'first' | 'second' | '';
+  admitting: boolean;
+  clarificationSourceId: string | null;
   clarificationReply: boolean;
   setClarificationReply: (value: boolean) => void;
-  canReplyToClarification: boolean;
+  ambiguousProposal: AmbiguousProposal | null;
+  foldChoice: 'first' | 'second' | '';
   setFoldChoice: (value: 'first' | 'second' | '') => void;
   eligibility: { allowed: boolean; reason: string | null };
   active: boolean;
@@ -170,6 +181,52 @@ export function useConversationTask({
     modelSelection,
     setModelSelection,
   } = useConversationComposer(initialIntent);
+  const [files, setFiles] = useState<ChatFile[]>([]);
+  const [fileError, setFileError] = useState<ConversationTask['fileError']>(null);
+  const [readingFiles, setReadingFiles] = useState(false);
+  const fileRead = useRef<AbortController | null>(null);
+  const [admitting, setAdmitting] = useState(false);
+  const [clarificationReplyTo, setClarificationReplyTo] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!fileError) return;
+    const timeout = window.setTimeout(() => {
+      setFileError((current) => (current === fileError ? null : current));
+    }, 5000);
+    return () => window.clearTimeout(timeout);
+  }, [fileError]);
+
+  function clearFiles() {
+    fileRead.current?.abort();
+    fileRead.current = null;
+    setReadingFiles(false);
+    setFiles([]);
+    setFileError(null);
+  }
+
+  async function addFiles(incoming: readonly File[]) {
+    if (!incoming.length || fileRead.current || busyRef.current || sendUncertain) return;
+    const read = new AbortController();
+    fileRead.current = read;
+    setReadingFiles(true);
+    setFileError(null);
+    try {
+      const next = await readChatFiles(incoming, files);
+      if (read.signal.aborted) return;
+      setFiles(next);
+      setIntent('chat');
+      setAmbiguousProposal(null);
+      setFoldChoice('');
+    } catch (error) {
+      if (!read.signal.aborted)
+        setFileError({ message: error instanceof Error ? error.message : '文件读取失败。' });
+    } finally {
+      if (fileRead.current === read) {
+        fileRead.current = null;
+        setReadingFiles(false);
+      }
+    }
+  }
   const { workspaces, workspaceState, workspaceError, readWorkspaces } = useWorkspaceRegistration(
     intent,
     setWorkspaceId,
@@ -205,7 +262,6 @@ export function useConversationTask({
   const [sendUncertain, setSendUncertain] = useState(false);
   const [ambiguousProposal, setAmbiguousProposal] = useState<AmbiguousProposal | null>(null);
   const [foldChoice, setFoldChoice] = useState<'first' | 'second' | ''>('');
-  const [clarificationReply, setClarificationReply] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const {
     reminderResults,
@@ -243,9 +299,6 @@ export function useConversationTask({
   const cursors = useRef(new Map<string, number>());
   const eventsRef = useRef<ThreadEvent[]>([]);
   const selectionVersion = useRef(0);
-  useEffect(() => {
-    setClarificationReply(false);
-  }, [run?.run_id, intent]);
   const leaveAllowed = useRef(false);
   const [effectsUnknown, setEffectsUnknown] = useState(false);
   const unknownRef = useRef(false);
@@ -502,7 +555,13 @@ export function useConversationTask({
     }
   }
 
-  async function stream(url: string, body: object, text?: string, idempotencyKey?: string) {
+  async function stream(
+    url: string,
+    body: object,
+    text?: string,
+    idempotencyKey?: string,
+    onAdmitted?: () => void,
+  ) {
     const request = new AbortController();
     followRef.current?.abort();
     followed.current = null;
@@ -511,14 +570,12 @@ export function useConversationTask({
     setStreaming(true);
     setLiveReply(true);
     setLiveOriginal(text ?? null);
-    let accepted = false;
-    let failedEvent = false;
     let expectedEof = false;
     leaveAllowed.current = false;
     try {
       const me = await loadMe(request.signal);
       if (!mounted.current || request.signal.aborted || version !== selectionVersion.current)
-        return false;
+        return;
       const response = await postRunStream(
         url,
         body,
@@ -526,6 +583,14 @@ export function useConversationTask({
         request.signal,
         idempotencyKey,
       );
+      if (
+        response.ok &&
+        response.headers.get('content-type')?.startsWith('text/event-stream') &&
+        mounted.current &&
+        !request.signal.aborted &&
+        version === selectionVersion.current
+      )
+        onAdmitted?.();
       if (idempotencyKey && response.ok && selectedRef.current) {
         const target = selectedRef.current;
         const current = await readRun(target.conversationId, target.runId, request.signal);
@@ -542,7 +607,6 @@ export function useConversationTask({
         )
           throw new Error('继续事件与原运行不匹配。');
         if (mounted.current && !request.signal.aborted && version === selectionVersion.current) {
-          if (event.type === 'thread.failed') failedEvent = true;
           if (
             event.type === 'approval_required' ||
             event.type === 'thread.completed' ||
@@ -565,7 +629,6 @@ export function useConversationTask({
         )
           throw new Error('执行连接提前结束，未收到终态或挂起状态。');
       }
-      accepted = !failedEvent;
     } catch (failure) {
       if (mounted.current && !request.signal.aborted && version === selectionVersion.current) {
         const rejected =
@@ -594,7 +657,6 @@ export function useConversationTask({
         await refresh();
       }
     }
-    return accepted;
   }
 
   const active = conversationSendBlocked({
@@ -608,15 +670,36 @@ export function useConversationTask({
     sendUncertain,
     effectsUnknown,
   });
-  const eligibility = taskSendEligibility({
-    intent,
-    text: ambiguousProposal?.raw_text ?? input,
-    busy: active,
-    workspaceState,
-    workspaceId,
-    workspaces,
-  });
-  const canReplyToClarification = Boolean(clarificationReplyReference(run, intent, true));
+  const filePayloadLength = useMemo(
+    () => (files.length ? encodeChatMessage('', files).length : 0),
+    [files],
+  );
+  const fileBlockedReason = readingFiles
+    ? '正在读取文件。'
+    : filePayloadLength && filePayloadLength + JSON.stringify(input).length - 2 > chatMessageLimit
+      ? '消息和文件内容超出单条消息的容量。'
+      : null;
+  const eligibility = fileBlockedReason
+    ? { allowed: false, reason: fileBlockedReason }
+    : taskSendEligibility({
+        intent,
+        text: ambiguousProposal?.raw_text ?? input,
+        busy: active,
+        workspaceState,
+        workspaceId,
+        workspaces,
+      });
+  const clarificationKind = run?.goal_result?.clarification?.kind;
+  const clarificationSourceId =
+    !files.length &&
+    intent === 'chat' &&
+    selected?.runId === run?.run_id &&
+    run?.status === 'done' &&
+    run.authorization_revision === 'delegation/1' &&
+    (run.goal_result?.status === 'blocked' || run.goal_result?.status === 'partial') &&
+    (clarificationKind === 'destination' || clarificationKind === 'target_selection')
+      ? run.run_id
+      : null;
 
   function finishCompact(request: CompactRequest, receipt: CompactReceipt) {
     if (request.runId && request.runId !== receipt.run_id)
@@ -711,6 +794,10 @@ export function useConversationTask({
 
   async function send(retry = false) {
     const command = compactCommand(retry ? (pendingSend.current?.text ?? '') : input);
+    if (command && files.length && !retry) {
+      setFileError({ message: '请移除附件后再使用 /compact。' });
+      return;
+    }
     if (command) {
       if (retry || command === 'invalid') {
         setError(' /compact 不接受参数，也不能作为普通消息重试。'.trim());
@@ -728,6 +815,7 @@ export function useConversationTask({
     )
       return;
     busyRef.current = true;
+    setAdmitting(true);
     setBusy(true);
     setError(null);
     const authentication = new AbortController();
@@ -743,13 +831,16 @@ export function useConversationTask({
           text,
           body: {
             raw_text: text,
+            ...(files.length ? { files } : {}),
             conversation_id: conversationRef.current ?? undefined,
             confirmed_timezone:
               proposal?.timezone_id ?? (intent === 'chat' ? undefined : me.confirmed_timezone),
             fold_choice: proposal ? foldChoice : undefined,
             clarification_of_run_id:
               proposal?.source_run_id ??
-              (clarificationReply && canReplyToClarification ? run?.run_id : undefined),
+              (clarificationReplyTo === clarificationSourceId
+                ? (clarificationSourceId ?? undefined)
+                : undefined),
             ...taskAdmission(intent),
             ...(intent === 'document' ? { workspace_id: workspaceId } : {}),
             ...(intent !== 'reminder' && modelSelection
@@ -779,21 +870,42 @@ export function useConversationTask({
       setRetryResume(null);
       setAmbiguousProposal(null);
       setSendUncertain(false);
-      setClarificationReply(false);
       const submittedText = pending.text;
-      // The message is shown and persisted as pending, so the composer is free for the next draft.
-      setInput((draft) => (draft === submittedText ? '' : draft));
-      const accepted = await stream('/api/v1/conversations/messages', pending.body, pending.text);
-      // A request the server rejected was never sent: give the draft back instead of losing it.
-      if (mounted.current && !authentication.signal.aborted && !accepted && !pendingSend.current)
-        setInput((draft) => (draft === '' ? submittedText : draft));
+      // Keep the submitted draft intact until the server accepts the request.
+      const submittedFiles = ChatFilesSchema.safeParse(pending.body.files);
+      const sentFiles = submittedFiles.success ? submittedFiles.data : [];
+      const submittedMessage = encodeChatMessage(submittedText, sentFiles);
+      const sameDraft =
+        input === submittedText &&
+        files.length === sentFiles.length &&
+        files.every((file, index) => {
+          const sent = sentFiles[index];
+          return file.name === sent?.name && file.text === sent.text;
+        });
+      await stream(
+        '/api/v1/conversations/messages',
+        pending.body,
+        submittedMessage,
+        undefined,
+        () => {
+          if (sameDraft) {
+            setInput('');
+            clearFiles();
+          }
+          setClarificationReplyTo(null);
+          setAdmitting(false);
+        },
+      );
     } catch (failure) {
       if (mounted.current && !authentication.signal.aborted)
         setError(failure instanceof Error ? failure.message : '发送失败，请核实身份。');
     } finally {
       if (sendRef.current === authentication) {
         busyRef.current = false;
-        if (mounted.current && !authentication.signal.aborted) setBusy(false);
+        if (mounted.current && !authentication.signal.aborted) {
+          setAdmitting(false);
+          setBusy(false);
+        }
       }
     }
   }
@@ -1169,6 +1281,8 @@ export function useConversationTask({
         throw new Error('原发送的会话身份不匹配。');
       pendingSend.current = pending;
       setInput(pending.text);
+      const restoredFiles = ChatFilesSchema.safeParse(pending.body.files);
+      if (restoredFiles.success) setFiles(restoredFiles.data);
     } catch (failure) {
       setError(
         `原发送结果未知，不能创建另一条消息。${failure instanceof Error ? failure.message : '原请求记录无法读取。'}`,
@@ -1182,6 +1296,7 @@ export function useConversationTask({
     void refresh();
     return () => {
       mounted.current = false;
+      fileRead.current?.abort();
       selectionVersion.current++;
       streamRef.current?.abort();
       followRef.current?.abort();
@@ -1228,10 +1343,13 @@ export function useConversationTask({
     setRuns([]);
     setRun(null);
     setInput('');
+    clearFiles();
     setIntent(initialIntent ?? 'chat');
     setHistoryReady(!conversationId);
     setReading(Boolean(conversationId));
     setStreaming(false);
+    setAdmitting(false);
+    setClarificationReplyTo(null);
     setBusy(false);
     setStopping(false);
     setLiveReply(false);
@@ -1452,6 +1570,16 @@ export function useConversationTask({
 
   return {
     input,
+    files,
+    fileError,
+    fileBlockedReason,
+    addFiles,
+    removeFile: (index) => {
+      if (fileRead.current || busyRef.current || sendUncertain) return;
+      setFiles((draft) => draft.filter((_, i) => i !== index));
+      setFileError(null);
+    },
+    clearFiles,
     setInput: (text) => {
       setInput(text);
       setAmbiguousProposal(null);
@@ -1459,6 +1587,7 @@ export function useConversationTask({
     },
     intent,
     setIntent: (next) => {
+      if (next !== 'chat') clearFiles();
       setIntent(next);
       setAmbiguousProposal(null);
       setFoldChoice('');
@@ -1491,11 +1620,13 @@ export function useConversationTask({
     streaming,
     retryResume,
     sendUncertain,
+    admitting,
+    clarificationSourceId,
+    clarificationReply:
+      clarificationSourceId !== null && clarificationSourceId === clarificationReplyTo,
+    setClarificationReply: (value) => setClarificationReplyTo(value ? clarificationSourceId : null),
     ambiguousProposal,
     foldChoice,
-    clarificationReply,
-    setClarificationReply,
-    canReplyToClarification,
     setFoldChoice,
     eligibility,
     active,

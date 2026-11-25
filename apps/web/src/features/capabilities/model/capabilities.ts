@@ -1,14 +1,4 @@
 export const capabilities = {
-  materials: {
-    title: '资料',
-    description: '管理 Along 能读取的文件和文件夹。',
-    boundary:
-      '资料管理还在准备中。已经登记过的资料，仍可在聊天里选用，登记情况可在「账户」里查看。',
-    related: [
-      { href: '/account', label: '查看已登记的资料' },
-      { href: '/conversations?intent=document', label: '在聊天里处理资料' },
-    ],
-  },
   journal: {
     title: '日记',
     description: '按日期记录每天发生的事。',

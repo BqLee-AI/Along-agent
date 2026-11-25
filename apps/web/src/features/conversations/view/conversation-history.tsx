@@ -5,7 +5,6 @@ import { memo, useCallback, useEffect, useState } from 'react';
 import type { ConversationListItem } from '@along/contracts';
 import { ArrowUpRight, History, Search } from 'lucide-react';
 import { Badge } from '@lorelum/lumen-ui/components/badge';
-import { Button } from '@lorelum/lumen-ui/components/button';
 import { Dialog } from '@lorelum/lumen-ui/components/dialog';
 import { Input } from '@lorelum/lumen-ui/components/input';
 import { Label } from '@lorelum/lumen-ui/components/label';
@@ -63,7 +62,10 @@ export const ConversationHistory = memo(function ConversationHistory({
   }, []);
   return (
     <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
-      <Dialog.Trigger render={<Button variant="clear" color="default" aria-label="历史会话" />}>
+      <Dialog.Trigger
+        aria-label="历史会话"
+        className="inline-flex min-h-8 min-w-8 items-center justify-center gap-1.5 rounded-full px-2 text-[13px] text-secondary-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring max-lg:min-h-11 max-lg:min-w-11"
+      >
         <History className="size-4" aria-hidden="true" />
         <span className="hidden sm:inline">历史</span>
       </Dialog.Trigger>

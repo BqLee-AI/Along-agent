@@ -7,6 +7,7 @@ import { clearAppRetryState, protectedLoginHref } from '@/shared/session/navigat
 export type AccountRequest = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 export type AccountActionPath =
+  | 'account/profile'
   | 'contact/request'
   | 'contact/verify'
   | 'password/change'
@@ -44,6 +45,8 @@ function accountActionRequest(
     }
   }
   switch (path) {
+    case 'account/profile':
+      return api.account.profile.post(auth.authAccountProfileUpdateSchema.parse(body), options);
     case 'contact/request':
       return api.contact.request.post(auth.authContactRequestSchema.parse(body), options);
     case 'contact/verify':

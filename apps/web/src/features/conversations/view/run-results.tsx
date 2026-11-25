@@ -126,36 +126,28 @@ export function RunResults({
   const selected = task.selected;
   if (!entries.length || !conversationId) return null;
   return (
-    <details
+    <section
       id="run-results"
-      open={needsAction || showReminderResult || undefined}
-      className="min-w-0"
+      aria-label="批准与结果"
+      className="min-w-0 space-y-4"
       data-testid="run-results"
     >
-      <summary className="min-h-8 max-lg:min-h-11 cursor-pointer content-center text-[13px] leading-5 text-muted-foreground hover:text-foreground">
-        批准与结果 · {entries.length} 次运行
-      </summary>
-      <div className="space-y-4 py-3">
-        <p className="text-sm leading-[22px] text-secondary-foreground">
-          助手文本不代表工具已执行。提醒可在此确认并继续原运行；文档批准后仍需明确继续。
-        </p>
-        {entries.map((entry) => {
-          const isSelected = entry.runId === selected?.runId;
-          return (
-            <RunHistoryRow
-              key={entry.runId}
-              entry={entry}
-              reply={task.transcript.get(entry.runId)}
-              conversationId={conversationId}
-              isSelected={isSelected}
-              needsAction={isSelected && needsAction}
-              showReminderResult={isSelected && showReminderResult}
-              task={isSelected ? task : undefined}
-              observeEffect={task.observeEffect}
-            />
-          );
-        })}
-      </div>
-    </details>
+      {entries.map((entry) => {
+        const isSelected = entry.runId === selected?.runId;
+        return (
+          <RunHistoryRow
+            key={entry.runId}
+            entry={entry}
+            reply={task.transcript.get(entry.runId)}
+            conversationId={conversationId}
+            isSelected={isSelected}
+            needsAction={isSelected && needsAction}
+            showReminderResult={isSelected && showReminderResult}
+            task={isSelected ? task : undefined}
+            observeEffect={task.observeEffect}
+          />
+        );
+      })}
+    </section>
   );
 }

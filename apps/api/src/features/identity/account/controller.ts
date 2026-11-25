@@ -3,6 +3,8 @@ import * as model from './model.js';
 import { csrfTokenFor } from '../../../http/auth.js';
 import type { HttpAccess } from '../../../http/access.js';
 import type { AppDeps } from '../../../http/contracts.js';
+import type { TimeContext } from '../../time/public.js';
+import { updateAccountProfile } from '../profile/preferences.js';
 import { connectionOf } from '../../../http/transport/metadata.js';
 import { okEnvelope } from '../../../http/errors.js';
 import { envelope, errorResponses, responses } from '../../../http/model.js';
@@ -32,7 +34,9 @@ export function createMeController(access: HttpAccess) {
   );
 }
 export function createAccountController(
-  deps: Pick<AppDeps, 'accountService' | 'invitedAccountService'>,
+  deps: Pick<AppDeps, 'accountService' | 'invitedAccountService' | 'pool'> & {
+    timeContext: TimeContext;
+  },
   access: HttpAccess,
 ) {
   function service() {
@@ -105,6 +109,25 @@ export function createAccountController(
         return okEnvelope(await invited().account(actor), access.requestId(request));
       },
       { response: responses(model.AccountViewSchema) },
+    )
+    .post(
+      '/api/v1/auth/account/profile',
+      async ({ request, body }) => {
+        const actor = await signed(request);
+        if (!deps.pool) throw notReady();
+        const profile = await updateAccountProfile(
+          deps.pool,
+          actor.ownerId,
+          body,
+          deps.timeContext,
+        );
+        return okEnvelope(profile, access.requestId(request));
+      },
+      {
+        parse: parse(true),
+        body: model.authAccountProfileUpdateSchema,
+        response: responses(model.authAccountProfileSchema),
+      },
     )
     .get(
       '/api/v1/auth/invitations',

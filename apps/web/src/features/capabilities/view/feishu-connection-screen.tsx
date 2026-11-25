@@ -1,6 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Image from 'next/image';
+import { Button } from '@lorelum/lumen-ui/components/button';
+import { Card } from '@lorelum/lumen-ui/components/card';
+import WorkspaceLink from '@/shell/view/workspace-link';
 import {
   changeFeishuBotConnection,
   readFeishuBotStatus,
@@ -57,20 +61,13 @@ function FeishuBotConnection() {
 
   return (
     <div className="space-y-3">
-      <h3 className="font-semibold">飞书机器人</h3>
-      <p className="text-sm text-muted-foreground">
-        优先连接已有机器人，没有机器人时可在飞书新建。无需填写密钥；Along
-        只验证机器人身份，不收发消息。
-      </p>
-      <div role="status" className="text-sm">
-        {!bot && !error && '正在检查飞书机器人连接…'}
-        {bot?.state === 'idle' && '尚未连接机器人。'}
-        {bot?.state === 'connected' && `机器人已连接：${bot.name}`}
-        {bot?.state === 'preparing' && '正在生成飞书扫码链接…'}
-        {bot?.state === 'waiting' &&
-          '请在飞书选择已有应用；没有可用的机器人时再新建。Along 会自动检查结果。'}
-        {bot?.state === 'failed' && '扫码未完成、已过期或机器人未启用，可以重新扫码。'}
-        {bot?.state === 'other_session' && '另一个登录会话正在扫码。可取消旧扫码后在这里重新连接。'}
+      <div role="status" className="text-sm empty:absolute">
+        {!bot && !error && '正在检查连接…'}
+        {bot?.state === 'connected' && `已连接 ${bot.name}`}
+        {bot?.state === 'preparing' && '正在生成二维码…'}
+        {bot?.state === 'waiting' && '请在飞书扫码并选择机器人。'}
+        {bot?.state === 'failed' && '扫码未完成，请重试。'}
+        {bot?.state === 'other_session' && '另一个会话正在扫码。'}
         {error && <p>{error}</p>}
       </div>
       {bot?.state === 'waiting' && (
@@ -91,7 +88,7 @@ function FeishuBotConnection() {
       <div className="flex flex-wrap gap-3">
         {(bot?.state === 'idle' || bot?.state === 'failed') && (
           <button className={button} disabled={busy} onClick={() => void act('scan')}>
-            扫码连接飞书机器人
+            扫码连接
           </button>
         )}
         {bot?.state === 'connected' && (
@@ -121,23 +118,48 @@ function FeishuBotConnection() {
   );
 }
 
-export function FeishuConnectionScreen() {
+export function FeishuConnectionScreen({ showConnection }: { showConnection: boolean }) {
+  if (showConnection) {
+    return (
+      <div className="w-full min-w-0">
+        <PageHeading title="飞书机器人" />
+        <div className="space-y-4">
+          <Button
+            render={<WorkspaceLink href="/connectors" />}
+            nativeButton={false}
+            role="link"
+            variant="clear"
+            size="sm"
+          >
+            返回连接应用
+          </Button>
+          <FeishuBotConnection />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="w-full min-w-0">
-      <PageHeading title="连接器" description="管理 Along 的飞书机器人连接。" />
-      <section
-        className="max-w-xl space-y-4 rounded-2xl bg-muted p-6"
-        aria-labelledby="feishu-heading"
-      >
-        <h2 id="feishu-heading" className="text-lg font-semibold">
-          飞书
-        </h2>
-        <FeishuBotConnection />
-        <p className="text-sm text-muted-foreground">
-          连接机器人不会授予文档权限。仅可读取部署配置允许、机器人有权访问的飞书
-          Docx，且须在新对话请求中指定单个直链。不搜索或修改文档。
-        </p>
-      </section>
+      <PageHeading title="连接应用" />
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,13rem),13rem))] gap-3">
+        <Card variant="soft" className="flex-row items-center justify-between gap-3 px-3 py-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <Image src="/feishu.png" alt="" width={32} height={32} unoptimized />
+            <span className="text-sm font-medium">飞书</span>
+          </div>
+          <Button
+            render={<WorkspaceLink href="/connectors?app=feishu" />}
+            nativeButton={false}
+            role="link"
+            variant="glass"
+            size="sm"
+            aria-label="连接飞书"
+          >
+            连接
+          </Button>
+        </Card>
+      </div>
     </div>
   );
 }

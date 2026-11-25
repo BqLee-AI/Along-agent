@@ -75,6 +75,7 @@ export function createFinishHandlers(
             ? { reason: 'harness_cancelled' }
             : { approval_id: null }),
           goal_result: goal,
+          usage: attemptState.cumulative,
         }),
       );
     });
@@ -241,7 +242,17 @@ export function createFinishHandlers(
       return persistAttemptOutput(
         client,
         context,
-        () => commitTerminal(client, context, request.outcome, payload, { prepareGoal }),
+        () =>
+          commitTerminal(
+            client,
+            context,
+            request.outcome,
+            {
+              ...payload,
+              ...(context.authorizationRevision ? { usage: attemptState.cumulative } : {}),
+            },
+            { prepareGoal },
+          ),
         request.outcome === 'done',
       );
     });
