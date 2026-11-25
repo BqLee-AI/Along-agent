@@ -46,6 +46,153 @@ function encodeFrame(value: unknown): string {
   return json;
 }
 
+/**
+ * The compact subprocess has a separate, EOF-delimited input, not a Run frame.
+ * A near-limit prompt grows when escaped, and an oversized provider response
+ * can still contain a valid summary. The ordinary Run frame cap stays intact.
+ */
+export async function callNativeCompact(
+  services: HarnessProcessServices,
+  operation: 'assemble' | 'interpret',
+  input: unknown,
+  signal: AbortSignal,
+): Promise<unknown> {
+  signal.throwIfAborted();
+  // stdx JSON does not represent lone UTF-16 surrogates. Preserve them as
+  // escaped private-use pairs on this internal wire, including a real marker.
+  const depths = new WeakMap<object, number>();
+  const json = JSON.stringify(input, function (this: object, _key, value: unknown) {
+    // Only the compact contract has to survive transport: no valid field
+    // contains a container past this depth. Original provider sizes are
+    // accounted before this projection, including values outside the contract.
+    if (operation === 'interpret' && value && typeof value === 'object') {
+      const depth = (depths.get(this) ?? -1) + 1;
+      if (depth > 5) return null;
+      depths.set(value, depth);
+    }
+    // The only accepted numeric values are safe integers. Preserve invalid
+    // numeric types without feeding out-of-range values into stdx.
+    if (typeof value === 'number' && !Number.isSafeInteger(value)) return null;
+    return value;
+  }).replace(/\\(?:["\\/bfnrt]|u[\da-f]{4})|\ue000/gi, (token) => {
+    if (token === '\ue000') return '\ue000\ue000';
+    const unit = token.length === 6 ? Number.parseInt(token.slice(2), 16) : 0;
+    return unit >= 0xd800 && unit <= 0xdfff
+      ? `\ue000${String.fromCharCode(0xe100 + unit - 0xd800)}`
+      : token;
+  });
+  const { child, state, completion, terminate, dispose } = spawnHarness(services, [
+    `compact-${operation}/1`,
+  ]);
+  signal.addEventListener('abort', terminate, { once: true });
+  try {
+    signal.throwIfAborted();
+    child.stdin.end(json, 'utf8');
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    for await (const chunk of child.stdout) {
+      const buffer: Buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      bytes += buffer.length;
+      // Assembly's estimated raw data is <= 1 MiB with up to two levels of
+      // escaping. Interpretation emits only bounded summary/coverage/candidates.
+      if (bytes > 8 * HARNESS_MAX_FRAME_BYTES) throw protocolError();
+      chunks.push(buffer);
+    }
+    const exit = await completion;
+    signal.throwIfAborted();
+    assertHarnessExit(state, exit);
+    try {
+      const reply = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks, bytes));
+      if (reply.indexOf('\n') !== reply.length - 1 || !reply.endsWith('\n')) throw protocolError();
+      return JSON.parse(reply, (_key, value: unknown) =>
+        typeof value === 'string'
+          ? value.replace(/\ue000([\ue000\ue100-\ue8ff])/g, (_pair, unit: string) =>
+              unit === '\ue000' ? unit : String.fromCharCode(unit.charCodeAt(0) - 0xe100 + 0xd800),
+            )
+          : value,
+      ) as unknown;
+    } catch {
+      throw protocolError();
+    }
+  } finally {
+    signal.removeEventListener('abort', terminate);
+    await dispose();
+  }
+}
+
+function spawnHarness(
+  services: HarnessProcessServices,
+  args: string[],
+  onExit?: NativeHarnessOptions['onExit'],
+) {
+  const child = spawn(services.binaryPath, args, {
+    shell: false,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: {
+      LANG: 'C.UTF-8',
+      LC_ALL: 'C.UTF-8',
+      TZ: 'UTC',
+      ...(services.libraryPath ? { LD_LIBRARY_PATH: services.libraryPath } : {}),
+    },
+  });
+  const state = { spawnFailed: false, transportFailed: false, exited: false };
+  let closed = false;
+  let killTimer: NodeJS.Timeout | undefined;
+  // Exit can precede stdout drainage while a provider request is in flight.
+  child.once('exit', () => {
+    state.exited = true;
+    void onExit?.();
+  });
+  const { promise: completion, resolve } = Promise.withResolvers<{
+    code: number | null;
+    signal: string | null;
+  }>();
+  child.once('error', () => {
+    state.spawnFailed = true;
+  });
+  child.once('close', (code, exitSignal) => {
+    closed = true;
+    void onExit?.();
+    resolve({ code, signal: exitSignal });
+  });
+  const terminate = () => {
+    if (closed) return;
+    child.kill('SIGTERM');
+    killTimer ??= setTimeout(() => {
+      if (!closed) child.kill('SIGKILL');
+    }, 1000);
+    killTimer.unref();
+  };
+  const pipeFailed = () => {
+    state.transportFailed = true;
+    terminate();
+  };
+  child.stdin.on('error', pipeFailed);
+  child.stdout.on('error', pipeFailed);
+  child.stderr.resume();
+  return {
+    child,
+    state,
+    completion,
+    terminate,
+    async dispose() {
+      terminate();
+      await completion;
+      clearTimeout(killTimer);
+    },
+  };
+}
+
+function assertHarnessExit(
+  state: { spawnFailed: boolean; transportFailed: boolean },
+  exit: { code: number | null; signal: string | null },
+): void {
+  if (state.spawnFailed)
+    throw new ApplicationError(503, 'HARNESS_UNAVAILABLE', 'harness unavailable');
+  if (state.transportFailed || exit.code !== 0 || exit.signal !== null)
+    throw new ApplicationError(502, 'HARNESS_EXITED', 'harness process exited unexpectedly');
+}
+
 // Only the synchronous pipe enqueue is under authority; drain outside the transaction.
 async function writeLine(
   stream: Writable,
@@ -93,55 +240,11 @@ export async function runNativeHarness(options: NativeHarnessOptions): Promise<v
       : HarnessStartSchema.safeParse(options.start);
   if (!parsedStart.success) throw protocolError();
   const startJson = encodeFrame(parsedStart.data);
-  const child = spawn(services.binaryPath, [], {
-    shell: false,
-    stdio: ['pipe', 'pipe', 'pipe'],
-    env: {
-      LANG: 'C.UTF-8',
-      LC_ALL: 'C.UTF-8',
-      TZ: 'UTC',
-      ...(services.libraryPath ? { LD_LIBRARY_PATH: services.libraryPath } : {}),
-    },
-  });
-  let spawnFailed = false;
-  let transportFailed = false;
-  let closed = false;
-  let exited = false;
-  let killTimer: NodeJS.Timeout | undefined;
-  // exit precedes stdio close: abort a provider read even while the request
-  // handler is waiting and stdout has not yet been drained to EOF.
-  child.once('exit', () => {
-    exited = true;
-    void options.onExit?.();
-  });
-  const completion = new Promise<{ code: number | null; signal: string | null }>((resolve) => {
-    child.once('error', () => {
-      spawnFailed = true;
-    });
-    child.once('close', (code, exitSignal) => {
-      closed = true;
-      void options.onExit?.();
-      resolve({ code, signal: exitSignal });
-    });
-  });
-  const terminate = () => {
-    if (closed) return;
-    child.kill('SIGTERM');
-    killTimer ??= setTimeout(() => {
-      if (!closed) child.kill('SIGKILL');
-    }, 1000);
-    killTimer.unref();
-  };
-  child.stdin.on('error', () => {
-    transportFailed = true;
-    terminate();
-  });
-  child.stdout.on('error', () => {
-    transportFailed = true;
-    terminate();
-  });
-  // Drain without retaining or exposing raw provider/context text on stderr.
-  child.stderr.resume();
+  const { child, state, completion, terminate, dispose } = spawnHarness(
+    services,
+    [],
+    options.onExit,
+  );
   const abort = () => {
     if (!child.stdin.destroyed && child.stdin.writable) {
       child.stdin.write(
@@ -281,22 +384,17 @@ export async function runNativeHarness(options: NativeHarnessOptions): Promise<v
         'HARNESS_PROTOCOL_ERROR',
         'harness ended without terminal control',
       );
-    const exit = await completion;
-    if (spawnFailed) throw new ApplicationError(503, 'HARNESS_UNAVAILABLE', 'harness unavailable');
-    if (transportFailed || exit.code !== 0 || exit.signal !== null) {
-      throw new ApplicationError(502, 'HARNESS_EXITED', 'harness process exited unexpectedly');
-    }
+    assertHarnessExit(state, await completion);
   } catch (error) {
     if (signal.aborted) return;
     if (error instanceof ApplicationError && error.errorCode === 'FORBIDDEN') throw error;
-    if (spawnFailed) throw new ApplicationError(503, 'HARNESS_UNAVAILABLE', 'harness unavailable');
-    if (transportFailed || exited)
+    if (state.spawnFailed)
+      throw new ApplicationError(503, 'HARNESS_UNAVAILABLE', 'harness unavailable');
+    if (state.transportFailed || state.exited)
       throw new ApplicationError(502, 'HARNESS_EXITED', 'harness process exited unexpectedly');
     throw error;
   } finally {
     signal.removeEventListener('abort', abort);
-    if (!closed) terminate();
-    await completion;
-    clearTimeout(killTimer);
+    await dispose();
   }
 }

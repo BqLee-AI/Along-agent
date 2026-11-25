@@ -63,7 +63,7 @@
 
 仓颉的 v7 暂停与 v8 快照共用观察状态的组装。v8 只组装一次，并记录历史插入位置。与状态版本对应的读写由原生线协议及真实 HTTP 暂停、恢复和会话压缩测试覆盖。
 
-TypeScript 组装工具禁用的摘要请求，解释模型结果并校验候选记忆的来源，在 PostgreSQL 中发布摘要。仓颉决定何时到达安全点，保留尚未消费的模型结果，并用新摘要恢复执行。
+会话压缩的执行分两段。仓颉组装摘要请求并解释模型结果，检查候选记忆是否按顺序引用本批新消息、是否包含用户原话。TypeScript 调用模型，核对冻结的覆盖范围并在 PostgreSQL 中发布摘要。仓颉决定何时到达安全点，保留尚未消费的模型结果，并用新摘要恢复执行。
 
 运行中 compact 的常规重放和插入冲突回读共用一份查询及匹配规则。首次查不到继续执行资格检查，插入冲突后查不到仍返回同一状态冲突。该提交点仍由原 Run 事务保护。
 
@@ -220,7 +220,7 @@ apps/api/src/
 | `agent/operations/run.ts`、`run-view.ts`、`release-stop.ts`                                           | `agent/run/run-actions.ts` 负责查询、取消、批准恢复和发布检查，和 `pause.ts` 共用 `resume-run.ts` 的执行权交接。投影与维护停跑归 `run-view.ts` 和 `maintenance/release-stop.ts`。                                                                                     |
 | `agent/operations/execute.ts`、`pause.ts`、`public.ts`                                                | `agent/run/execute-turn.ts` 分派确定性提醒和请求内 Harness 执行。`agent/run/pause.ts` 负责暂停和继续。控制器和 CLI 使用 `agent/run/public.ts`。                                                                                                                       |
 | `agent/operations/document-decision.ts`、`reject-document.ts`、`target-continuation.ts`               | 文档批准和拒绝归 `agent/run/approvals`，目标澄清的后继判定归 `agent/run/continuation`。审批事实和文档规则留在 `features/approvals/document`。                                                                                                                         |
-| `agent/operations/compact.ts`、`compact-execution.ts`、`compact-model.ts`                             | `agent/compact/runtime-compact.ts` 处理运行中压缩和后继，`execute-compact.ts` 协调摘要、计量与记忆发布，`compact-model.ts` 组装摘要请求并校验模型结果。                                                                                                               |
+| `agent/operations/compact.ts`、`compact-execution.ts`、`compact-model.ts`                             | `agent/compact/runtime-compact.ts` 处理运行中压缩和后继，`execute-compact.ts` 协调摘要、计量与记忆发布，`compact-model.ts` 对接模型传输和仓颉。                                                                                                                       |
 | `agent/operations/finish-attempt.ts`、`finish.ts`、`goal-result.ts`、`run-approval-decision.ts`       | `execution/result` 的 `finish.ts`、`commit.ts`、`goal-result.ts`，以及 `execution/load-approval-decision.ts`，依次处理终态帧、终态组装、目标证据和冻结批准事实。持久化终态沿用 `features/conversations/run` 的事务入口。                                              |
 | `agent/runtime/attempt-{load,session,model,tools,pause,routing,snapshot,state}.ts`                    | 归 `agent/execution/attempt`。`session.ts` 负责帧分派，其余文件名对应加载、模型、工具、安全点、路由、快照和内存状态。                                                                                                                                                 |
 | `agent/runtime/run-driver.ts`、`run-ownership.ts`、`private-output.ts`、`frozen-tool-eligibility.ts`  | 分别归 `execution/driver/driver.ts`、`execution/driver/ownership.ts`、`execution/result/private-output.ts` 和 `execution/attempt/frozen-tool-eligibility.ts`，负责后台执行、执行权、私密输出资格和冻结工具资格。                                                      |
@@ -246,7 +246,7 @@ apps/api/src/
 
 **受管资料、文档批准和飞书。** CJ 组织读取、拟定写入、等待批准和写后复读，根据被接受的证据决定下一步。TS 校验冻结工作区、连接、版本和实际字节。确认授权只产生对冻结动作的许可，TS 为原 Run 续接 attempt，CJ 把决议带回上下文后选择写入或结束。调用账、未知效果查证、私密内容加解密和披露资格由 TS 持有。适合进一步迁入 CJ 的是批准恢复和手动继续共用的执行状态解释，需先定位 TS 对执行状态的实际重建，逐段切除。按当前代码保留已接受工具、批准和原始来源的绑定核验，包括 compact 后继读取时与已发布事实的比对。[继续入口](../../apps/api/src/features/conversations/controller.ts) · [恢复交接](../../apps/api/src/agent/run/resume-run.ts) · [原生恢复](../../apps/harness/src/session/restore.cj) · [文档批准验收](../../apps/api/test/integration/document-approvals.test.ts) · [飞书披露验收](../../apps/api/test/integration/feishu-private-history.test.ts)
 
-**跨会话记忆。** CJ 决定何时召回以及哪些已接受的观察进入本轮上下文。TS 校验压缩候选对本批消息的来源引用和顺序，持有记忆版本、有效期、用户订正和原消息证据，在写入和读取时核验。后续从「保存或订正后再提问」验收 TS 读写减量及 CJ 的观察纳入行为。[记忆用例](../../apps/api/src/features/memory/service.ts) · [原生接线验收](../../apps/api/test/integration/memory-native-wiring.test.ts)
+**跨会话记忆。** CJ 决定何时召回以及哪些已接受的观察进入本轮上下文。压缩的候选解释已在 CJ，包含本批消息的来源顺序检查。TS 持有记忆版本、有效期、用户订正和原消息证据，在写入和读取时核验。后续从「保存或订正后再提问」验收 TS 读写减量及 CJ 的观察纳入行为。[记忆用例](../../apps/api/src/features/memory/service.ts) · [原生接线验收](../../apps/api/test/integration/memory-native-wiring.test.ts)
 
 **调度、投递和后台撤销。** 用户创建或取消提醒后，worker 从 outbox 推进调度、发送和撤销。消费资格、并发认领、调度回执、发送对账及任务终态均由 TS 依据 PostgreSQL 事实判定。这条链没有模型执行步骤，简化集中在 TS 的查询、锁和状态写入。账户、安装维护、模型配置和办公纪要单次摘要同样由对应 TS 用例拥有。办公摘要在默认模型下独立调用传输，使用自己的业务输入和输出。[应用与 worker 装配](../../apps/api/src/bootstrap/application.ts) · [投递对账](../../apps/api/src/features/tasks/scheduler/delivery.ts) · [调度恢复验收](../../apps/api/test/integration/scheduler-recovery.test.ts) · [纪要摘要验收](../../apps/api/test/integration/office-notes-summary.test.ts)
 
@@ -258,9 +258,9 @@ apps/api/src/
 
 暂停和批准挂起在各自锁定的 Run 事务内复用 checkpoint 核验所读取的调用账。v8 暂停复用共用核验对待处理模型结果和工具观察的检查，v7 暂停保留 version 3 特有的检查，并使用已经读取的恢复观察。压缩续跑与后继快照回读基于同一份操作回执计算累计用量。
 
-TS 组装摘要请求时合并旧摘要覆盖范围与本批消息，检查重复、顺序和缺口，并从冻结预算扣出续跑预留量。覆盖范围、预算、输入大小的错误仍按原顺序返回。TS 校验模型结果的覆盖范围和候选记忆来源，并负责计量及数据库发布。
+压缩请求组装在仓颉合并旧摘要覆盖范围与本批消息，检查重复、顺序和缺口，并从冻结预算扣出续跑预留量。TS 核验模型请求中的预算，执行调用资格、计量和数据库发布校验。三个错误仍按覆盖范围、预算、输入大小的顺序返回。
 
-普通 v8 恢复从快照重建上下文。压缩发布后，启动帧只在原快照之外传递已发布的新摘要，仓颉复用压缩预演的重建逻辑保留未覆盖的消息。TS 在恢复事务内复用同一份接纳事实核验快照和收据。
+仓颉解释摘要时直接拿冻结覆盖范围逐项比对模型返回的 ID 和序号，向 TS 返回摘要及候选记忆结果。普通 v8 恢复从快照重建上下文。压缩发布后，启动帧只在原快照之外传递已发布的新摘要，仓颉复用压缩预演的重建逻辑保留未覆盖的消息。TS 在恢复事务内复用同一份接纳事实核验快照和收据。
 
 三代启动帧共用工具目录筛选、传输大小检查和冻结工作区校验。每代仍使用各自的快照和恢复输入。
 
@@ -272,7 +272,16 @@ TS 组装摘要请求时合并旧摘要覆盖范围与本批消息，检查重�
 
 ### 实施计数
 
-当前切片保留 TypeScript 摘要组装和解释。自动压缩阈值判定、续跑预演和快照上下文重建属于本切片；摘要组装和解释迁至仓颉后另行统计。
+| 生产源码             | 基线文件数 | 实施后文件数 | 基线行数 | 实施后行数 | 行数净变动 |
+| -------------------- | ---------: | -----------: | -------: | ---------: | ---------: |
+| API TypeScript       |        251 |          260 |   37,156 |     36,990 |       −166 |
+| Web TypeScript / TSX |        168 |          168 |   16,567 |     16,558 |         −9 |
+| 仓颉 Harness         |         16 |           17 |    2,021 |      2,410 |       +389 |
+| 合计                 |        435 |          445 |   55,744 |     55,958 |       +214 |
+
+自动压缩和恢复链路重构使 API 减少 93 行、仓颉增加 28 行，内部帧合同增加 17 行，三者合计净减 48 行。压缩请求组装使 API 再减少 19 行、仓颉增加 51 行，净增 32 行，共享合同无变动。上表累计口径不含 `packages/contracts`。
+
+摘要解释、v8 恢复和启动帧归并共增加 API 5 行、仓颉 10 行、内部合同 12 行，合计净增 27 行。普通恢复与压缩续跑的启动帧省掉重复历史，TS 复用原始接纳事实和已完成的快照核验。
 
 中断结算在核对冻结的 Run 绑定后，一次查询读取已完成的时区设置、提醒创建、提醒取消和记忆保存回执。各类回执仍按原顺序核验，文档效果沿用同一次 Run 绑定检查。暂停继续和审批恢复共用锁内的幂等回执读取，审批恢复用同一条查询读取后继 attempt 的状态。外部写入的单次派发和未知结果核对继续由工具账本负责。
 

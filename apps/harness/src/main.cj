@@ -6,7 +6,23 @@ import along_harness.session.*
 import std.env.*
 import stdx.encoding.json.*
 
-main(): Int64 {
+main(args: Array<String>): Int64 {
+    if (args.size != 0) {
+        try {
+            require(args.size == 1)
+            let reply = match (args[0]) {
+                case "compact-assemble/1" => assembleCompact(readCompactInput())
+                case "compact-interpret/1" => interpretCompact(readCompactInput())
+                case _ => throw Exception("unknown harness operation")
+            }
+            getStdOut().write(wireJson(reply) + "\n")
+            getStdOut().flush()
+            return 0
+        } catch (_: Exception) {
+            getStdErr().write("HARNESS_PROTOCOL_ERROR\n")
+            return 2
+        }
+    }
     let pipe = Pipe()
     let harness = Harness(pipe)
     try {

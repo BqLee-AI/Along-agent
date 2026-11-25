@@ -42,6 +42,8 @@ unknown 与取消后迟到调用另验证真实非事务调用核心到 native �
 
 工厂在创建时快照配置。调用者须提供与 Run 冻结模型绑定一致的配置版本。`measureHarnessContext` 是异步本地计量，不调用网络执行器。工厂不选择默认模型、不执行工具，也不恢复旧 Run。
 
+`compact/1` 的独立工具禁用模型调用由同一 native 制品组装请求、解释摘要和候选结构。TS 保留冻结来源与覆盖授权、计量、发起前持久预留、provider 传输及 usage/发布。两个内部版本化一次性命令从 stdin 读至 EOF，不改变 Run NDJSON 的 1 MiB 上限：转义后的模型请求仍由原计量拒绝，超长模型回复仍可保留有效摘要但不采纳候选。修改此路径后需重新构建 native 制品；`apps/api/test/contracts/compact-model.test.ts` 使用 `HARNESS_BINARY` 和 `HARNESS_LIBRARY_PATH` 验证真实进程。
+
 常规 v8 Run 可在启动帧携带 `auto_compact`，提供冻结的触发阈值和压缩、续跑所需的预算。仓颉只在最终模型候选计量通过后决定是否通过 `pause_probe` 提议自动压缩。宿主核验计量与当前 attempt，优先处理已登记的暂停，并对相同覆盖去重。启动帧和提议由同一次发布的宿主与 native 制品共同使用，持久化快照版本不变。
 
 ## 执行与失败合同

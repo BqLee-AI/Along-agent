@@ -17,6 +17,20 @@ func readAvailable(buffer: Array<UInt8>): Int64 {
     }
 }
 
+// Compact is a local one-shot computation, not a Run frame. In particular an
+// oversized provider reply still has to be interpreted for a usable summary.
+protected func readCompactInput(): String {
+    let chunk = Array<UInt8>(4096, repeat: 0)
+    let bytes = ArrayList<UInt8>()
+    while (true) {
+        let count = readAvailable(chunk)
+        require(count >= 0)
+        if (count == 0) { return String.fromUtf8(bytes.toArray()) }
+        for (i in 0..count) { bytes.add(chunk[i]) }
+    }
+    throw Exception("unreachable")
+}
+
 protected class Cancelled <: Exception {
     protected init() { super("cancelled") }
 }

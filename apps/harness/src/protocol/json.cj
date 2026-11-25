@@ -61,7 +61,7 @@ public func obj(pairs: Array<(String, JsonValue)>): JsonObject {
 public func text(s: String): JsonString { JsonString(s) }
 // The pinned serializer expands ampersands. Normalize only real JSON escapes,
 // never literal text such as a backslash followed by "u0026".
-public func wireJson(value: JsonObject): String {
+public func wireJson(value: JsonValue): String {
     let json = value.toString()
     if (!json.contains("\\u0026") && !json.contains("\\u007f")) { return json }
     let bytes = json.toArray()

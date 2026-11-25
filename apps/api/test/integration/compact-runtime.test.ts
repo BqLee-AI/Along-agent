@@ -114,6 +114,12 @@ interface Fixture {
     f: Fixture,
     transport: CompactModelTransport,
   ): Parameters<typeof executeCompact>[0] {
+    const binaryPath = process.env.HARNESS_BINARY;
+    if (!binaryPath)
+      throw new Error(
+        'compact integration requires HARNESS_BINARY from the current production build',
+      );
+    const libraryPath = process.env.HARNESS_LIBRARY_PATH;
     return {
       pool: db.pool,
       binding: f.binding,
@@ -136,6 +142,7 @@ interface Fixture {
         maxOutputTokens: 100,
       },
       transport,
+      harness: { binaryPath, ...(libraryPath ? { libraryPath } : {}) },
       signal: new AbortController().signal,
       // This controlled seam exercises orchestration, not native continuation measurement.
       validateContinuation: async () => {},
