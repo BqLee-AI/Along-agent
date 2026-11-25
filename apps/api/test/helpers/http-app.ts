@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createApp } from '../../src/http/app.js';
-import { handleRequest as handleSocketRequest } from '../../src/http/transport/handler.js';
+import { createRequestHandler } from '../../src/http/transport/handler.js';
 import type { AppDeps } from '../../src/http/contracts.js';
 import { createConfiguredAccountService } from '../../src/bootstrap/identity.js';
 import { createInvitedAccountService } from '../../src/features/identity/public.js';
@@ -34,7 +34,7 @@ export async function handleRequest(
 ): Promise<void> {
   const deps = httpTestDeps(dependencies);
   if (req.socket && typeof req.socket.setNoDelay === 'function')
-    return handleSocketRequest(req, res, deps);
+    return createRequestHandler(deps)(req, res);
   const request = toWebRequest(req, new URL(req.url ?? '/', 'http://localhost'));
   attachConnection(request, {
     remoteAddress: req.socket?.remoteAddress ?? null,

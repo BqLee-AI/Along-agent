@@ -1,5 +1,4 @@
-import { timingSafeEqual } from 'node:crypto';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import type { Actor } from '../features/identity/public.js';
 import {
   createActorResolver,
@@ -37,6 +36,13 @@ export function queryOf(request: Request): Record<string, string | string[] | un
 export function idempotencyKeyOf(request: Request): string | null {
   return request.headers.get('idempotency-key')?.trim() || null;
 }
+
+/** The request ID is echoed in HTTP and stored in the bounded checkpoint envelope. */
+export function normalizeRequestId(incoming: string | null | undefined): string {
+  const value = incoming?.trim();
+  return value && value.length <= 200 ? value : randomUUID();
+}
+
 export function createAccess(deps: Pick<AppDeps, 'pool' | 'resolveActor'>) {
   const resolve = deps.resolveActor ?? createActorResolver({ pool: deps.pool });
   const actors = new WeakMap<Request, Promise<Actor | null>>();
@@ -46,8 +52,7 @@ export function createAccess(deps: Pick<AppDeps, 'pool' | 'resolveActor'>) {
   function requestId(request: Request): string {
     let id = ids.get(request);
     if (!id) {
-      const incoming = request.headers.get('x-request-id')?.trim();
-      id = incoming && incoming.length <= 200 ? incoming : randomUUID();
+      id = normalizeRequestId(request.headers.get('x-request-id'));
       ids.set(request, id);
     }
     return id;

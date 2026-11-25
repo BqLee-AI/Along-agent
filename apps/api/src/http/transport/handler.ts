@@ -52,16 +52,3 @@ export function createRequestHandler(deps: AppDeps) {
     }
   };
 }
-const handlers = new WeakMap<AppDeps, ReturnType<typeof createRequestHandler>>();
-export function handleRequest(
-  req: IncomingMessage,
-  res: ServerResponse,
-  deps: AppDeps,
-): Promise<void> {
-  let handler = handlers.get(deps);
-  if (!handler) {
-    handler = createRequestHandler(deps);
-    handlers.set(deps, handler);
-  }
-  return handler(req, res);
-}

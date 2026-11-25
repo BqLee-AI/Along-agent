@@ -1,9 +1,8 @@
 import { httpStatusForError } from '@along/contracts';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { randomUUID } from 'node:crypto';
 import { ApplicationError, notReady, validationError } from '../platform/errors.js';
 import { status } from 'elysia';
-import type { HttpAccess } from './access.js';
+import { normalizeRequestId, type HttpAccess } from './access.js';
 import { errorResponses } from './model.js';
 import { unmatchedError } from './routing/fallback-controller.js';
 import { writeFiniteResponse } from './transport/unread-upload.js';
@@ -13,13 +12,9 @@ import { writeFiniteResponse } from './transport/unread-upload.js';
 // the symbolic name (UNAUTHENTICATED, NOT_FOUND, ...). Business 40xxxx codes
 // land with confirm/reject in PR2.
 
-// Bounded: the id is echoed in every envelope and persisted in checkpoints,
-// whose protocol schema caps request_id at 200 chars.
 export function requestIdOf(req: IncomingMessage): string {
   const incoming = req.headers['x-request-id'];
-  const first = Array.isArray(incoming) ? incoming[0] : incoming;
-  const value = first?.trim() ?? '';
-  return value !== '' && value.length <= 200 ? value : randomUUID();
+  return normalizeRequestId(Array.isArray(incoming) ? incoming[0] : incoming);
 }
 
 export function sendJson(
@@ -57,20 +52,6 @@ export function jsonResponse(
       ...extraHeaders,
     },
   });
-}
-
-export function internalErrorResponse(requestId: string): Response {
-  return jsonResponse(
-    500,
-    {
-      code: 500,
-      data: null,
-      msg: 'internal error',
-      error: { code: 'INTERNAL_ERROR', message: 'internal error', request_id: requestId },
-      request_id: requestId,
-    },
-    requestId,
-  );
 }
 
 export function okEnvelope<T>(data: T, requestId: string) {
