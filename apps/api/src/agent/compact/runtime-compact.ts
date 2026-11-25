@@ -487,6 +487,7 @@ async function executeRuntimeCompactWork(
           maxOutputTokens: compactCompletionCap,
         },
         transport,
+        harness: deps.harness,
         signal,
         guard,
         validateContinuation: async (frozen, result) => {

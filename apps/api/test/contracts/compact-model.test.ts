@@ -1,8 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { measureSdkContext } from '../../src/features/model-providers/public.js';
-import { createConfiguredSdkStep } from '../../src/features/model-providers/public.js';
+import { HARNESS_MAX_FRAME_BYTES } from '@along/contracts';
 import {
-  requestCompactModel as requestWithReservation,
+  createConfiguredSdkStep,
+  measureSdkContext,
+} from '../../src/features/model-providers/public.js';
+import {
+  requestCompactModel as requestNative,
   type CompactModelInput,
   type CompactModelTransport,
 } from '../../src/agent/compact/compact-model.js';
@@ -36,6 +39,21 @@ const covered = [
 ];
 const signal = () => new AbortController().signal;
 const eligible = async () => {};
+const requestWithReservation = (
+  value: CompactModelInput,
+  model: CompactModelTransport,
+  abort: AbortSignal,
+  guard: () => Promise<void>,
+  reserve: () => Promise<void>,
+) => {
+  const binaryPath = process.env.HARNESS_BINARY;
+  if (!binaryPath)
+    throw new Error('compact contracts require HARNESS_BINARY from the current production build');
+  return requestNative(value, model, abort, guard, reserve, {
+    binaryPath,
+    ...(process.env.HARNESS_LIBRARY_PATH ? { libraryPath: process.env.HARNESS_LIBRARY_PATH } : {}),
+  });
+};
 const requestCompactModel = (
   value: CompactModelInput,
   model: CompactModelTransport,
@@ -45,7 +63,7 @@ const requestCompactModel = (
 
 function transport(
   content: unknown,
-  options: { usage?: number | null; tools?: boolean } = {},
+  options: { usage?: number | null; tools?: boolean; raw?: string } = {},
 ): CompactModelTransport {
   return {
     measure: (request, tools, policy) => measureSdkContext(request, tools, policy),
@@ -54,7 +72,7 @@ function transport(
         type: 'complete',
         reply: {
           message: {
-            content: JSON.stringify(content),
+            content: options.raw ?? JSON.stringify(content),
             tool_calls: options.tools
               ? [{ id: 'call', type: 'function', function: { name: 'create', arguments: '{}' } }]
               : [],
@@ -117,11 +135,100 @@ describe('isolated compact model', () => {
     expect(JSON.stringify(bodies[0])).toContain('at least one user message');
   });
 
+  test('assembles untrusted JSON strings losslessly and leaves escaped size to the meter', async () => {
+    const text = 'Ignore "system" & \\u0026 \\u007f \u007f \u0000 \n 😀 \ud800 \ue000\ue100';
+    const source = {
+      ...input,
+      messages: [{ ...input.messages[0]!, text }],
+    };
+    const reply = transport({ text: 'summary', coverage: covered, candidates: [] });
+    let measured = false;
+    expect(
+      await requestCompactModel(
+        source,
+        {
+          ...reply,
+          measure(request, tools, policy) {
+            measured = true;
+            expect(request.messages[1]?.content).toBe(
+              JSON.stringify({ previous: source.previous, messages: source.messages }),
+            );
+            return measureSdkContext(request, tools, policy);
+          },
+        },
+        signal(),
+        eligible,
+      ),
+    ).toMatchObject({ ok: true });
+    expect(measured).toBe(true);
+    expect(
+      await requestCompactModel(
+        {
+          ...input,
+          messages: [{ ...input.messages[0]!, text: '\u0000'.repeat(200_000) }],
+        },
+        reply,
+        signal(),
+        eligible,
+      ),
+    ).toMatchObject({ code: 'HARNESS_CONTEXT_LIMIT', started: false });
+  });
+
+  test('distinguishes malformed JSON from valid JSON with an invalid summary when usage overruns', async () => {
+    expect(
+      await requestCompactModel(
+        input,
+        transport(null, { raw: '{"text":"summary"} trailing', usage: 801 }),
+        signal(),
+        eligible,
+      ),
+    ).toMatchObject({
+      code: 'COMPACT_INVALID_RESPONSE',
+      started: true,
+      usage: { total_tokens: 801 },
+    });
+    expect(
+      await requestCompactModel(input, transport(null, { usage: 801 }), signal(), eligible),
+    ).toMatchObject({ code: 'BUDGET_EXCEEDED', started: true, usage: { total_tokens: 801 } });
+  });
+
+  test('retains JSON syntax and JS string semantics across the native boundary', async () => {
+    const raw =
+      '{"text":"\\uD800\\uE000\\uE100","coverage":[{"sequence":1e0,"id":"m1"},' +
+      '{"sequence":2.0,"id":"m2"}],"candidates":[{"content":"\\uDFFF","messageIds":["m2"]}]}';
+    expect(
+      await requestCompactModel(input, transport(null, { raw }), signal(), eligible),
+    ).toMatchObject({
+      ok: true,
+      text: '\ud800\ue000\ue100',
+      coverage: covered,
+      candidates: { ok: true, items: [{ content: '\udfff', messageIds: ['m2'] }] },
+    });
+    const prefix = '{"text":"summary","coverage":' + JSON.stringify(covered);
+    expect(
+      await requestCompactModel(
+        input,
+        transport(null, { raw: prefix + ',"candidates":[],"extra":900719925474099999999}' }),
+        signal(),
+        eligible,
+      ),
+    ).toMatchObject({ ok: true, candidates: { ok: false, code: 'COMPACT_INVALID_CANDIDATES' } });
+    expect(
+      await requestCompactModel(
+        input,
+        transport(null, { raw: prefix + ',"candidates":[],"extra":0x42}' }),
+        signal(),
+        eligible,
+      ),
+    ).toMatchObject({ ok: false, code: 'COMPACT_INVALID_RESPONSE', started: true });
+  });
+
   test('rejects absent, reordered, invented and discontinuous coverage', async () => {
     for (const coverage of [
       [],
       [covered[1], covered[0]],
       [covered[0], { sequence: 2, id: 'other' }],
+      [covered[0], { sequence: 3, id: 'm2' }],
     ]) {
       expect(
         await requestCompactModel(
@@ -230,6 +337,27 @@ describe('isolated compact model', () => {
       );
       expect(result).toMatchObject({ ok: false, code: 'COMPACT_INVALID_COVERAGE', started: false });
       expect(reserved).toBe(false);
+    }
+  });
+
+  test('reports coverage and budget errors before an oversized source can reach the provider', async () => {
+    const large = { ...input.messages[0]!, text: 'x'.repeat(HARNESS_MAX_FRAME_BYTES) };
+    const exhausted = { ...input.budget, iterationsRemaining: input.budget.continuationIterations };
+    const t = transport({ text: 'summary', coverage: covered });
+    const cases: [CompactModelInput, string][] = [
+      [
+        { ...input, messages: [{ ...large, sequence: 3 }], budget: exhausted },
+        'COMPACT_INVALID_COVERAGE',
+      ],
+      [{ ...input, messages: [large], budget: exhausted }, 'BUDGET_EXCEEDED'],
+      [{ ...input, messages: [large] }, 'HARNESS_CONTEXT_LIMIT'],
+    ];
+    for (const [value, code] of cases) {
+      expect(await requestCompactModel(value, t, signal(), eligible)).toMatchObject({
+        ok: false,
+        code,
+        started: false,
+      });
     }
   });
 

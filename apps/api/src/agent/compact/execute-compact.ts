@@ -24,6 +24,7 @@ import {
   type CompactModelResult,
   type CompactModelTransport,
 } from './compact-model.js';
+import type { HarnessProcessServices } from '../harness/harness-process.js';
 import { withRunTransaction } from '../execution/driver/ownership.js';
 
 export type CompactOutcome =
@@ -48,6 +49,7 @@ export async function executeCompact(input: {
   policy: ContextPolicy;
   budget: CompactModelInput['budget'];
   transport: CompactModelTransport;
+  harness: HarnessProcessServices;
   signal: AbortSignal;
   guard: (client: PoolClient, messageIds: readonly string[]) => Promise<void>;
   validateContinuation: (
@@ -111,6 +113,7 @@ export async function executeCompact(input: {
     input.signal,
     () => tx((client) => assertCompactEligibility(client, binding, guard(fullIds))),
     () => tx((client) => beginCompactCall(client, binding, frozen.freezeId, guard(fullIds))),
+    input.harness,
   );
   // A commit acknowledgement may be lost after the reservation committed.
   // Read the durable fact rather than trusting the callback's return alone.
