@@ -12,7 +12,7 @@ FROM harness-toolchain AS harness-native
 COPY apps/harness/cjpm.toml apps/harness/cjpm.lock apps/harness/
 COPY apps/harness/src apps/harness/src
 COPY scripts/build-harness.sh scripts/build-harness.sh
-RUN bash scripts/build-harness.sh --inside-builder
+RUN bash scripts/build-harness.sh
 
 FROM scratch AS harness-artifact
 COPY --from=harness-native /out/ /

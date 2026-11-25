@@ -6,11 +6,12 @@
 
 ## 可复现构建与安装
 
-Linux/WSL 安装 Bun1.4.2、Docker 后执行根入口 `bun run build:harness`，或 `bash scripts/build-harness.sh`。它构建 `infra/docker/Dockerfile` 的独立 `harness-artifact` 目标，默认导出到 `apps/harness/dist`。builder 包含 GCC、binutils、C/C++ 开发库和按 `artifacts.lock` 校验的 SDK/stdx；`cjpm build --skip-script` 编译本目录正式源，不接受全局 SDK 或旧二进制。`cjpm.lock` 固定包依赖，`artifacts.lock` 单独固定二进制路径依赖；stdx hash 是官方 release 的本地计算值，不是独立发布者证明。
+使用 Bun 1.4.2 和 Linux x64 Docker 引擎，在仓库根目录执行 `bun run build:harness`。Windows 可直接使用 Docker Desktop 执行这条命令。Docker 构建 `harness-artifact` 目标并将制品导出至 `apps/harness/dist`。构建容器使用 `artifacts.lock` 校验 SDK 和 stdx，再由 `cjpm build --skip-script` 编译正式源码。`cjpm.lock` 固定包依赖，`artifacts.lock` 固定构建用的二进制依赖。
 
 也可执行 `docker build --target harness-artifact --output type=local,dest=/tmp/along-harness -f infra/docker/Dockerfile .`。导出包括 `bin/along-harness`、实际链接的 SDK/stdx 动态库闭包 `lib/`、官方及第三方许可 `notices/`、源与产物 SHA256。API 使用 `HARNESS_BINARY=/tmp/along-harness/bin/along-harness` 和 `HARNESS_LIBRARY_PATH=/tmp/along-harness/lib`；直接运行二进制使用 `LD_LIBRARY_PATH=/tmp/along-harness/lib`。正式 API 镜像将该构建阶段复制到 `/app/harness/` 并配置这些路径。
 
 `source.sha256` 递归收录 `src/` 下所有 `.cj` 源文件（按路径排序），以及 `cjpm.toml`、`cjpm.lock` 和 `artifacts.lock`；子包新增或修改均会改变对应源哈希。
+在 `apps/harness` 执行 `sha256sum -c dist/source.sha256` 核对源文件，在 `apps/harness/dist` 执行 `sha256sum -c binary.sha256` 核对可执行文件。
 
 `bun run harness:prepare /opt/along-toolchain` 是显式 Linux 下载入口，先校验再解包；依赖 bash/curl/sha256sum/tar/unzip，构建不运行 cjpm hooks 或下载隐式依赖。Docker builder 是正式编译环境；原生 Windows 和其他架构不在该 artifact lock 支持范围。
 

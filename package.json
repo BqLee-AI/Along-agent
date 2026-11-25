@@ -13,7 +13,7 @@
   ],
   "scripts": {
     "harness:prepare": "bash scripts/prepare-harness.sh",
-    "build:harness": "bash scripts/build-harness.sh",
+    "build:harness": "docker build --target harness-artifact --output type=local,dest=apps/harness/dist -f infra/docker/Dockerfile .",
     "build:packages": "bun run --bun --filter './packages/*' build",
     "build:api": "bun run build:packages && bun run --bun --filter @along/api build",
     "build": "bun run build:api && bun run --bun --filter './apps/*' --filter '!@along/api' build",
