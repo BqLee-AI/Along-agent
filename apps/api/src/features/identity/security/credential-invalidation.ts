@@ -12,6 +12,18 @@ export async function revokeChallenges(client: PoolClient, condition: string, ar
   );
 }
 
+/** Revoke this user's sessions, optionally keeping the current session. */
+export async function revokeUserSessions(
+  client: PoolClient,
+  userId: string,
+  keepSessionId?: string,
+) {
+  await client.query(
+    'UPDATE sessions SET revoked_at=COALESCE(revoked_at,clock_timestamp()) WHERE user_id=$1 AND id IS DISTINCT FROM $2::uuid',
+    [userId, keepSessionId ?? null],
+  );
+}
+
 /** Credential change: bump revision, void pending challenges, revoke every session. */
 export async function invalidateUser(client: PoolClient, userId: string) {
   await client.query(
@@ -19,8 +31,5 @@ export async function invalidateUser(client: PoolClient, userId: string) {
     [userId],
   );
   await revokeChallenges(client, 'user_id=$1', [userId]);
-  await client.query(
-    'UPDATE sessions SET revoked_at=COALESCE(revoked_at,clock_timestamp()) WHERE user_id=$1',
-    [userId],
-  );
+  await revokeUserSessions(client, userId);
 }
