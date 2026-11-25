@@ -11,6 +11,14 @@ import {
   validationError,
 } from '../../platform/errors.js';
 import {
+  currentRevisionJoin as join,
+  insertMemoryRevision,
+  loadMemoryRevision as load,
+  memoryRecord as record,
+  memoryRevisionProjection as projection,
+  type MemoryRevisionRow as Row,
+} from './records/revisions.js';
+import {
   createMemorySemantic,
   MemorySourceFailure,
   type MemoryIndexResult,
@@ -79,40 +87,6 @@ export interface MemoryService {
   correct(ownerId: string, memoryId: string, input: CorrectionInput): Promise<MemoryRecord>;
   stopRecall(ownerId: string, memoryId: string, expectedRevision: number): Promise<void>;
 }
-type Row = {
-  id: string;
-  owner_id: string;
-  conversation_id: string;
-  message_ids: string[];
-  content: string;
-  source_kind: 'explicit' | 'compact';
-  summary_id: string | null;
-  revision: number;
-  status: 'active' | 'stopped';
-  expires_at: Date | null;
-  created_at: Date;
-  updated_at: Date;
-};
-const projection = `m.id, m.owner_id, r.conversation_id, r.message_ids, r.content,
-  r.source_kind, r.summary_id, r.revision, m.status, r.expires_at, m.created_at, m.updated_at`;
-const join = `FROM r3_memories m JOIN r3_memory_revisions r
-  ON r.owner_id=m.owner_id AND r.memory_id=m.id AND r.revision=m.current_revision`;
-function record(row: Row): MemoryRecord {
-  return {
-    id: row.id,
-    ownerId: row.owner_id,
-    conversationId: row.conversation_id,
-    messageIds: row.message_ids,
-    content: row.content,
-    sourceKind: row.source_kind,
-    summaryId: row.summary_id,
-    revision: row.revision,
-    status: row.status,
-    expiresAt: row.expires_at?.toISOString() ?? null,
-    createdAt: row.created_at.toISOString(),
-    updatedAt: row.updated_at.toISOString(),
-  };
-}
 function validateOwner(ownerId: string): void {
   if (!isUuid(ownerId)) throw validationError('invalid owner');
 }
@@ -166,20 +140,6 @@ export function createMemoryService({
       ...(row.summary_id ? { summaryId: row.summary_id } : {}),
     });
   }
-  async function load(
-    client: PoolClient,
-    ownerId: string,
-    memoryId: string,
-    lock = false,
-  ): Promise<Row | null> {
-    const { rows } = await client.query<Row>(
-      `SELECT ${projection} ${join}
-      WHERE m.owner_id=$1 AND m.id=$2 AND m.status='active'
-      AND (r.expires_at IS NULL OR r.expires_at > clock_timestamp()) ${lock ? 'FOR UPDATE OF m' : ''}`,
-      [ownerId, memoryId],
-    );
-    return rows[0] ?? null;
-  }
   async function save(
     client: PoolClient,
     ownerId: string,
@@ -220,7 +180,7 @@ export function createMemoryService({
     if (existing.rows[0]) {
       if (existing.rows[0].request_hash !== hash)
         throw stateConflict('memory idempotency key reused');
-      const row = await load(client, ownerId, existing.rows[0].memory_id, true);
+      const row = await load(client, ownerId, existing.rows[0].memory_id);
       if (!row) throw stateConflict('memory is no longer recallable');
       if (row.revision !== 1) throw stateConflict('memory has since been corrected');
       await checkSource(client, ownerId, row);
@@ -238,30 +198,21 @@ export function createMemoryService({
       `INSERT INTO r3_memories(id,owner_id,current_revision,status) VALUES ($1,$2,1,'active')`,
       [id, ownerId],
     );
-    await client.query(
-      `INSERT INTO r3_memory_revisions(owner_id,memory_id,revision,conversation_id,message_ids,content,source_kind,summary_id,expires_at)
-      VALUES ($1,$2,1,$3,$4,$5,$6,$7,$8)`,
-      [
-        ownerId,
-        id,
-        input.conversationId,
-        input.messageIds,
-        input.content,
-        kind,
-        summaryId,
-        input.expiresAt ?? null,
-      ],
+    await insertMemoryRevision(
+      client,
+      ownerId,
+      id,
+      1,
+      input,
+      kind,
+      summaryId,
+      input.expiresAt ?? null,
     );
     await client.query(
       'INSERT INTO r3_memory_requests(owner_id,idempotency_key,request_hash,memory_id) VALUES ($1,$2,$3,$4)',
       [ownerId, input.idempotencyKey, hash, id],
     );
-    // Return the actual inserted row, even if an explicitly supplied expiry is already past.
-    const { rows } = await client.query<Row>(
-      `SELECT ${projection} ${join} WHERE m.owner_id=$1 AND m.id=$2`,
-      [ownerId, id],
-    );
-    return record(rows[0]!);
+    return record((await load(client, ownerId, id, 'stored'))!);
   }
   async function rememberInTransaction(
     client: PoolClient,
@@ -281,7 +232,7 @@ export function createMemoryService({
     validateOwner(ownerId);
     if (!isUuid(memoryId)) throw validationError('invalid memory id');
     return withTransaction(pool, async (client) => {
-      const row = await load(client, ownerId, memoryId, true);
+      const row = await load(client, ownerId, memoryId);
       if (!row) return null;
       try {
         await checkSource(client, ownerId, row);
@@ -471,7 +422,7 @@ export function createMemoryService({
     validateRevision(input.expectedRevision);
     if (!isUuid(memoryId)) throw validationError('invalid memory id');
     return withTransaction(pool, async (client) => {
-      const old = await load(client, ownerId, memoryId, true);
+      const old = await load(client, ownerId, memoryId);
       if (!old) throw notFound('memory not found');
       await checkSource(client, ownerId, old);
       if (old.revision !== input.expectedRevision) throw stateConflict('memory revision changed');
@@ -481,28 +432,22 @@ export function createMemoryService({
         messageIds: input.messageIds,
         purpose: 'correction',
       });
-      await client.query(
-        `INSERT INTO r3_memory_revisions(owner_id,memory_id,revision,conversation_id,message_ids,content,source_kind,summary_id,expires_at)
-        VALUES ($1,$2,$3,$4,$5,$6,'explicit',NULL,$7)`,
-        [
-          ownerId,
-          memoryId,
-          old.revision + 1,
-          input.conversationId,
-          input.messageIds,
-          input.content,
-          input.expiresAt === undefined ? old.expires_at : input.expiresAt,
-        ],
+      const revision = old.revision + 1;
+      await insertMemoryRevision(
+        client,
+        ownerId,
+        memoryId,
+        revision,
+        input,
+        'explicit',
+        null,
+        input.expiresAt === undefined ? old.expires_at : input.expiresAt,
       );
       await client.query(
         'UPDATE r3_memories SET current_revision=$3, updated_at=now() WHERE owner_id=$1 AND id=$2',
-        [ownerId, memoryId, old.revision + 1],
+        [ownerId, memoryId, revision],
       );
-      const { rows } = await client.query<Row>(
-        `SELECT ${projection} ${join} WHERE m.owner_id=$1 AND m.id=$2`,
-        [ownerId, memoryId],
-      );
-      return record(rows[0]!);
+      return record((await load(client, ownerId, memoryId, 'stored'))!);
     });
   }
   async function stopRecall(
@@ -514,7 +459,7 @@ export function createMemoryService({
     validateRevision(expectedRevision);
     if (!isUuid(memoryId)) throw validationError('invalid memory id');
     await withTransaction(pool, async (client) => {
-      const row = await load(client, ownerId, memoryId, true);
+      const row = await load(client, ownerId, memoryId);
       if (!row) throw notFound('memory not found');
       if (row.revision !== expectedRevision) throw stateConflict('memory revision changed');
       await client.query(

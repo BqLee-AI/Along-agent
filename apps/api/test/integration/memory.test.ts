@@ -130,6 +130,42 @@ maybe('owner memory service', () => {
     ).toBe(false);
   });
 
+  it('preserves an omitted expiry, clears null, and returns an expired written revision', async () => {
+    const expiry = new Date(Date.now() + 60 * 60_000).toISOString();
+    const saved = await memory.remember(owner, {
+      conversationId: conversation,
+      messageIds: [message],
+      content: 'original expiring fact',
+      idempotencyKey: randomUUID(),
+      expiresAt: expiry,
+    });
+    expect(saved.expiresAt).toBe(expiry);
+
+    const correctionInput = {
+      conversationId: conversation,
+      messageIds: [correction],
+      content: 'corrected expiring fact',
+    };
+    const inherited = await memory.correct(owner, saved.id, {
+      ...correctionInput,
+      expectedRevision: saved.revision,
+    });
+    expect(inherited.expiresAt).toBe(expiry);
+    const cleared = await memory.correct(owner, saved.id, {
+      ...correctionInput,
+      expectedRevision: inherited.revision,
+      expiresAt: null,
+    });
+    expect(cleared.expiresAt).toBeNull();
+    const expired = await memory.correct(owner, saved.id, {
+      ...correctionInput,
+      expectedRevision: cleared.revision,
+      expiresAt: '2000-01-01T00:00:00.000Z',
+    });
+    expect(expired).toMatchObject({ revision: 4, expiresAt: '2000-01-01T00:00:00.000Z' });
+    expect(await memory.get(owner, saved.id)).toBeNull();
+  });
+
   it('requires compact qualification and respects expiry', async () => {
     const input = {
       conversationId: conversation,
