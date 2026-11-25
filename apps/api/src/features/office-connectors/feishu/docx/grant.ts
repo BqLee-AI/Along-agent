@@ -1,6 +1,6 @@
 import type { PoolClient } from 'pg';
 import { z } from 'zod';
-import type { FeishuBotDocxConfiguration } from './feishu-bot-docx-config.js';
+import type { FeishuBotDocxConfiguration } from './config.js';
 
 export async function readFeishuBotDocxBinding(
   client: PoolClient,
