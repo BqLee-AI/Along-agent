@@ -20,10 +20,7 @@ import {
   testProvider,
   testProviderConnection,
 } from '../public.js';
-import {
-  MAX_OFFICE_NOTES_BYTES,
-  summarizeOfficeNotes,
-} from '../outbound/summarize-office-notes.js';
+import { MAX_OFFICE_NOTES_BYTES, summarizeOfficeNotes } from '../summarize-office-notes.js';
 
 export const modelSelectionWritePath = '/api/v1/model-selection/actions/set-default' as const;
 export const modelProviderWriteScopes = ['/api/v1/model-providers'] as const;

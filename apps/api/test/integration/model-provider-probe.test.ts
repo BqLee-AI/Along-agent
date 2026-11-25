@@ -15,7 +15,7 @@ import {
 } from '../../src/features/model-providers/outbound/probe.js';
 import { handleRequest } from '../helpers/http-app.js';
 import { csrfTokenFor } from '../../src/http/auth.js';
-import { createUserModelTransport } from '../../src/features/model-providers/runtime/model-transport.js';
+import { createUserModelTransport } from '../../src/features/model-providers/public.js';
 
 const schema = `probe_test_${randomUUID().replaceAll('-', '')}`;
 const url = process.env.MODEL_PROVIDER_TEST_DATABASE_URL ?? process.env.DATABASE_URL;

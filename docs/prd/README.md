@@ -6,6 +6,8 @@
 
 > Proposed 本人多模型接入与逐 Run 选择见 [PRD 验收](04-acceptance-open-questions.md#本人模型接入proposed)和 [design/22](../design/22-model-provider-settings.md)；不代表 SDK、Web 或真实供应商验收完成。
 
+Run 绑定的内部职责见 [design/02 §2](../design/02-modular-monolith-and-split-triggers.md)，用户可见的模型设置与可用性继续按 PRD 验收。
+
 ## 依赖链（v0 唯一主链路）
 
 - [Required] 八步按序推进，前一步未完成不得进入下一步（B06 §1–§2）：

@@ -51,7 +51,7 @@ TS 模块化单体（`apps/api` 内按模块分目录，单镜像 `api|worker|al
 
 `.dependency-cruiser.cjs` 动态发现模块，禁止跨模块导入 repository/schema 等存储实现（含 type import），并禁止非路由业务代码依赖 HTTP 实现、路由或 Hono；允许所属模块的公共函数调用。它不解析 SQL，不证明表所有权或 owner 过滤完整。SQL 表归属、owner、锁与事务范围仍需人工审查和行为测试，不用 D1 绿色代替。
 
-会话接纳归 `conversations/lifecycle/admission.ts`，用户暂停和 compact 编排分别归 `conversations/harness/harness-pause.ts`、`conversations/compact/compact-authority.ts`；Run 事实与终结证据分开组合，不复制 attempt session 状态。`tools/gateway.ts` 负责调用选择，具体处理按提醒、偏好、工作区和记忆分担，调用接受账由 `tools/invocations/` 持有。模型 Run 绑定的事务内资格检查归 `model-providers/runtime/run-binding.ts`；工作区登记和 grant 归 `workspaces/registry/service.ts`，文件读取归 `workspaces/read/files.ts`，发布仍由创建和替换用例负责。
+会话接纳归 `conversations/lifecycle/admission.ts`，用户暂停和 compact 编排分别归 `conversations/harness/harness-pause.ts`、`conversations/compact/compact-authority.ts`；Run 事实与终结证据分开组合，不复制 attempt session 状态。`tools/gateway.ts` 负责调用选择，具体处理按提醒、偏好、工作区和记忆分担，调用接受账由 `tools/invocations/` 持有。模型 Run 绑定的事务内资格检查归 `model-providers/run-binding.ts`；工作区登记和 grant 归 `workspaces/registry/service.ts`，文件读取归 `workspaces/read/files.ts`，发布仍由创建和替换用例负责。
 
 ## 3. 拆分判据 a–d（Required，量化触发指标）
 

@@ -21,15 +21,6 @@ export type Draft = { base_url: string; credential: Credential };
 const ConnectionResultSchema = z.object({ status: z.literal('passed'), latency_ms: z.number() });
 export type ConnectionResult = z.infer<typeof ConnectionResultSchema>;
 
-// A saved credential is bound to its saved endpoint, including for draft tests.
-export function validateDraft(provider: Provider, draft: Draft): string | null {
-  if (draft.base_url !== provider.base_url && draft.credential.action === 'keep')
-    return '地址已更改，请替换 Key 或明确选择清除 Key，不能沿用旧地址的 Key。';
-  if (draft.credential.action === 'replace' && !draft.credential.api_key)
-    return '请输入用于替换的 Key，或选择保留／清除。';
-  return null;
-}
-
 async function csrfOptions() {
   const me = MeSchema.parse(await readEnvelope(await api.api.v1.me.get()));
   if (!me.csrf_token) throw new Error('当前会话没有 CSRF 凭据，请重新登录。');

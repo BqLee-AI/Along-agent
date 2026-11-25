@@ -13,7 +13,7 @@ import {
   stateConflict,
   validationError,
 } from '../../../platform/errors.js';
-import { lockOwner, type ModelSelection } from '../runtime/run-binding.js';
+import { lockOwner, type ModelSelection } from '../run-binding.js';
 
 interface ProviderRow {
   id: string;
@@ -47,6 +47,23 @@ export async function ownedProvider(
       ? stateConflict('provider changed during synchronization')
       : notFound('provider not found');
   return row;
+}
+
+function validateBaseUrl(value: string): void {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw validationError('invalid base URL');
+  }
+  if (
+    !['http:', 'https:'].includes(url.protocol) ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash
+  )
+    throw validationError('invalid base URL');
 }
 
 async function providerView(client: PoolClient, row: ProviderRow): Promise<ProviderView> {
@@ -128,21 +145,7 @@ export async function updateProvider(
       credential.action === 'keep'
     )
       throw validationError('changing endpoint requires replacing or clearing the credential');
-    if (input.base_url) {
-      try {
-        const url = new URL(input.base_url);
-        if (
-          !['http:', 'https:'].includes(url.protocol) ||
-          url.username ||
-          url.password ||
-          url.hash ||
-          url.search
-        )
-          throw new Error();
-      } catch {
-        throw validationError('invalid base URL');
-      }
-    }
+    if (input.base_url) validateBaseUrl(input.base_url);
     const ciphertext =
       credential.action === 'replace'
         ? encryptCredential(credentialKey(), ownerId, id, credential.api_key)
@@ -253,6 +256,22 @@ export async function removeModel(
   });
 }
 
+async function requireSelectableModel(client: PoolClient, row: ProviderRow, modelId: string) {
+  const model = await client.query(
+    'SELECT 1 FROM model_provider_models WHERE provider_id = $1 AND model_id = $2',
+    [row.id, modelId],
+  );
+  if (!row.enabled || !row.base_url.trim() || !model.rowCount)
+    throw stateConflict('model selection unavailable');
+}
+
+async function saveDefaultSelection(client: PoolClient, row: ProviderRow, modelId: string) {
+  await client.query(
+    'INSERT INTO model_provider_defaults(owner_id,provider_id,model_id) VALUES ($1,$2,$3) ON CONFLICT(owner_id) DO UPDATE SET provider_id=excluded.provider_id, model_id=excluded.model_id',
+    [row.owner_id, row.id, modelId],
+  );
+}
+
 export async function setDefault(
   pool: Pool,
   ownerId: string,
@@ -265,20 +284,12 @@ export async function setDefault(
       return;
     }
     const row = await ownedProvider(client, ownerId, selection.provider_id);
-    const model = await client.query(
-      'SELECT 1 FROM model_provider_models WHERE provider_id = $1 AND model_id = $2',
-      [selection.provider_id, selection.model_id],
-    );
-    if (!row.enabled || !row.base_url.trim() || !model.rowCount)
-      throw stateConflict('model selection unavailable');
+    await requireSelectableModel(client, row, selection.model_id);
     await client.query('UPDATE model_providers SET default_model_id = $2 WHERE id = $1', [
       selection.provider_id,
       selection.model_id,
     ]);
-    await client.query(
-      'INSERT INTO model_provider_defaults(owner_id,provider_id,model_id) VALUES ($1,$2,$3) ON CONFLICT(owner_id) DO UPDATE SET provider_id=excluded.provider_id, model_id=excluded.model_id',
-      [ownerId, selection.provider_id, selection.model_id],
-    );
+    await saveDefaultSelection(client, row, selection.model_id);
   });
 }
 
@@ -292,16 +303,8 @@ export async function setProviderDefault(
     await lockOwner(client, ownerId);
     const row = await ownedProvider(client, ownerId, id);
     if (modelId !== null) {
-      const model = await client.query(
-        'SELECT 1 FROM model_provider_models WHERE provider_id = $1 AND model_id = $2',
-        [id, modelId],
-      );
-      if (!row.enabled || !row.base_url.trim() || !model.rowCount)
-        throw stateConflict('model selection unavailable');
-      await client.query(
-        'INSERT INTO model_provider_defaults(owner_id,provider_id,model_id) VALUES ($1,$2,$3) ON CONFLICT(owner_id) DO UPDATE SET provider_id=excluded.provider_id, model_id=excluded.model_id',
-        [ownerId, id, modelId],
-      );
+      await requireSelectableModel(client, row, modelId);
+      await saveDefaultSelection(client, row, modelId);
     } else {
       await client.query(
         'DELETE FROM model_provider_defaults WHERE owner_id = $1 AND provider_id = $2',
@@ -378,20 +381,7 @@ export async function importLegacyProvider(
   ownerId: string,
   input: { name: string; base_url: string; api_key: string | null; model_id: string },
 ): Promise<ProviderView> {
-  let url: URL;
-  try {
-    url = new URL(input.base_url);
-    if (
-      !['http:', 'https:'].includes(url.protocol) ||
-      url.username ||
-      url.password ||
-      url.search ||
-      url.hash
-    )
-      throw new Error();
-  } catch {
-    throw validationError('invalid base URL');
-  }
+  validateBaseUrl(input.base_url);
   if (!input.name.trim() || !input.model_id || input.model_id.length > 512 || input.api_key === '')
     throw validationError('invalid import');
   return withTransaction(pool, async (client) => {

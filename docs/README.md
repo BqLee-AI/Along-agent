@@ -11,6 +11,7 @@
 用户安全点暂停、显式继续和 compact 接口见 [conversations API §9–§10](api/conversations/conversations_routes.md#9-用户安全点暂停和继续)；本人记忆管理见 [API §12](api/README.md#12-本人短期记忆)，R3 边界见 design/23。
 API 将业务能力放在 `features/`，将跨功能操作、Run 执行和仓颉会话放在 `agent/`，由 Elysia 组装唯一业务路由。职责与事务边界见 [design/01 §2](design/01-tech-stack-and-repo-structure.md#2-monorepo-布局observedv0-关键目录)。Web 的 JSON 调用由 Eden 推导类型，SSE 保留独立协议。
 Microsoft Learn 公开资料搜索由普通对话的现有模型按需使用，无需连接或专用模式；固定服务、模型 query、来源和执行边界见 [Microsoft Learn 合同](api/microsoft-learn.md)，带日期的实验与验收见[验证记录](verification/remote-mcp-verification-2026-11-23.md)。
+模型接入与单次 Run 的模型选择见 [design/22](design/22-model-provider-settings.md)，模块职责与事务内资格校验见 [design/02 §2](design/02-modular-monolith-and-split-triggers.md)。
 
 ## 一、PRD（产品需求，5 篇）
 
