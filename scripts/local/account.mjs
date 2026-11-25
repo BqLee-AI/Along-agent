@@ -26,7 +26,7 @@ import {
   projectContainers,
   verifyVolumes,
 } from './compose.mjs';
-import { reloadInstallation } from './runtime.mjs';
+import { assertInstallationSchema, reloadInstallation } from './runtime.mjs';
 
 export function createAccountTerminalIO() {
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw failure('ACCOUNT_TERMINAL_REQUIRED');
@@ -87,9 +87,10 @@ async function prepare(file, config) {
     await database.connect();
     await database.acquireLease();
     const state = await database.classify();
-    if (state.kind !== 'supported') throw failure('DATABASE_UNSUPPORTED');
-    if (state.version !== database.targetVersion || state.version < '0024')
-      throw failure('UPGRADE_REQUIRED');
+    assertInstallationSchema(state, database.targetVersion, {
+      minimumVersion: '0024',
+      unsupportedCode: 'DATABASE_UNSUPPORTED',
+    });
   } finally {
     await database.close();
   }
