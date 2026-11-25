@@ -25,7 +25,7 @@ import {
   bindRunSelection,
   resolveRunSelection,
   getRunSelections,
-} from '../../src/features/model-providers/runtime/run-binding.js';
+} from '../../src/features/model-providers/public.js';
 
 const schema = `provider_test_${randomUUID().replaceAll('-', '')}`;
 const url = process.env.MODEL_PROVIDER_TEST_DATABASE_URL ?? process.env.DATABASE_URL;

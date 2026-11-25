@@ -3,7 +3,7 @@ import { createServer } from 'node:http';
 import { HARNESS_PROTOCOL_VERSION, type HarnessRequest } from '@along/contracts';
 import { createContextPolicy } from '../src/features/conversations/public.js';
 import { loadHarnessServices } from '../src/agent/runtime/config.js';
-import { createUserModelTransport } from '../src/features/model-providers/runtime/model-transport.js';
+import { createUserModelTransport } from '../src/features/model-providers/public.js';
 
 test('production user transport binds SDK measurement and calls only approved outbound destinations', async () => {
   let body = '';

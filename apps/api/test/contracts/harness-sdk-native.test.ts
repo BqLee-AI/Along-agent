@@ -6,11 +6,11 @@ import { z } from 'zod';
 import { HarnessModelMessageSchema } from '@along/contracts';
 import { ThreadEventSchema } from '@along/stream-protocol';
 import { createContextPolicy } from '../../src/features/conversations/public.js';
-import { createUserModelTransport } from '../../src/features/model-providers/runtime/model-transport.js';
 import {
+  createUserModelTransport,
   listProviders,
   updateProvider,
-} from '../../src/features/model-providers/configuration/service.js';
+} from '../../src/features/model-providers/public.js';
 import type { HarnessConsumer } from '../helpers/harness-consumer.js';
 import type * as HarnessHelpers from '../helpers/harness-consumer.js';
 

@@ -10,7 +10,6 @@ import {
   testConnection,
   testModel,
   updateProvider,
-  validateDraft,
   type Provider,
 } from '../src/features/model-settings/model/http-gateway';
 import {
@@ -21,7 +20,7 @@ import {
   isDirty,
   selectionAfterDefaultChange,
   validateModelId,
-  validateDraft as validateFormDraft,
+  validateDraft,
   type Provider as FormProvider,
 } from '../src/features/model-settings/model/model-config';
 import { availablePresets } from '../src/features/model-settings/model/provider-presets';
@@ -91,52 +90,6 @@ describe('model settings HTTP contract', () => {
     await deleteProvider(provider.id);
     expect(deleteCalls[1]?.url).toBe(`/api/v1/model-providers/${provider.id}/actions/delete`);
     expect(JSON.parse(String(deleteCalls[1]?.init?.body))).toEqual({});
-  });
-  it('allows a new keyless endpoint but never carries a saved key to a changed address', () => {
-    const saved: FormProvider = {
-      id: provider.id,
-      name: provider.name,
-      enabled: true,
-      apiHost: provider.base_url,
-      hasApiKey: true,
-      models: [],
-      defaultModelId: null,
-      modelContextWindows: {},
-    };
-    const changed = {
-      apiHost: 'https://new.test/v1',
-      apiKey: '',
-      credentialAction: 'keep' as const,
-    };
-    expect(validateFormDraft(changed, saved).apiKey).toBeDefined();
-    expect(validateFormDraft(changed, { ...saved, hasApiKey: false })).toEqual({});
-    expect(
-      validateFormDraft({ ...changed, apiKey: 'replacement', credentialAction: 'replace' }, saved),
-    ).toEqual({});
-    expect(validateFormDraft({ ...changed, credentialAction: 'clear' }, saved)).toEqual({});
-  });
-  it('requires an explicit replacement or clearing when the draft address changes', () => {
-    expect(
-      validateDraft(provider, { base_url: provider.base_url, credential: { action: 'keep' } }),
-    ).toBeNull();
-    expect(
-      validateDraft(provider, { base_url: 'https://new.test/v1', credential: { action: 'keep' } }),
-    ).not.toBeNull();
-    expect(
-      validateDraft(provider, {
-        base_url: 'https://new.test/v1',
-        credential: { action: 'replace', api_key: '' },
-      }),
-    ).not.toBeNull();
-    expect(
-      validateDraft(provider, {
-        base_url: 'https://new.test/v1',
-        credential: { action: 'replace', api_key: 'new' },
-      }),
-    ).toBeNull();
-    expect(
-      validateDraft(provider, { base_url: 'https://new.test/v1', credential: { action: 'clear' } }),
-    ).toBeNull();
   });
   it('sends CSRF and explicit credential actions on writes and draft tests', async () => {
     const calls = installFetch(provider);
@@ -246,6 +199,18 @@ describe('model settings form helpers', () => {
       'https://custom.test/v1',
     );
     expect(draftFrom({ ...preset, hasApiKey: true }).apiHost).toBe('');
+  });
+
+  it('binds saved keys to their endpoint and requires a nonempty replacement', () => {
+    const draft = draftFrom(formProvider);
+    expect(validateDraft(draft, formProvider)).toEqual({});
+    const changed = { ...draft, apiHost: 'https://new.test/v1' };
+    expect(validateDraft(changed, formProvider).apiKey).toBeDefined();
+    expect(validateDraft(changed, { ...formProvider, hasApiKey: false })).toEqual({});
+    const replacement = { ...changed, credentialAction: 'replace' as const };
+    expect(validateDraft(replacement, formProvider).apiKey).toBeDefined();
+    expect(validateDraft({ ...replacement, apiKey: 'new' }, formProvider)).toEqual({});
+    expect(validateDraft({ ...changed, credentialAction: 'clear' }, formProvider)).toEqual({});
   });
 
   it('compares the trimmed host and tracks explicit credential changes', () => {

@@ -5,14 +5,14 @@ import {
   HarnessModelStepSchema,
   type HarnessModelStep,
 } from '@along/contracts';
-import { withTransaction } from '../../../db/transaction.js';
-import { forbidden, notReady, stateConflict } from '../../../platform/errors.js';
-import { lockViewerAccess, type Actor } from '../../identity/public.js';
-import { credentialKey, decryptCredential } from '../configuration/crypto.js';
-import type { ModelTransportFactory } from '../runtime/model-contract.js';
-import { resolveSelection } from '../runtime/run-binding.js';
-import { externalFailure } from './errors.js';
-import { OutboundError, type AuthorizeDispatch } from './outbound.js';
+import { withTransaction } from '../../db/transaction.js';
+import { forbidden, notReady, stateConflict } from '../../platform/errors.js';
+import { lockViewerAccess, type Actor } from '../identity/public.js';
+import { credentialKey, decryptCredential } from './configuration/crypto.js';
+import type { ModelTransportFactory } from './inference/model-contract.js';
+import { resolveSelection } from './run-binding.js';
+import { externalFailure } from './outbound/errors.js';
+import { OutboundError, type AuthorizeDispatch } from './outbound/outbound.js';
 
 export const MAX_OFFICE_NOTES_BYTES = 48 * 1024;
 const MAX_SUMMARY_BYTES = 16 * 1024;

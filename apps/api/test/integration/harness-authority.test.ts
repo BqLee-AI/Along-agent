@@ -58,9 +58,9 @@ import { readRunDocumentEvidence } from '../../src/agent/tools/query.js';
 import { seedAdmittedSession as seedSession } from './setup.js';
 import {
   deleteProvider,
+  isRunSelectionUsable,
   updateProvider,
-} from '../../src/features/model-providers/configuration/service.js';
-import { isRunSelectionUsable } from '../../src/features/model-providers/runtime/run-binding.js';
+} from '../../src/features/model-providers/public.js';
 import type { SeededSession } from '../../src/features/identity/session/seed.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 import {

@@ -20,8 +20,8 @@ import {
   stateConflict,
   validationError,
 } from '../../../platform/errors.js';
-import type { ModelStepTransport, ModelTransportFactory } from '../runtime/model-contract.js';
-import { lockOwner } from '../runtime/run-binding.js';
+import type { ModelStepTransport, ModelTransportFactory } from '../inference/model-contract.js';
+import { lockOwner } from '../run-binding.js';
 type ProbeResult = {
   text_stream: ProbeStatus;
   tool_round_trip: ProbeStatus;
