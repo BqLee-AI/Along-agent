@@ -4,6 +4,12 @@ import { withTransaction } from '../../../db/transaction.js';
 import { ApplicationError } from '../../../platform/errors.js';
 import { requestEncoding, validateEncoderUrl } from '../../../platform/encoder.js';
 import type { MemoryRecord, MemorySources } from '../types.js';
+import {
+  currentRevisionJoin,
+  memoryRecord,
+  memoryRevisionProjection,
+  type MemoryRevisionRow,
+} from '../records/revisions.js';
 
 /** Explicit deployment configuration; binding is the encoder's verified manifest SHA-256. */
 export interface MemorySemanticConfig {
@@ -42,36 +48,11 @@ interface AuthorizedRow {
   message_ids: string[];
   summary_id: string | null;
 }
-interface CandidateRow extends AuthorizedRow {
-  owner_id: string;
-  content: string;
-  source_kind: 'explicit' | 'compact';
-  status: 'active';
-  expires_at: Date | null;
-  created_at: Date;
-  updated_at: Date;
-}
 function isInaccessible(error: unknown): boolean {
   return (
     error instanceof ApplicationError &&
     (httpStatusForError(error.code) === 403 || httpStatusForError(error.code) === 404)
   );
-}
-function asRecord(row: CandidateRow): MemoryRecord {
-  return {
-    id: row.id,
-    ownerId: row.owner_id,
-    conversationId: row.conversation_id,
-    messageIds: row.message_ids,
-    content: row.content,
-    sourceKind: row.source_kind,
-    summaryId: row.summary_id,
-    revision: row.revision,
-    status: row.status,
-    expiresAt: row.expires_at?.toISOString() ?? null,
-    createdAt: row.created_at.toISOString(),
-    updatedAt: row.updated_at.toISOString(),
-  };
 }
 function sourceInput(ownerId: string, row: AuthorizedRow) {
   return {
@@ -178,11 +159,8 @@ export function createMemorySemantic(deps: {
       let after: string | null = startCursor;
       let wrapped = false;
       while (authorized.length < 20) {
-        const result: { rows: CandidateRow[] } = await client.query<CandidateRow>(
-          `SELECT m.id,m.owner_id,m.status,m.created_at,m.updated_at,
-            r.revision,r.conversation_id,r.message_ids,r.summary_id,r.content,r.source_kind,r.expires_at
-          FROM r3_memories m JOIN r3_memory_revisions r
-            ON r.owner_id=m.owner_id AND r.memory_id=m.id AND r.revision=m.current_revision
+        const result: { rows: MemoryRevisionRow[] } = await client.query<MemoryRevisionRow>(
+          `SELECT ${memoryRevisionProjection} ${currentRevisionJoin}
           LEFT JOIN r3_memory_vectors v ON v.owner_id=m.owner_id AND v.memory_id=m.id
             AND v.revision=r.revision AND v.binding_sha256=$2
           WHERE m.owner_id=$1 AND m.status='active'
@@ -194,7 +172,7 @@ export function createMemorySemantic(deps: {
         for (const row of result.rows) {
           try {
             await deps.sources.validate(client, sourceInput(ownerId, row));
-            authorized.push(asRecord(row));
+            authorized.push(memoryRecord(row));
             if (authorized.length === 20) break;
           } catch (error) {
             if (!isInaccessible(error))
@@ -299,9 +277,8 @@ export function createMemorySemantic(deps: {
       }
       // Whole identifier boundaries keep XQ-4792 distinct from XQ-47920 and XQ-4793.
       const pattern = identifier ? `(^|[^A-Za-z0-9_-])${identifier}([^A-Za-z0-9_-]|$)` : null;
-      const rows = await client.query<CandidateRow>(
-        `SELECT m.id,m.owner_id,m.status,m.created_at,m.updated_at,
-          r.revision,r.conversation_id,r.message_ids,r.summary_id,r.content,r.source_kind,r.expires_at
+      const rows = await client.query<MemoryRevisionRow>(
+        `SELECT ${memoryRevisionProjection}
         FROM memory_authorized a JOIN r3_memories m ON m.id=a.id AND m.owner_id=$1 AND m.current_revision=a.revision
         JOIN r3_memory_revisions r ON r.owner_id=m.owner_id AND r.memory_id=m.id AND r.revision=a.revision
         LEFT JOIN r3_memory_vectors v ON v.owner_id=m.owner_id AND v.memory_id=m.id AND v.revision=a.revision AND v.binding_sha256=$2
@@ -312,7 +289,7 @@ export function createMemorySemantic(deps: {
         LIMIT $5`,
         [ownerId, deps.config.bindingSha256, pattern, embedding, limit],
       );
-      return { items: rows.rows.map(asRecord) };
+      return { items: rows.rows.map(memoryRecord) };
     });
   }
   return { rebuild, search, indexMissing };
