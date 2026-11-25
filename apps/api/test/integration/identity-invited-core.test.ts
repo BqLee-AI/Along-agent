@@ -344,6 +344,34 @@ maybe('invited identity core actual PostgreSQL behavior', () => {
         service.resetPassword({ token: stale, new_password: replacement }, ip),
       ).rejects.toMatchObject({ details: { reason: 'TOKEN_INVALID' } });
   });
+
+  it('revokes a pending invitation and suppresses its mail when the same address is verified', async () => {
+    const { actor } = await member();
+    const email = 'contact-with-invitation@example.test';
+    const invitation = await invite(email);
+    await service.requestContact(actor, { email, current_password: memberPassword }, ip);
+    const token = await latestToken('verify_contact', actor.ownerId);
+    await expect(service.verifyContact(actor, { token }, ip)).resolves.toEqual({
+      contact_state: 'verified',
+    });
+    const { items } = await service.listInvitations(admin, {});
+    expect(items.find((item) => item.id === invitation.id)).toMatchObject({
+      state: 'revoked',
+      delivery: { status: 'suppressed' },
+    });
+    await expectApplicationRejection(
+      service.acceptInvitation(
+        {
+          token: invitation.token,
+          login_name: 'second-member',
+          password: memberPassword,
+          display_name: 'Second Member',
+        },
+        ip,
+      ),
+      { status: 409, details: { reason: 'TOKEN_INVALID' } },
+    );
+  });
   it('atomically changes password, consumes reset and revokes every existing session without logging in', async () => {
     const { actor } = await member();
     await accounts.signIn({ login_name: 'member', password: memberPassword }, ip);

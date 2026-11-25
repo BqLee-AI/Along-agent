@@ -143,6 +143,18 @@ export function createAccountService(pool: Pool, options: AccountServiceOptions)
       client?.release();
     }
   }
+  function requireAdmittedLocalOwner(userId: string) {
+    return transaction(async (client) => {
+      const user = (
+        await client.query<{ id: string; display_name: string }>(
+          "SELECT u.id,u.display_name FROM users u JOIN identity_account_admissions a ON a.user_id=u.id WHERE u.id=$1 AND u.status='active' FOR SHARE OF u",
+          [userId],
+        )
+      ).rows[0];
+      if (!user) throw stateConflict('selected account is no longer eligible');
+      return { userId: user.id, displayName: user.display_name };
+    }, false);
+  }
   async function binding(db: Pool | PoolClient): Promise<BoundAdministrator | null> {
     const { rows } = await db.query<{ userId: string; displayName: string }>(
       `SELECT u.id AS "userId",u.display_name AS "displayName" FROM installation_admin a JOIN users u ON u.id=a.user_id WHERE a.singleton=true`,
@@ -593,30 +605,12 @@ export function createAccountService(pool: Pool, options: AccountServiceOptions)
     async resolveAdmittedLocalCandidate(selection) {
       const userId = selections.get(selection);
       if (!userId) throw validationError('select an account from current candidates');
-      return transaction(async (client) => {
-        const user = (
-          await client.query<{ id: string; display_name: string }>(
-            "SELECT u.id,u.display_name FROM users u JOIN identity_account_admissions a ON a.user_id=u.id WHERE u.id=$1 AND u.status='active' FOR SHARE OF u",
-            [userId],
-          )
-        ).rows[0];
-        if (!user) throw stateConflict('selected account is no longer eligible');
-        return { userId: user.id, displayName: user.display_name };
-      }, false);
+      return requireAdmittedLocalOwner(userId);
     },
     async getAdmittedLocalOwner(userId) {
       if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId))
         throw validationError('invalid account identifier');
-      return transaction(async (client) => {
-        const user = (
-          await client.query<{ id: string; display_name: string }>(
-            "SELECT u.id,u.display_name FROM users u JOIN identity_account_admissions a ON a.user_id=u.id WHERE u.id=$1 AND u.status='active' FOR SHARE OF u",
-            [userId],
-          )
-        ).rows[0];
-        if (!user) throw stateConflict('selected account is no longer eligible');
-        return { userId: user.id, displayName: user.display_name };
-      }, false);
+      return requireAdmittedLocalOwner(userId);
     },
     async listPasswordResetCandidates() {
       return transaction(async (client) => {

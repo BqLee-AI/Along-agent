@@ -8,9 +8,9 @@ import {
   authInvitationResendSchema,
   authInvitationRevokeSchema,
   authInvitationAcceptSchema,
+  authPasswordChangeSchema,
   authPasswordForgotSchema,
   authPasswordResetSchema,
-  authPasswordChangeSchema,
   authSessionsRevokeSchema,
   authDisableUserSchema,
   authListQuerySchema,
@@ -48,7 +48,11 @@ import {
 } from '../security/email-security.js';
 import { enqueueIdentityMail } from '../delivery/mail.js';
 import { requireIdentityMailReady, type IdentityMailConfig } from '../delivery/transport.js';
-import { invalidateUser, revokeChallenges } from '../security/credential-invalidation.js';
+import {
+  invalidateUser,
+  revokeChallenges,
+  revokeUserSessions,
+} from '../security/credential-invalidation.js';
 import { requireLookupKey } from '../security/lookup-key.js';
 import {
   consumeIdentityQuota,
@@ -63,9 +67,6 @@ const schemas = {
   resend: authInvitationResendSchema,
   revoke: authInvitationRevokeSchema,
   accept: authInvitationAcceptSchema,
-  forgot: authPasswordForgotSchema,
-  reset: authPasswordResetSchema,
-  change: authPasswordChangeSchema,
   sessions: authSessionsRevokeSchema,
   disable: authDisableUserSchema,
   query: authListQuerySchema,
@@ -90,12 +91,6 @@ function id(value: string) {
 function iso(value: Date | string): string {
   return new Date(value).toISOString();
 }
-interface User {
-  id: string;
-  display_name: string;
-  status: string;
-  auth_email: string;
-}
 interface Challenge {
   id: string;
   purpose: Purpose;
@@ -115,6 +110,24 @@ interface Challenge {
   encryption_key_id: string | null;
   masked_email: string | null;
 }
+interface Contact {
+  id: string;
+  user_id: string;
+  lookup_digest: Buffer;
+  revision: string | number;
+  masked_email: string;
+  verified_at: Date;
+  address_ciphertext: Buffer;
+  address_nonce: Buffer;
+  address_tag: Buffer;
+  encryption_key_id: string;
+}
+interface User {
+  id: string;
+  display_name: string;
+  status: string;
+  auth_email: string;
+}
 interface Invitation {
   id: string;
   created_by: string;
@@ -132,18 +145,6 @@ interface Invitation {
   accepted_at: Date | null;
   revoked_at: Date | null;
   created_at_cursor?: string;
-}
-interface Contact {
-  id: string;
-  user_id: string;
-  lookup_digest: Buffer;
-  revision: string | number;
-  masked_email: string;
-  verified_at: Date;
-  address_ciphertext: Buffer;
-  address_nonce: Buffer;
-  address_tag: Buffer;
-  encryption_key_id: string;
 }
 export interface InvitedAccountServiceOptions {
   secret?: string;
@@ -273,6 +274,23 @@ export function createInvitedAccountService(
       [...new Set(ids)].sort(),
     ]);
   }
+  async function isInstallationAdmin(client: PoolClient, userId: string) {
+    const result = await client.query('SELECT 1 FROM installation_admin WHERE user_id=$1', [
+      userId,
+    ]);
+    return !!result.rowCount;
+  }
+  async function deactivateAccount(
+    client: PoolClient,
+    userId: string,
+    status: 'disabled' | 'deleted_requested',
+  ) {
+    await client.query('UPDATE users SET status=$2,updated_at=clock_timestamp() WHERE id=$1', [
+      userId,
+      status,
+    ]);
+    await invalidateUser(client, userId);
+  }
   async function actorUser(client: PoolClient, actor: Actor, admin = false): Promise<User> {
     if (!actor.sessionId) throw unauthorized();
     const user = (
@@ -291,33 +309,42 @@ export function createInvitedAccountService(
       ).rowCount
     )
       throw unauthorized();
-    if (
-      admin &&
-      !(await client.query('SELECT 1 FROM installation_admin WHERE user_id=$1', [actor.ownerId]))
-        .rowCount
-    )
-      throw forbidden();
+    if (admin && !(await isInstallationAdmin(client, actor.ownerId))) throw forbidden();
     return user;
+  }
+  async function passwordCredential(client: PoolClient, userId: string) {
+    const { rows } = await client.query<{
+      id: string;
+      account_id: string;
+      password_hash: string | null;
+    }>('SELECT id,account_id,password_hash FROM auth_accounts WHERE user_id=$1 LIMIT 2', [userId]);
+    const [credential] = rows;
+    if (rows.length !== 1 || credential?.account_id !== userId || !credential.password_hash)
+      return undefined;
+    return { id: credential.id, hash: credential.password_hash };
   }
   async function verifyPassword(client: PoolClient, userId: string, raw: string) {
     const context = await library(client).$context;
-    const credential = (
-      await client.query<{ id: string; account_id: string; password_hash: string | null }>(
-        'SELECT id,account_id,password_hash FROM auth_accounts WHERE user_id=$1 ORDER BY id',
-        [userId],
-      )
-    ).rows;
-    if (
-      credential.length !== 1 ||
-      credential[0]!.account_id !== userId ||
-      !credential[0]!.password_hash
-    ) {
+    const credential = await passwordCredential(client, userId);
+    if (!credential) {
       await context.password.hash(raw);
       throw unauthorized();
     }
-    if (!(await context.password.verify({ hash: credential[0]!.password_hash!, password: raw })))
+    if (!(await context.password.verify({ hash: credential.hash, password: raw })))
       throw unauthorized();
-    return credential[0]!;
+    return credential;
+  }
+  async function writePassword(
+    client: PoolClient,
+    context: Awaited<ReturnType<typeof library>['$context']>,
+    credentialId: string,
+    raw: string,
+  ) {
+    await context.adapter.update({
+      model: 'account',
+      where: [{ field: 'id', value: credentialId }],
+      update: { password: await context.password.hash(raw), updatedAt: await now(client) },
+    });
   }
   async function quota(
     action: IdentityQuotaAction,
@@ -593,19 +620,29 @@ export function createInvitedAccountService(
       conflict('IDEMPOTENCY_MISMATCH');
     return row.response_snapshot;
   }
-  async function recordAction(
+  async function issueInvitation(
     client: PoolClient,
-    actor: Actor,
-    action: string,
-    key: string,
     k: IdentityKeyring,
+    row: Invitation,
+    address: string,
+    at: Date,
+    action: 'invite_create' | 'invite_resend',
+    key: string,
     request: string,
-    snapshot: InvitationView,
   ) {
+    await issueChallenge(client, k, {
+      purpose: 'invitation',
+      invitationId: row.id,
+      digest: row.lookup_digest,
+      generation: Number(row.generation),
+      address,
+      at,
+    });
+    const snapshot = await invitationView(client, row);
     await client.query(
       `INSERT INTO identity_action_keys(actor_id,action,key,request_digest,request_key_id,invitation_id,generation,delivery_id,response_snapshot,created_at,replay_until) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,clock_timestamp(),clock_timestamp()+interval '7 days')`,
       [
-        actor.ownerId,
+        row.created_by,
         action,
         key,
         tokenDigest(k, 'invitation', request),
@@ -616,8 +653,13 @@ export function createInvitedAccountService(
         snapshot,
       ],
     );
+    return snapshot;
   }
-  async function closePending(client: PoolClient, digest: Buffer) {
+  async function requireAvailableInvitationAddress(
+    client: PoolClient,
+    digest: Buffer,
+    exceptId: string | null = null,
+  ) {
     const rows = (
       await client.query<{ id: string }>(
         `UPDATE identity_invitations SET state='expired',updated_at=clock_timestamp() WHERE lookup_digest=$1 AND state='pending' AND expires_at<=clock_timestamp() RETURNING id`,
@@ -625,6 +667,29 @@ export function createInvitedAccountService(
       )
     ).rows;
     for (const row of rows) await revokeChallenges(client, 'invitation_id=$1', [row.id]);
+    const occupied = await client.query(
+      `SELECT 1 FROM identity_contacts WHERE lookup_digest=$1
+       UNION ALL
+       SELECT 1 FROM identity_invitations
+       WHERE lookup_digest=$1 AND state='pending' AND id IS DISTINCT FROM $2::uuid`,
+      [digest, exceptId],
+    );
+    if (occupied.rowCount) conflict('CONTACT_UNAVAILABLE');
+  }
+  async function lockPendingInvitation(client: PoolClient, digest: Buffer) {
+    const { rows } = await client.query<Pick<Invitation, 'id' | 'state'>>(
+      "SELECT id,state FROM identity_invitations WHERE lookup_digest=$1 AND state='pending' FOR UPDATE",
+      [digest],
+    );
+    return rows[0];
+  }
+  async function revokeInvitationRow(client: PoolClient, row: Pick<Invitation, 'id' | 'state'>) {
+    if (row.state !== 'revoked')
+      await client.query(
+        "UPDATE identity_invitations SET state='revoked',revoked_at=clock_timestamp(),updated_at=clock_timestamp() WHERE id=$1",
+        [row.id],
+      );
+    await revokeChallenges(client, 'invitation_id=$1', [row.id]);
   }
 
   return {
@@ -643,9 +708,7 @@ export function createInvitedAccountService(
         return {
           user: { id: user.id, display_name: user.display_name },
           account_status: 'active' as const,
-          installation_admin: !!(
-            await client.query('SELECT 1 FROM installation_admin WHERE user_id=$1', [actor.ownerId])
-          ).rowCount,
+          installation_admin: await isInstallationAdmin(client, actor.ownerId),
           contact: {
             state: c ? ('verified' as const) : ('unbound' as const),
             masked_email: c?.masked_email ?? null,
@@ -728,10 +791,7 @@ export function createInvitedAccountService(
         await addressLock(client, candidate.lookup_digest);
         await lockUsers(client, [actor.ownerId]);
         await actorUser(client, actor);
-        await client.query(
-          "SELECT id FROM identity_invitations WHERE lookup_digest=$1 AND state='pending' ORDER BY id FOR UPDATE",
-          [candidate.lookup_digest],
-        );
+        const pending = await lockPendingInvitation(client, candidate.lookup_digest);
         const c = await lockedChallenge(client, candidate);
         const a = (
           await client.query<{ contact_generation: string }>(
@@ -767,14 +827,7 @@ export function createInvitedAccountService(
           `identity:challenge:${c.id}:${actor.ownerId}:verify_contact:${c.generation}`,
         );
         await putContact(client, k, actor.ownerId, address, c.lookup_digest, c.masked_email!);
-        const pending = (
-          await client.query<{ id: string }>(
-            "UPDATE identity_invitations SET state='revoked',revoked_at=clock_timestamp(),updated_at=clock_timestamp() WHERE lookup_digest=$1 AND state='pending' RETURNING id",
-            [c.lookup_digest],
-          )
-        ).rows;
-        for (const invitation of pending)
-          await revokeChallenges(client, 'invitation_id=$1', [invitation.id]);
+        if (pending) await revokeInvitationRow(client, pending);
         await client.query(
           'UPDATE identity_challenges SET consumed_at=clock_timestamp(),candidate_ciphertext=NULL,candidate_nonce=NULL,candidate_tag=NULL,encryption_key_id=NULL WHERE id=$1',
           [c.id],
@@ -825,16 +878,7 @@ export function createInvitedAccountService(
           request,
         );
         if (replay) return { invitation: replay, replayed: true };
-        await closePending(client, digest);
-        if (
-          (
-            await client.query(
-              "SELECT 1 FROM identity_contacts WHERE lookup_digest=$1 UNION ALL SELECT 1 FROM identity_invitations WHERE lookup_digest=$1 AND state='pending'",
-              [digest],
-            )
-          ).rowCount
-        )
-          conflict('CONTACT_UNAVAILABLE');
+        await requireAvailableInvitationAddress(client, digest);
         const invitationId = randomUUID(),
           at = await now(client),
           expiresAt = new Date(at.getTime() + 48 * 3600000),
@@ -857,23 +901,15 @@ export function createInvitedAccountService(
             ],
           )
         ).rows[0]!;
-        await issueChallenge(client, k, {
-          purpose: 'invitation',
-          invitationId,
-          digest,
-          generation: 1,
-          address: address.address,
-          at,
-        });
-        const invitation = await invitationView(client, row);
-        await recordAction(
+        const invitation = await issueInvitation(
           client,
-          actor,
+          k,
+          row,
+          address.address,
+          at,
           'invite_create',
           data.idempotency_key,
-          k,
           request,
-          invitation,
         );
         return { invitation, replayed: false };
       });
@@ -929,16 +965,7 @@ export function createInvitedAccountService(
         if (!row) throw notFound();
         if (row.state !== 'pending' && row.state !== 'expired') conflict('INVITATION_CLOSED');
         if (!address) conflict('INVITATION_CLOSED');
-        await closePending(client, digest);
-        if (
-          (
-            await client.query(
-              "SELECT 1 FROM identity_contacts WHERE lookup_digest=$1 UNION ALL SELECT 1 FROM identity_invitations WHERE lookup_digest=$1 AND state='pending' AND id<>$2",
-              [digest, row.id],
-            )
-          ).rowCount
-        )
-          conflict('CONTACT_UNAVAILABLE');
+        await requireAvailableInvitationAddress(client, digest, row.id);
         await revokeChallenges(client, 'invitation_id=$1', [row.id]);
         const generation = Number(row.generation) + 1,
           at = await now(client),
@@ -949,23 +976,15 @@ export function createInvitedAccountService(
             [row.id, generation, expiresAt, at, digest, k.lookup.id],
           )
         ).rows[0]!;
-        await issueChallenge(client, k, {
-          purpose: 'invitation',
-          invitationId: row.id,
-          digest,
-          generation,
-          address: invitationAddress(k, row),
-          at,
-        });
-        const invitation = await invitationView(client, updated);
-        await recordAction(
+        const invitation = await issueInvitation(
           client,
-          actor,
+          k,
+          updated,
+          invitationAddress(k, row),
+          at,
           'invite_resend',
           data.idempotency_key,
-          k,
           request,
-          invitation,
         );
         return { invitation };
       });
@@ -997,12 +1016,7 @@ export function createInvitedAccountService(
           )
         ).rows[0]!;
         if (row.state === 'accepted') conflict('INVITATION_CLOSED');
-        if (row.state !== 'revoked')
-          await client.query(
-            "UPDATE identity_invitations SET state='revoked',revoked_at=clock_timestamp(),updated_at=clock_timestamp() WHERE id=$1",
-            [row.id],
-          );
-        await revokeChallenges(client, 'invitation_id=$1', [row.id]);
+        await revokeInvitationRow(client, row);
         return { revoked: true as const };
       });
     },
@@ -1089,16 +1103,15 @@ export function createInvitedAccountService(
       });
     },
     async forgotPassword(input: unknown, ip: string) {
-      const data = parse(schemas.forgot, input),
-        k = keys(),
-        address = normalizeContactEmail(data.email);
+      const data = parse(authPasswordForgotSchema, input);
+      const k = keys();
+      const address = normalizeContactEmail(data.email);
       mailReady();
       await quota('forgot', ip, { address: address.normalized });
       const digest = lookupDigest(k, address.normalized);
-      return tx(async (client) => {
+      await tx(async (client) => {
         await requireLookupKey(client, k);
-        // Configuration failure is global: an anonymous address must not select
-        // whether a missing historical contact key becomes visible as 503.
+        // A missing historical key must fail regardless of which address was requested.
         if (
           (
             await client.query(
@@ -1110,111 +1123,98 @@ export function createInvitedAccountService(
           throw notReady('identity contact key unavailable');
         await addressLock(client, digest);
         const initial = (
-          await client.query<Contact>('SELECT * FROM identity_contacts WHERE lookup_digest=$1', [
-            digest,
-          ])
-        ).rows[0];
-        if (!initial) return { accepted: true as const };
-        await lockUsers(client, [initial.user_id]);
-        const eligible = (
-          await client.query(
-            "SELECT 1 FROM users u JOIN identity_account_admissions a ON a.user_id=u.id WHERE u.id=$1 AND u.status='active'",
-            [initial.user_id],
+          await client.query<Pick<Contact, 'user_id'>>(
+            'SELECT user_id FROM identity_contacts WHERE lookup_digest=$1',
+            [digest],
           )
-        ).rowCount;
-        const c = await contact(client, initial.user_id);
-        if (!eligible || !c || !c.lookup_digest.equals(digest)) return { accepted: true as const };
-        await revokeChallenges(client, "user_id=$1 AND purpose='reset_password'", [c.user_id]);
-        const generation = Number(
-          (
-            await client.query<{ reset_generation: string }>(
-              'UPDATE identity_account_admissions SET reset_generation=reset_generation+1 WHERE user_id=$1 RETURNING reset_generation',
-              [c.user_id],
-            )
-          ).rows[0]!.reset_generation,
-        );
+        ).rows[0];
+        if (!initial) return;
+        await lockUsers(client, [initial.user_id]);
+        const current = (
+          await client.query<Contact>(
+            `SELECT c.* FROM identity_contacts c
+             JOIN identity_account_admissions a ON a.user_id=c.user_id
+             JOIN users u ON u.id=c.user_id
+             WHERE c.user_id=$1 AND c.lookup_digest=$2 AND u.status='active'`,
+            [initial.user_id, digest],
+          )
+        ).rows[0];
+        if (!current) return;
+        await revokeChallenges(client, "user_id=$1 AND purpose='reset_password'", [
+          current.user_id,
+        ]);
+        const { reset_generation } = (
+          await client.query<{ reset_generation: string }>(
+            'UPDATE identity_account_admissions SET reset_generation=reset_generation+1 WHERE user_id=$1 RETURNING reset_generation',
+            [current.user_id],
+          )
+        ).rows[0]!;
         await issueChallenge(client, k, {
           purpose: 'reset_password',
-          userId: c.user_id,
+          userId: current.user_id,
           digest,
-          generation,
-          address: contactAddress(k, c),
-          contactRevision: Number(c.revision),
+          generation: Number(reset_generation),
+          address: contactAddress(k, current),
+          contactRevision: Number(current.revision),
           at: await now(client),
         });
-        return { accepted: true as const };
       });
+      return { accepted: true as const };
     },
     async resetPassword(input: unknown, ip: string) {
       const k = keys();
       await quota('reset', ip, { token: quotaToken(input) });
-      const data = parse(schemas.reset, input);
-      return tx(async (client) => {
+      const data = parse(authPasswordResetSchema, input);
+      await tx(async (client) => {
         await requireLookupKey(client, k);
         const candidate = await findChallenge(client, k, 'reset_password', data.token);
         await addressLock(client, candidate.lookup_digest);
         await lockUsers(client, [candidate.user_id!]);
-        const c = await lockedChallenge(client, candidate);
-        const a = (
-          await client.query<{ reset_generation: string }>(
-            "SELECT a.reset_generation FROM identity_account_admissions a JOIN users u ON u.id=a.user_id WHERE a.user_id=$1 AND u.status='active'",
-            [c.user_id],
+        const challenge = await lockedChallenge(client, candidate);
+        const userId = challenge.user_id!;
+        const current = (
+          await client.query<
+            Pick<Contact, 'revision' | 'lookup_digest'> & { reset_generation: string }
+          >(
+            `SELECT a.reset_generation,c.revision,c.lookup_digest FROM identity_account_admissions a
+             JOIN users u ON u.id=a.user_id
+             JOIN identity_contacts c ON c.user_id=a.user_id
+             WHERE a.user_id=$1 AND u.status='active'`,
+            [userId],
           )
         ).rows[0];
-        const contactRow = await contact(client, c.user_id!);
         if (
-          !a ||
-          Number(a.reset_generation) !== Number(c.generation) ||
-          !contactRow ||
-          Number(contactRow.revision) !== Number(c.contact_revision) ||
-          !contactRow.lookup_digest.equals(c.lookup_digest)
+          !current ||
+          Number(current.reset_generation) !== Number(challenge.generation) ||
+          Number(current.revision) !== Number(challenge.contact_revision) ||
+          !current.lookup_digest.equals(challenge.lookup_digest)
         )
           conflict('TOKEN_INVALID');
         const context = await library(client).$context;
-        const credential = (
-          await client.query<{ id: string; account_id: string; password_hash: string | null }>(
-            'SELECT id,account_id,password_hash FROM auth_accounts WHERE user_id=$1',
-            [c.user_id],
-          )
-        ).rows;
-        if (
-          credential.length !== 1 ||
-          credential[0]!.account_id !== c.user_id ||
-          !credential[0]!.password_hash
-        )
-          conflict('TOKEN_INVALID');
-        await context.adapter.update({
-          model: 'account',
-          where: [{ field: 'id', value: credential[0]!.id }],
-          update: {
-            password: await context.password.hash(data.new_password),
-            updatedAt: await now(client),
-          },
-        });
+        const credential = await passwordCredential(client, userId);
+        if (!credential) conflict('TOKEN_INVALID');
+        await writePassword(client, context, credential.id, data.new_password);
         await client.query(
           'UPDATE identity_challenges SET consumed_at=clock_timestamp() WHERE id=$1',
-          [c.id],
+          [challenge.id],
         );
-        await invalidateUser(client, c.user_id!);
-        return { password_changed: true as const, authenticated: false as const };
+        await invalidateUser(client, userId);
       });
+      return { password_changed: true as const, authenticated: false as const };
     },
     async changePassword(actor: Actor, input: unknown, headers: Headers, ip: string) {
-      const data = parse(schemas.change, input);
+      const data = parse(authPasswordChangeSchema, input);
       await quota('password_write', ip, { actor: actor.ownerId });
       await tx(async (client) => {
         await lockUsers(client, [actor.ownerId]);
         await actorUser(client, actor);
         const credential = await verifyPassword(client, actor.ownerId, data.current_password);
-        const context = await library(client).$context;
-        await context.adapter.update({
-          model: 'account',
-          where: [{ field: 'id', value: credential.id }],
-          update: {
-            password: await context.password.hash(data.new_password),
-            updatedAt: await now(client),
-          },
-        });
+        await writePassword(
+          client,
+          await library(client).$context,
+          credential.id,
+          data.new_password,
+        );
         await invalidateUser(client, actor.ownerId);
       });
       return { cookies: await clearCookies(headers) };
@@ -1256,15 +1256,11 @@ export function createInvitedAccountService(
       await tx(async (client) => {
         await lockUsers(client, [actor.ownerId]);
         await actorUser(client, actor);
-        if (
-          !(
-            await client.query(
-              'UPDATE sessions SET revoked_at=COALESCE(revoked_at,clock_timestamp()) WHERE id=$1 AND user_id=$2 RETURNING id',
-              [sessionId, actor.ownerId],
-            )
-          ).rowCount
-        )
-          throw notFound();
+        const result = await client.query(
+          'UPDATE sessions SET revoked_at=COALESCE(revoked_at,clock_timestamp()) WHERE id=$1 AND user_id=$2',
+          [sessionId, actor.ownerId],
+        );
+        if (!result.rowCount) throw notFound();
       });
       const signedOut = sessionId === actor.sessionId;
       return { signed_out: signedOut, cookies: signedOut ? await clearCookies(headers) : [] };
@@ -1272,16 +1268,13 @@ export function createInvitedAccountService(
     async revokeSessions(actor: Actor, input: unknown, headers: Headers, ip: string) {
       const data = parse(schemas.sessions, input);
       await quota('password_write', ip, { actor: actor.ownerId });
+      const signedOut = data.scope === 'all';
       await tx(async (client) => {
         await lockUsers(client, [actor.ownerId]);
         await actorUser(client, actor);
         await verifyPassword(client, actor.ownerId, data.current_password);
-        await client.query(
-          "UPDATE sessions SET revoked_at=COALESCE(revoked_at,clock_timestamp()) WHERE user_id=$1 AND ($2='all' OR id<>$3)",
-          [actor.ownerId, data.scope, actor.sessionId],
-        );
+        await revokeUserSessions(client, actor.ownerId, signedOut ? undefined : actor.sessionId!);
       });
-      const signedOut = data.scope === 'all';
       return { signed_out: signedOut, cookies: signedOut ? await clearCookies(headers) : [] };
     },
     async users(actor: Actor, query: unknown) {
@@ -1319,21 +1312,12 @@ export function createInvitedAccountService(
         await lockUsers(client, [actor.ownerId, userId]);
         await actorUser(client, actor, true);
         await verifyPassword(client, actor.ownerId, data.current_password);
-        if (
-          (await client.query('SELECT 1 FROM installation_admin WHERE user_id=$1', [userId]))
-            .rowCount
-        )
-          conflict('SOLE_ADMIN_PROTECTED');
-        const target = (await client.query<User>('SELECT * FROM users WHERE id=$1', [userId]))
-          .rows[0];
-        if (!target) throw notFound();
-        if (target.status === 'disabled') return { disabled: true as const };
-        if (target.status !== 'active') throw notFound();
-        await client.query(
-          "UPDATE users SET status='disabled',updated_at=clock_timestamp() WHERE id=$1",
-          [userId],
-        );
-        await invalidateUser(client, userId);
+        if (await isInstallationAdmin(client, userId)) conflict('SOLE_ADMIN_PROTECTED');
+        const target = (
+          await client.query<Pick<User, 'status'>>('SELECT status FROM users WHERE id=$1', [userId])
+        ).rows[0];
+        if (target?.status === 'active') await deactivateAccount(client, userId, 'disabled');
+        else if (target?.status !== 'disabled') throw notFound();
         return { disabled: true as const };
       });
     },
@@ -1344,16 +1328,8 @@ export function createInvitedAccountService(
         await lockUsers(client, [actor.ownerId]);
         await actorUser(client, actor);
         await verifyPassword(client, actor.ownerId, data.current_password);
-        if (
-          (await client.query('SELECT 1 FROM installation_admin WHERE user_id=$1', [actor.ownerId]))
-            .rowCount
-        )
-          conflict('SOLE_ADMIN_PROTECTED');
-        await client.query(
-          "UPDATE users SET status='deleted_requested',updated_at=clock_timestamp() WHERE id=$1",
-          [actor.ownerId],
-        );
-        await invalidateUser(client, actor.ownerId);
+        if (await isInstallationAdmin(client, actor.ownerId)) conflict('SOLE_ADMIN_PROTECTED');
+        await deactivateAccount(client, actor.ownerId, 'deleted_requested');
       });
       return { cookies: await clearCookies(headers) };
     },
