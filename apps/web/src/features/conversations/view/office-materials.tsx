@@ -5,7 +5,7 @@ import { Button } from '@lorelum/lumen-ui/components/button';
 import { Accordion } from '@lorelum/lumen-ui/components/accordion';
 import { ClipboardList } from 'lucide-react';
 import { z } from 'zod';
-import Link from '@/shell/view/workspace-link';
+import Link from 'next/link';
 import { readEnvelope } from '@/shared/http/client';
 import { api, writeOptions } from '@/shared/http/eden';
 import { MeSchema } from '@/shared/session/identity';
@@ -198,7 +198,7 @@ function OfficeForm() {
               href="/conversations?intent=reminder"
               className="inline-flex min-h-9 items-center px-2 underline"
             >
-              在对话中填写提醒
+              在新对话中填写提醒
             </Link>
           </div>
           {report.notes && (

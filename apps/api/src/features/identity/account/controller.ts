@@ -4,7 +4,6 @@ import { csrfTokenFor } from '../../../http/auth.js';
 import type { HttpAccess } from '../../../http/access.js';
 import type { AppDeps } from '../../../http/contracts.js';
 import type { TimeContext } from '../../time/public.js';
-import { withTransaction } from '../../../db/transaction.js';
 import { updateAccountProfile } from '../profile/preferences.js';
 import { connectionOf } from '../../../http/transport/metadata.js';
 import { okEnvelope } from '../../../http/errors.js';
@@ -116,8 +115,11 @@ export function createAccountController(
       async ({ request, body }) => {
         const actor = await signed(request);
         if (!deps.pool) throw notReady();
-        const profile = await withTransaction(deps.pool, (client) =>
-          updateAccountProfile(client, actor.ownerId, body, deps.timeContext),
+        const profile = await updateAccountProfile(
+          deps.pool,
+          actor.ownerId,
+          body,
+          deps.timeContext,
         );
         return okEnvelope(profile, access.requestId(request));
       },

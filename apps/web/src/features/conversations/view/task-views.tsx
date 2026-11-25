@@ -242,6 +242,7 @@ export function RunStatusPanel({ task }: { task: ConversationTask }) {
       {goalResult ? (
         <>
           {!answerVisible ||
+          goalResult.clarification ||
           goalResult.outcomes.some((outcome) => outcome.receipt_refs.length > 0) ||
           goalResult.status === 'unknown' ? (
             <div className="py-2 text-sm">
@@ -496,7 +497,7 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
     ? task.compactAvailable
       ? null
       : '当前压缩请求尚不可提交。'
-    : composerBlockedReason({
+    : (composerBlockedReason({
         effectsUnknown: task.effectsUnknown,
         reading: task.reading,
         run: task.run,
@@ -504,7 +505,7 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
         ambiguous: Boolean(task.ambiguousProposal && !task.foldChoice),
         active: task.active,
         eligibilityReason: task.eligibility.reason,
-      });
+      }) ?? task.fileBlockedReason);
   return (
     <section
       className="flex max-h-[min(460px,calc(100dvh-14rem))] min-h-0 min-w-0 flex-col gap-2 overflow-y-auto p-1 text-sm leading-[22px]"
@@ -772,6 +773,18 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
               请包含日期、年份、时间与时区。沿用已确认时区，不从浏览器猜测；批准前不会登记提醒。
             </p>
           ) : null}
+          {task.clarificationSourceId && !task.ambiguousProposal ? (
+            <Button
+              type="button"
+              variant="glass"
+              color="default"
+              aria-pressed={task.clarificationReply}
+              disabled={task.active}
+              onClick={() => task.setClarificationReply(!task.clarificationReply)}
+            >
+              补充上一个问题
+            </Button>
+          ) : null}
           {task.ambiguousProposal ? (
             <fieldset className="space-y-2 p-3">
               <legend className="text-sm font-medium">此时刻出现两次，请选择</legend>
@@ -872,7 +885,7 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
                     : '有什么想聊的？'
             }
             value={task.input}
-            disabled={task.sendUncertain}
+            disabled={task.sendUncertain || task.admitting}
             aria-describedby={`task-ai-note${blockedReason ? ' task-send-reason' : ''}${task.intent === 'reminder' ? ' task-help' : ''}${task.error ? ' task-form-error' : ''}`}
             onChange={(event) => task.setInput(event.target.value)}
             onCompositionStart={() => {

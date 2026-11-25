@@ -18,6 +18,7 @@ function composerTask(overrides: Partial<ConversationTask> = {}): ConversationTa
     setInput() {},
     files: [],
     fileError: null,
+    fileBlockedReason: null,
     async addFiles() {},
     removeFile() {},
     clearFiles() {},
@@ -58,6 +59,10 @@ function composerTask(overrides: Partial<ConversationTask> = {}): ConversationTa
     streaming: false,
     retryResume: null,
     sendUncertain: false,
+    admitting: false,
+    clarificationSourceId: null,
+    clarificationReply: false,
+    setClarificationReply() {},
     ambiguousProposal: null,
     foldChoice: '',
     setFoldChoice() {},
@@ -310,7 +315,7 @@ describe('durable goal result consumer', () => {
     expect(markup).not.toContain('<strong>Accepted setting remains saved.</strong>');
   });
 
-  it('keeps an ordinary clarification in the reply without repeating the goal or adding a checkbox', () => {
+  it('shows the separate destination question without repeating the visible answer', () => {
     const goal_result: GoalResult = {
       ...result,
       status: 'blocked',
@@ -322,11 +327,14 @@ describe('durable goal result consumer', () => {
       liveReply: true,
     });
     const visible = renderToStaticMarkup(createElement(RunStatusPanel, { task }));
-    expect(visible).not.toContain('data-testid="goal-result"');
+    expect(visible).toContain('Which destination?');
+    expect(visible).not.toContain('Accepted setting remains saved.');
     expect(visible).not.toContain('本次运行模型');
     expect(visible).not.toContain('此运行绑定当前连接');
-    const composer = renderToStaticMarkup(createElement(TaskComposer, { task }));
-    expect(composer).not.toContain('type="checkbox"');
+    const composer = renderToStaticMarkup(
+      createElement(TaskComposer, { task: { ...task, clarificationSourceId: rid } }),
+    );
+    expect(composer).toContain('补充上一个问题');
     const unavailable = renderToStaticMarkup(
       createElement(RunStatusPanel, { task: { ...task, liveReply: false } }),
     );
@@ -448,6 +456,21 @@ describe('composer consumer states', () => {
     expect(markup).toContain('状态读取失败');
     expect(markup).toContain('重新读取压缩状态');
     expect(markup).not.toContain('压缩已完成');
+  });
+
+  it('explains why an oversized attachment draft cannot be sent', () => {
+    const reason = '消息和文件内容超出单条消息的容量。';
+    const markup = renderToStaticMarkup(
+      createElement(TaskComposer, {
+        task: composerTask({
+          active: false,
+          eligibility: { allowed: false, reason },
+          fileBlockedReason: reason,
+        }),
+      }),
+    );
+    expect(openingTag(markup, 'send-message')).toContain('disabled');
+    expect(markup).toContain(reason);
   });
 
   it('disables new sends for controller-blocked and unresolved DST choices', () => {

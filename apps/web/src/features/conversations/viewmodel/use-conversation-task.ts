@@ -88,6 +88,7 @@ export interface ConversationTask {
   setInput: (value: string) => void;
   files: readonly ChatFile[];
   fileError: { message: string } | null;
+  fileBlockedReason: string | null;
   addFiles: (files: readonly File[]) => Promise<void>;
   removeFile: (index: number) => void;
   clearFiles: () => void;
@@ -121,6 +122,10 @@ export interface ConversationTask {
   streaming: boolean;
   retryResume: ResumeRequest | null;
   sendUncertain: boolean;
+  admitting: boolean;
+  clarificationSourceId: string | null;
+  clarificationReply: boolean;
+  setClarificationReply: (value: boolean) => void;
   ambiguousProposal: AmbiguousProposal | null;
   foldChoice: 'first' | 'second' | '';
   setFoldChoice: (value: 'first' | 'second' | '') => void;
@@ -180,6 +185,8 @@ export function useConversationTask({
   const [fileError, setFileError] = useState<ConversationTask['fileError']>(null);
   const [readingFiles, setReadingFiles] = useState(false);
   const fileRead = useRef<AbortController | null>(null);
+  const [admitting, setAdmitting] = useState(false);
+  const [clarificationReplyTo, setClarificationReplyTo] = useState<string | null>(null);
 
   useEffect(() => {
     if (!fileError) return;
@@ -548,7 +555,13 @@ export function useConversationTask({
     }
   }
 
-  async function stream(url: string, body: object, text?: string, idempotencyKey?: string) {
+  async function stream(
+    url: string,
+    body: object,
+    text?: string,
+    idempotencyKey?: string,
+    onAdmitted?: () => void,
+  ) {
     const request = new AbortController();
     followRef.current?.abort();
     followed.current = null;
@@ -557,14 +570,12 @@ export function useConversationTask({
     setStreaming(true);
     setLiveReply(true);
     setLiveOriginal(text ?? null);
-    let accepted = false;
-    let failedEvent = false;
     let expectedEof = false;
     leaveAllowed.current = false;
     try {
       const me = await loadMe(request.signal);
       if (!mounted.current || request.signal.aborted || version !== selectionVersion.current)
-        return false;
+        return;
       const response = await postRunStream(
         url,
         body,
@@ -572,6 +583,14 @@ export function useConversationTask({
         request.signal,
         idempotencyKey,
       );
+      if (
+        response.ok &&
+        response.headers.get('content-type')?.startsWith('text/event-stream') &&
+        mounted.current &&
+        !request.signal.aborted &&
+        version === selectionVersion.current
+      )
+        onAdmitted?.();
       if (idempotencyKey && response.ok && selectedRef.current) {
         const target = selectedRef.current;
         const current = await readRun(target.conversationId, target.runId, request.signal);
@@ -588,7 +607,6 @@ export function useConversationTask({
         )
           throw new Error('继续事件与原运行不匹配。');
         if (mounted.current && !request.signal.aborted && version === selectionVersion.current) {
-          if (event.type === 'thread.failed') failedEvent = true;
           if (
             event.type === 'approval_required' ||
             event.type === 'thread.completed' ||
@@ -611,7 +629,6 @@ export function useConversationTask({
         )
           throw new Error('执行连接提前结束，未收到终态或挂起状态。');
       }
-      accepted = !failedEvent;
     } catch (failure) {
       if (mounted.current && !request.signal.aborted && version === selectionVersion.current) {
         const rejected =
@@ -640,7 +657,6 @@ export function useConversationTask({
         await refresh();
       }
     }
-    return accepted;
   }
 
   const active = conversationSendBlocked({
@@ -673,6 +689,17 @@ export function useConversationTask({
         workspaceId,
         workspaces,
       });
+  const clarificationKind = run?.goal_result?.clarification?.kind;
+  const clarificationSourceId =
+    !files.length &&
+    intent === 'chat' &&
+    selected?.runId === run?.run_id &&
+    run?.status === 'done' &&
+    run.authorization_revision === 'delegation/1' &&
+    (run.goal_result?.status === 'blocked' || run.goal_result?.status === 'partial') &&
+    (clarificationKind === 'destination' || clarificationKind === 'target_selection')
+      ? run.run_id
+      : null;
 
   function finishCompact(request: CompactRequest, receipt: CompactReceipt) {
     if (request.runId && request.runId !== receipt.run_id)
@@ -788,6 +815,7 @@ export function useConversationTask({
     )
       return;
     busyRef.current = true;
+    setAdmitting(true);
     setBusy(true);
     setError(null);
     const authentication = new AbortController();
@@ -808,7 +836,11 @@ export function useConversationTask({
             confirmed_timezone:
               proposal?.timezone_id ?? (intent === 'chat' ? undefined : me.confirmed_timezone),
             fold_choice: proposal ? foldChoice : undefined,
-            clarification_of_run_id: proposal?.source_run_id,
+            clarification_of_run_id:
+              proposal?.source_run_id ??
+              (clarificationReplyTo === clarificationSourceId
+                ? (clarificationSourceId ?? undefined)
+                : undefined),
             ...taskAdmission(intent),
             ...(intent === 'document' ? { workspace_id: workspaceId } : {}),
             ...(intent !== 'reminder' && modelSelection
@@ -839,28 +871,41 @@ export function useConversationTask({
       setAmbiguousProposal(null);
       setSendUncertain(false);
       const submittedText = pending.text;
-      // The message is shown and persisted as pending, so the composer is free for the next draft.
-      setInput((draft) => (draft === submittedText ? '' : draft));
+      // Keep the submitted draft intact until the server accepts the request.
       const submittedFiles = ChatFilesSchema.safeParse(pending.body.files);
       const sentFiles = submittedFiles.success ? submittedFiles.data : [];
-      if (sentFiles.length) clearFiles();
-      const accepted = await stream(
+      const submittedMessage = encodeChatMessage(submittedText, sentFiles);
+      const sameDraft =
+        input === submittedText &&
+        files.length === sentFiles.length &&
+        files.every((file, index) => {
+          const sent = sentFiles[index];
+          return file.name === sent?.name && file.text === sent.text;
+        });
+      await stream(
         '/api/v1/conversations/messages',
         pending.body,
-        encodeChatMessage(submittedText, sentFiles),
+        submittedMessage,
+        undefined,
+        () => {
+          if (sameDraft) {
+            setInput('');
+            clearFiles();
+          }
+          setClarificationReplyTo(null);
+          setAdmitting(false);
+        },
       );
-      // A request the server rejected was never sent: give the draft back instead of losing it.
-      if (mounted.current && !authentication.signal.aborted && !accepted && !pendingSend.current) {
-        setInput((draft) => (draft === '' ? submittedText : draft));
-        if (sentFiles.length) setFiles(sentFiles);
-      }
     } catch (failure) {
       if (mounted.current && !authentication.signal.aborted)
         setError(failure instanceof Error ? failure.message : '发送失败，请核实身份。');
     } finally {
       if (sendRef.current === authentication) {
         busyRef.current = false;
-        if (mounted.current && !authentication.signal.aborted) setBusy(false);
+        if (mounted.current && !authentication.signal.aborted) {
+          setAdmitting(false);
+          setBusy(false);
+        }
       }
     }
   }
@@ -1303,6 +1348,8 @@ export function useConversationTask({
     setHistoryReady(!conversationId);
     setReading(Boolean(conversationId));
     setStreaming(false);
+    setAdmitting(false);
+    setClarificationReplyTo(null);
     setBusy(false);
     setStopping(false);
     setLiveReply(false);
@@ -1525,6 +1572,7 @@ export function useConversationTask({
     input,
     files,
     fileError,
+    fileBlockedReason,
     addFiles,
     removeFile: (index) => {
       if (fileRead.current || busyRef.current || sendUncertain) return;
@@ -1572,6 +1620,11 @@ export function useConversationTask({
     streaming,
     retryResume,
     sendUncertain,
+    admitting,
+    clarificationSourceId,
+    clarificationReply:
+      clarificationSourceId !== null && clarificationSourceId === clarificationReplyTo,
+    setClarificationReply: (value) => setClarificationReplyTo(value ? clarificationSourceId : null),
     ambiguousProposal,
     foldChoice,
     setFoldChoice,
