@@ -10,7 +10,7 @@ import {
 } from '../../platform/errors.js';
 import { getDocumentApproval } from '../../features/approvals/public.js';
 import { validateWorkspaceGrant } from '../../features/workspaces/public.js';
-import type { ConversationDeps, RunContext, StartResult } from '../execution/contracts.js';
+import type { ConversationDeps, StartResult } from '../execution/contracts.js';
 import {
   CancelRunBodySchema,
   ResumeRunBodySchema,
