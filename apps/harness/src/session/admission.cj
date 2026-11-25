@@ -14,17 +14,22 @@ extend Harness {
                 require(!isNull(field(start, "snapshot")) && isNull(field(start, "approval")))
                 let s = field(start, "snapshot").asObject()
                 require(integer(field(s, "version"), 2) == 4 && isNull(field(s, "waiting")))
-                if (start.containsKey("workspace")) {
+                if (start.containsKey("compact_preview") && start.containsKey("workspace")) {
+                    keys(start, ["protocol", "type", "mode", "r3_context", "tools", "budget", "context_policy", "routing_policy", "eligible_phase", "snapshot", "observations", "approval", "workspace", "trusted_context", "compact_preview"])
+                    workspaceCheck(field(start, "workspace"))
+                } else if (start.containsKey("compact_preview")) {
+                    keys(start, ["protocol", "type", "mode", "r3_context", "tools", "budget", "context_policy", "routing_policy", "eligible_phase", "snapshot", "observations", "approval", "trusted_context", "compact_preview"])
+                } else if (start.containsKey("workspace")) {
                     keys(start, ["protocol", "type", "mode", "r3_context", "tools", "budget", "context_policy", "routing_policy", "eligible_phase", "snapshot", "observations", "approval", "workspace", "trusted_context"])
                     workspaceCheck(field(start, "workspace"))
                 } else {
                     keys(start, ["protocol", "type", "mode", "r3_context", "tools", "budget", "context_policy", "routing_policy", "eligible_phase", "snapshot", "observations", "approval", "trusted_context"])
                 }
             } else if (start.containsKey("workspace")) {
-                keys(start, ["protocol", "type", "r3_context", "tools", "budget", "context_policy", "routing_policy", "eligible_phase", "snapshot", "observations", "approval", "workspace", "trusted_context"])
+                keys(start, ["protocol", "type", "r3_context", "tools", "budget", "context_policy", "routing_policy", "eligible_phase", "snapshot", "observations", "approval", "workspace", "trusted_context"], optional: "auto_compact")
                 workspaceCheck(field(start, "workspace"))
             } else {
-                keys(start, ["protocol", "type", "r3_context", "tools", "budget", "context_policy", "routing_policy", "eligible_phase", "snapshot", "observations", "approval", "trusted_context"])
+                keys(start, ["protocol", "type", "r3_context", "tools", "budget", "context_policy", "routing_policy", "eligible_phase", "snapshot", "observations", "approval", "trusted_context"], optional: "auto_compact")
             }
         } else if (start.containsKey("workspace")) {
             keys(start, ["protocol", "type", "messages", "tools", "budget", "context_policy", "routing_policy", "eligible_phase", "snapshot", "observations", "approval", "workspace", "trusted_context"])
@@ -90,6 +95,23 @@ extend Harness {
     }
     func admitPolicyAndTools(start: JsonObject): Unit {
         policyCheck(field(start, "context_policy"))
+        if (start.containsKey("auto_compact")) {
+            let policy = field(start, "auto_compact").asObject()
+            let supplied = field(start, "r3_context")
+            let context = if (isNull(supplied) || supplied.asObject().containsKey("compact_summary")) {
+                field(field(start, "snapshot").asObject(), "context").asObject()
+            } else { supplied.asObject() }
+            let input = field(context, "input").asObject()
+            require(ref(field(input, "type")) == "user")
+            keys(policy, ["window_tokens", "trigger_ratio", "input_reserve", "output_reserve", "continuation_tokens", "continuation_iterations"])
+            for (key in ["window_tokens", "input_reserve", "output_reserve", "continuation_tokens", "continuation_iterations"]) {
+                integer(field(policy, key), 1)
+            }
+            let ratio = field(policy, "trigger_ratio").asFloat().getValue()
+            require(ratio > 0.0 && ratio <= 1.0)
+            autoCompact = Some(policy)
+            compactMeterRevision = field(field(start, "context_policy").asObject(), "meter_revision").asString().getValue()
+        }
         routingPolicy = field(start, "routing_policy")
         routingPolicyCheck(routingPolicy)
         let phase = ref(field(start, "eligible_phase"))

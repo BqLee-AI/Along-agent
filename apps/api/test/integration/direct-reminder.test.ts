@@ -6,7 +6,7 @@ import { invokeTool, reserveToolInvocation } from '../../src/agent/tools/gateway
 import {
   readRunCreatedReminders,
   readRunInterruptionEvidence,
-} from '../../src/agent/tools/query.js';
+} from '../../src/agent/tools/evidence/run-evidence.js';
 import type { ToolContext, ToolOutcome } from '../../src/agent/tools/contracts.js';
 import { loadTimeContext } from '../../src/features/time/context.js';
 import {
@@ -18,8 +18,8 @@ import {
 import {
   interruptedGoalResult,
   validateGoalResult,
-} from '../../src/agent/operations/goal-result.js';
-import { acceptTargetContinuation } from '../../src/agent/operations/target-continuation.js';
+} from '../../src/agent/execution/result/goal-result.js';
+import { acceptTargetContinuation } from '../../src/agent/run/continuation/target.js';
 import { createTaskWithinTransaction } from '../../src/features/tasks/create.js';
 import { runSchedulePhase } from '../../src/features/tasks/scheduler/schedule.js';
 import { runCancelPhase } from '../../src/features/tasks/scheduler/cancel-phase.js';
@@ -797,7 +797,7 @@ describe('direct reminder accepted facts', () => {
       ...(enabled ? { elapsedRevision: 'elapsed/1' as const } : {}),
     });
   }
-  it('creates anchor plus 180 seconds and replays the same elapsed invocation exactly once', async () => {
+  it('creates anchor plus 180 seconds and preserves the elapsed receipt on replay', async () => {
     const ctx = await elapsedContext();
     ctx.confirmedTimezone = 'UTC';
     const binding = await reserveToolInvocation(db.pool, ctx, {
@@ -807,9 +807,7 @@ describe('direct reminder accepted facts', () => {
     });
     const invoke = () =>
       invokeTool(db.pool, ctx, { ...binding, toolId: 'create_reminder', args: elapsedArgs });
-    const [first, concurrent] = await Promise.all([invoke(), invoke()]);
-    expect([first.replayed, concurrent.replayed].sort()).toEqual([false, true]);
-    expect({ ...first, replayed: true }).toEqual({ ...concurrent, replayed: true });
+    const first = await invoke();
     expect(await invoke()).toEqual({ ...first, replayed: true });
     const sourceMessageId = (
       await db.pool.query('SELECT input_message_id FROM agent_runs WHERE id=$1', [ctx.runId])

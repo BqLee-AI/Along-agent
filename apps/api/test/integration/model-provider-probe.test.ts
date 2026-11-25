@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { Pool } from 'pg';
-import type { ConversationDeps, HarnessServices } from '../../src/agent/runtime/contracts.js';
+import type { ConversationDeps, HarnessServices } from '../../src/agent/execution/contracts.js';
 import {
   createProvider,
   listProviders,

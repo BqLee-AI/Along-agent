@@ -17,14 +17,14 @@ import {
 } from '@along/contracts';
 import { ThreadEventSchema, type ThreadEvent } from '@along/stream-protocol';
 import { handleRequest } from '../helpers/http-app.js';
-import { executeRun } from '../../src/agent/operations/execute.js';
-import { getRunView } from '../../src/agent/operations/run.js';
-import { startConversationRun } from '../../src/agent/operations/start.js';
-import { acceptReminderDate } from '../../src/features/conversations/lifecycle/reminder-date.js';
-import type { ConversationDeps } from '../../src/agent/runtime/contracts.js';
+import { executeRun } from '../../src/agent/run/execute-turn.js';
+import { getRunView } from '../../src/agent/run/run-actions.js';
+import { startConversationRun } from '../../src/agent/run/admit-message.js';
+import { acceptReminderDate } from '../../src/features/conversations/run/reminder-date-continuation.js';
+import type { ConversationDeps } from '../../src/agent/execution/contracts.js';
 import { createContextPolicy } from '../../src/features/conversations/public.js';
 import { createLocalFixtureModelTransport } from '../helpers/local-fixture-model.js';
-import type { HarnessServices } from '../../src/agent/runtime/contracts.js';
+import type { HarnessServices } from '../../src/agent/execution/contracts.js';
 import { loadTimeContext } from '../../src/features/time/context.js';
 import {
   createIntegrationDatabase,

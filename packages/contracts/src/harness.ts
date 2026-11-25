@@ -620,13 +620,11 @@ const r3Message = z
     content: text,
   })
   .strict();
+const r3Summary = r3SummaryRef.extend({ text, message_ids: z.array(uuid).max(4096) }).strict();
 export const HarnessR3ContextSchema = z
   .object({
     manifest: r3Manifest,
-    summary: r3SummaryRef
-      .extend({ text, message_ids: z.array(uuid).max(4096) })
-      .strict()
-      .nullable(),
+    summary: r3Summary.nullable(),
     messages: z.array(r3Message).max(4096),
     input: z.discriminatedUnion('type', [
       z.object({ type: z.literal('user'), message_id: uuid, content: text }).strict(),
@@ -814,7 +812,7 @@ export const HarnessRequestSchema = z
       .object({
         ...request,
         type: z.literal('pause_probe'),
-        after_measurement: z.literal(true).optional(),
+        auto_compact: z.literal(true).optional(),
       })
       .strict(),
     z
@@ -872,12 +870,12 @@ export const HarnessRequestSchema = z
     }
     if (
       value.type === 'pause_probe' &&
-      value.after_measurement &&
+      value.auto_compact &&
       value.protocol !== HARNESS_CONTEXT_PROTOCOL_VERSION
     ) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'measurement marker requires harness/v8',
+        message: 'automatic compact proposal requires harness/v8',
       });
     }
     if (
@@ -984,7 +982,27 @@ export const HarnessR3ContextStartSchema = z
     type: z.literal('start'),
     mode: z.literal('measure_only').optional(),
     trusted_context: TrustedExecutionContextSchema.nullable(),
-    r3_context: HarnessR3ContextSchema,
+    r3_context: z
+      .union([HarnessR3ContextSchema, z.object({ compact_summary: r3Summary }).strict()])
+      .nullable(),
+    compact_preview: z
+      .object({
+        summary: r3Summary,
+        used_tokens: safe,
+      })
+      .strict()
+      .optional(),
+    auto_compact: z
+      .object({
+        window_tokens: positive,
+        trigger_ratio: z.number().finite().positive().max(1),
+        input_reserve: positive,
+        output_reserve: positive,
+        continuation_tokens: positive,
+        continuation_iterations: positive,
+      })
+      .strict()
+      .optional(),
     tools: z.array(HarnessToolSchema).max(64),
     context_policy: ContextPolicySchema,
     routing_policy: RoutingPolicySchema.nullable(),
@@ -997,6 +1015,25 @@ export const HarnessR3ContextStartSchema = z
   })
   .strict()
   .superRefine((start, ctx) => {
+    const supplied = start.r3_context;
+    const full = supplied && 'manifest' in supplied ? supplied : null;
+    const replacement = supplied !== null && full === null;
+    const current = full ?? start.snapshot?.context;
+    if (
+      replacement &&
+      (!start.snapshot || start.snapshot.waiting || start.approval || start.mode)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'compact summary requires an unblocked v4 continuation',
+      });
+    }
+    if (start.auto_compact && (start.mode || current?.input.type !== 'user')) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'automatic compact requires an execution with user input',
+      });
+    }
     if (
       start.mode === 'measure_only' &&
       (!start.snapshot || start.snapshot.waiting !== null || start.approval !== null)
@@ -1006,7 +1043,18 @@ export const HarnessR3ContextStartSchema = z
         message: 'measurement requires an unblocked v4 snapshot',
       });
     }
-    const current = start.r3_context;
+    if (start.compact_preview) {
+      if (start.mode !== 'measure_only' || start.r3_context !== null) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            'compact preview requires measure_only and derives its context from the snapshot',
+        });
+      }
+    } else if (!start.r3_context && (!start.snapshot || start.mode)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'current context is required' });
+    }
+    if (!current) return;
     if (
       start.trusted_context &&
       current.input.type === 'user' &&
@@ -1027,7 +1075,7 @@ export const HarnessR3ContextStartSchema = z
         message: 'resume must retain original manifest and input',
       });
     }
-    if (start.snapshot) {
+    if (start.snapshot && full) {
       const previous = start.snapshot.context;
       const covered = new Set(current.summary?.message_ids ?? []);
       if (previous.summary?.message_ids.some((id) => !covered.has(id))) {

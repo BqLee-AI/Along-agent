@@ -1,3 +1,4 @@
+apps/api/test/integration/auto-compact-failure.test.ts
 apps/api/test/integration/harness-native.test.ts
 apps/api/test/integration/harness-stream-revocation.test.ts
 apps/api/test/integration/memory-native-wiring.test.ts

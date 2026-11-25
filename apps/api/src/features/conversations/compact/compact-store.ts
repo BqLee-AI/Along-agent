@@ -58,6 +58,16 @@ const frozenContextSchema = z
   })
   .strict();
 
+async function readCompactHead(client: PoolClient, ownerId: string, conversationId: string) {
+  const { rows } = await client.query<{ id: string; revision: string; text: string }>(
+    `SELECT s.id,h.revision::text,s.summary_text AS text FROM compact_heads h
+     JOIN compact_summaries s ON s.id=h.summary_id AND s.owner_id=h.owner_id AND s.conversation_id=h.conversation_id
+     WHERE h.owner_id=$1 AND h.conversation_id=$2`,
+    [ownerId, conversationId],
+  );
+  return rows[0];
+}
+
 /** Freeze a caller-selected prefix of the Run's immutable admission manifest,
  * excluding its accepted input and its already summarized IDs. Previous coverage
  * is exact ID membership, never a timestamp bound. Model ordinals are local
@@ -111,18 +121,11 @@ export async function freezeCompact(
     manifestHistory.some((id, i) => id !== historyIds[i])
   )
     throw stateConflict('compact admission manifest invalid');
-  const head = (
-    await client.query<{ summary_id: string; revision: string; summary_text: string }>(
-      `SELECT h.summary_id,h.revision::text,s.summary_text FROM compact_heads h
-      JOIN compact_summaries s ON s.id=h.summary_id AND s.owner_id=h.owner_id AND s.conversation_id=h.conversation_id
-      WHERE h.owner_id=$1 AND h.conversation_id=$2`,
-      [binding.ownerId, binding.conversationId],
-    )
-  ).rows[0];
+  const head = await readCompactHead(client, binding.ownerId, binding.conversationId);
   const previousRows = head
-    ? await readSummarySources(client, binding.ownerId, binding.conversationId, head.summary_id)
+    ? await readSummarySources(client, binding.ownerId, binding.conversationId, head.id)
     : [];
-  let ancestor: string | null = head?.summary_id ?? null;
+  let ancestor: string | null = head?.id ?? null;
   const admittedSummary = frozen.summary?.id ?? null;
   for (let depth = 0; ancestor !== admittedSummary; depth++) {
     if (!ancestor || depth >= 4096)
@@ -141,9 +144,9 @@ export async function freezeCompact(
   }
   if (
     head &&
-    head.summary_id === admittedSummary &&
+    head.id === admittedSummary &&
     frozen.summary &&
-    (head.revision !== frozen.summary.revision || head.summary_text !== frozen.summary.text)
+    (head.revision !== frozen.summary.revision || head.text !== frozen.summary.text)
   )
     throw stateConflict('compact admitted summary changed');
   const previousIds = new Set(previousRows.map((row) => row.id));
@@ -152,7 +155,7 @@ export async function freezeCompact(
     previousIds.size !== previousRows.length ||
     baseIds.some((id) => !previousIds.has(id)) ||
     previousRows.some((row) => !manifestIds.has(row.id)) ||
-    (head?.summary_id === admittedSummary && previousRows.length !== baseIds.length)
+    (head?.id === admittedSummary && previousRows.length !== baseIds.length)
   )
     throw stateConflict('compact predecessor coverage outside admission manifest');
   const candidates = manifest.filter((id) => !previousIds.has(id)).slice(0, args.messageIds.length);
@@ -206,7 +209,7 @@ export async function freezeCompact(
       binding.runId,
       binding.attemptId,
       binding.pauseId,
-      head?.summary_id ?? null,
+      head?.id ?? null,
       head?.revision ?? '0',
       modelId,
       args.promptRevision,
@@ -223,8 +226,8 @@ export async function freezeCompact(
     freezeId,
     previous: head
       ? {
-          id: head.summary_id,
-          text: head.summary_text,
+          id: head.id,
+          text: head.text,
           messageIds: manifest.filter((id) => previousIds.has(id)),
         }
       : null,
@@ -358,14 +361,7 @@ export async function readCompactView(
     [conversationId, ownerId],
   );
   if (!conversation.rowCount) throw notFound('compact conversation unavailable');
-  const head = (
-    await client.query<{ id: string; revision: string; text: string }>(
-      `SELECT s.id,h.revision::text,s.summary_text AS text FROM compact_heads h
-     JOIN compact_summaries s ON s.id=h.summary_id AND s.owner_id=h.owner_id AND s.conversation_id=h.conversation_id
-     WHERE h.owner_id=$1 AND h.conversation_id=$2`,
-      [ownerId, conversationId],
-    )
-  ).rows[0];
+  const head = await readCompactHead(client, ownerId, conversationId);
   const sources = head ? await readSummarySources(client, ownerId, conversationId, head.id) : [];
   const messages = await client.query<{ id: string }>(
     `SELECT m.id FROM messages m WHERE m.owner_id=$1 AND m.conversation_id=$2 AND m.role IN ('user','assistant')

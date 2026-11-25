@@ -1,5 +1,6 @@
 import type { Pool, PoolClient } from 'pg';
 import { workspaceGrantSchema } from '@along/contracts';
+import { withClient } from '../../../db/transaction.js';
 import { ApplicationError } from '../../../platform/errors.js';
 import {
   createDocumentApproval,
@@ -28,7 +29,7 @@ import {
 } from '../invocations/invocations.js';
 import { readAcceptedInvocationResult } from '../invocations/accepted-result.js';
 import { callWorkspaceMcp, type WorkspaceReadTool } from './mcp-workspace.js';
-import { readRunDocumentEvidence } from '../query.js';
+import { readRunDocumentEvidence } from '../evidence/run-evidence.js';
 import { workspaceDenied } from '../handler-common.js';
 
 export async function runWorkspaceProposal(
@@ -160,16 +161,17 @@ export function invokeWorkspaceReplace(
             },
           },
         };
-      if (edit.exact_new_content === undefined || !edit.new_version)
+      const { exact_new_content, new_version } = edit;
+      if (exact_new_content === undefined || !new_version)
         throw new Error('missing exact document bytes');
-      frozen.signal?.throwIfAborted();
-      const client = await pool.connect();
-      try {
-        const result = await publishWorkspaceReplace(client, frozen.ownerId, grant, {
+      const { ownerId, signal } = frozen;
+      signal?.throwIfAborted();
+      return withClient(pool, async (client) => {
+        const result = await publishWorkspaceReplace(client, ownerId, grant, {
           path: edit.relative_path,
           base_version: edit.base_version,
-          exact_new_content: edit.exact_new_content,
-          new_version: edit.new_version,
+          exact_new_content,
+          new_version,
         });
         const common = {
           workspace_id: grant.workspace_id,
@@ -202,9 +204,7 @@ export function invokeWorkspaceReplace(
                   },
           },
         };
-      } finally {
-        client.release();
-      }
+      });
     },
   });
 }
@@ -228,10 +228,10 @@ export function invokeWorkspaceCreate(
       const grant = frozen?.workspaceGrant;
       const target = frozen?.documentCreate;
       if (!frozen || !grant || !target) throw new Error('missing frozen create target');
-      frozen.signal?.throwIfAborted();
-      const client = await pool.connect();
-      try {
-        const result = await publishWorkspaceCreate(client, frozen.ownerId, grant, {
+      const { ownerId, signal } = frozen;
+      signal?.throwIfAborted();
+      return withClient(pool, async (client) => {
+        const result = await publishWorkspaceCreate(client, ownerId, grant, {
           output_directory: target.output_directory,
           directory_identity: target.directory_identity,
           path: target.relative_path,
@@ -265,9 +265,7 @@ export function invokeWorkspaceCreate(
                   : { kind: 'create_failed', ...common, reason: result.reason, zero_write: true },
           },
         };
-      } finally {
-        client.release();
-      }
+      });
     },
   });
 }
@@ -296,9 +294,9 @@ export function invokeWorkspaceRead(
         file_identity: string;
         version: string;
       }> = [];
-      if (frozen.authorizationRevision === 'delegation/1' && frozen.workspaceGrant) {
-        const client = await pool.connect();
-        try {
+      const grant = frozen.workspaceGrant;
+      if (frozen.authorizationRevision === 'delegation/1' && grant) {
+        await withClient(pool, async (client) => {
           const { rows } = await client.query<{
             invocation_id: string;
             args_hash: string;
@@ -337,9 +335,9 @@ export function invokeWorkspaceRead(
               frozen.ownerId,
               frozen.conversationId,
               frozen.runId,
-              JSON.stringify(frozen.workspaceGrant),
-              frozen.workspaceGrant.workspace_id,
-              frozen.workspaceGrant.root_identity,
+              JSON.stringify(grant),
+              grant.workspace_id,
+              grant.root_identity,
             ],
           );
           for (const row of rows) {
@@ -357,14 +355,14 @@ export function invokeWorkspaceRead(
               target &&
               historicalGrant.success &&
               historicalGrant.data.owner_id === frozen.ownerId &&
-              historicalGrant.data.workspace_id === frozen.workspaceGrant.workspace_id &&
-              historicalGrant.data.root_identity === frozen.workspaceGrant.root_identity &&
+              historicalGrant.data.workspace_id === grant.workspace_id &&
+              historicalGrant.data.root_identity === grant.root_identity &&
               typeof target.directory_identity === 'string' &&
               target.directory_identity.length > 0 &&
               typeof target.output_directory === 'string' &&
               target.output_directory === directory &&
               isWorkspaceOutputDirectory(historicalGrant.data, directory) &&
-              isWorkspaceOutputDirectory(frozen.workspaceGrant, directory) &&
+              isWorkspaceOutputDirectory(grant, directory) &&
               !authorizedCreatedPaths.some((entry) => entry.path === target.relative_path) &&
               typeof privateResult.file_identity === 'string' &&
               privateResult.file_identity.length > 0
@@ -376,9 +374,7 @@ export function invokeWorkspaceRead(
                 version: accepted.result.version,
               });
           }
-        } finally {
-          client.release();
-        }
+        });
       }
       const result = await callWorkspaceMcp(frozen, toolId, mcpArgs, authorizedCreatedPaths);
       return {

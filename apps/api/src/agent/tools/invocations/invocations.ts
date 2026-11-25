@@ -18,7 +18,7 @@ import {
   bindDocumentApprovalApply,
   readDocumentApprovalReceipt,
 } from '../../../features/approvals/public.js';
-import { readRunDocumentEvidence } from '../query.js';
+import { readRunDocumentEvidence } from '../evidence/run-evidence.js';
 import { assertDocumentTargetAvailable } from './document-target.js';
 import { isActiveOwner } from '../../../features/identity/public.js';
 import {
@@ -28,13 +28,14 @@ import {
   sealFeishuBotObservation,
 } from '../../../features/office-connectors/public.js';
 import { withTransaction } from '../../../db/transaction.js';
+import { canonicalJson as serializeCanonicalJson } from '../../../platform/canonical-json.js';
 import { forbidden, notFound, stateConflict, ApplicationError } from '../../../platform/errors.js';
 import {
   assertToolRunBinding,
   lockToolRunBinding as lockConversationToolBinding,
   lockToolEffectAcceptanceBinding,
 } from '../../../features/conversations/public.js';
-import { withRunTransaction } from '../../runtime/run-ownership.js';
+import { withRunTransaction } from '../../execution/driver/ownership.js';
 import type {
   InvocationInput,
   ReservationInput,
@@ -129,25 +130,11 @@ const invocationSchema = z.object({
   approval_id: z.string().uuid().nullable(),
 });
 type Invocation = z.infer<typeof invocationSchema>;
+const canonicalJson = (value: unknown) =>
+  serializeCanonicalJson(value, 'tool arguments must be JSON');
 
 // JSON identity is computed before tool schemas supply defaults. Nothing here
 // trims strings, normalizes Unicode, or persists the original arguments.
-function canonicalJson(value: unknown): string {
-  if (value === null || typeof value === 'string' || typeof value === 'boolean')
-    return JSON.stringify(value);
-  if (typeof value === 'number' && Number.isFinite(value)) return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-  if (
-    typeof value === 'object' &&
-    value !== null &&
-    Object.getPrototypeOf(value) === Object.prototype
-  ) {
-    const entries: [string, unknown][] = Object.entries(value);
-    entries.sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
-    return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`).join(',')}}`;
-  }
-  throw stateConflict('tool arguments must be JSON');
-}
 export function digestInvocationArgs(args: unknown): { argsHash: string; argsBytes: number } {
   const canonical = canonicalJson(args);
   return {
@@ -347,6 +334,7 @@ export async function reserveInvocation(
     let selected = ctx.workspaceGrant ?? null;
     let documentEdit: ToolContext['documentEdit'];
     let documentCreate: ToolContext['documentCreate'];
+    let documentApprovalId: string | undefined;
     if (ctx.authorizationRevision === 'delegation/1' && input.toolId.startsWith('workspace_')) {
       const grants = ctx.workspaceGrants ?? [];
       if (
@@ -357,8 +345,8 @@ export async function reserveInvocation(
         const args = DELEGATED_WORKSPACE_READ_SCHEMAS[input.toolId].parse(input.args);
         selected = resolveFrozenWorkspaceGrant(ctx.ownerId, grants, args.workspace_id);
       } else if (input.toolId === 'workspace_apply_replace') {
-        const args = WorkspaceApplyReplaceInputSchema.parse(input.args);
-        const approval = await getDocumentApproval(client, ctx.ownerId, args.approval_id);
+        documentApprovalId = WorkspaceApplyReplaceInputSchema.parse(input.args).approval_id;
+        const approval = await getDocumentApproval(client, ctx.ownerId, documentApprovalId);
         if (approval.conversation_id !== ctx.conversationId || approval.run_id !== ctx.runId)
           throw forbidden();
         selected = resolveFrozenWorkspaceGrant(ctx.ownerId, grants, approval.workspace_id);
@@ -429,9 +417,13 @@ export async function reserveInvocation(
         const summary = validateWorkspaceGrant(ctx.ownerId, selected);
         if (
           read.registration_digest !== selected.registration_digest ||
-          !summary.writable_paths.includes(read.relative_path) ||
-          hashBytes(utf8Bytes(read.result.content)) !== read.result.version ||
-          utf8Bytes(read.result.content).length !== read.result.byte_length
+          !summary.writable_paths.includes(read.relative_path)
+        )
+          throw forbidden();
+        const baseBytes = utf8Bytes(read.result.content);
+        if (
+          hashBytes(baseBytes) !== read.result.version ||
+          baseBytes.length !== read.result.byte_length
         )
           throw forbidden();
         const replaces = await assertDocumentTargetAvailable(client, ctx, read, {
@@ -451,6 +443,8 @@ export async function reserveInvocation(
     }
     if (selected) validateWorkspaceGrant(ctx.ownerId, selected);
     const invocationId = randomUUID();
+    if (input.toolId === 'workspace_apply_replace')
+      documentApprovalId ??= WorkspaceApplyReplaceInputSchema.parse(input.args).approval_id;
     await client.query(
       `INSERT INTO tool_invocations (invocation_id, owner_id, conversation_id, run_id, call_key,
         first_attempt_id, first_request_id, tool_id, args_hash, args_bytes, execution_kind, frozen_context)
@@ -471,21 +465,18 @@ export async function reserveInvocation(
           ...freezeContext({ ...ctx, workspaceGrant: selected }),
           ...(documentEdit ? { documentEdit } : {}),
           ...(documentCreate ? { documentCreate } : {}),
-          ...(input.toolId === 'workspace_apply_replace'
-            ? { documentApprovalId: WorkspaceApplyReplaceInputSchema.parse(input.args).approval_id }
-            : {}),
+          ...(documentApprovalId === undefined ? {} : { documentApprovalId }),
         }),
       ],
     );
-    if (input.toolId === 'workspace_apply_replace') {
-      const args = WorkspaceApplyReplaceInputSchema.parse(input.args);
+    if (documentApprovalId !== undefined) {
       if (!selected || input.executionKind !== 'non_transactional') throw forbidden();
       await bindDocumentApprovalApply(client, {
         ownerId: ctx.ownerId,
         conversationId: ctx.conversationId,
         runId: ctx.runId,
         workspaceGrant: selected,
-        approvalId: args.approval_id,
+        approvalId: documentApprovalId,
         invocationId,
       });
     }
@@ -737,6 +728,19 @@ async function accept(
   await audit(client, ctx, row, recordKind, result);
   return result;
 }
+async function denyInvocation(
+  client: PoolClient,
+  ctx: ToolContext,
+  row: Invocation,
+  result: ToolResult = denied,
+  mode: 'audit' | 'complete-reservation' = 'audit',
+): Promise<ToolOutcome> {
+  if (mode === 'complete-reservation' && row.state === 'reserved')
+    await accept(client, ctx, row, result, 'denied');
+  else await audit(client, ctx, row, 'denied', result);
+  return { ...result, invocationId: row.invocation_id, replayed: false };
+}
+
 async function gate(
   client: PoolClient,
   ctx: ToolContext,
@@ -752,10 +756,8 @@ async function gate(
       ctx.ownerId,
       ['create_reminder', 'cancel_reminder'].includes(row.tool_id) ? { lock: 'share' } : {},
     ))
-  ) {
-    await audit(client, ctx, row, 'denied', denied);
-    return { ...denied, invocationId: row.invocation_id, replayed: false };
-  }
+  )
+    return denyInvocation(client, ctx, row);
   if (
     row.tool_id !== input.toolId ||
     row.args_hash !== digest.argsHash ||
@@ -768,29 +770,18 @@ async function gate(
     await audit(client, ctx, row, 'denied', conflict, digest.argsHash);
     return { ...conflict, invocationId: row.invocation_id, replayed: false };
   }
-  if (!workspaceAuthorized(ctx, row) || ctx.signal?.aborted) {
-    await audit(client, ctx, row, 'denied', denied);
-    return { ...denied, invocationId: row.invocation_id, replayed: false };
-  }
-  if (!ctx.allowlist.includes(row.tool_id)) {
-    if (row.state === 'reserved') await accept(client, ctx, row, permissionDenied, 'denied');
-    else await audit(client, ctx, row, 'denied', permissionDenied);
-    return { ...permissionDenied, invocationId: row.invocation_id, replayed: false };
-  }
+  if (!workspaceAuthorized(ctx, row) || ctx.signal?.aborted)
+    return denyInvocation(client, ctx, row);
+  if (!ctx.allowlist.includes(row.tool_id))
+    return denyInvocation(client, ctx, row, permissionDenied, 'complete-reservation');
   if (
     ['set_user_timezone', 'create_reminder', 'get_task', 'cancel_reminder'].includes(row.tool_id) &&
     (ctx.authorizationRevision !== 'delegation/1' ||
       row.frozen_context.authorizationRevision !== 'delegation/1')
-  ) {
-    if (row.state === 'reserved') await accept(client, ctx, row, denied, 'denied');
-    else await audit(client, ctx, row, 'denied', denied);
-    return { ...denied, invocationId: row.invocation_id, replayed: false };
-  }
+  )
+    return denyInvocation(client, ctx, row, denied, 'complete-reservation');
   if (row.tool_id === 'read_run_observation') {
-    if (!canExecute || ctx.signal?.aborted) {
-      await audit(client, ctx, row, 'denied', denied);
-      return { ...denied, invocationId: row.invocation_id, replayed: false };
-    }
+    if (!canExecute || ctx.signal?.aborted) return denyInvocation(client, ctx, row);
     const parsed = ReadRunObservationInputSchema.safeParse(input.args);
     let authorized = parsed.success;
     if (parsed.success) {
@@ -802,29 +793,17 @@ async function gate(
         authorized = false;
       }
     }
-    if (!authorized) {
-      if (row.state === 'reserved') await accept(client, ctx, row, denied, 'denied');
-      else await audit(client, ctx, row, 'denied', denied);
-      return { ...denied, invocationId: row.invocation_id, replayed: false };
-    }
+    if (!authorized) return denyInvocation(client, ctx, row, denied, 'complete-reservation');
   }
   if (row.state === 'completed') {
-    if (row.tool_id === 'feishu_docx_read' && !canExecute) {
-      await audit(client, ctx, row, 'denied', denied);
-      return { ...denied, invocationId: row.invocation_id, replayed: false };
-    }
+    if (row.tool_id === 'feishu_docx_read' && !canExecute) return denyInvocation(client, ctx, row);
     const result = await readAcceptedInvocationResult(client, ctx, row);
-    if (validateReplay && (!canExecute || !(await validateReplay(client, result)))) {
-      await audit(client, ctx, row, 'denied', denied);
-      return { ...denied, invocationId: row.invocation_id, replayed: false };
-    }
+    if (validateReplay && (!canExecute || !(await validateReplay(client, result))))
+      return denyInvocation(client, ctx, row);
     await audit(client, ctx, row, 'replayed', result);
     return { ...result, invocationId: row.invocation_id, replayed: true };
   }
-  if (row.state === 'reserved' && !canExecute) {
-    await audit(client, ctx, row, 'denied', denied);
-    return { ...denied, invocationId: row.invocation_id, replayed: false };
-  }
+  if (row.state === 'reserved' && !canExecute) return denyInvocation(client, ctx, row);
   return null;
 }
 
@@ -898,10 +877,7 @@ export async function executeReadOnlyInvocation(
     const { row, canExecute } = await loadInvocation(client, ctx, input);
     // Revalidate before replay, too: a read which was already in flight must
     // not disclose its peer's accepted content after cancellation/revocation.
-    if (!canExecute || ctx.signal?.aborted) {
-      await audit(client, ctx, row, 'denied', denied);
-      return { ...denied, invocationId: row.invocation_id, replayed: false };
-    }
+    if (!canExecute || ctx.signal?.aborted) return denyInvocation(client, ctx, row);
     const gated = await gate(client, ctx, row, input, canExecute, validateBeforeReplay);
     if (gated) return gated;
     executionContext(ctx, row);
@@ -937,24 +913,16 @@ export interface NonTransactionalCapabilities {
   execute: (binding: EffectBinding) => Promise<EffectEvidence | NotAppliedEvidence>;
   reconcile?: (binding: EffectBinding) => Promise<EffectEvidence | NotAppliedEvidence | null>;
 }
+const effectEvidenceBase = z.object({
+  invocationId: z.string().uuid(),
+  argsHash: z.string().regex(/^[a-f0-9]{64}$/),
+  evidenceRef: z.string().min(1).max(512),
+});
 const evidenceSchema = z.union([
-  z
-    .object({
-      invocationId: z.string().uuid(),
-      argsHash: z.string().regex(/^[a-f0-9]{64}$/),
-      evidenceRef: z.string().min(1).max(512),
-      result: z.unknown(),
-      fileIdentity: z.string().min(1).optional(),
-    })
+  effectEvidenceBase
+    .extend({ result: z.unknown(), fileIdentity: z.string().min(1).optional() })
     .strict(),
-  z
-    .object({
-      invocationId: z.string().uuid(),
-      argsHash: z.string().regex(/^[a-f0-9]{64}$/),
-      evidenceRef: z.string().min(1).max(512),
-      notApplied: z.literal(true),
-    })
-    .strict(),
+  effectEvidenceBase.extend({ notApplied: z.literal(true) }).strict(),
 ]);
 
 // Only the stack receiving a successful reserved->unknown COMMIT may execute.
@@ -969,12 +937,7 @@ export async function executeNonTransactionalInvocation(
   const dispatch = await withRunTransaction(pool, ctx.ownership, async (client) => {
     const { row, canExecute } = await loadInvocation(client, ctx, input);
     const gated = await gate(client, ctx, row, input, canExecute);
-    if (gated)
-      return {
-        outcome: gated,
-        permission: false,
-        binding: { invocationId: row.invocation_id, argsHash: row.args_hash },
-      };
+    if (gated) return { outcome: gated };
     if (row.execution_kind !== 'non_transactional')
       throw stateConflict('invocation is not non-transactional');
     const binding = { invocationId: row.invocation_id, argsHash: row.args_hash };
@@ -992,14 +955,7 @@ export async function executeNonTransactionalInvocation(
     return { outcome: null, permission: true, binding };
   }).catch((error: unknown) => {
     if (!permitPrepared) throw error;
-    return {
-      outcome: { ...unknown, invocationId: input.invocationId, replayed: false },
-      permission: false,
-      binding: {
-        invocationId: input.invocationId,
-        argsHash: digestInvocationArgs(input.args).argsHash,
-      },
-    };
+    return { outcome: { ...unknown, invocationId: input.invocationId, replayed: false } };
   });
   if (dispatch.outcome) return dispatch.outcome;
   let observed: EffectEvidence | NotAppliedEvidence | null;
@@ -1062,11 +1018,8 @@ export async function executeNonTransactionalInvocation(
       (!row.tool_id.startsWith('workspace_') || (canExecute && !ctx.signal?.aborted));
     // Record external facts even after cancellation, but never disclose them
     // through a currently revoked allowlist.
-    if (row.state === 'completed' && !disclose) {
-      await audit(client, ctx, row, 'denied', permissionDenied);
-      return { ...permissionDenied, invocationId: row.invocation_id, replayed: false };
-    }
     if (row.state === 'completed') {
+      if (!disclose) return denyInvocation(client, ctx, row, permissionDenied);
       const accepted = await readAcceptedInvocationResult(client, ctx, row);
       if (canonicalJson(accepted) !== canonicalJson(result))
         throw stateConflict('conflicting external effect evidence');
@@ -1083,10 +1036,7 @@ export async function executeNonTransactionalInvocation(
       evidence.evidenceRef,
       'result' in evidence ? evidence.fileIdentity : undefined,
     );
-    if (!disclose) {
-      await audit(client, ctx, row, 'denied', permissionDenied);
-      return { ...permissionDenied, invocationId: row.invocation_id, replayed: false };
-    }
+    if (!disclose) return denyInvocation(client, ctx, row, permissionDenied);
     return { ...accepted, invocationId: row.invocation_id, replayed: false };
   }).catch((error: unknown) => {
     if (

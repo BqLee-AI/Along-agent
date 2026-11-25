@@ -6,10 +6,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { WorkspaceGrant } from '@along/contracts';
 import { createContextPolicy } from '../../src/features/conversations/public.js';
-import type { ConversationDeps } from '../../src/agent/runtime/contracts.js';
-import type { HarnessServices } from '../../src/agent/runtime/contracts.js';
-import { cancelConversationRun, getRunView } from '../../src/agent/operations/run.js';
-import { startConversationRun } from '../../src/agent/operations/start.js';
+import type { ConversationDeps } from '../../src/agent/execution/contracts.js';
+import type { HarnessServices } from '../../src/agent/execution/contracts.js';
+import { cancelConversationRun, getRunView } from '../../src/agent/run/run-actions.js';
+import { startConversationRun } from '../../src/agent/run/admit-message.js';
 import { loadTimeContext } from '../../src/features/time/context.js';
 import { DELEGATION_TOOL_IDS, R3_MEMORY_TOOL_IDS } from '../../src/agent/tools/contracts.js';
 import {

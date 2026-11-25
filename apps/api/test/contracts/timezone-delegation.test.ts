@@ -23,21 +23,21 @@ import {
   type ThreadEvent,
 } from '@along/stream-protocol';
 import { handleRequest } from '../helpers/http-app.js';
-import { executeRun } from '../../src/agent/operations/execute.js';
-import { getConversationDetail } from '../../src/features/conversations/lifecycle/service.js';
-import { cancelConversationRun, getRunView } from '../../src/agent/operations/run.js';
-import { startConversationRun } from '../../src/agent/operations/start.js';
-import type { ConversationDeps, RunContext } from '../../src/agent/runtime/contracts.js';
+import { executeRun } from '../../src/agent/run/execute-turn.js';
+import { getConversationDetail } from '../../src/features/conversations/history/conversation-detail.js';
+import { cancelConversationRun, getRunView } from '../../src/agent/run/run-actions.js';
+import { startConversationRun } from '../../src/agent/run/admit-message.js';
+import type { ConversationDeps, RunContext } from '../../src/agent/execution/contracts.js';
 import { createContextPolicy } from '../../src/features/conversations/public.js';
 import { createLocalFixtureModelTransport } from '../helpers/local-fixture-model.js';
-import type { HarnessServices } from '../../src/agent/runtime/contracts.js';
+import type { HarnessServices } from '../../src/agent/execution/contracts.js';
 import { seedAdmittedSession as seedSession } from '../integration/setup.js';
 import type { SeededSession } from '../../src/features/identity/session/seed.js';
-import { interruptedGoalResult } from '../../src/agent/operations/goal-result.js';
+import { interruptedGoalResult } from '../../src/agent/execution/result/goal-result.js';
 import type { ToolContext } from '../../src/agent/tools/contracts.js';
 import { readInvocationSnapshots } from '../../src/agent/tools/invocations/invocations.js';
 import { readRunInvocationStates } from '../../src/agent/tools/invocations/run-state.js';
-import { readRunTimezoneSettings } from '../../src/agent/tools/query.js';
+import { readRunTimezoneSettings } from '../../src/agent/tools/evidence/run-evidence.js';
 import { loadTimeContext } from '../../src/features/time/context.js';
 import { createIntegrationDatabase, type IntegrationDatabase } from '../integration/setup.js';
 import {

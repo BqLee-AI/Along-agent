@@ -1,14 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
-import { readCompactContinuation } from '../../src/agent/runtime/compact-continuation.js';
+import { readCompactContinuation } from '../../src/features/conversations/compact/compact-continuation.js';
 import { freezeR3Context } from '../../src/features/conversations/compact/r3-context.js';
 import type { CompactBinding } from '../../src/features/conversations/compact/compact-eligibility.js';
-import { cancelConversationRun } from '../../src/agent/operations/run.js';
-import { executeRuntimeCompact } from '../../src/agent/operations/compact.js';
+import { cancelConversationRun } from '../../src/agent/run/run-actions.js';
+import { executeRuntimeCompact } from '../../src/agent/compact/runtime-compact.js';
 import { createContextPolicy } from '../../src/features/conversations/public.js';
-import type { ConversationDeps, RunContext } from '../../src/agent/runtime/contracts.js';
-import { RunOwnership } from '../../src/agent/runtime/run-ownership.js';
+import type { ConversationDeps, RunContext } from '../../src/agent/execution/contracts.js';
+import { RunOwnership } from '../../src/agent/execution/driver/ownership.js';
 import { loadTimeContext } from '../../src/features/time/context.js';
 import {
   admitTestUser,
@@ -256,12 +256,15 @@ import {
             );
           });
           const policy = createContextPolicy({ completionCap: 512, model: 'fixture-model' });
+          const binaryPath = process.env.HARNESS_BINARY;
+          if (!binaryPath) throw new Error('automatic compact requires the built HARNESS_BINARY');
           const timeContext = loadTimeContext('fixture-v1');
           const deps: ConversationDeps = {
             pool: db.pool,
             timeContext,
             harness: {
-              binaryPath: '/unused',
+              binaryPath,
+              libraryPath: process.env.HARNESS_LIBRARY_PATH,
               maxIterations: 8,
               maxTokens: 8000,
               contextPolicy: policy,

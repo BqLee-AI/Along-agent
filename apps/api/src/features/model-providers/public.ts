@@ -26,7 +26,7 @@ export type {
   ModelStepTransport,
   ModelTransportFactory,
 } from './inference/model-contract.js';
-export { createUserModelTransport } from './inference/model-transport.js';
+export { createUserModelTransport, ESTIMATED_METER_REVISION } from './inference/model-transport.js';
 export { createConfiguredSdkStep } from './inference/sdk-step.js';
 export type { SdkStepConfig, SdkStepNetwork } from './inference/sdk-step.js';
 export { measureSdkContext, serializeSdkRequest } from './inference/sdk-context.js';

@@ -6,7 +6,7 @@ import { createServer, type Server } from 'node:http';
 import type { Pool } from 'pg';
 import { handleRequest } from '../helpers/http-app.js';
 import { loadTimeContext } from '../../src/features/time/context.js';
-import { startConversationRun } from '../../src/agent/operations/start.js';
+import { startConversationRun } from '../../src/agent/run/admit-message.js';
 import { invokeTool, reserveToolInvocation } from '../../src/agent/tools/gateway.js';
 import { frames, listen, pending, started } from '../helpers/harness-consumer.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';

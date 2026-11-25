@@ -8,11 +8,11 @@ import { z } from 'zod';
 import { handleRequest } from '../helpers/http-app.js';
 import { createContextPolicy } from '../../src/features/conversations/public.js';
 import { createLocalFixtureModelTransport } from '../helpers/local-fixture-model.js';
-import { resumeConversationRun } from '../../src/agent/operations/run.js';
-import { createHarnessSession } from '../../src/agent/runtime/attempt-session.js';
-import { continueConversationPause } from '../../src/agent/operations/pause.js';
-import { createRunDriver } from '../../src/agent/runtime/run-driver.js';
-import { startConversationRun } from '../../src/agent/operations/start.js';
+import { resumeConversationRun } from '../../src/agent/run/run-actions.js';
+import { createHarnessSession } from '../../src/agent/execution/attempt/session.js';
+import { continueConversationPause } from '../../src/agent/run/pause.js';
+import { createRunDriver } from '../../src/agent/execution/driver/driver.js';
+import { startConversationRun } from '../../src/agent/run/admit-message.js';
 import {
   executeNonTransactionalInvocation,
   reserveInvocation,

@@ -20,7 +20,7 @@ import {
 import type { ThreadEvent } from '@along/stream-protocol';
 import { withTransaction } from '../../src/db/transaction.js';
 import { ApplicationError } from '../../src/platform/errors.js';
-import { startConversationRun } from '../../src/agent/operations/start.js';
+import { startConversationRun } from '../../src/agent/run/admit-message.js';
 import { getConversationRuns } from '../../src/features/conversations/history/history-service.js';
 import {
   createContextPolicy,
@@ -30,31 +30,31 @@ import type {
   ConversationDeps,
   RunContext,
   StartResult,
-} from '../../src/agent/runtime/contracts.js';
-import type { HarnessServices } from '../../src/agent/runtime/contracts.js';
+} from '../../src/agent/execution/contracts.js';
+import type { HarnessServices } from '../../src/agent/execution/contracts.js';
 import {
   cancelConversationRun,
   getRunView,
   inspectReleaseWaiting,
   resumeConversationRun,
-} from '../../src/agent/operations/run.js';
-import { stopReleaseWaiting } from '../../src/agent/operations/release-stop.js';
+} from '../../src/agent/run/run-actions.js';
+import { stopReleaseWaiting } from '../../src/agent/run/maintenance/release-stop.js';
 import {
   createHarnessSession as createAuthoritySession,
   type HarnessSession,
-} from '../../src/agent/runtime/attempt-session.js';
+} from '../../src/agent/execution/attempt/session.js';
 import {
   listRunEvents,
   listConversationEvents,
-  lockRun,
-} from '../../src/features/conversations/run/repository.js';
+} from '../../src/features/conversations/run/checkpoints.js';
+import { lockRun } from '../../src/features/conversations/run/repository.js';
 import { confirmApproval, rejectApproval } from '../../src/features/approvals/reminder/confirm.js';
 import { reviseApproval } from '../../src/features/approvals/reminder/revise.js';
 import { getApprovalDetail } from '../../src/features/approvals/reminder/service.js';
 import { loadTimeContext } from '../../src/features/time/context.js';
-import { confirmDocumentApproval } from '../../src/agent/operations/document-decision.js';
+import { confirmDocumentApproval } from '../../src/agent/run/approvals/document-decision.js';
 import { readDocumentApprovalDetail } from '../../src/features/approvals/document/document-service.js';
-import { readRunDocumentEvidence } from '../../src/agent/tools/query.js';
+import { readRunDocumentEvidence } from '../../src/agent/tools/evidence/run-evidence.js';
 import { seedAdmittedSession as seedSession } from './setup.js';
 import {
   deleteProvider,
@@ -72,7 +72,7 @@ import {
 } from '../../src/agent/tools/invocations/invocations.js';
 import * as gateway from '../../src/agent/tools/gateway.js';
 import { appendEvent } from '../../src/features/conversations/run/run-state.js';
-import { readSnapshot } from '../../src/agent/runtime/run-snapshot.js';
+import { readSnapshot } from '../../src/agent/execution/attempt/restore-snapshot.js';
 import {
   configureWorkspaceRegistry,
   getWorkspaceGrant,

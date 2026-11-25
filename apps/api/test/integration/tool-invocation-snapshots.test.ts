@@ -2,7 +2,7 @@ import { admitTestUser } from './setup.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
-import { startConversationRun } from '../../src/agent/operations/start.js';
+import { startConversationRun } from '../../src/agent/run/admit-message.js';
 import { invokeTool, reserveToolInvocation } from '../../src/agent/tools/gateway.js';
 import {
   executeNonTransactionalInvocation,

@@ -12,6 +12,29 @@ const workspaceParameters = (
   additionalProperties: false,
 });
 const workspacePath = { type: 'string' };
+
+const workspaceReplacement = workspaceParameters(
+  {
+    read_invocation_id: { type: 'string', format: 'uuid' },
+    change: {
+      oneOf: [
+        workspaceParameters(
+          {
+            kind: { const: 'literal' },
+            old_text: { type: 'string', minLength: 1 },
+            new_text: { type: 'string' },
+          },
+          ['kind', 'old_text', 'new_text'],
+        ),
+        workspaceParameters({ kind: { const: 'full' }, new_content: { type: 'string' } }, [
+          'kind',
+          'new_content',
+        ]),
+      ],
+    },
+  },
+  ['read_invocation_id', 'change'],
+);
 export const WORKSPACE_TOOL_DEFINITIONS = [
   {
     name: 'workspace_list',
@@ -238,56 +261,14 @@ export const DELEGATION_TOOL_DEFINITIONS = [
     description:
       '引用本 Run 接受的完整读取，直接精确编辑现有文件；冲突仅在零写后重新读取，未知不得重试，成功须独立新读取核验。',
     risk: 'high' as const,
-    parameters: workspaceParameters(
-      {
-        read_invocation_id: { type: 'string', format: 'uuid' },
-        change: {
-          oneOf: [
-            workspaceParameters(
-              {
-                kind: { const: 'literal' },
-                old_text: { type: 'string', minLength: 1 },
-                new_text: { type: 'string' },
-              },
-              ['kind', 'old_text', 'new_text'],
-            ),
-            workspaceParameters({ kind: { const: 'full' }, new_content: { type: 'string' } }, [
-              'kind',
-              'new_content',
-            ]),
-          ],
-        },
-      },
-      ['read_invocation_id', 'change'],
-    ),
+    parameters: workspaceReplacement,
   },
   {
     name: 'workspace_propose_replace',
     description:
       '仅当修改引入用户未授权的新增影响时，引用全文提出精确替换，等待批准；批准不是写入。',
     risk: 'medium' as const,
-    parameters: workspaceParameters(
-      {
-        read_invocation_id: { type: 'string', format: 'uuid' },
-        change: {
-          oneOf: [
-            workspaceParameters(
-              {
-                kind: { const: 'literal' },
-                old_text: { type: 'string', minLength: 1 },
-                new_text: { type: 'string' },
-              },
-              ['kind', 'old_text', 'new_text'],
-            ),
-            workspaceParameters({ kind: { const: 'full' }, new_content: { type: 'string' } }, [
-              'kind',
-              'new_content',
-            ]),
-          ],
-        },
-      },
-      ['read_invocation_id', 'change'],
-    ),
+    parameters: workspaceReplacement,
   },
   WORKSPACE_TOOL_DEFINITIONS[4]!,
   {

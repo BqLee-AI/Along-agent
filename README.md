@@ -1,6 +1,6 @@
 # Along-agent
 
-Along-agent 是一个可自托管的 Web 个人助理。你可以在对话里安排提醒、查询今天的安排，或让助理整理你明确开放的项目资料；之后回到原会话或活动页，核对系统实际做了什么。
+Along-agent 是一个以仓颉为执行核心的自托管 Web 个人助理。你可以在对话里安排提醒、查询今天的安排，或让助理整理你明确开放的项目资料。回到原会话或活动页可以核对实际结果。
 
 例如，在对话里发「10 分钟后提醒我检查构建结果」。指令明确且在授权范围内时，助理可以创建提醒；如果时间有歧义，它会先澄清。**已创建、已排期、已触发和已生成站内通知是不同的状态**，助理不会把一句回复当成投递回执。
 
@@ -58,7 +58,7 @@ bun --no-env-file run local:start
 
 ## 技术栈与项目结构
 
-Web 使用 **Next.js App Router、React、Tailwind CSS 与 LumenUI**；API 使用 **TypeScript、Bun、Elysia 与 Better Auth**，JSON 合同用 Zod 校验，实时对话走 SSE。**仓颉原生 Harness**负责模型与工具的执行循环；授权、业务动作、调度和持久化由 TypeScript 服务负责。**PostgreSQL 16** 是业务事实源；同一个服务镜像可按 `api`、`worker` 或 `all` 运行。
+普通对话由 **仓颉原生 Harness** 执行。它组织模型上下文，处理模型提出的工具调用，控制执行预算，并在安全点暂停和恢复。**TypeScript / Bun** 提供 HTTP、SSE、模型传输、授权、工具效果和后台调度。**PostgreSQL 16** 保存任务、回执和运行状态。Web 工作台使用 **Next.js / React**。
 
 ```text
 apps/

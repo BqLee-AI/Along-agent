@@ -116,7 +116,7 @@ extend Harness {
             }
         }
     }
-    func measuredOutput(allowProjection: Bool): Int64 {
+    func measuredOutput(allowProjection: Bool): (Int64, Bool) {
         var output = budgetState.completionCap
         if (budgetState.tokensKnown && budgetState.maxTokens - budgetState.knownTokens < output) { output = budgetState.maxTokens - budgetState.knownTokens }
         while (true) {
@@ -172,25 +172,64 @@ extend Harness {
                 if (allowProjection && projectOldest()) { continue }
                 throw RemoteFailure("HARNESS_CONTEXT_LIMIT")
             }
-            return output
+            return (output, allowProjection && shouldAutoCompact(meter))
         }
         throw Exception("unreachable")
+    }
+    func shouldAutoCompact(meter: JsonObject): Bool {
+        if (autoCompact.isNone() || field(contextState.r3Context, "messages").asArray().size() == 0) { return false }
+        let tokens = field(meter, "input_tokens")
+        if (isNull(tokens) || field(meter, "meter_revision").asString().getValue() != compactMeterRevision) { return false }
+        let policy = autoCompact.getOrThrow()
+        let output = integer(field(policy, "output_reserve"), 1)
+        if (budgetState.modelWindow > 0 && output >= budgetState.modelWindow - budgetState.reserveTokens) { return false }
+        if (budgetState.maxIterations - budgetState.iterations <= integer(field(policy, "continuation_iterations"), 1)) { return false }
+        if (budgetState.tokensKnown) {
+            let afterInput = budgetState.maxTokens - budgetState.knownTokens - integer(field(policy, "input_reserve"), 1)
+            if (afterInput < output || afterInput - output < integer(field(policy, "continuation_tokens"), 1)) { return false }
+        }
+        let ratio = Float64(integer(tokens, 0)) / Float64(integer(field(policy, "window_tokens"), 1))
+        return ratio >= field(policy, "trigger_ratio").asFloat().getValue()
+    }
+    func compactPreviewContext(start: JsonObject): JsonObject {
+        require(pipe.measureOnly && isNull(field(start, "r3_context")))
+        let preview = field(start, "compact_preview").asObject()
+        keys(preview, ["summary", "used_tokens"])
+        return replaceCompactSummary(field(field(start, "snapshot").asObject(), "context").asObject(),
+            field(preview, "summary").asObject())
+    }
+    func replaceCompactSummary(previous: JsonObject, summary: JsonObject): JsonObject {
+        let covered = HashSet<String>()
+        for (value in field(summary, "message_ids").asArray().getItems()) {
+            require(covered.add(uuid(value)))
+        }
+        let oldSummary = field(previous, "summary")
+        if (!isNull(oldSummary)) {
+            require(uuid(field(oldSummary.asObject(), "id")) != uuid(field(summary, "id")))
+            for (value in field(oldSummary.asObject(), "message_ids").asArray().getItems()) {
+                require(covered.contains(uuid(value)))
+            }
+        }
+        let messages = JsonArray()
+        for (message in field(previous, "messages").asArray().getItems()) {
+            if (!covered.contains(uuid(field(message.asObject(), "message_id")))) { messages.add(message) }
+        }
+        return obj([("manifest", field(previous, "manifest")), ("summary", summary),
+            ("messages", messages), ("input", field(previous, "input"))])
     }
     protected func previewContext(): Unit {
         require(pipe.measureOnly && pipe.protocol == "harness/v8" && restoredPause && isNull(waiting))
         rebuildMessages()
         // The accepted response is protected across compact even though it has
         // not yet become history. Account for it without inventing a tool result.
-        if (!isNull(pendingModel)) {
+        let hasPendingModel = !isNull(pendingModel)
+        if (hasPendingModel) {
             let pending = pendingModel.asObject()
             let content = field(pending, "content")
             let calls = field(pending, "tool_calls").asArray()
-            let historyContent: JsonValue = if (isNull(content)) { text("") } else { content }
-            if (calls.size() == 0) {
-                contextState.messages.add(obj([("role", text("assistant")), ("content", historyContent)]))
-            } else {
-                contextState.messages.add(obj([("role", text("assistant")), ("content", historyContent), ("tool_calls", calls)]))
-            }
+            let entry = obj([("role", text("assistant")), ("content", if (isNull(content)) { text("") } else { content })])
+            if (calls.size() > 0) { entry.put("tool_calls", calls) }
+            contextState.messages.add(entry)
         }
         require(contextState.messages.size() > 0 && contextState.messages.size() <= 256)
         var output = budgetState.completionCap
@@ -201,22 +240,26 @@ extend Harness {
             if (available < output) { output = available }
         }
         if (budgetState.iterations >= budgetState.maxIterations) { output = 0 }
-        let payload = obj([("messages", contextState.messages), ("remaining_tokens", remaining),
-            ("max_output_tokens", JsonInt(output)), ("pending_model", JsonBool(!isNull(pendingModel)))])
-        let modelPayload = obj([("messages", contextState.messages), ("remaining_tokens", remaining), ("max_output_tokens", JsonInt(output))])
-        require(pipe.frameFits("context_preview", payload, 1) && pipe.frameFits("model", modelPayload, 1))
+        let payload = obj([("messages", contextState.messages), ("remaining_tokens", remaining), ("max_output_tokens", JsonInt(output))])
+        require(pipe.frameFits("model", payload, 1))
+        payload.put("pending_model", JsonBool(hasPendingModel))
+        require(pipe.frameFits("context_preview", payload, 1))
         pipe.ack("context_preview", payload, "accepted")
+    }
+    func snapshotState(): JsonObject {
+        let units = JsonArray()
+        for (unit in contextState.units) {
+            units.add(obj([("entries", unit.entries), ("observation", unit.observation),
+                ("seen", JsonBool(unit.seen)), ("projected", JsonBool(unit.projected))]))
+        }
+        return obj([("protected_messages", contextState.protectedMessages), ("units", units),
+            ("hard_denied", text(hardDenied)), ("closing_goal", JsonBool(closingGoal)),
+            ("pending_model", pendingModel)])
     }
     func context(): JsonObject {
         if (pipe.protocol == "harness/v8") {
-            let stateUnits = JsonArray()
-            for (unit in contextState.units) {
-                stateUnits.add(obj([("entries", unit.entries), ("observation", unit.observation),
-                    ("seen", JsonBool(unit.seen)), ("projected", JsonBool(unit.projected))]))
-            }
-            let state = obj([("protected_messages", contextState.protectedMessages), ("units", stateUnits),
-                ("hard_denied", text(hardDenied)), ("closing_goal", JsonBool(closingGoal)),
-                ("pending_model", pendingModel), ("history_index", JsonInt(contextState.historyIndex))])
+            let state = snapshotState()
+            state.put("history_index", JsonInt(contextState.historyIndex))
             return obj([("version", JsonInt(4)), ("original_manifest", contextState.originalManifest),
                 ("original_summary", contextState.originalSummary), ("context", contextState.r3Context), ("tool_refs", toolRefs),
                 ("next_call_no", JsonInt(nextCall)), ("usage", budgetState.usage()), ("waiting", waiting), ("native_state", state)])
@@ -224,28 +267,20 @@ extend Harness {
         return obj([("version", JsonInt(2)), ("message_refs", contextState.messageRefs), ("tool_refs", toolRefs),
             ("next_call_no", JsonInt(nextCall)), ("usage", budgetState.usage()), ("waiting", waiting)])
     }
-    func pausePoint(): Bool { return pausePointWithMarker(false) }
-    func pausePointWithMarker(afterMeasurement: Bool): Bool {
+    func pausePoint(autoCompactRequested!: Bool = false): Bool {
         if (pipe.protocol == "harness/v6") { return false }
         let payload = JsonObject()
-        if (afterMeasurement) {
+        if (autoCompactRequested) {
             require(pipe.protocol == "harness/v8")
-            payload.put("after_measurement", JsonBool(true))
+            payload.put("auto_compact", JsonBool(true))
         }
         let probe = pipe.request("pause_probe", payload).asObject()
         keys(probe, ["pending"])
         if (!field(probe, "pending").asBool().getValue()) { return false }
-        let stateUnits = JsonArray()
-        for (unit in contextState.units) {
-            stateUnits.add(obj([("entries", unit.entries), ("observation", unit.observation),
-                ("seen", JsonBool(unit.seen)), ("projected", JsonBool(unit.projected))]))
-        }
-        let state = obj([("protected_messages", contextState.protectedMessages), ("units", stateUnits),
-            ("hard_denied", text(hardDenied)), ("closing_goal", JsonBool(closingGoal)), ("pending_model", pendingModel)])
         let snapshot = context()
         if (pipe.protocol == "harness/v7") {
             snapshot.put("version", JsonInt(3))
-            snapshot.put("native_state", state)
+            snapshot.put("native_state", snapshotState())
         }
         let reply = pipe.request("pause_point", obj([("context", snapshot)])).asObject()
         keys(reply, ["paused"])

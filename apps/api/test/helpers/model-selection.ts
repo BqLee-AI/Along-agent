@@ -5,7 +5,7 @@ import {
   setDefault,
   updateProvider,
 } from '../../src/features/model-providers/public.js';
-import type { ConversationDeps, HarnessServices } from '../../src/agent/runtime/contracts.js';
+import type { ConversationDeps, HarnessServices } from '../../src/agent/execution/contracts.js';
 import { measureSdkContext } from '../../src/features/model-providers/public.js';
 
 /** Controlled legacy transport seam; not SDK, outbound-policy or provider acceptance coverage. */

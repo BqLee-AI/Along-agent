@@ -13,7 +13,7 @@ import {
   type RunView,
 } from '@along/contracts';
 import type { ToolOutcome } from '../../src/agent/tools/contracts.js';
-import { cancelConversationRun } from '../../src/agent/operations/run.js';
+import { cancelConversationRun } from '../../src/agent/run/run-actions.js';
 import { runNativeHarness } from '../../src/agent/harness/harness-process.js';
 import { forbidden } from '../../src/platform/errors.js';
 import { createContextPolicy } from '../../src/features/conversations/public.js';

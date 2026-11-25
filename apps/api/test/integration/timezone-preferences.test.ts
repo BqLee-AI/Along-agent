@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
 import { invokeTool, reserveToolInvocation } from '../../src/agent/tools/gateway.js';
 import type { ToolContext } from '../../src/agent/tools/contracts.js';
-import * as toolQuery from '../../src/agent/tools/query.js';
+import * as toolQuery from '../../src/agent/tools/evidence/run-evidence.js';
 import { loadTimeContext } from '../../src/features/time/context.js';
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 

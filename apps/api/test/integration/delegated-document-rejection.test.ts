@@ -6,11 +6,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { HARNESS_R3_PROTOCOL_VERSION, DocumentApprovalReceiptSchema } from '@along/contracts';
-import { rejectDocumentApproval } from '../../src/agent/operations/document-decision.js';
-import { resumeConversationRun } from '../../src/agent/operations/run.js';
-import { createHarnessSession } from '../../src/agent/runtime/attempt-session.js';
+import { rejectDocumentApproval } from '../../src/agent/run/approvals/document-decision.js';
+import { resumeConversationRun } from '../../src/agent/run/run-actions.js';
+import { createHarnessSession } from '../../src/agent/execution/attempt/session.js';
 import { createContextPolicy } from '../../src/features/conversations/public.js';
-import { startConversationRun } from '../../src/agent/operations/start.js';
+import { startConversationRun } from '../../src/agent/run/admit-message.js';
 import { executeReadOnlyInvocation } from '../../src/agent/tools/invocations/invocations.js';
 import {
   configureWorkspaceRegistry,

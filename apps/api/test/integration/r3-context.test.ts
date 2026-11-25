@@ -12,7 +12,7 @@ import {
   type R3ContextBinding,
 } from '../../src/features/conversations/compact/r3-context.js';
 import { appendEvent } from '../../src/features/conversations/run/run-state.js';
-import { commitTerminal } from '../../src/agent/operations/finish.js';
+import { commitTerminal } from '../../src/agent/execution/result/commit.js';
 import {
   admitTestUser,
   createIntegrationDatabase,

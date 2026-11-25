@@ -25,8 +25,8 @@ import {
   invokeWorkspaceCreate,
   invokeWorkspaceRead,
 } from './workspace/workspace-handlers.js';
-import { invokeMemorySource, invokeMemoryRecall, runRememberMemory } from './memory-handlers.js';
-import { invokeRunObservation } from './observation-handler.js';
+import { invokeMemorySource, invokeMemoryRecall, runRememberMemory } from './memory/handlers.js';
+import { invokeRunObservation } from './observations/handler.js';
 import { invokeFeishuDocxRead } from './feishu/docx-read.js';
 import { invokeLearnDocsSearch } from './remote-mcp/learn-search.js';
 

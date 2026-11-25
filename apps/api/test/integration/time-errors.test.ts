@@ -9,9 +9,9 @@ import { handleRequest } from '../helpers/http-app.js';
 import type { AppDeps } from '../../src/http/contracts.js';
 import type { Actor } from '../../src/features/identity/session/actor.js';
 import { createTimeContext, loadTimeContext } from '../../src/features/time/context.js';
-import { executeRun } from '../../src/agent/operations/execute.js';
-import { startConversationRun } from '../../src/agent/operations/start.js';
-import { listRunEvents } from '../../src/features/conversations/run/repository.js';
+import { executeRun } from '../../src/agent/run/execute-turn.js';
+import { startConversationRun } from '../../src/agent/run/admit-message.js';
+import { listRunEvents } from '../../src/features/conversations/run/checkpoints.js';
 import {
   createIntegrationDatabase,
   databaseUrl,

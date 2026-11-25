@@ -4,7 +4,7 @@ import { queryOf } from '../../http/access.js';
 import { okEnvelope } from '../../http/errors.js';
 import { responses } from '../../http/model.js';
 import { getBrief, type BriefDeps } from './public.js';
-import { BriefResponseSchema } from './model.js';
+import { BriefResponseSchema } from './schemas.js';
 export function createBriefController(deps: BriefDeps, access: HttpAccess) {
   return new Elysia({ name: 'brief', strictPath: true }).get(
     '/api/v1/brief',

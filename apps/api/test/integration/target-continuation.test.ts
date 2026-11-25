@@ -10,8 +10,8 @@ import type { GoalResult } from '@along/contracts';
 import {
   acceptTargetContinuation,
   readCancellationScopeInput,
-} from '../../src/agent/operations/target-continuation.js';
-import { acceptReminderDate } from '../../src/features/conversations/lifecycle/reminder-date.js';
+} from '../../src/agent/run/continuation/target.js';
+import { acceptReminderDate } from '../../src/features/conversations/run/reminder-date-continuation.js';
 import { loadTimeContext } from '../../src/features/time/context.js';
 import {
   admitTestUser,
@@ -20,8 +20,8 @@ import {
   type IntegrationDatabase,
 } from './setup.js';
 import { invokeTool, reserveToolInvocation } from '../../src/agent/tools/gateway.js';
-import { validateGoalResult } from '../../src/agent/operations/goal-result.js';
-import { startConversationRun } from '../../src/agent/operations/start.js';
+import { validateGoalResult } from '../../src/agent/execution/result/goal-result.js';
+import { startConversationRun } from '../../src/agent/run/admit-message.js';
 import { createContextPolicy } from '../../src/features/conversations/public.js';
 import {
   readShownCancellationCandidates,

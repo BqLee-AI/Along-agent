@@ -318,6 +318,13 @@ describe('harness/v7 user pause contract', () => {
       HarnessStartSchema.safeParse({ ...start, protocol: 'harness/v7', snapshot: pauseSnapshot })
         .success,
     ).toBe(true);
+    expect(
+      HarnessStartSchema.safeParse({
+        ...start,
+        protocol: 'harness/v7',
+        snapshot: { ...pauseSnapshot, extra: true },
+      }).success,
+    ).toBe(false);
     for (const protocol of ['harness/v6', 'harness/v7']) {
       expect(HarnessStartSchema.safeParse({ ...start, protocol, snapshot }).success).toBe(true);
     }
@@ -337,8 +344,12 @@ describe('harness/v7 user pause contract', () => {
       HarnessRequestSchema.safeParse({ ...frame, type: 'pause_point', context: snapshot }).success,
     ).toBe(false);
     expect(
-      HarnessRequestSchema.safeParse({ ...frame, type: 'pause_probe', after_measurement: true })
-        .success,
+      HarnessRequestSchema.safeParse({
+        ...frame,
+        type: 'pause_point',
+        context: pauseSnapshot,
+        extra: true,
+      }).success,
     ).toBe(false);
     expect(HarnessStartSchema.safeParse({ ...start, protocol: 'harness/v8' }).success).toBe(false);
   });
@@ -381,6 +392,9 @@ describe('harness/v7 user pause contract', () => {
     ).toBe(true);
     expect(
       RunViewSchema.safeParse({ ...view, pause: { ...pause, unexpected: true } }).success,
+    ).toBe(false);
+    expect(
+      RunViewSchema.safeParse({ ...view, pause: { ...pause, status: 'consumed' } }).success,
     ).toBe(false);
   });
 });
@@ -505,5 +519,60 @@ describe('v8 memory source compatibility', () => {
         HarnessStartSchema.safeParse({ ...start, protocol, observations: [observation] }).success,
       ).toBe(false);
     }
+  });
+
+  it('derives the current user input from a v4 resume snapshot when context is not repeated', () => {
+    const { messages, ...common } = start;
+    const context = {
+      manifest: { message_ids: [] },
+      summary: null,
+      messages: [],
+      input: { type: 'user', message_id: messageId, content: messages[0].content },
+    };
+    const resume = {
+      ...common,
+      protocol: 'harness/v8',
+      r3_context: null,
+      snapshot: {
+        version: 4,
+        context,
+        original_manifest: context.manifest,
+        original_summary: null,
+        tool_refs: [],
+        next_call_no: 1,
+        usage: { iterations: 1, tokens: 42 },
+        waiting: null,
+        native_state: {
+          protected_messages: [],
+          units: [],
+          hard_denied: '',
+          closing_goal: false,
+          pending_model: null,
+          history_index: 0,
+        },
+      },
+      auto_compact: {
+        window_tokens: 1024,
+        trigger_ratio: 0.8,
+        input_reserve: 32,
+        output_reserve: 32,
+        continuation_tokens: 64,
+        continuation_iterations: 1,
+      },
+    };
+    expect(HarnessR3ContextStartSchema.safeParse(resume).success).toBe(true);
+    expect(HarnessR3ContextStartSchema.safeParse({ ...resume, snapshot: null }).success).toBe(
+      false,
+    );
+    const compact = {
+      ...resume,
+      r3_context: {
+        compact_summary: { id: invocationId, revision: '1', text: 'summary', message_ids: [] },
+      },
+    };
+    expect(HarnessR3ContextStartSchema.safeParse(compact).success).toBe(true);
+    expect(
+      HarnessR3ContextStartSchema.safeParse({ ...compact, mode: 'measure_only' }).success,
+    ).toBe(false);
   });
 });

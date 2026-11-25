@@ -71,6 +71,8 @@ protected class Harness {
     var waiting: JsonValue = JsonNull()
     var routingPolicy: JsonValue = JsonNull()
     var routingEligible: Bool = false
+    var autoCompact: Option<JsonObject> = None
+    var compactMeterRevision: String = ""
     var delegated: Bool = false
     var trustedWorkspaces = JsonArray()
     let workspaceIds = HashSet<String>()

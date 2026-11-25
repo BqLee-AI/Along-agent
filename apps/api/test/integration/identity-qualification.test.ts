@@ -12,7 +12,7 @@ import {
 } from '../../src/features/identity/session/crypto.js';
 import { isActiveOwner } from '../../src/features/identity/profile/preferences.js';
 import { getConversationList } from '../../src/features/conversations/history/history-service.js';
-import { startConversationRun } from '../../src/agent/operations/public.js';
+import { startConversationRun } from '../../src/agent/run/public.js';
 import { loadTimeContext } from '../../src/features/time/context.js';
 import { getApprovalDetail } from '../../src/features/approvals/reminder/service.js';
 import { confirmApproval } from '../../src/features/approvals/reminder/confirm.js';

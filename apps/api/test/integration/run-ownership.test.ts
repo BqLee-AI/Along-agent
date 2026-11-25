@@ -7,7 +7,7 @@ import { createConnection, createServer } from 'node:net';
 import { Pool } from 'pg';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
-import { RunOwnership } from '../../src/agent/runtime/run-ownership.js';
+import { RunOwnership } from '../../src/agent/execution/driver/ownership.js';
 import { withTransaction } from '../../src/db/transaction.js';
 import { lockRun } from '../../src/features/conversations/run/repository.js';
 import {
@@ -17,7 +17,7 @@ import {
 import { createIntegrationDatabase, databaseUrl, type IntegrationDatabase } from './setup.js';
 import { seedContext, fileLines } from './tool-invocations-probe.js';
 import { appendFileEffect } from './tool-invocations-file-effect.js';
-import { createRunDriver, RunDriver } from '../../src/agent/runtime/run-driver.js';
+import { createRunDriver, RunDriver } from '../../src/agent/execution/driver/driver.js';
 
 const maybe = databaseUrl ? describe : describe.skip;
 
@@ -65,7 +65,7 @@ maybe('Run ownership PostgreSQL session', () => {
     expect(owner).not.toBeNull();
     const childSource = `
       import { Pool } from 'pg';
-      import { RunOwnership } from './src/agent/runtime/run-ownership.ts';
+      import { RunOwnership } from './src/agent/execution/driver/ownership.ts';
       const pool = new Pool({ connectionString: process.env.OWNERSHIP_TEST_DATABASE });
       const owner = await RunOwnership.tryAcquire(pool, process.env.OWNERSHIP_TEST_RUN);
       console.log(owner ? 'acquired' : 'busy');
@@ -531,7 +531,7 @@ maybe('Run ownership PostgreSQL session', () => {
         '-e',
         `
       import { Pool } from 'pg';
-      import { RunOwnership } from './src/agent/runtime/run-ownership.ts';
+      import { RunOwnership } from './src/agent/execution/driver/ownership.ts';
       const pool = new Pool({ connectionString: process.env.OWNERSHIP_TEST_DATABASE });
       const owner = await RunOwnership.tryAcquire(pool, process.env.OWNERSHIP_TEST_RUN);
       console.log(owner ? 'acquired' : 'busy');

@@ -1,8 +1,30 @@
+import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { stateConflict } from '../../../platform/errors.js';
 import { isActiveOwner } from '../../identity/public.js';
 import { lockRun } from '../run/repository.js';
 import type { CompactBinding } from './compact-eligibility.js';
+
+export async function insertCompactPause(
+  client: PoolClient,
+  { pauseId, ownerId, conversationId, runId, attemptId }: CompactBinding,
+  purpose: 'manual_compact' | 'automatic_compact',
+  key?: string,
+): Promise<boolean> {
+  const inserted = await client.query(
+    `INSERT INTO harness_pauses(id,owner_id,conversation_id,run_id,attempt_id,idempotency_key,reason,purpose,resume_source,state)
+     VALUES($1,$2,$3,$4,$5,$6,'runtime',$7,'runtime','pending')
+     ${key === undefined ? '' : 'ON CONFLICT (owner_id,idempotency_key) DO NOTHING'}`,
+    [pauseId, ownerId, conversationId, runId, attemptId, key ?? randomUUID(), purpose],
+  );
+  if (!inserted.rowCount) return false;
+  await client.query(
+    `INSERT INTO compact_operations(pause_id,owner_id,conversation_id,run_id,attempt_id,status)
+     VALUES($1,$2,$3,$4,$5,'pending')`,
+    [pauseId, ownerId, conversationId, runId, attemptId],
+  );
+  return true;
+}
 
 /** All functions use a caller-owned short transaction. No model I/O is allowed
  * while holding these locks. Cancellation takes the same attempt -> Run -> pause
@@ -62,6 +84,21 @@ export async function beginCompactCall(
   if (!result.rowCount) throw stateConflict('compact call already started or freeze unavailable');
 }
 
+async function lockCompactAccounting(client: PoolClient, binding: CompactBinding): Promise<void> {
+  const { attemptId, ownerId, runId, conversationId, pauseId } = binding;
+  const attempt = await client.query(
+    'SELECT 1 FROM run_attempts WHERE id=$1 AND owner_id=$2 AND run_id=$3 FOR UPDATE',
+    [attemptId, ownerId, runId],
+  );
+  const run = await client.query(
+    'SELECT 1 FROM agent_runs WHERE id=$1 AND owner_id=$2 AND conversation_id=$3 FOR UPDATE',
+    [runId, ownerId, conversationId],
+  );
+  if (!attempt.rowCount || !run.rowCount)
+    throw stateConflict('compact accounting binding unavailable');
+  await client.query('SELECT 1 FROM harness_pauses WHERE id=$1 FOR UPDATE', [pauseId]);
+}
+
 /** Account for a reserved call even after cancellation or loss of eligibility.
  * Lock the original attempt and Run, but do not require it still be latest: a
  * late provider result must never be silently dropped. Null is unknown, not zero. */
@@ -72,17 +109,7 @@ export async function recordCompactUsage(
 ): Promise<void> {
   if (tokens !== null && (!Number.isSafeInteger(tokens) || tokens < 0))
     throw stateConflict('invalid compact usage');
-  const attempt = await client.query(
-    'SELECT 1 FROM run_attempts WHERE id=$1 AND owner_id=$2 AND run_id=$3 FOR UPDATE',
-    [binding.attemptId, binding.ownerId, binding.runId],
-  );
-  const run = await client.query(
-    'SELECT 1 FROM agent_runs WHERE id=$1 AND owner_id=$2 AND conversation_id=$3 FOR UPDATE',
-    [binding.runId, binding.ownerId, binding.conversationId],
-  );
-  if (!attempt.rowCount || !run.rowCount)
-    throw stateConflict('compact accounting binding unavailable');
-  await client.query('SELECT 1 FROM harness_pauses WHERE id=$1 FOR UPDATE', [binding.pauseId]);
+  await lockCompactAccounting(client, binding);
   const operation = (
     await client.query<{
       call_started: boolean;
@@ -113,17 +140,7 @@ export async function failCompact(
   code: string,
 ): Promise<void> {
   if (!code || code.length > 128) throw stateConflict('invalid compact failure');
-  const attempt = await client.query(
-    'SELECT 1 FROM run_attempts WHERE id=$1 AND owner_id=$2 AND run_id=$3 FOR UPDATE',
-    [binding.attemptId, binding.ownerId, binding.runId],
-  );
-  const run = await client.query(
-    'SELECT 1 FROM agent_runs WHERE id=$1 AND owner_id=$2 AND conversation_id=$3 FOR UPDATE',
-    [binding.runId, binding.ownerId, binding.conversationId],
-  );
-  if (!attempt.rowCount || !run.rowCount)
-    throw stateConflict('compact accounting binding unavailable');
-  await client.query('SELECT 1 FROM harness_pauses WHERE id=$1 FOR UPDATE', [binding.pauseId]);
+  await lockCompactAccounting(client, binding);
   const result = await client.query(
     `UPDATE compact_operations SET status='failed',error_code=$6,updated_at=now()
      WHERE pause_id=$1 AND owner_id=$2 AND conversation_id=$3 AND run_id=$4 AND attempt_id=$5
@@ -218,17 +235,7 @@ export async function failCompactCandidates(
   code: string,
 ): Promise<boolean> {
   if (!code || code.length > 128) throw stateConflict('invalid compact candidate failure');
-  const attempt = await client.query(
-    'SELECT 1 FROM run_attempts WHERE id=$1 AND owner_id=$2 AND run_id=$3 FOR UPDATE',
-    [binding.attemptId, binding.ownerId, binding.runId],
-  );
-  const run = await client.query(
-    'SELECT 1 FROM agent_runs WHERE id=$1 AND owner_id=$2 AND conversation_id=$3 FOR UPDATE',
-    [binding.runId, binding.ownerId, binding.conversationId],
-  );
-  if (!attempt.rowCount || !run.rowCount)
-    throw stateConflict('compact accounting binding unavailable');
-  await client.query('SELECT 1 FROM harness_pauses WHERE id=$1 FOR UPDATE', [binding.pauseId]);
+  await lockCompactAccounting(client, binding);
   const result = await client.query(
     `UPDATE compact_operations SET candidate_status='failed',candidate_error_code=$7,
        candidate_failed_count=1,updated_at=now()

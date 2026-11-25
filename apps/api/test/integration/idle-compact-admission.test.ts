@@ -1,10 +1,11 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { createContextPolicy } from '../../src/features/conversations/public.js';
-import type { ConversationDeps, RunContext } from '../../src/agent/runtime/contracts.js';
-import { RunOwnership } from '../../src/agent/runtime/run-ownership.js';
-import { getCompactReceipt } from '../../src/agent/operations/compact.js';
-import { startConversationRun, startIdleCompact } from '../../src/agent/operations/start.js';
+import type { ConversationDeps, RunContext } from '../../src/agent/execution/contracts.js';
+import { RunOwnership } from '../../src/agent/execution/driver/ownership.js';
+import { getCompactReceipt } from '../../src/agent/compact/runtime-compact.js';
+import { startConversationRun } from '../../src/agent/run/admit-message.js';
+import { startIdleCompact } from '../../src/agent/compact/start-idle-compact.js';
 import { loadTimeContext } from '../../src/features/time/context.js';
 import { configureTestModel } from '../helpers/model-selection.js';
 import {

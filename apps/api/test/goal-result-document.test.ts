@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { GoalResult } from '@along/contracts';
-import type { RunGoalDocumentEvidence } from '../src/agent/tools/query.js';
-import { validateGoalDocuments } from '../src/agent/operations/goal-result.js';
+import type { RunGoalDocumentEvidence } from '../src/agent/tools/evidence/run-evidence.js';
+import { validateGoalDocuments } from '../src/agent/execution/result/goal-result.js';
 import {
   decodeWorkspaceContent,
   hydrateWorkspaceReadResult,

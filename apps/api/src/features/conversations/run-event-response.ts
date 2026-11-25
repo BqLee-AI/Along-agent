@@ -2,9 +2,9 @@ import type { ThreadEvent } from '@along/stream-protocol';
 import { withTransaction } from '../../db/transaction.js';
 import { unauthorized } from '../../platform/errors.js';
 import { lockViewerAccess, type Actor } from '../identity/public.js';
-import type { ConversationDeps, StartResult } from '../../agent/runtime/contracts.js';
-import { getRunView, executeRun } from '../../agent/operations/public.js';
-import { listConversationEvents } from './run/repository.js';
+import type { ConversationDeps, StartResult } from '../../agent/execution/contracts.js';
+import { getRunView, executeRun } from '../../agent/run/public.js';
+import { listConversationEvents } from './run/checkpoints.js';
 import { writeAuthorizedEvent } from './run/stream-authorization.js';
 
 type EventSink = {

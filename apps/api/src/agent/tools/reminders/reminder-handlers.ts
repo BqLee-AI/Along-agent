@@ -18,7 +18,7 @@ import {
   createTaskWithinTransaction,
   lockTaskCreationScope,
 } from '../../../features/tasks/public.js';
-import { readCancellationScopeInput } from '../../operations/target-continuation.js';
+import { readCancellationScopeInput } from '../../run/continuation/target.js';
 import {
   cancellationScopeIncludes,
   candidatesInCancellationRequest,
@@ -26,7 +26,7 @@ import {
   renderCancellationClarification,
 } from './reminder-cancel-scope.js';
 import { PaginatedListTasksInputSchema, TOOL_INPUT_SCHEMAS } from '../schemas.js';
-import { readRunTimezoneSettings } from '../query.js';
+import { readRunTimezoneSettings } from '../evidence/run-evidence.js';
 import { ApplicationError } from '../../../platform/errors.js';
 import type { ToolContext, ToolResult } from '../contracts.js';
 import type { ToolExecution } from '../handler-common.js';

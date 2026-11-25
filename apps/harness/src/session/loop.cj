@@ -27,10 +27,8 @@ extend Harness {
             var m = JsonObject()
             if (isNull(pendingModel)) {
             if (budgetState.iterations >= budgetState.maxIterations || budgetState.knownTokens >= budgetState.maxTokens) { finish("failed", "BUDGET_EXCEEDED"); return }
-            let output = measuredOutput(true)
-            // A v8 measurement can atomically register an automatic compact.
-            // Recheck before spending a model permit or incrementing usage.
-            if (pipe.protocol == "harness/v8" && pausePointWithMarker(true)) { return }
+            let (output, compactRequested) = measuredOutput(true)
+            if (pipe.protocol == "harness/v8" && pausePoint(autoCompactRequested: compactRequested)) { return }
             var step = pipe.request("model", candidate(output)).asObject()
             if (str(field(step, "type"), 32) == "pause_requested") {
                 require(pipe.protocol != "harness/v6")

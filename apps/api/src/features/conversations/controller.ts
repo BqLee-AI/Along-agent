@@ -5,7 +5,7 @@ import { okEnvelope } from '../../http/errors.js';
 import { errorResponses, responses } from '../../http/model.js';
 import { literalUuidAt } from '../../http/request/path.js';
 import { validationError } from '../../platform/errors.js';
-import type { ConversationDeps } from '../../agent/runtime/contracts.js';
+import type { ConversationDeps } from '../../agent/execution/contracts.js';
 import {
   startConversationRun,
   startIdleCompact,
@@ -16,7 +16,7 @@ import {
   requestConversationPause,
   getCompactReceipt,
   requestRuntimeCompactPause,
-} from '../../agent/operations/public.js';
+} from '../../agent/run/public.js';
 import {
   getConversationList,
   getConversationMessages,

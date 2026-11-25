@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import { requirePool } from '../run/run-input.js';
 import {
   ConversationListQuerySchema,
   ConversationMessagesQuerySchema,
@@ -12,11 +13,10 @@ import {
   encodeCursor,
   forbidden,
   notFound,
-  notReady,
   validationError,
 } from '../../../platform/errors.js';
 import type { ConversationDeps } from '../contracts.js';
-import { getConversation } from '../run/repository.js';
+import { getConversation } from '../run/messages.js';
 import { HistoryCursorSchema, type HistoryCursor } from '../schemas.js';
 import {
   listConversationHistory,
@@ -38,11 +38,6 @@ async function requireEligibleHistoryOwner(pool: Pool, ownerId: string): Promise
 }
 
 export type HistoryQuery = Record<string, string | string[] | undefined>;
-
-function poolOf(deps: Pick<ConversationDeps, 'pool'>): Pool {
-  if (!deps.pool) throw notReady();
-  return deps.pool;
-}
 
 export async function requireHistoryConversation(
   pool: Pool,
@@ -124,8 +119,9 @@ export async function getConversationList(
   if (!parsed.success) throw validationError('invalid conversations query');
   const { limit, cursor: raw } = parsed.data;
   const cursor = cursorOf(raw, 'conversations', ownerId);
-  await requireEligibleHistoryOwner(poolOf(deps), ownerId);
-  const rows = await listConversationHistory(poolOf(deps), { ownerId, cursor, limit });
+  const pool = requirePool(deps);
+  await requireEligibleHistoryOwner(pool, ownerId);
+  const rows = await listConversationHistory(pool, { ownerId, cursor, limit });
   const items = rows.slice(0, limit).map((row) => ({
     conversation_id: row.conversation_id,
     status: row.status,
@@ -157,7 +153,7 @@ export async function getConversationMessages(
 ): Promise<ConversationMessagePage> {
   const parsed = ConversationMessagesQuerySchema.safeParse(query);
   if (!parsed.success) throw validationError('invalid messages query');
-  const pool = poolOf(deps);
+  const pool = requirePool(deps);
   await requireHistoryConversation(pool, ownerId, conversationId);
   const { limit, cursor: raw } = parsed.data;
   const cursor = cursorOf(raw, 'messages', ownerId, conversationId);
@@ -192,7 +188,7 @@ export async function getConversationRuns(
 ): Promise<ConversationRunPage> {
   const parsed = ConversationRunsQuerySchema.safeParse(query);
   if (!parsed.success) throw validationError('invalid runs query');
-  const pool = poolOf(deps);
+  const pool = requirePool(deps);
   await requireHistoryConversation(pool, ownerId, conversationId);
   const { limit, cursor: raw, run_id: runId } = parsed.data;
   const cursor = cursorOf(raw, 'runs', ownerId, conversationId);

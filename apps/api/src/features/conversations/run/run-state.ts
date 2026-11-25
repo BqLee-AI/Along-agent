@@ -6,7 +6,9 @@ import {
   type ThreadEvent,
 } from '@along/stream-protocol';
 import { stateConflict } from '../../../platform/errors.js';
-import { appendCheckpoint, finishAttempt, insertMessage } from './repository.js';
+import { appendCheckpoint } from './checkpoints.js';
+import { finishAttempt } from './repository.js';
+import { insertMessage } from './messages.js';
 import type { RunContext } from '../contracts.js';
 
 export async function appendEvent(
@@ -40,21 +42,12 @@ export async function appendEvent(
     payload,
     request_id: context.requestId,
   });
-  const seq = (
-    await client.query<{ seq: number }>(
-      'SELECT COALESCE(max(seq),0)::int+1 AS seq FROM run_checkpoints WHERE attempt_id=$1',
-      [context.attemptId],
-    )
-  ).rows[0]?.seq;
-  if (!seq) throw new Error('checkpoint sequence unavailable');
   event.seq = await appendCheckpoint(client, {
     ownerId: context.ownerId,
     attemptId: context.attemptId,
-    seq,
-    type,
-    payload,
-    requestId: context.requestId,
-    streamProtocolVersion: event.protocol_version,
+    kind: type,
+    payloadJson: JSON.stringify({ type, payload, request_id: context.requestId }),
+    protocol: event.protocol_version,
   });
   return event;
 }

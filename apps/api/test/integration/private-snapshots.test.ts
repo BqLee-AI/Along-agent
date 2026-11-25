@@ -1,13 +1,10 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { randomBytes, randomUUID } from 'node:crypto';
 import type { HarnessSnapshot } from '@along/contracts';
-import {
-  continueConversationPause,
-  requestConversationPause,
-} from '../../src/agent/operations/pause.js';
-import { startConversationRun } from '../../src/agent/operations/start.js';
-import { createHarnessSession } from '../../src/agent/runtime/attempt-session.js';
-import type { ConversationDeps } from '../../src/agent/runtime/contracts.js';
+import { continueConversationPause, requestConversationPause } from '../../src/agent/run/pause.js';
+import { startConversationRun } from '../../src/agent/run/admit-message.js';
+import { createHarnessSession } from '../../src/agent/execution/attempt/session.js';
+import type { ConversationDeps } from '../../src/agent/execution/contracts.js';
 import { withTransaction } from '../../src/db/transaction.js';
 import {
   createContextPolicy,

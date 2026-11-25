@@ -88,18 +88,18 @@ test('context preview is v8-only and may truthfully report exhausted budget', ()
   );
 });
 
-test('only v8 may mark the final measurement on a pause probe', () => {
+test('only v8 may propose automatic compact on a pause probe', () => {
   const probe = { type: 'pause_probe', request_ref: 'r1' };
   expect(
-    HarnessRequestSchema.safeParse({ ...probe, protocol: 'harness/v8', after_measurement: true })
+    HarnessRequestSchema.safeParse({ ...probe, protocol: 'harness/v8', auto_compact: true })
       .success,
   ).toBe(true);
   expect(
-    HarnessRequestSchema.safeParse({ ...probe, protocol: 'harness/v8', after_measurement: false })
+    HarnessRequestSchema.safeParse({ ...probe, protocol: 'harness/v8', auto_compact: false })
       .success,
   ).toBe(false);
   expect(
-    HarnessRequestSchema.safeParse({ ...probe, protocol: 'harness/v7', after_measurement: true })
+    HarnessRequestSchema.safeParse({ ...probe, protocol: 'harness/v7', auto_compact: true })
       .success,
   ).toBe(false);
   expect(HarnessRequestSchema.safeParse({ ...probe, protocol: 'harness/v7' }).success).toBe(true);

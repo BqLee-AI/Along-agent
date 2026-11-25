@@ -1,12 +1,12 @@
 import { expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import { startConversationRun } from '../../src/agent/operations/start.js';
-import { cancelConversationRun } from '../../src/agent/operations/run.js';
+import { startConversationRun } from '../../src/agent/run/admit-message.js';
+import { cancelConversationRun } from '../../src/agent/run/run-actions.js';
 import { reserveToolInvocation, invokeTool } from '../../src/agent/tools/gateway.js';
 import { readInvocationSnapshots } from '../../src/agent/tools/invocations/invocations.js';
 import { createContextPolicy } from '../../src/features/conversations/public.js';
 import { loadTimeContext } from '../../src/features/time/public.js';
-import { contextOf } from '../../src/agent/runtime/context.js';
+import { contextOf } from '../../src/agent/execution/attempt/context.js';
 import type { RunRow } from '../../src/features/conversations/public.js';
 import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import { createIntegrationDatabase, seedAdmittedSession } from './setup.js';

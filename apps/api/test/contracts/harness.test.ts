@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { EnvelopeSchema, HarnessApprovalDecisionSchema } from '@along/contracts';
 import type { ThreadEvent } from '@along/stream-protocol';
 import { ApplicationError } from '../../src/platform/errors.js';
-import { executeRun } from '../../src/agent/operations/execute.js';
+import { executeRun } from '../../src/agent/run/execute-turn.js';
 import { parseResult, resultSchema } from '../../src/agent/tools/result-schema.js';
 import {
   createHarnessConsumer,
