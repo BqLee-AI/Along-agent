@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-if [[ "${1:-}" != --inside-builder ]]; then
-  exec docker build --target harness-artifact --output "type=local,dest=${1:-$root/apps/harness/dist}" -f "$root/infra/docker/Dockerfile" "$root"
-fi
 # Fixed path matches cjpm's binary dependency manifest; no global SDK or hooks.
 export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
 source /opt/along-toolchain/cangjie/envsetup.sh
@@ -26,4 +23,4 @@ LD_LIBRARY_PATH=/out/lib ldd /out/bin/along-harness
 cp artifacts.lock /out/artifacts.lock
 find src -type f -name '*.cj' -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > /out/source.sha256
 sha256sum cjpm.toml cjpm.lock artifacts.lock >> /out/source.sha256
-sha256sum /out/bin/along-harness > /out/binary.sha256
+(cd /out && sha256sum bin/along-harness > binary.sha256)
