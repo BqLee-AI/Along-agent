@@ -3,10 +3,10 @@ import { registerApp } from '@larksuiteoapi/node-sdk';
 import type { Pool, PoolClient } from 'pg';
 import QRCode from 'qrcode';
 import { z } from 'zod';
-import { withTransaction } from '../../db/transaction.js';
-import { ApplicationError, unauthorized } from '../../platform/errors.js';
-import { lockViewerAccess } from '../identity/public.js';
-import { issueFeishuTenantToken } from './feishu-tenant-token.js';
+import { withTransaction } from '../../../../db/transaction.js';
+import { ApplicationError, unauthorized } from '../../../../platform/errors.js';
+import { lockViewerAccess } from '../../../identity/public.js';
+import { issueFeishuTenantToken } from './tenant-token.js';
 
 type Viewer = { ownerId: string; sessionId: string };
 type Row = {

@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
-import type { FeishuBotDocxGrant } from './feishu-bot-docx-binding.js';
+import type { FeishuBotDocxGrant } from '../docx/grant.js';
 
 /** Decrypt historical user-identity receipts without supporting new v1 writes. */
 export function openFeishuObservation(

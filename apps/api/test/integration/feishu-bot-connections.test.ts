@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import { createFeishuBotConnections } from '../../src/features/office-connectors/feishu-bot-connections.js';
+import { createFeishuBotConnections } from '../../src/features/office-connectors/feishu/connections/bot.js';
 import { readActiveFeishuConnection } from '../../src/features/office-connectors/public.js';
 import { createIntegrationDatabase, databaseUrl, seedAdmittedSession } from './setup.js';
 

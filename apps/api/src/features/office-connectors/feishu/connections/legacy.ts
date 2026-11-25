@@ -1,5 +1,5 @@
 import type { PoolClient } from 'pg';
-import { lockViewerAccess } from '../identity/public.js';
+import { lockViewerAccess } from '../../../identity/public.js';
 
 const feishuCallbackPath = '/api/v1/office/feishu/callback';
 

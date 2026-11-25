@@ -3,7 +3,7 @@ import type { Pool } from 'pg';
 import type { HttpAccess } from '../../http/access.js';
 import { okEnvelope } from '../../http/errors.js';
 import { ApplicationError, notFound } from '../../platform/errors.js';
-import { createFeishuBotConnections } from './feishu-bot-connections.js';
+import { createFeishuBotConnections } from './feishu/connections/bot.js';
 
 const base = '/api/v1/office/feishu/bot';
 

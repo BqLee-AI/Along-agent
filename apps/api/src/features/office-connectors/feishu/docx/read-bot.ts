@@ -1,6 +1,6 @@
-import { readFeishuDocx } from './feishu-docx.js';
-import { issueFeishuTenantToken } from './feishu-tenant-token.js';
-import type { FeishuBotDocxConfiguration } from './feishu-bot-docx-config.js';
+import { readFeishuDocx } from './read.js';
+import { issueFeishuTenantToken } from '../connections/tenant-token.js';
+import type { FeishuBotDocxConfiguration } from './config.js';
 
 /** The gateway owns Run eligibility; do not hold database locks during this operation. */
 export async function readFeishuBotDocx(
