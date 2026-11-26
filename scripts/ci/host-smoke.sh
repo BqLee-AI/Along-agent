@@ -55,6 +55,7 @@ docker exec "$native" bash -ec '
   wait "$pid"
   exit "$result"
 ' _ "http://$baseline:3000"
+docker exec "$native" bun scripts/ci/host-worker-smoke.ts
 docker stop -t 5 "$pg" >/dev/null
 MSYS_NO_PATHCONV=1 docker exec "$native" bun -e '
   const response = await fetch("http://127.0.0.1:3000/readyz", { signal: AbortSignal.timeout(5000) });
