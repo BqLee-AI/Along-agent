@@ -530,7 +530,7 @@ async function executeRuntimeCompactWork(
               }),
             );
           let seen = false;
-          await runNativeHarness({
+          await (deps.runHarness ?? runNativeHarness)({
             services: deps.harness!,
             start,
             signal,

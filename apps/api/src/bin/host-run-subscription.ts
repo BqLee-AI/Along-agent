@@ -1,8 +1,6 @@
-import { produceRunEvents } from '../features/conversations/run-event-response.js';
+import type { RunEventSink } from '../features/conversations/run-event-response.js';
 
-type SubscriptionArgs = Parameters<typeof produceRunEvents>;
-
-export function createHostRunSubscription(...args: OmitLast<SubscriptionArgs>) {
+export function createHostRunSubscription(produce: (sink: RunEventSink) => Promise<void>) {
   const abort = new AbortController();
   let done = false;
   let demand: ((value: unknown) => boolean) | undefined;
@@ -23,9 +21,9 @@ export function createHostRunSubscription(...args: OmitLast<SubscriptionArgs>) {
     wake?.();
   }
 
-  const delivery = produceRunEvents(...args, {
+  const delivery = produce({
     signal: abort.signal,
-    write: (event) => emit(`data: ${JSON.stringify(event)}\n\n`),
+    write: emit,
     async ready() {
       while (!done && !demand) {
         const { promise, resolve } = Promise.withResolvers<void>();
@@ -70,5 +68,3 @@ export function createHostRunSubscription(...args: OmitLast<SubscriptionArgs>) {
     },
   };
 }
-
-type OmitLast<T extends unknown[]> = T extends [...infer Head, unknown] ? Head : never;

@@ -14,6 +14,11 @@ import { ApplicationError } from '../../platform/errors.js';
 export interface HarnessProcessServices {
   binaryPath: string;
   libraryPath?: string;
+  compactExchange?: (
+    operation: 'assemble' | 'interpret',
+    input: string,
+    signal: AbortSignal,
+  ) => Promise<string>;
 }
 
 type EnqueueNativeFrame = () => undefined;
@@ -81,6 +86,12 @@ export async function callNativeCompact(
       ? `\ue000${String.fromCharCode(0xe100 + unit - 0xd800)}`
       : token;
   });
+  if (services.compactExchange) {
+    const reply = await services.compactExchange(operation, json, signal);
+    signal.throwIfAborted();
+    if (Buffer.byteLength(reply, 'utf8') > 8 * HARNESS_MAX_FRAME_BYTES) throw protocolError();
+    return decodeCompactReply(reply);
+  }
   const { child, state, completion, terminate, dispose } = spawnHarness(services, [
     `compact-${operation}/1`,
   ]);
@@ -101,22 +112,29 @@ export async function callNativeCompact(
     const exit = await completion;
     signal.throwIfAborted();
     assertHarnessExit(state, exit);
-    try {
-      const reply = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks, bytes));
-      if (reply.indexOf('\n') !== reply.length - 1 || !reply.endsWith('\n')) throw protocolError();
-      return JSON.parse(reply, (_key, value: unknown) =>
-        typeof value === 'string'
-          ? value.replace(/\ue000([\ue000\ue100-\ue8ff])/g, (_pair, unit: string) =>
-              unit === '\ue000' ? unit : String.fromCharCode(unit.charCodeAt(0) - 0xe100 + 0xd800),
-            )
-          : value,
-      ) as unknown;
-    } catch {
-      throw protocolError();
-    }
+    return decodeCompactReply(Buffer.concat(chunks, bytes));
   } finally {
     signal.removeEventListener('abort', terminate);
     await dispose();
+  }
+}
+
+function decodeCompactReply(output: string | Uint8Array): unknown {
+  try {
+    const reply =
+      typeof output === 'string'
+        ? output
+        : new TextDecoder('utf-8', { fatal: true }).decode(output);
+    if (reply.indexOf('\n') !== reply.length - 1 || !reply.endsWith('\n')) throw protocolError();
+    return JSON.parse(reply, (_key, value: unknown) =>
+      typeof value === 'string'
+        ? value.replace(/\ue000([\ue000\ue100-\ue8ff])/g, (_pair, unit: string) =>
+            unit === '\ue000' ? unit : String.fromCharCode(unit.charCodeAt(0) - 0xe100 + 0xd800),
+          )
+        : value,
+    ) as unknown;
+  } catch {
+    throw protocolError();
   }
 }
 

@@ -1,43 +1,23 @@
 import { randomUUID } from 'node:crypto';
 import type { ThreadEvent } from '@along/stream-protocol';
-import { executeRuntimeCompact } from '../agent/compact/runtime-compact.js';
+import type { ConversationDeps } from '../agent/execution/contracts.js';
+import { executeRun } from '../agent/run/public.js';
 import { RunDriver } from '../agent/execution/driver/driver.js';
 import type { AppDeps } from '../http/contracts.js';
 import { loadTimeContext } from '../features/time/public.js';
 import { writeAuthorizedEvent } from '../features/conversations/public.js';
-import { stateConflict, validationError } from '../platform/errors.js';
-import { createHostAdmission } from './host-admission.js';
+import { ApplicationError, stateConflict, validationError } from '../platform/errors.js';
+import { bindRunReplay } from './host-run-replay.js';
+import { createHostConversationOperations } from './host-conversation-operations.js';
 import { bindBusinessRun } from './host-business-run.js';
-import { createHostHarnessRun } from './host-harness-run.js';
+import { createHostHarnessRun, type HostHarnessRun } from './host-harness-run.js';
 import { createHostRunSubscription } from './host-run-subscription.js';
 
 type Reply = (value: unknown) => boolean;
 
 export function createHostBusinessCapability(deps: AppDeps) {
-  const harnessRuns = new Map<string, ReturnType<typeof createHostHarnessRun>>();
-  const admit = createHostAdmission(deps, (context) => {
-    if (!(deps.runDriver instanceof RunDriver))
-      throw stateConflict('native Run driver unavailable');
-    const native = createHostHarnessRun();
-    const execution = deps.runDriver.start(
-      {
-        pool: deps.pool,
-        timeContext,
-        harness: deps.harness,
-        modelTransport: deps.modelTransport,
-        routing: deps.routing,
-        runDriver: deps.runDriver,
-        runHarness: native.run,
-      },
-      context,
-      executeRuntimeCompact,
-    );
-    harnessRuns.set(context.runId, native);
-    void execution
-      .finally(native.finish)
-      .catch((error: unknown) => console.error('[host harness]', error));
-    return undefined;
-  });
+  const nativeRuns = new Map<string, HostHarnessRun>();
+  const dispatch = createHostConversationOperations(deps);
   const timeContext = deps.timeContext ?? loadTimeContext(deps.tzdbVersion);
   const runs = new Map<
     string,
@@ -47,53 +27,116 @@ export function createHostBusinessCapability(deps: AppDeps) {
       close: () => Promise<void>;
     }
   >();
-  async function open(request: Request) {
-    const { actor, started } = await admit(request);
+  async function open(request: Request, entry: string) {
+    let native: HostHarnessRun | undefined;
+    function allocateNative() {
+      const run = createHostHarnessRun();
+      nativeRuns.set(run.id, run);
+      native = run;
+      return run;
+    }
+    function finishNative(run: HostHarnessRun) {
+      run.finish();
+      // Retain the completion long enough for the native consumer's final poll.
+      setTimeout(() => nativeRuns.delete(run.id), 10_000).unref();
+    }
+    const driver = deps.runDriver;
+    const domain: ConversationDeps = {
+      ...deps,
+      timeContext,
+      runDriver:
+        driver instanceof RunDriver
+          ? {
+              acquire: driver.acquire.bind(driver),
+              release: driver.release.bind(driver),
+              start(executionDeps, context, compact) {
+                const run = allocateNative();
+                try {
+                  const execution = driver.start(
+                    {
+                      ...executionDeps,
+                      harness: executionDeps.harness
+                        ? { ...executionDeps.harness, compactExchange: run.compact }
+                        : executionDeps.harness,
+                      runHarness: run.run,
+                    },
+                    context,
+                    compact,
+                  );
+                  void execution
+                    .finally(() => finishNative(run))
+                    .catch((error: unknown) => console.error('[host harness]', error));
+                } catch (error) {
+                  nativeRuns.delete(run.id);
+                  throw error;
+                }
+              },
+            }
+          : driver,
+    };
+    const result = await dispatch(domain, entry, request);
+    if ('data' in result) return { data: result.data, native: native?.id };
+    const { actor, stream: started } = result;
     const ids = { runId: started.runId, conversationId: started.conversationId };
-    const native = started.serverOwned ? harnessRuns.get(started.runId) : undefined;
     const lease = randomUUID();
     let close: () => Promise<void>;
     let operation: (name: string, input: unknown, reply: Reply) => Promise<void>;
     let facts: unknown;
-    if (started.serverOwned) {
-      harnessRuns.delete(started.runId);
-      const subscription = createHostRunSubscription(
-        { pool: deps.pool, timeContext },
-        actor,
-        started.conversationId,
-        started.runId,
-        started.afterSeq ?? null,
-      );
+    const subscribed = !!started.serverOwned;
+    const streamed = !!started.replay || started.context?.execution === 'harness';
+    if (subscribed) {
+      const pull = bindRunReplay(domain, actor, started);
+      operation = async (name, input, reply) => {
+        try {
+          await pull(name, input, reply);
+        } catch (error) {
+          // A stream has already been opened; a failed disclosure check closes it.
+          if (
+            error instanceof ApplicationError &&
+            (error.errorCode === 'FORBIDDEN' || error.errorCode === 'UNAUTHENTICATED')
+          ) {
+            reply({ status: 'done' });
+            return;
+          }
+          throw error;
+        }
+      };
+      close = async () => {};
+    } else if (streamed) {
+      const { replay, context } = started;
+      const subscription = createHostRunSubscription(async (sink) => {
+        if (replay) {
+          const pool = deps.pool;
+          if (!pool) throw stateConflict('database unavailable');
+          for (const event of replay) {
+            if (!(await sink.ready())) return;
+            const delivered = await writeAuthorizedEvent(
+              pool,
+              actor.ownerId,
+              async (item) => sink.write(item),
+              event,
+              actor.sessionId,
+            );
+            if (!delivered) return;
+          }
+        } else {
+          if (!context) throw stateConflict('Run context missing');
+          const run = allocateNative();
+          const write = Object.assign(async (event: ThreadEvent) => sink.write(event), {
+            ready: sink.ready,
+          });
+          try {
+            await executeRun({ ...domain, runHarness: run.run }, context, write, sink.signal);
+          } finally {
+            finishNative(run);
+          }
+        }
+      });
       operation = async (name, _input, reply) => {
         if (name !== 'replay') throw validationError('expected Run event pull');
         await subscription.pull(reply);
       };
       close = subscription.close;
-    } else if (started.replay) {
-      let index = 0;
-      const replay = started.replay;
-      const pool = deps.pool;
-      if (!pool) throw stateConflict('database unavailable');
-      operation = async (name, _input, reply) => {
-        if (name !== 'replay') throw validationError('expected replay pull');
-        while (index < replay.length) {
-          const next = replay[index++]!;
-          let accepted = false;
-          const open = await writeAuthorizedEvent(
-            pool,
-            actor.ownerId,
-            async (event) => {
-              accepted = true;
-              return reply(event);
-            },
-            next,
-            actor.sessionId,
-          );
-          if (!open || accepted) return;
-        }
-        reply(null);
-      };
-      close = async () => {};
     } else {
       const pool = deps.pool;
       if (!pool) throw stateConflict('database unavailable');
@@ -145,17 +188,16 @@ export function createHostBusinessCapability(deps: AppDeps) {
       };
     }
     const expires = setTimeout(() => {
-      native?.finish();
       void dispose(lease).catch((error: unknown) => console.error('[host run] expiry', error));
     }, 300_000).unref();
     runs.set(lease, { expires, operation, close });
-    if (native) nativeRuns.set(native.id, native);
     return {
       ...ids,
       lease,
-      replay: !!started.replay,
       facts,
-      subscription: !!started.serverOwned,
+      streamed,
+      subscribed,
+      afterSeq: started.afterSeq ?? null,
       native: native?.id,
     };
   }
@@ -179,7 +221,6 @@ export function createHostBusinessCapability(deps: AppDeps) {
     await state.operation(name, input, reply);
   }
 
-  const nativeRuns = new Map<string, ReturnType<typeof createHostHarnessRun>>();
   async function harnessStep(id: string, operation: string, input: unknown) {
     const native = nativeRuns.get(id);
     if (!native) throw stateConflict('native Run unavailable');

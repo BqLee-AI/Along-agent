@@ -6,8 +6,6 @@ import std.net.*
 import stdx.encoding.json.*
 import stdx.net.http.*
 
-let messagesPath = "/api/v1/conversations/messages"
-
 func privateClient(socketPath: String, readTimeout!: Duration = 10 * Duration.second): Client {
     return ClientBuilder().connector({ _: SocketAddress =>
         let socket = UnixSocket(socketPath)
@@ -42,6 +40,10 @@ class HostDistributor <: HttpRequestDistributor {
     public func distribute(path: String): HttpRequestHandler {
         if (let Some(route) <- routes.get(path)) { return route }
         let parts = path.split("/")
+        if (parts.size >= 4 && parts[0].isEmpty() && parts[1] == "api" &&
+            parts[2] == "v1" && parts[3] == "conversations") {
+            return FuncHandler({ ctx => serveConversation(ctx, socketPath) })
+        }
         if (parts.size == 7 && parts[0].isEmpty() && parts[1] == "api" &&
             parts[2] == "v1" && !parts[4].isEmpty() && parts[5] == "actions" &&
             ((parts[3] == "approvals" && parts[6] == "confirm") ||
@@ -89,8 +91,12 @@ func runCapabilityStep(client: Client, path: String, id: String, lease: String,
         .header("x-request-id", id).header("x-run-capability", lease)
         .header("x-run-operation", operation).header("content-type", "application/json")
         .body(input.toString()).build())
-    let body = boundedBody(reply, maximum: 6 * 1048576 + 64)
-    if (reply.status != 200) { throw Exception("Run capability rejected " + operation) }
+    if (reply.status != 200 || reply.headers.getFirst("x-request-id") != Some(id)) {
+        throw Exception("Run capability rejected " + operation)
+    }
+    let body = boundedBody(reply, maximum: if (path == "/harness/step" && operation == "next") {
+        64 * 1048576
+    } else { 6 * 1048576 + 64 })
     return JsonValue.fromStr(body)
 }
 
@@ -117,6 +123,16 @@ func driveNativeRun(socketPath: String, id: String, lease: String): Unit {
                         result = "HARNESS_EXITED"
                     }
                     step("exit", JsonString(result))
+                case "compact" =>
+                    let work = JsonObject()
+                    work.put("id", next.get("id").getOrThrow())
+                    try {
+                        let output = runNativeCompact(jsonText(next, "operation"), jsonText(next, "input"))
+                        work.put("output", JsonString(output))
+                    } catch (error: Exception) {
+                        eprintln("[host compact] ${error.message}")
+                    }
+                    step("compact-result", work)
                 case "pending" => sleep(100 * Duration.millisecond)
                 case _ => throw Exception("invalid Run capability status")
             }
@@ -129,66 +145,3 @@ func driveNativeRun(socketPath: String, id: String, lease: String): Unit {
     }
 }
 
-func serveBusinessChat(ctx: HttpContext, socketPath: String): Unit {
-    let id = requestId(ctx)
-    let builder = ctx.responseBuilder.header("x-request-id", id).header("cache-control", "no-store")
-    if (ctx.request.method != "POST") {
-        builder.status(404).body("")
-        return
-    }
-    let client = privateClient(socketPath)
-    try {
-        let admitted = forwardPublicPost(ctx, client, messagesPath, id, "admit")
-        let body = boundedBody(admitted)
-        if (admitted.status != 200) {
-            builder.status(admitted.status).header("content-type", "application/json").body(body)
-            return
-        }
-        let run = JsonValue.fromStr(body).asObject()
-        let lease = jsonText(run, "lease")
-        let step = { operation: String, input: JsonValue =>
-            runCapabilityStep(client, "/business/step", id, lease, operation, input)
-        }
-        if (let Some(native) <- run.get("native")) {
-            let nativeLease = native.asString().getValue()
-            spawn { driveNativeRun(socketPath, id, nativeLease) }
-        }
-        try {
-            builder.header("content-type", "text/event-stream")
-                .header("cache-control", "no-cache, no-transform")
-                .header("x-conversation-id", jsonText(run, "conversationId"))
-                .header("x-run-id", jsonText(run, "runId"))
-                .header("transfer-encoding", "chunked")
-            let writer = HttpResponseWriter(ctx)
-            let emit = { event: JsonValue =>
-                if (ctx.isClosed()) { throw Exception("SSE disconnected") }
-                writer.write(("data: " + event.toString() + "\n\n").toArray())
-            }
-            if (run.get("subscription").getOrThrow().asBool().getValue()) {
-                while (!ctx.isClosed()) {
-                    let frame = step("replay", JsonNull())
-                    if (businessNull(frame)) { break }
-                    let text = frame.asString().getValue()
-                    if (!text.isEmpty()) { writer.write(text.toArray()) }
-                }
-            } else if (run.get("replay").getOrThrow().asBool().getValue()) {
-                while (!ctx.isClosed()) {
-                    let event = step("replay", JsonNull())
-                    if (businessNull(event)) { break }
-                    emit(event)
-                }
-            } else {
-                emit(step("start", JsonNull()))
-                advanceBusinessRun(run.get("facts").getOrThrow().asObject(),
-                    { tool: String => step("invoke", JsonString(tool)).asObject() },
-                    { kind: String, payload: JsonObject =>
-                        emit(step("publish", businessPayload([("type", JsonString(kind)), ("payload", payload)])))
-                    })
-            }
-        } finally {
-            try { step("close", JsonNull()) } catch (_: Exception) {}
-        }
-    } finally {
-        client.close()
-    }
-}

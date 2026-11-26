@@ -190,7 +190,6 @@ func serve(port: UInt16, socketPath: String): Unit {
         ctx.responseBuilder.header("x-request-id", id).header("Content-Type", "text/event-stream")
             .header("Transfer-Encoding", "chunked").body(ReadinessEvents(socketPath, id))
     })
-    server.distributor.register(messagesPath, { ctx => serveBusinessChat(ctx, socketPath) })
     spawn {
         while (!stopping()) { sleep(50 * Duration.millisecond) }
         server.closeGracefully()

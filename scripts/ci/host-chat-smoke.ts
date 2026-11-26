@@ -221,7 +221,7 @@ try {
   const firstRunId = delegated.headers.get('x-run-id');
   assert.ok(firstRunId);
   const reader = delegated.body!.getReader();
-  assert.match(new TextDecoder().decode((await reader.read()).value), /thread\.started/);
+  await readStarted(reader);
   await providerEntered.promise;
   await reader.cancel();
   releaseProvider.resolve();
@@ -257,13 +257,20 @@ try {
   });
   assert.equal(revokedSubscription.status, 200);
   const revokedReader = revokedSubscription.body!.getReader();
-  assert.match(new TextDecoder().decode((await revokedReader.read()).value), /thread\.started/);
+  await readStarted(revokedReader);
   await revocationEntered.promise;
   await database.pool.query('UPDATE sessions SET revoked_at=clock_timestamp() WHERE id=$1', [
     session.sessionId,
   ]);
   releaseRevocation.resolve();
-  assert.equal((await revokedReader.read()).done, true, 'revoked subscriber received a new event');
+  const decoder = new TextDecoder();
+  let remaining = '';
+  for (;;) {
+    const chunk = await revokedReader.read();
+    if (chunk.done) break;
+    remaining += decoder.decode(chunk.value, { stream: true });
+  }
+  assert.ok(!remaining.includes('data:'), 'revoked subscriber received a new event');
   const until = performance.now() + 110_000;
   let restarted = false;
   for (;;) {
@@ -315,5 +322,15 @@ async function stopHost(child: ReturnType<typeof Bun.spawn>) {
     assert.equal(await child.exited, 0);
   } finally {
     clearTimeout(deadline);
+  }
+}
+async function readStarted(reader: ReadableStreamDefaultReader<Uint8Array>) {
+  const decoder = new TextDecoder();
+  let text = '';
+  for (;;) {
+    const chunk = await reader.read();
+    assert.equal(chunk.done, false, 'stream ended before thread.started');
+    text += decoder.decode(chunk.value, { stream: true });
+    if (text.includes('thread.started')) return;
   }
 }
