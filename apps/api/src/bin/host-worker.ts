@@ -1,5 +1,6 @@
 import { createPool, type Pool } from '../db/pool.js';
 import { createLocalInAppProvider, type InAppProvider } from '../features/notifications/public.js';
+import { runIdentityMailTick } from '../features/identity/public.js';
 import {
   runAckPhase,
   runCancelPhase,
@@ -27,9 +28,22 @@ export function createHostWorker(pool: Pool | null) {
     : null;
   const provider = receivePool ? createLocalInAppProvider(receivePool) : null;
   let activePhase: Promise<unknown> | null = null;
+  let activeMail: Promise<unknown> | null = null;
   let stopping: Promise<void> | null = null;
 
   async function runPhase(phase: string, workerId: string): Promise<void> {
+    if (phase === 'identity-mail') {
+      if (stopping) throw new Error('host worker is stopping');
+      if (!pool) return;
+      if (activeMail) throw new Error('host mail phase already active');
+      activeMail = runIdentityMailTick(pool);
+      try {
+        await activeMail;
+      } finally {
+        activeMail = null;
+      }
+      return;
+    }
     const run = Object.hasOwn(phases, phase) ? phases[phase] : undefined;
     if (!run) throw new Error('unknown host worker phase');
     if (stopping) throw new Error('host worker is stopping');
@@ -47,7 +61,7 @@ export function createHostWorker(pool: Pool | null) {
   function stop(): Promise<void> {
     stopping ??= (async () => {
       // A phase failure is reported to its own caller; only pool close can fail shutdown.
-      await activePhase?.catch(() => undefined);
+      await Promise.allSettled([activePhase, activeMail]);
       await receivePool?.end();
     })();
     return stopping;
