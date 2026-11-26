@@ -153,7 +153,7 @@ R2-B 的完整目标及多轮自主查询边界见[design/19 §4、§6](design/1
 
 #169 的合成错误/歧义取消、实际 PG 撤销回执、撞名后精确字节与 MCP 新读见[2026-11-23 核对记录](verification/write-targets-169-verification-2026-11-23.md)；历史归因和真实模型未覆盖边界单列。
 
-仓颉后端的生产镜像验收覆盖 [HTTP/SSE 与私有能力通道](verification/cangjie-host-2026-11-26.md)和[聊天提醒、委托 Run 与 Worker 恢复](verification/cangjie-chat-reminder-2026-11-26.md)。
+仓颉后端的生产镜像验收覆盖 [HTTP/SSE 与私有能力通道](verification/cangjie-host-2026-11-26.md)、[聊天提醒与 Worker 恢复](verification/cangjie-chat-reminder-2026-11-26.md)和 [Run 编排、审批恢复与压缩](verification/cangjie-run-2026-11-26.md)。
 
 ## 十、References（3 篇）
 
