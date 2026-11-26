@@ -36,7 +36,7 @@
 - [Required] 同次 verify 仅复用成功 typecheck 构建的共享 packages；失败构建不消费，独立单元入口与跳过 typecheck 的 verify 仍真实准备包，不依赖旧 dist 或跨 job 产物。Compose 宿主不安装没有宿主消费者的依赖，镜像内仍真实执行 Bun 冻结安装、构建与运行；缺/有 `TZDB_VERSION` 两轮全新卷的就绪场景均须保留，格式错误不能作为警告放行。验收结果记在对应 change tasks / PR，不把未执行检查写成完成。
 - [Required · #43] HTTP入口在业务POST收集前复用身份与适用CSRF头门禁；原始JSON字节累计不超过131072（含分块/UTF8），超限413 PAYLOAD_TOO_LARGE，空/畸形JSON400 VALIDATION_ERROR，响应头/envelope/error的request_id一致。认证/CSRF、未知路径及超限拒绝未结束上传时须完整发送有限错误并及时关闭，不等end或主动无界drain；允许运行时已缓冲数据及触发超限的最后chunk有限越界，不要求零读取。合法小JSON与keep-alive、冻结确认/取消事务不回归；不以此声明DoS、代理缓冲、内存/吞吐等通用防护已验证（design/10 §1.1）。
   - HTTP 路由实现的更换不改变此验收：生产handler须通过真实明文及TLS连接，分别用慢速和持续上传验证上述拒绝、完整错误和及时关闭；合法连接复用、账户和业务写的错误先后，以及 SSE 断连/撤权也须通过真实连接分别验证。框架内部请求不能替代实际socket证据。详见 design/10 §1.1。
-- [Required · 职责基线] 仓颉唯一组织模型/工具循环、本次上下文、行动选择、预算、等待/恢复/停止；TS 长期保留 ToolGateway/能力、身份/批准/时间/任务/worker、API/Web 与 Run/checkpoint 存储（design/09/11、ADR0009）。native 源码分层见 [Harness README](../../apps/harness/README.md)，不改变该职责或 wire 合同。最小接入不等于完整 R1；补读不执行，checkpoint/fencing 不保证通用 external exactly-once。
+- [Required · 职责基线] 生产环境由仓颉接收 HTTP/SSE、编排 Run 并推进 Worker，原生 Harness 组织模型与工具循环。TS 保留 Web、ToolGateway、身份、批准、时间、任务、外部调用与 PostgreSQL 原子写入。补读不执行，checkpoint 与执行权栅栏保留既有外部效果合同（design/09、11，ADR 0010）。
 - [Required · API 功能职责] API 按功能及实际业务生命周期就近组织控制器、用例、契约与持久化；分工见 design/01 §2。Elysia 是已注册端点的唯一分发器，未命中不重跑业务控制器。公共入口分开请求准入、响应表示和连接处理；目录及适配调整不得改变认证、请求拒绝、流式披露、事务或运行角色行为（design/10 §1）。
 - [Required · #144] 用户可请求运行在安全点暂停，并在原 Run 显式继续；在途效果如实裁决，预算和授权不重置。刷新和只读跟随不继续，取消先提交使资格失效；不将用户暂停等同批准或通用崩溃恢复（design/23 §3、conversations API §9）。
 - [Required · #144 记忆] 本人可要求记住并在其他会话召回，也可查看来源、按修订更正或停止召回；owner 隔离和当前来源资格适用于读取及重放。字面无命中或降级不证明不存在，记忆不是授权，也不能保证模型准确理解本人意图（design/23 §6、API §12）。
