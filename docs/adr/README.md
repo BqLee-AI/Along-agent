@@ -25,3 +25,4 @@
 | [0007](0007-ci-critical-path.md)                | CI 关键路径局部修订                | 历史编排                     | Bun/Ox 选型及构建复用保留；当前 CI 调度见 design/13 §4；#21                         |
 | [0008](0008-static-scheduling.md)               | static 内部调度                    | Accepted（编排已修订）       | 内部并发边界和构建拓扑保留；当前 CI 分类见 design/13 §4；#24                        |
 | [0009](0009-cangjie-harness-ts-capabilities.md) | 仓颉唯一 Harness / TS 长期能力     | Accepted                     | 局部修订 0003 的调用/事务范围；design/02/04/09/11；不改业务、安全 spec 或 CI        |
+| [0010](0010-cangjie-backend-host.md)            | 仓颉生产服务宿主                   | Accepted                     | #189、#190，按迁移切片接管 0009 的服务入口和运行编排                                |

@@ -4,6 +4,7 @@
 - **Date**: 2026-10-23
 - **Deciders**: issue #44（用户确定语言分工；本次仅规范对齐）
 - **Supersedes**: [0003](0003-pg-source-of-truth-outbox.md) 中“所有跨模块副作用一律 outbox / 仅创建确认可跨模块事务”的绝对范围；PG 唯一事实源、事务可靠投递和约束继续有效。旧正文冻结保留，当前适用范围在本记录与索引说明；不修改 0005 的安全冻结。
+- **Superseded by**: [0010](0010-cangjie-backend-host.md)，按迁移切片修订生产 API、Run 宿主编排和 Worker 的语言归属。
 
 ## Context
 
