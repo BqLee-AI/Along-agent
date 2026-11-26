@@ -33,6 +33,69 @@ private func harnessExited(): HarnessRunError {
     return HarnessRunError("HARNESS_EXITED", "harness process exited unexpectedly")
 }
 
+private func launchHarness(args: Array<String>, input: File): SubProcess {
+    let configured = getVariable("HARNESS_BINARY") ?? ""
+    let binary = if (configured.isEmpty()) { "/app/harness/bin/along-harness" } else { configured }
+    let library = getVariable("HARNESS_LIBRARY_PATH") ?? ""
+    let environment = HashMap<String, String>()
+    environment.add("LANG", "C.UTF-8")
+    environment.add("LC_ALL", "C.UTF-8")
+    environment.add("TZ", "UTC")
+    environment.add("LD_LIBRARY_PATH", if (library.isEmpty()) { "/app/harness/lib" } else { library })
+    return launch(binary, args, environment: environment, stdIn: FromFile(input), stdOut: Pipe, stdErr: Discard)
+}
+
+func runNativeCompact(operation: String, payload: String): String {
+    if (operation != "assemble" && operation != "interpret") { throw harnessProtocol() }
+    let directory = Directory.createTemp("/tmp")
+    try {
+        let path = directory.toString() + "/input"
+        File.writeTo(path, unsafe { payload.rawData() })
+        let input = File(path, OpenMode.Read)
+        let child = try { launchHarness(["compact-${operation}/1"], input) }
+        finally { input.close() }
+        let done = AtomicBool(false)
+        let watcher = spawn {
+            while (!done.load()) {
+                if (stopping()) { terminateHarness(child); break }
+                sleep(25 * Duration.millisecond)
+            }
+        }
+        var reaped = false
+        try {
+            let chunks = ArrayList<Array<Byte>>()
+            var size: Int64 = 0
+            let chunk = Array<Byte>(8192, repeat: 0)
+            while (!stopping()) {
+                let count = child.stdOutPipe.read(chunk)
+                if (count <= 0) { break }
+                size += count
+                if (size > 8 * harnessFrameLimit) { throw harnessProtocol() }
+                chunks.add(chunk.slice(0, count).clone())
+            }
+            let status = child.wait()
+            reaped = true
+            if (status != 0) { throw harnessExited() }
+            let output = Array<Byte>(size, repeat: 0)
+            var offset: Int64 = 0
+            for (block in chunks) {
+                for (index in 0..block.size) { output[offset + index] = block[index] }
+                offset += block.size
+            }
+            return String.fromUtf8(output)
+        } finally {
+            done.store(true)
+            watcher.get()
+            if (!reaped) {
+                terminateHarness(child)
+                try { child.wait() } catch (_: Exception) {}
+            }
+        }
+    } finally {
+        remove(directory, recursive: true)
+    }
+}
+
 // SubProcess.wait closes the SDK's stdin pipe only after exit. Own the write
 // end separately so a terminal reply can be followed by EOF before waiting.
 private class HarnessInput {
@@ -52,17 +115,10 @@ private class HarnessInput {
     }
 
     func start(): SubProcess {
-        let configured = getVariable("HARNESS_BINARY") ?? ""
-        let binary = if (configured.isEmpty()) { "/app/harness/bin/along-harness" } else { configured }
-        let library = getVariable("HARNESS_LIBRARY_PATH") ?? ""
-        let environment = HashMap<String, String>()
-        environment.add("LANG", "C.UTF-8")
-        environment.add("LC_ALL", "C.UTF-8")
-        environment.add("TZ", "UTC")
-        environment.add("LD_LIBRARY_PATH", if (library.isEmpty()) { "/app/harness/lib" } else { library })
+        let args: Array<String> = []
         let input = File("/proc/self/fd/${reader}", OpenMode.Read)
         try {
-            return launch(binary, [], environment: environment, stdIn: FromFile(input), stdOut: Pipe, stdErr: Discard)
+            return launchHarness(args, input)
         } finally {
             try { input.close() } catch (_: Exception) {}
         }

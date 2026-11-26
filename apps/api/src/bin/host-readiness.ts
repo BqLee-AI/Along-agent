@@ -7,7 +7,7 @@ import { createPool } from '../db/pool.js';
 import { createUserModelTransport } from '../features/model-providers/public.js';
 import { loadTimeContext } from '../features/time/public.js';
 import { readiness } from '../http/health/model.js';
-import { failEnvelope } from '../http/errors.js';
+import { failEnvelope, okEnvelope } from '../http/errors.js';
 import { toWebRequest } from '../http/transport/request.js';
 import { ApplicationError, validationError } from '../platform/errors.js';
 import { createHostBusinessCapability } from './host-business-capability.js';
@@ -41,6 +41,7 @@ function sendCapabilityJson(
   status: number,
   value: unknown,
   requestId: string,
+  headers?: Record<string, string>,
 ) {
   const body = JSON.stringify(value);
   res
@@ -48,6 +49,7 @@ function sendCapabilityJson(
       'content-type': 'application/json',
       'content-length': Buffer.byteLength(body),
       'x-request-id': requestId,
+      ...headers,
     })
     .end(body);
 }
@@ -74,17 +76,29 @@ const server = createServer(async (request, response) => {
     }
     return;
   }
+  const conversationEntry = request.headers['x-along-conversation-operation'];
   if (
-    request.method === 'POST' &&
-    (path.startsWith('/api/v1/') || path === '/business/step' || path === '/harness/step')
+    (request.method === 'POST' &&
+      (path.startsWith('/api/v1/') || path === '/business/step' || path === '/harness/step')) ||
+    (request.method === 'GET' &&
+      typeof conversationEntry === 'string' &&
+      path.startsWith('/api/v1/conversations'))
   ) {
     try {
       const web = toWebRequest(request, new URL(path, 'http://localhost'));
-      if (
-        web.headers.get('x-along-host-operation') === 'admit' &&
-        new URL(web.url).pathname === '/api/v1/conversations/messages'
-      ) {
-        sendCapabilityJson(response, 200, await business.open(web), requestId);
+      if (typeof conversationEntry === 'string' && path.startsWith('/api/v1/conversations')) {
+        const opened = await business.open(web, conversationEntry);
+        if ('data' in opened) {
+          sendCapabilityJson(
+            response,
+            200,
+            okEnvelope(opened.data, requestId),
+            requestId,
+            opened.native ? { 'x-native-handoff': opened.native } : undefined,
+          );
+        } else {
+          sendCapabilityJson(response, 200, opened, requestId, { 'x-run-stream': '1' });
+        }
       } else if (path === '/business/step' || path === '/harness/step') {
         const lease = web.headers.get('x-run-capability');
         const operation = web.headers.get('x-run-operation');
