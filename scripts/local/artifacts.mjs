@@ -146,7 +146,11 @@ export async function prepareArtifact(config, directory, { upgrade = false } = {
     { env, log, code: 'API_BUILD_FAILED' },
   );
   try {
-    await run('docker', ['pull', 'postgres:16-alpine'], { env, log, code: 'POSTGRES_IMAGE_FAILED' });
+    await run('docker', ['pull', 'postgres:16-alpine'], {
+      env,
+      log,
+      code: 'POSTGRES_IMAGE_FAILED',
+    });
   } catch {
     await run('docker', ['image', 'inspect', 'postgres:16-alpine'], {
       env,
