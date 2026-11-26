@@ -37,11 +37,69 @@ for role in native baseline; do
 done
 MSYS_NO_PATHCONV=1 docker exec "$native" bun scripts/ci/host-smoke.mjs \
   http://127.0.0.1:3000 "http://$baseline:3000"
+docker exec "$native" bash -ec '
+  tls=$(mktemp -d)
+  openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=localhost \
+    -addext "subjectAltName=DNS:localhost" -keyout "$tls/key.pem" -out "$tls/cert.pem" >/dev/null 2>&1
+  ALONG_HOST_TLS_CERT="$tls/cert.pem" ALONG_HOST_TLS_KEY="$tls/key.pem" /app/host/bin/along-host 3001 &
+  pid=$!
+  trap "rm -rf \"$tls\"" EXIT
+  for ((i=0; i<25; i++)); do
+    if (echo >/dev/tcp/127.0.0.1/3001) 2>/dev/null; then break; fi
+    sleep .2
+  done
+  result=0
+  NODE_EXTRA_CA_CERTS="$tls/cert.pem" bun scripts/ci/host-smoke.mjs \
+    https://localhost:3001 "$1" || result=$?
+  kill -TERM "$pid"
+  wait "$pid"
+  exit "$result"
+' _ "http://$baseline:3000"
 docker stop -t 5 "$pg" >/dev/null
 MSYS_NO_PATHCONV=1 docker exec "$native" bun -e '
   const response = await fetch("http://127.0.0.1:3000/readyz", { signal: AbortSignal.timeout(5000) });
   if (response.status !== 503 || (await response.json()).reason !== "NOT_READY") process.exit(1);
 '
+docker exec "$native" bun -e '
+  const { readdirSync, readFileSync } = await import("node:fs");
+  const childCommand = "/app/apps/api/dist/bin/host-readiness.js";
+  const pid = readdirSync("/proc").find((entry) => {
+    if (!/^\d+$/.test(entry)) return false;
+    try {
+      return readFileSync(`/proc/${entry}/cmdline`, "utf8").split("\0")[1] === childCommand;
+    } catch {
+      return false;
+    }
+  });
+  if (!pid) throw Error("capability process missing");
+  process.kill(Number(pid), "SIGSTOP");
+  try {
+    const stream = await fetch("http://127.0.0.1:3000/readyz/events", {
+      signal: AbortSignal.timeout(1800)
+    });
+    const reader = stream.body.getReader();
+    const { value } = await reader.read();
+    if (new TextDecoder().decode(value) !== ": readiness\n\n") throw Error("missing SSE heartbeat");
+    await reader.cancel();
+    const health = await fetch("http://127.0.0.1:3000/healthz", {
+      signal: AbortSignal.timeout(1800)
+    });
+    if (!health.ok) throw Error("host did not serve health after SSE disconnect");
+  } catch (error) {
+    process.kill(Number(pid), "SIGCONT");
+    throw error;
+  }
+  try {
+    const started = performance.now();
+    const response = await fetch("http://127.0.0.1:3000/readyz", { signal: AbortSignal.timeout(5000) });
+    const elapsed = performance.now() - started;
+    if (response.status !== 503 || elapsed < 2000 || (await response.json()).reason !== "NOT_READY") {
+      throw Error(`unexpected readiness timeout: ${response.status} in ${elapsed} ms`);
+    }
+  } finally {
+    process.kill(Number(pid), "SIGCONT");
+  }
+'
 docker stop -t 5 "$native" >/dev/null
 test "$(docker inspect "$native" --format '{{.State.ExitCode}}')" = 0
-printf '%s\n' 'Dependency failure and SIGTERM passed.'
+printf '%s\n' 'Dependency failure, capability timeout and SIGTERM passed.'
