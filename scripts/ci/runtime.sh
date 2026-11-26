@@ -14,6 +14,7 @@ if [[ "$(uname -s)" != Linux || "$(uname -m)" != x86_64 ]]; then
 fi
 owned="$(mktemp -d "${TMPDIR:-/tmp}/along-runtime.XXXXXX")"
 image="along-runtime:$(basename "$owned")"
+host_image="$image-host"
 pids=()
 cleanup() {
   local result=$?
@@ -22,6 +23,9 @@ cleanup() {
     if kill -0 "$pid" 2>/dev/null; then kill -TERM "$pid" 2>/dev/null || true; fi
   done
   for pid in "${pids[@]}"; do wait "$pid" 2>/dev/null || true; done
+  if docker image inspect "$host_image" >/dev/null 2>&1; then
+    docker image rm "$host_image" >/dev/null || result=1
+  fi
   if docker image inspect "$image" >/dev/null 2>&1; then
     docker image rm "$image" >/dev/null || result=1
   fi
@@ -47,6 +51,9 @@ fi
 bash scripts/ci/contracts.sh "$image" &
 pids+=("$!")
 if [[ "$mode" == all ]]; then
+  docker build --target host-runtime --tag "$host_image" --file infra/docker/Dockerfile .
+  bash scripts/ci/host-smoke.sh "$host_image" "$image" &
+  pids+=("$!")
   env -u DATABASE_URL -u TZDB_VERSION \
     COMPOSE_PROJECT_NAME="along-ci-smoke-$(basename "$owned" | tr '[:upper:].' '[:lower:]-')" \
     bash scripts/ci/compose-smoke.sh "$image" &

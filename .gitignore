@@ -21,3 +21,6 @@ data/
 
 # TypeScript incremental build
 *.tsbuildinfo
+
+# Cangjie backend build
+/apps/host/target/
