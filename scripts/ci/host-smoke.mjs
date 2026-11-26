@@ -56,11 +56,12 @@ async function rejectUnfinishedUpload(path, status, code, continuous) {
     : tcpConnect(options);
   const chunks = [];
   let pump;
+  const deadline = setTimeout(
+    () => socket.destroy(new Error(`unfinished upload timed out: ${path}`)),
+    3_000,
+  );
   try {
     await new Promise((resolve, reject) => {
-      socket.setTimeout(3_000, () =>
-        socket.destroy(new Error(`unfinished upload timed out: ${path}`)),
-      );
       socket.once(tls ? 'secureConnect' : 'connect', () => {
         socket.write(
           `POST ${path} HTTP/1.1\r\nHost: ${url.host}\r\nContent-Type: application/json\r\n` +
@@ -75,6 +76,7 @@ async function rejectUnfinishedUpload(path, status, code, continuous) {
       });
     });
   } finally {
+    clearTimeout(deadline);
     clearInterval(pump);
     socket.destroy();
   }

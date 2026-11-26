@@ -95,16 +95,36 @@ const handleRequest: RequestListener = async (request, response) => {
   }
   const operation = request.headers['x-along-host-operation'];
   if (operation === 'fallback') {
-    const web = finiteRequest(
-      toWebRequest(request, new URL(path, 'http://localhost'), undefined, onRead),
-    );
-    const error = await unmatchedError(web, !!apiPool, fallbackAccess);
-    sendCapabilityJson(
-      response,
-      httpStatusForError(error.code),
-      failEnvelope(error, requestId),
-      requestId,
-    );
+    try {
+      const web = finiteRequest(
+        toWebRequest(request, new URL(path, 'http://localhost'), undefined, onRead),
+      );
+      const error = await unmatchedError(web, !!apiPool, fallbackAccess);
+      if (!response.destroyed) {
+        sendCapabilityJson(
+          response,
+          httpStatusForError(error.code),
+          failEnvelope(error, requestId),
+          requestId,
+        );
+      }
+    } catch (error) {
+      if (response.destroyed) return;
+      if (response.headersSent) {
+        response.destroy();
+        return;
+      }
+      const failure =
+        error instanceof ApplicationError
+          ? error
+          : new ApplicationError(500, 'INTERNAL_ERROR', 'internal error');
+      sendCapabilityJson(
+        response,
+        httpStatusForError(failure.code),
+        failEnvelope(failure, requestId),
+        requestId,
+      );
+    }
     return;
   }
   if (request.method === 'POST' && path.startsWith('/worker/')) {

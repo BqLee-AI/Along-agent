@@ -145,7 +145,18 @@ export async function prepareArtifact(config, directory, { upgrade = false } = {
     ['build', '--tag', image, '--file', path.join(source, 'infra/docker/Dockerfile'), source],
     { env, log, code: 'API_BUILD_FAILED' },
   );
-  await run('docker', ['pull', 'postgres:16-alpine'], { env, log, code: 'POSTGRES_IMAGE_FAILED' });
+  try {
+    await run('docker', ['pull', 'postgres:16-alpine'], {
+      env,
+      log,
+      code: 'POSTGRES_IMAGE_FAILED',
+    });
+  } catch {
+    await run('docker', ['image', 'inspect', 'postgres:16-alpine'], {
+      env,
+      code: 'POSTGRES_IMAGE_FAILED',
+    });
+  }
   const imageId = (await run('docker', ['image', 'inspect', '--format', '{{.Id}}', image])).trim();
   const artifact = { digest, image, imageId };
   await writeJson(path.join(source, 'along-build.json'), { digest, imageId });

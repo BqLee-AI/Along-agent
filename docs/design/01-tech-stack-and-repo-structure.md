@@ -144,7 +144,7 @@ packages/contracts ──depends──▶ zod（仅此）
 - 模型 key、向量库地址（如有）一律环境变量/Secret，不进代码（Observed, B03§6）。
 - 工具链：`bun install --frozen-lockfile`；`bun run build:packages` 构建共享包，`bun run build` 先包后应用，`bun run build:api` 构建 API 及依赖。开发、类型检查与测试同样须满足包产物前置，不依赖旧 `dist/`。
 - 本地入口：`bun run dev`、`bun run typecheck`、`bun run lint`、`bun run verify`；格式修复与阻塞检查为 `bun run format` / `bun run format:check`。完整测试分组见 [贡献指南](../../CONTRIBUTING.md)。
-- Docker 使用固定 Bun、冻结安装与依赖优先构建，以 Bun 启动三角色服务；真实 Dockerfile 从源码与 `bun.lock` 构建，不借宿主机产物或容器内旧工具旁路。D7 健康/就绪行为不变（见 13 §4）。
+- Docker 从源码和 `bun.lock` 冻结安装并构建。生产镜像默认启动仓颉宿主，按 `ROLE=api|worker|all` 提供公开 HTTP/SSE、Run 编排和 Worker。TS 能力进程继续处理授权、领域事务和外部 I/O。D7 探针合同见 13 §4，语言分工见 ADR 0010。
 
 ## 6. R1 Web：个人助理与职责边界
 
