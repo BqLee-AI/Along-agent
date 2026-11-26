@@ -9,11 +9,11 @@ Issue: #209
 - 用户管理自己的 Bot，并在 Bot 的独立设置里编辑名称、简介、角色、行为指令、模型选择及工具和资料限制。
 - 用户先进入 Bot，再新建或打开它下面的对话。一个 Bot 可以拥有多个彼此独立的对话；对话在创建时确定所属 Bot，不提供切换或迁移操作。
 - 新 Run 使用接纳时的 Bot 配置；已有 Run 保留当时依据。角色指令不能授权，后续工具动作仍检查当前资格。
-- 旧会话及其历史、审批链接和回执继续可访问，不自动授予任何 Bot 旧资料或历史执行资格。
+- 移除无 Bot 会话入口。在切换时清理确认可丢弃的本地旧测试会话及其专属运行记录。升级发现未处理的无 Bot 历史时停止切换。
 
 ## 现有合同与变更
 
-- 会话归属、历史和兼容：[`design/17` §2、§4、§6、§7、§9](../../../docs/design/17-r1-conversation-history.md)，增量见 `specs/conversations/spec.md`。
+- 会话归属、历史和切换：[`design/17` §2、§4、§6、§7、§9](../../../docs/design/17-r1-conversation-history.md)，增量见 `specs/conversations/spec.md`。
 - 运行资格、可信上下文和恢复：[`design/20` §2–§4、§7、§9](../../../docs/design/20-goal-scoped-delegation.md)，增量见 `specs/agent-runtime/spec.md` 和 `specs/tool-gateway/spec.md`。
 - 模型绑定：[`design/22` §3](../../../docs/design/22-model-provider-settings.md)。复用用户已经配置的模型，不复制凭据或扩大模型访问资格。
 
