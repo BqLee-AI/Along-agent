@@ -2,14 +2,18 @@ import { createServer, type ServerResponse } from 'node:http';
 import { httpStatusForError } from '@along/contracts';
 import { createRunDriver } from '../agent/execution/driver/driver.js';
 import { createRoutingRuntime } from '../agent/routing/index.js';
+import { createConfiguredAccountService } from '../bootstrap/identity.js';
 import { loadHarnessServices } from '../bootstrap/harness-services.js';
 import { createPool } from '../db/pool.js';
+import { createInvitedAccountService } from '../features/identity/public.js';
 import { createUserModelTransport } from '../features/model-providers/public.js';
 import { loadTimeContext } from '../features/time/public.js';
 import { readiness } from '../http/health/model.js';
 import { failEnvelope, okEnvelope } from '../http/errors.js';
 import { toWebRequest } from '../http/transport/request.js';
 import { ApplicationError, validationError } from '../platform/errors.js';
+import { writeFiniteReply } from './finite-http.js';
+import { createHostAccount } from './host-account.js';
 import { createHostBusinessCapability } from './host-business-capability.js';
 import { createHostReminderActions } from './host-reminder-actions.js';
 import { createHostWorker } from './host-worker.js';
@@ -35,6 +39,17 @@ const business = createHostBusinessCapability({
   runDriver: driver,
 });
 const actions = createHostReminderActions({ pool: apiPool });
+const account = createHostAccount({
+  pool: apiPool,
+  timeContext: time,
+  modelTransport: createUserModelTransport,
+  ...(apiPool
+    ? {
+        accountService: createConfiguredAccountService(apiPool),
+        invitedAccountService: createInvitedAccountService(apiPool),
+      }
+    : {}),
+});
 
 function sendCapabilityJson(
   res: ServerResponse,
@@ -73,6 +88,26 @@ const server = createServer(async (request, response) => {
     } catch (error) {
       console.error('[host worker]', path, error);
       response.writeHead(500, { 'x-request-id': requestId }).end();
+    }
+    return;
+  }
+  if (request.headers['x-along-host-operation'] === 'account') {
+    const abort = new AbortController();
+    const onClose = () => abort.abort();
+    response.once('close', onClose);
+    try {
+      const result = await account(
+        toWebRequest(request, new URL(path, 'http://localhost'), abort.signal),
+      );
+      if (result) await writeFiniteReply(result, response);
+      else response.writeHead(404, { 'content-length': 0 }).end();
+    } catch {
+      if (!response.destroyed && !response.headersSent) {
+        const failure = new ApplicationError(503, 'NOT_READY', 'service not ready');
+        sendCapabilityJson(response, 503, failEnvelope(failure, requestId), requestId);
+      }
+    } finally {
+      response.off('close', onClose);
     }
     return;
   }
