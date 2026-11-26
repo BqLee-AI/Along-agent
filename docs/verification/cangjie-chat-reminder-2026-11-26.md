@@ -7,7 +7,8 @@
 - 提醒快捷路径返回完整审批事件流。幂等重放逐字节一致，重复确认返回同一个任务 ID，投递前取消的任务进入 `cancelled`，通知和 `fired` 事件均为零。
 - 委托路径在模型应答前断开 SSE，Run 随后进入 `done`。用原幂等键重放得到原 Run 和 `thread.completed`，模型仅请求两次，创建回执对应唯一已完成的工具调用。
 - 仓颉 Worker 排程后收到 SIGTERM 并退出。重启后同一提醒进入 `fired`，保留排程回执，只有一条通知和一条 `fired` 事件。
-- 对宿主镜像 `sha256:4cc9bc6977c5bc7222c68d850017fdf5a8866190d47714faa96ddb497ded7441` 复跑聊天验收。模型仍在等待时撤销会话，随后释放模型响应。原订阅结束，没有收到新事件。
+- 最终 `host-runtime` 镜像 `sha256:f76fc4ca1710ed51cb27afebbe9fcf36c292ae6c52f36978c4b5436516bcd663` 通过 `scripts/ci/host-smoke.sh`。模型仍在等待时撤销会话，随后释放模型响应。原订阅结束，没有收到新事件。
+- 聊天提醒冒烟使用 Web 的 `taskAdmission('reminder')` 构造请求，并用 `consumeThreadStream` 解码仓颉 HTTP 响应。事件顺序与重放字节保持一致。
 
 ## 覆盖边界
 

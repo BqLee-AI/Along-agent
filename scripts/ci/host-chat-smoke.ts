@@ -13,6 +13,9 @@ import {
   updateProvider,
 } from '../../apps/api/src/features/model-providers/public.js';
 import { jsonBody, listen, sendModelSse } from '../../apps/api/test/helpers/harness-consumer.js';
+import { consumeThreadStream } from '../../apps/web/src/features/conversations/model/conversation-run.js';
+import { taskAdmission } from '../../apps/web/src/features/conversations/model/task.js';
+import type { ThreadEvent } from '@along/stream-protocol';
 
 const database = await createIntegrationDatabase();
 let host: ReturnType<typeof Bun.spawn> | undefined;
@@ -143,19 +146,22 @@ try {
   const init = {
     method: 'POST',
     headers,
-    body: JSON.stringify({ raw_text, execution: 'business', confirmed_timezone: 'Asia/Shanghai' }),
+    body: JSON.stringify({
+      raw_text,
+      ...taskAdmission('reminder'),
+      confirmed_timezone: 'Asia/Shanghai',
+    }),
     signal: AbortSignal.timeout(10_000),
   };
   const send = () => fetch(base + '/api/v1/conversations/messages', init);
   const response = await send();
+  const webResponse = response.clone();
   const text = await response.text();
   assert.equal(response.status, 200, text);
   assert.match(response.headers.get('content-type'), /^text\/event-stream/);
   assert.equal(response.headers.get('x-request-id'), 'native-chat-test');
-  const events = text
-    .trim()
-    .split('\n\n')
-    .map((frame) => JSON.parse(frame.slice(6)));
+  const events: ThreadEvent[] = [];
+  await consumeThreadStream(webResponse, (event) => events.push(event));
   assert.deepEqual(
     events.map((event) => event.type),
     ['thread.started', 'message.delta', 'card.proposed', 'approval_required', 'thread.completed'],
