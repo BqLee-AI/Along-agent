@@ -76,6 +76,8 @@ CMD ["bun", "apps/api/dist/main.js"]
 
 FROM api-runtime AS host-runtime
 COPY --from=host-native /out/ /app/host/
+# stdx loads the unversioned OpenSSL name dynamically.
+RUN ln -s /usr/lib/x86_64-linux-gnu/libssl.so.3 /app/host/lib/libssl.so
 ENV LD_LIBRARY_PATH=/app/host/lib
 CMD ["/app/host/bin/along-host"]
 

@@ -1,8 +1,14 @@
 import assert from 'node:assert/strict';
 
 const [native, baseline] = process.argv.slice(2);
-async function probe(base, path) {
-  const response = await fetch(`${base}${path}`, { signal: AbortSignal.timeout(5_000) });
+async function probe(base, path, requestId) {
+  const response = await fetch(`${base}${path}`, {
+    signal: AbortSignal.timeout(5_000),
+    headers: requestId ? { 'x-request-id': requestId } : {},
+  });
+  const returnedId = response.headers.get('x-request-id');
+  if (requestId) assert.equal(returnedId, requestId);
+  else assert.match(returnedId ?? '', /^[\da-f-]{36}$/i);
   return [response.status, await response.json()];
 }
 
@@ -19,7 +25,9 @@ for (const base of [native, baseline]) {
 }
 const expected = await probe(baseline, '/readyz');
 assert.equal(expected[0], 200);
-const probes = await Promise.all(Array.from({ length: 4 }, () => probe(native, '/readyz')));
+const probes = await Promise.all(
+  Array.from({ length: 4 }, (_, i) => probe(native, '/readyz', `ready-${i}`)),
+);
 for (const result of probes) assert.deepEqual(result, expected);
 const stream = await fetch(`${native}/readyz/events`, { signal: AbortSignal.timeout(5_000) });
 assert.equal(stream.status, 200);
@@ -27,13 +35,13 @@ assert.match(stream.headers.get('content-type') ?? '', /^text\/event-stream\b/);
 const reader = stream.body.getReader();
 const decoder = new TextDecoder();
 let frame = '';
-while (!frame.includes('\n\n')) {
+while (!frame.includes('event: readiness') || !frame.endsWith('\n\n')) {
   const { done, value } = await reader.read();
   assert.equal(done, false);
   frame += decoder.decode(value, { stream: true });
 }
 await reader.cancel();
-assert.equal(frame, 'event: readiness\ndata: {"status":"ok"}\n\n');
+assert.equal(frame, ': readiness\n\nevent: readiness\ndata: {"status":"ok"}\n\n');
 assert.deepEqual(await probe(native, '/healthz'), [200, { status: 'ok' }]);
 console.log(
   'Native HTTP and readiness match TS with PostgreSQL. SSE frame and subsequent request passed.',
