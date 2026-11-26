@@ -90,7 +90,7 @@ export async function executeAttempt(
         return;
       }
     }
-    await runNativeHarness({
+    await (deps.runHarness ?? runNativeHarness)({
       services: deps.harness,
       start: session.start,
       signal: controller.signal,

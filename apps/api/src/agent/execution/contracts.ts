@@ -11,7 +11,7 @@ import type {
   ModelStepTransport,
 } from '../../features/model-providers/public.js';
 import type { ContextPolicy } from '@along/contracts';
-import type { HarnessProcessServices } from '../harness/harness-process.js';
+import type { HarnessProcessServices, NativeHarnessOptions } from '../harness/harness-process.js';
 import type { RoutingRuntime } from '../routing/index.js';
 import type { RunOwnership } from './driver/ownership.js';
 import type { FeishuBotDocxGrant } from '../../features/office-connectors/public.js';
@@ -47,6 +47,7 @@ export interface ConversationDeps {
         autoCompactPlanningTokens?: number;
       })
     | null;
+  runHarness?: (options: NativeHarnessOptions) => Promise<void>;
   routing?: RoutingRuntime;
   modelTransport?: ModelTransportFactory;
   runDriver?: {

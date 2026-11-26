@@ -334,6 +334,48 @@ async function executeBusinessTurn(
   );
 }
 
+export async function openBusinessRun(deps: ConversationDeps, context: RunContext) {
+  const pool = requirePool(deps);
+  await withTransaction(pool, async (client) => {
+    const { run } = await lockRun(client, context, true, false);
+    if (run.execution !== 'business') throw stateConflict('not a business run');
+  });
+  const session: RunSession = { context, terminal: false };
+  const text = context.reminderInputText ?? context.inputText;
+  return {
+    restatement: context.reminderNeedsRestatement === true,
+    wantsReminder: findReminderDirective(text) >= 0,
+    wantsCancel: CANCEL_INTENT.test(text),
+    cancellationTarget: UUID_IN_TEXT.exec(text)?.[0] ?? null,
+    start: () => persist(pool, session, 'thread.started', startPayload(session)),
+    publish: (type: ThreadEvent['type'], payload: Record<string, unknown>) =>
+      persist(pool, session, type, {
+        ...payload,
+        conversation_id: context.conversationId,
+        run_id: context.runId,
+      }),
+    cancel: () => cancelRun(pool, session),
+    async invoke(toolId: 'propose_task' | 'request_cancel_task' | 'list_tasks') {
+      switch (toolId) {
+        case 'propose_task':
+          return invokeTurnTool(pool, session, toolId, {
+            raw_time_text: text,
+            timezone_hint: context.confirmedTimezone,
+            note: text,
+            occurrence: 'once',
+          });
+        case 'request_cancel_task': {
+          const taskId = UUID_IN_TEXT.exec(text)?.[0];
+          if (!taskId) throw stateConflict('missing task target');
+          return invokeTurnTool(pool, session, toolId, { task_id: taskId, reason_text: text });
+        }
+        case 'list_tasks':
+          return invokeTurnTool(pool, session, toolId, { limit: 5 });
+      }
+    },
+  };
+}
+
 export async function executeRun(
   deps: ConversationDeps,
   context: RunContext,

@@ -136,7 +136,11 @@ export class RunDriver {
     }
   }
 
-  start(deps: ConversationDeps, context: RunContext, continueCompact: ContinueCompact): void {
+  start(
+    deps: ConversationDeps,
+    context: RunContext,
+    continueCompact: ContinueCompact,
+  ): Promise<void> {
     const owner = context.ownership;
     if (!owner || !this.owners.has(owner) || this.stopping)
       throw stateConflict('Run execution owner unavailable');
@@ -204,6 +208,7 @@ export class RunDriver {
       });
     this.executions.add(execution);
     void execution.catch(() => undefined).finally(() => this.executions.delete(execution));
+    return execution;
   }
 
   private async scan(): Promise<void> {
