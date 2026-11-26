@@ -13,9 +13,9 @@ Issue: #209
 
 ## 现有合同与变更
 
-- 会话归属、历史和切换：[`design/17` §2、§4、§6、§7、§9](../../../docs/design/17-r1-conversation-history.md)，增量见 `specs/conversations/spec.md`。
-- 运行资格、可信上下文和恢复：[`design/20` §2–§4、§7、§9](../../../docs/design/20-goal-scoped-delegation.md)，增量见 `specs/agent-runtime/spec.md` 和 `specs/tool-gateway/spec.md`。
-- 模型绑定：[`design/22` §3](../../../docs/design/22-model-provider-settings.md)。复用用户已经配置的模型，不复制凭据或扩大模型访问资格。
+- 会话归属、历史和切换：[`design/17` §2、§4、§6、§7、§9](../../../../docs/design/17-r1-conversation-history.md)，增量见 `specs/conversations/spec.md`。
+- 运行资格、可信上下文和恢复：[`design/20` §2–§4、§7、§9](../../../../docs/design/20-goal-scoped-delegation.md)，增量见 `specs/agent-runtime/spec.md` 和 `specs/tool-gateway/spec.md`。
+- 模型绑定：[`design/22` §3](../../../../docs/design/22-model-provider-settings.md)。复用用户已经配置的模型，不复制凭据或扩大模型访问资格。
 
 ## 非目标
 
