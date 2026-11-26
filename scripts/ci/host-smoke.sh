@@ -71,7 +71,7 @@ docker exec "$native" bun -e '
   const pid = readdirSync("/proc").find((entry) => {
     if (!/^\d+$/.test(entry)) return false;
     try {
-      return readFileSync(`/proc/${entry}/cmdline`, "utf8").split("\0")[1] === childCommand;
+      return readFileSync(`/proc/${entry}/cmdline`, "utf8").split("\0").includes(childCommand);
     } catch {
       return false;
     }

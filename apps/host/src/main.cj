@@ -122,7 +122,7 @@ main(args: Array<String>) {
     let directory = Directory.createTemp("/tmp")
     let socketPath = directory.toString() + "/capability.sock"
     try {
-        let capability = launch("bun", ["/app/apps/api/dist/bin/host-readiness.js", socketPath, role], stdIn: Pipe)
+        let capability = launch("bun", ["--no-env-file", "/app/apps/api/dist/bin/host-readiness.js", socketPath, role], stdIn: Pipe)
         try {
             for (_ in 0..100) {
                 if (exists(socketPath) || stopping()) { break }

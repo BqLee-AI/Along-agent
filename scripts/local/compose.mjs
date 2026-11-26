@@ -155,17 +155,6 @@ export async function compose(
         ...(feishuNames.length
           ? { environment: Object.fromEntries(feishuNames.map((name) => [name, null])) }
           : {}),
-        ...(config.identityKeyringFile
-          ? {
-              // Windows ACL-private binds can appear as mode 0777 in Linux.
-              // Seal the validated, read-only source without weakening the loader.
-              command: [
-                'sh',
-                '-ec',
-                'umask 077; cp /run/along-identity-keyring-source.json /run/along-identity-keyring.json; chmod 600 /run/along-identity-keyring.json; exec bun --no-env-file apps/api/dist/main.js',
-              ],
-            }
-          : {}),
         volumes: [
           ...(config.routing
             ? [
