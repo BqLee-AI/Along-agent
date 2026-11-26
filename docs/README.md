@@ -155,6 +155,8 @@ R2-B 的完整目标及多轮自主查询边界见[design/19 §4、§6](design/1
 
 仓颉后端的生产镜像验收覆盖 [HTTP/SSE 与私有能力通道](verification/cangjie-host-2026-11-26.md)、[聊天提醒与 Worker 恢复](verification/cangjie-chat-reminder-2026-11-26.md)、[Run 编排、审批恢复与压缩](verification/cangjie-run-2026-11-26.md)、[账户与模型设置](verification/cangjie-account-2026-11-26.md)和[产品接口](verification/cangjie-product-2026-11-26.md)。
 
+默认生产入口、本地安装、升级与回滚的结果见[仓颉切换验收](verification/cangjie-cutover-2026-11-26.md)。
+
 ## 十、References（3 篇）
 
 | 序号 | 文档                                                             | 作用                                        |
