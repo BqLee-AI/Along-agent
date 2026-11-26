@@ -98,6 +98,14 @@ const upstream = createServer(async (req, res) => {
         clarification: null,
         answer: 'Late reply must lose',
       };
+    } else if (user.includes('automatic compact scenario')) {
+      name = 'finish_goal';
+      args = {
+        status: 'completed',
+        outcomes: [{ description: 'Answer', status: 'achieved', receipt_refs: [] }],
+        clarification: null,
+        answer: 'Automatic compact continuation',
+      };
     } else {
       content = 'Native answer';
     }
@@ -142,6 +150,7 @@ try {
       DATABASE_URL: db.connectionString,
       TZDB_VERSION: 'fixture-v1',
       HARNESS_COMPLETION_CAP: '1024',
+      HARNESS_AUTO_COMPACT_PLANNING_TOKENS: '16000',
     },
     stdout: 'inherit',
     stderr: 'inherit',
@@ -334,8 +343,37 @@ try {
   const activeEvents = await collect(await get(`${active.path}/events`));
   assert.equal(activeEvents.at(-1)?.type, 'thread.completed', JSON.stringify(activeEvents));
   assert.equal(modelCalls.compact, 2);
+
+  const history = await collect(await send('历史资料'.repeat(4750)));
+  assert.equal(history.at(-1)?.type, 'thread.completed', JSON.stringify(history));
+  const initialAuto = await collect(
+    await send('automatic compact scenario', true, started(history).conversation_id),
+  );
+  const autoIds = started(initialAuto);
+  const autoPath = runPath(autoIds.conversation_id, autoIds.run_id);
+  const autoView = await until(
+    async () => json(await get(autoPath)),
+    (run) => run.status === 'done' || run.status === 'failed',
+  );
+  const auto = await collect(await get(`${autoPath}/events`));
+  assert.equal(autoView.status, 'done', JSON.stringify({ autoView, auto }));
+  assert.equal(auto.at(-1)?.type, 'thread.completed', JSON.stringify(auto));
+  const autoOperations = await db.pool.query(
+    `SELECT p.purpose, p.state, o.status, o.usage_recorded FROM harness_pauses p
+     JOIN compact_operations o ON o.pause_id=p.id WHERE p.run_id=$1`,
+    [autoIds.run_id],
+  );
+  assert.deepEqual(autoOperations.rows, [
+    {
+      purpose: 'automatic_compact',
+      state: 'consumed',
+      status: 'published',
+      usage_recorded: true,
+    },
+  ]);
+  assert.equal(modelCalls.compact, 3);
   console.log(
-    'native conversation HTTP verified cursor replay, request-bound abort, cancel fencing, approval resume, pause continuation and idle and active compact',
+    'native conversation HTTP verified cursor replay, request-bound abort, cancel fencing, approval resume, pause continuation and idle, active and automatic compact',
   );
 } finally {
   for (const gate of gates.values()) gate.release.resolve();

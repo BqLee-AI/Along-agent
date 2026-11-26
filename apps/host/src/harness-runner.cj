@@ -66,8 +66,9 @@ func runNativeCompact(operation: String, payload: String): String {
             let chunks = ArrayList<Array<Byte>>()
             var size: Int64 = 0
             let chunk = Array<Byte>(8192, repeat: 0)
+            let outputPipe = child.stdOutPipe
             while (!stopping()) {
-                let count = child.stdOutPipe.read(chunk)
+                let count = outputPipe.read(chunk)
                 if (count <= 0) { break }
                 size += count
                 if (size > 8 * harnessFrameLimit) { throw harnessProtocol() }
