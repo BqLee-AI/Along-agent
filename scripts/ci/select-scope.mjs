@@ -114,7 +114,7 @@ export function classifyChanges(changes, nativeTests = []) {
       runtime = true;
     } else if (
       path.startsWith('apps/host/') ||
-      /^scripts\/ci\/host-(?:account-|chat-|run-|worker-)?smoke\./.test(path)
+      /^scripts\/ci\/host-(?:account-|chat-|product-|run-|worker-)?smoke\./.test(path)
     ) {
       runtime = true;
     } else if (path.startsWith('infra/migrations/')) {

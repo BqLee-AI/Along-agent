@@ -5,17 +5,20 @@ import { createRoutingRuntime } from '../agent/routing/index.js';
 import { createConfiguredAccountService } from '../bootstrap/identity.js';
 import { loadHarnessServices } from '../bootstrap/harness-services.js';
 import { createPool } from '../db/pool.js';
+import { conversationMemorySources } from '../features/conversations/public.js';
 import { createInvitedAccountService } from '../features/identity/public.js';
+import { createMemoryService } from '../features/memory/public.js';
+import { loadWorkspaceRegistry } from '../features/workspaces/public.js';
 import { createUserModelTransport } from '../features/model-providers/public.js';
 import { loadTimeContext } from '../features/time/public.js';
 import { readiness } from '../http/health/model.js';
 import { failEnvelope, okEnvelope } from '../http/errors.js';
 import { toWebRequest } from '../http/transport/request.js';
 import { ApplicationError, validationError } from '../platform/errors.js';
-import { writeFiniteReply } from './finite-http.js';
+import { finiteRequest, writeFiniteReply } from './finite-http.js';
 import { createHostAccount } from './host-account.js';
 import { createHostBusinessCapability } from './host-business-capability.js';
-import { createHostReminderActions } from './host-reminder-actions.js';
+import { createHostProductRoutes } from './host-product-routes.js';
 import { createHostWorker } from './host-worker.js';
 
 const socketPath = process.argv[2];
@@ -38,7 +41,15 @@ const business = createHostBusinessCapability({
   routing: apiPool ? createRoutingRuntime() : undefined,
   runDriver: driver,
 });
-const actions = createHostReminderActions({ pool: apiPool });
+if (apiPool) await loadWorkspaceRegistry();
+const product = createHostProductRoutes({
+  pool: apiPool,
+  timeContext: time,
+  modelTransport: createUserModelTransport,
+  memoryService: apiPool
+    ? createMemoryService({ pool: apiPool, sources: conversationMemorySources })
+    : undefined,
+});
 const account = createHostAccount({
   pool: apiPool,
   timeContext: time,
@@ -91,14 +102,15 @@ const server = createServer(async (request, response) => {
     }
     return;
   }
-  if (request.headers['x-along-host-operation'] === 'account') {
+  const operation = request.headers['x-along-host-operation'];
+  if (operation === 'account' || operation === 'product') {
     const abort = new AbortController();
     const onClose = () => abort.abort();
     response.once('close', onClose);
     try {
-      const result = await account(
-        toWebRequest(request, new URL(path, 'http://localhost'), abort.signal),
-      );
+      const web = toWebRequest(request, new URL(path, 'http://localhost'), abort.signal);
+      const result =
+        operation === 'account' ? await account(web) : await product(finiteRequest(web));
       if (result) await writeFiniteReply(result, response);
       else response.writeHead(404, { 'content-length': 0 }).end();
     } catch {
@@ -113,11 +125,8 @@ const server = createServer(async (request, response) => {
   }
   const conversationEntry = request.headers['x-along-conversation-operation'];
   if (
-    (request.method === 'POST' &&
-      (path.startsWith('/api/v1/') || path === '/business/step' || path === '/harness/step')) ||
-    (request.method === 'GET' &&
-      typeof conversationEntry === 'string' &&
-      path.startsWith('/api/v1/conversations'))
+    (request.method === 'POST' && (path === '/business/step' || path === '/harness/step')) ||
+    (typeof conversationEntry === 'string' && path.startsWith('/api/v1/conversations'))
   ) {
     try {
       const web = toWebRequest(request, new URL(path, 'http://localhost'));
@@ -152,19 +161,6 @@ const server = createServer(async (request, response) => {
             await business.harnessStep(lease, operation, input),
             requestId,
           );
-        }
-      } else {
-        const result = await actions(web);
-        if (result) {
-          const body = await result.text();
-          response
-            .writeHead(result.status, {
-              ...Object.fromEntries(result.headers),
-              'content-length': Buffer.byteLength(body),
-            })
-            .end(body);
-        } else {
-          response.writeHead(404, { 'content-length': 0 }).end();
         }
       }
     } catch (error) {

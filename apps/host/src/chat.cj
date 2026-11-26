@@ -50,51 +50,20 @@ class HostDistributor <: HttpRequestDistributor {
             parts[2] == "v1" && parts[3] == "conversations") {
             return FuncHandler({ ctx => serveConversation(ctx, socketPath) })
         }
-        if (parts.size == 7 && parts[0].isEmpty() && parts[1] == "api" &&
-            parts[2] == "v1" && !parts[4].isEmpty() && parts[5] == "actions" &&
-            ((parts[3] == "approvals" && parts[6] == "confirm") ||
-             (parts[3] == "tasks" && parts[6] == "cancel"))) {
-            return FuncHandler({ ctx => serveReminderAction(ctx, socketPath, path) })
-        }
         if (isAccountPath(path)) {
             return FuncHandler({ ctx =>
                 serveFinite(ctx, socketPath, "account", encrypted: encrypted, listener: Some(listener))
+            })
+        }
+        if (isProductPath(path)) {
+            return FuncHandler({ ctx =>
+                serveFinite(ctx, socketPath, "product", encrypted: encrypted, listener: Some(listener))
             })
         }
         return NotFoundHandler()
     }
 }
 
-func forwardPublicPost(ctx: HttpContext, client: Client, path: String, id: String, operation: String): HttpResponse {
-    let request = HttpRequestBuilder().post().url("http://localhost" + path)
-        .header("x-request-id", id)
-    if (!operation.isEmpty()) { request.header("x-along-host-operation", operation) }
-    for (name in ["cookie", "authorization", "x-csrf-token", "idempotency-key", "content-type"]) {
-        if (let Some(value) <- ctx.request.headers.getFirst(name)) { request.header(name, value) }
-    }
-    match (ctx.request.headers.getFirst("content-length")) {
-        case Some(length) => request.header("content-length", length)
-        case None => request.header("transfer-encoding", "chunked")
-    }
-    return client.send(request.body(ctx.request.body).build())
-}
-
-func serveReminderAction(ctx: HttpContext, socketPath: String, path: String): Unit {
-    if (ctx.request.method != "POST") {
-        notFound(ctx)
-        return
-    }
-    let id = requestId(ctx)
-    let client = privateClient(socketPath)
-    try {
-        let reply = forwardPublicPost(ctx, client, path, id, "")
-        ctx.responseBuilder.status(reply.status).header("x-request-id", id)
-            .header("cache-control", "no-store").header("content-type", "application/json")
-            .body(boundedBody(reply))
-    } finally {
-        client.close()
-    }
-}
 
 func runCapabilityStep(client: Client, path: String, id: String, lease: String,
                        operation: String, input: JsonValue): JsonValue {
