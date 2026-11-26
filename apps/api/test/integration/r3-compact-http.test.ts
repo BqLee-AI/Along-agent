@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
@@ -69,10 +70,7 @@ suite('native server-owned compact over HTTP', () => {
     await configureTestModel(db.pool, owner.userId, 'fixture-transport-only');
     const conversationId = randomUUID(),
       sourceId = randomUUID();
-    await db.pool.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
-      conversationId,
-      owner.userId,
-    ]);
+    await createFixtureConversation(db.pool, owner.userId, { id: conversationId });
     await db.pool.query(
       "INSERT INTO messages(id,owner_id,conversation_id,role,content) VALUES($1,$2,$3,'user','Original source: retain this fact.')",
       [sourceId, owner.userId, conversationId],

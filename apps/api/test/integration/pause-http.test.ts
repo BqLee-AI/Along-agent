@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
@@ -127,6 +128,7 @@ maybe('user pause and continue over HTTP', () => {
       session.userId,
       randomUUID(),
       {
+        conversation_id: await createFixtureConversation(database.pool, session.userId),
         execution: 'harness',
         authorization_revision: 'delegation/1',
         raw_text: '请读取偏好并回答。',
@@ -441,6 +443,7 @@ maybe('user pause and continue over HTTP', () => {
       actor.userId,
       randomUUID(),
       {
+        conversation_id: await createFixtureConversation(database.pool, actor.userId),
         execution: 'harness',
         raw_text: '2027-11-02 09:20 提醒我喝水',
         confirmed_timezone: 'Asia/Shanghai',

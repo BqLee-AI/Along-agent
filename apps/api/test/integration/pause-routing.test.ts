@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import {
@@ -99,6 +100,7 @@ import {
       actor.userId,
       randomUUID(),
       {
+        conversation_id: await createFixtureConversation(db.pool, actor.userId),
         execution: 'harness',
         raw_text: '/timezone',
         idempotency_key: randomUUID(),

@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { GoalResultSchema } from '@along/contracts';
@@ -80,6 +81,7 @@ maybe('creation collision target identity', () => {
         actor.userId,
         randomUUID(),
         {
+          conversation_id: await createFixtureConversation(database.pool, actor.userId),
           execution: 'harness',
           authorization_revision: 'delegation/1',
           raw_text: rawText,

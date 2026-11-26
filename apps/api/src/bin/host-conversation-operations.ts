@@ -14,6 +14,7 @@ import * as model from '../features/conversations/model.js';
 import {
   ActionKeySchema,
   ConversationEventsQuerySchema,
+  getConversationBot,
   getConversationDetail,
   getConversationList,
   getConversationMessages,
@@ -152,6 +153,8 @@ export function createHostConversationOperations(deps: AppDeps) {
           return read(await getConversationList(domain, ownerId, query));
         case 'detail':
           return read(await getConversationDetail(domain, ownerId, conversationId(), query));
+        case 'bot':
+          return read(await getConversationBot(domain, ownerId, conversationId()));
         case 'messages':
           return read(await getConversationMessages(domain, ownerId, conversationId(), query));
         case 'runs':

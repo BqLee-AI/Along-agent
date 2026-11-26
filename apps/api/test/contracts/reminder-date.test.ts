@@ -44,7 +44,7 @@ interface MessageInput {
   execution: 'harness';
   raw_text: string;
   idempotency_key: string;
-  conversation_id?: string;
+  conversation_id: string;
   confirmed_timezone?: string;
 }
 
@@ -122,8 +122,18 @@ function propose(args: ProposalArgs, inspect?: (request: ModelRequest) => void):
   };
 }
 
-function body(raw_text: string, extra: Partial<MessageInput> = {}): MessageInput {
-  return { execution: 'harness', raw_text, idempotency_key: randomUUID(), ...extra };
+function body(
+  conversation_id: string,
+  raw_text: string,
+  extra: Pick<MessageInput, 'confirmed_timezone'> = {},
+): MessageInput {
+  return {
+    conversation_id,
+    execution: 'harness',
+    raw_text,
+    idempotency_key: randomUUID(),
+    ...extra,
+  };
 }
 
 function args(raw_time_text: string, note = '喝水'): ProposalArgs {
@@ -328,7 +338,8 @@ for (const mode of ['local', 'http'] as const satisfies readonly ConsumerMode[])
       const actor = await fixture.actor(mode);
       await at(utc(3, '02:00:00'));
       arrange(() => answer('请提供提醒内容。'));
-      const oldEvents = await (await actor.message(body('查看提醒'))).events;
+      const conversationId = await actor.createConversation();
+      const oldEvents = await (await actor.message(body(conversationId, '查看提醒'))).events;
       healthy(oldEvents);
       const old = started(oldEvents);
       const oldFrozen = await frozen(old.run_id);
@@ -336,8 +347,7 @@ for (const mode of ['local', 'http'] as const satisfies readonly ConsumerMode[])
       await at(utc(4, '02:00:00'));
       const today = await proposed(
         actor,
-        body('今天15:20提醒我喝水', {
-          conversation_id: old.conversation_id,
+        body(old.conversation_id, '今天15:20提醒我喝水', {
           confirmed_timezone: 'Asia/Shanghai',
         }),
         args('今天15:20'),
@@ -348,9 +358,7 @@ for (const mode of ['local', 'http'] as const satisfies readonly ConsumerMode[])
       await at(utc(5, '02:00:00'));
       const tomorrow = await proposed(
         actor,
-        body('明天15:20提醒我买水', {
-          conversation_id: old.conversation_id,
-        }),
+        body(old.conversation_id, '明天15:20提醒我买水'),
         args('明天15:20', '买水'),
         `${date(6)} 15:20`,
         utc(6, '07:20:00'),
@@ -365,7 +373,7 @@ for (const mode of ['local', 'http'] as const satisfies readonly ConsumerMode[])
       await at(utc(6, '02:00:00'));
       const first = await clarified(
         actor,
-        body('今天15:20提醒我喝水'),
+        body(await actor.createConversation(), '今天15:20提醒我喝水'),
         args('今天15:20'),
         'TIMEZONE_MISSING',
       );
@@ -374,9 +382,7 @@ for (const mode of ['local', 'http'] as const satisfies readonly ConsumerMode[])
       await at(utc(6, '02:02:00'));
       const reply = await proposed(
         actor,
-        body('北京时间', {
-          conversation_id: first.run.conversation_id,
-        }),
+        body(first.run.conversation_id, '北京时间'),
         args('今天15:20'),
         `${date(6)} 15:20`,
         utc(6, '07:20:00'),
@@ -394,7 +400,7 @@ for (const mode of ['local', 'http'] as const satisfies readonly ConsumerMode[])
       await at(utc(7, '15:59:50'));
       const first = await clarified(
         actor,
-        body('明天15:20提醒我喝水'),
+        body(await actor.createConversation(), '明天15:20提醒我喝水'),
         args('明天15:20'),
         'TIMEZONE_MISSING',
       );
@@ -403,9 +409,7 @@ for (const mode of ['local', 'http'] as const satisfies readonly ConsumerMode[])
       await at(utc(7, '16:00:10'));
       const reply = await clarified(
         actor,
-        body('Asia/Shanghai', {
-          conversation_id: first.run.conversation_id,
-        }),
+        body(first.run.conversation_id, 'Asia/Shanghai'),
         args('明天15:20'),
         'DATE_CHANGED',
       );
@@ -424,7 +428,7 @@ for (const mode of ['local', 'http'] as const satisfies readonly ConsumerMode[])
       await at(utc(9, '02:00:00'));
       const old = await proposed(
         actor,
-        body(historicalText, {
+        body(await actor.createConversation(), historicalText, {
           confirmed_timezone: 'Asia/Shanghai',
         }),
         args(historicalDate),
@@ -436,9 +440,7 @@ for (const mode of ['local', 'http'] as const satisfies readonly ConsumerMode[])
       await at(utc(10, '02:00:00'));
       await clarified(
         actor,
-        body('15:20提醒我喝水', {
-          conversation_id: old.run.conversation_id,
-        }),
+        body(old.run.conversation_id, '15:20提醒我喝水'),
         args(historicalDate),
         'DATE_MISSING',
         (request) => {
@@ -457,7 +459,9 @@ for (const mode of ['local', 'http'] as const satisfies readonly ConsumerMode[])
 
     test('approval recovery and message/resume replay after midnight retain the original frozen proposal', async () => {
       const actor = await fixture.actor(mode);
-      const input = body('明天15:20提醒我喝水', { confirmed_timezone: 'Asia/Shanghai' });
+      const input = body(await actor.createConversation(), '明天15:20提醒我喝水', {
+        confirmed_timezone: 'Asia/Shanghai',
+      });
       await at(utc(11, '15:59:50'));
       const original = await proposed(
         actor,

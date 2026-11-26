@@ -144,7 +144,9 @@ export async function inspectReleaseWaiting(
           },
         );
         await restoreSnapshotContext(client, context, snapshot);
-        const observations = await readSnapshotObservations(client, context, snapshot);
+        const observations = await readSnapshotObservations(client, context, snapshot, {
+          inspectOnly: true,
+        });
         buildHarnessStart(context, snapshot, observations, decision);
         results.push({ runId: run.id, status: 'compatible' });
       } catch (error) {

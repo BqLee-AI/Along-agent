@@ -9,13 +9,16 @@ import { Dialog } from '@lorelum/lumen-ui/components/dialog';
 import { Input } from '@lorelum/lumen-ui/components/input';
 import { Label } from '@lorelum/lumen-ui/components/label';
 import type { ConversationHistoryResource } from '../viewmodel/use-conversation-history';
+import { botHref } from '../model/personal-bot';
 import { ReadControls } from '@/shared/ui/read-controls';
 
 const HistoryRow = memo(function HistoryRow({
   item,
+  botId,
   onOpen,
 }: {
   item: ConversationListItem;
+  botId: string;
   onOpen: () => void;
 }) {
   return (
@@ -24,7 +27,7 @@ const HistoryRow = memo(function HistoryRow({
         <Link
           className="inline-flex min-h-8 max-lg:min-h-11 min-w-0 flex-1 items-center gap-2 text-sm leading-6 font-medium text-brand-ink underline-offset-4 hover:underline"
           onClick={onOpen}
-          href={`/conversations?${new URLSearchParams({ conversation_id: item.conversation_id })}`}
+          href={botHref(botId, item.conversation_id)}
         >
           <span className="min-w-0">
             {item.title || `会话 ${item.conversation_id.slice(0, 8)}`}
@@ -55,7 +58,7 @@ export const ConversationHistory = memo(function ConversationHistory({
   history: ConversationHistoryResource;
 }) {
   const [historyOpen, setHistoryOpen] = useState(false);
-  const { state, read, search, setSearch, matches } = history;
+  const { botId, state, read, search, setSearch, matches } = history;
   const openConversation = useCallback(() => setHistoryOpen(false), []);
   useEffect(() => {
     if (window.location.hash === '#conversation-history') setHistoryOpen(true);
@@ -73,7 +76,7 @@ export const ConversationHistory = memo(function ConversationHistory({
         <Dialog.Header>
           <Dialog.Title>历史会话</Dialog.Title>
           <Dialog.Description>
-            找回之前的对话。打开只读取原记录，不会发送或继续运行。
+            查找当前 Bot 的对话。打开只读取原记录，不会发送或继续运行。
           </Dialog.Description>
         </Dialog.Header>
         <div className="flex items-center gap-3 py-3">
@@ -104,7 +107,12 @@ export const ConversationHistory = memo(function ConversationHistory({
           ) : null}
           <ul className="divide-y divide-separator">
             {matches.map((item) => (
-              <HistoryRow key={item.conversation_id} item={item} onOpen={openConversation} />
+              <HistoryRow
+                key={item.conversation_id}
+                item={item}
+                botId={botId}
+                onOpen={openConversation}
+              />
             ))}
           </ul>
           <ReadControls state={state} read={read} label="会话列表" />

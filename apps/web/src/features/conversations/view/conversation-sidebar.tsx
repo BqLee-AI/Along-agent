@@ -2,8 +2,9 @@
 
 import Link from '@/shell/view/workspace-link';
 import { memo } from 'react';
-import { ChevronsDown, PanelLeftClose, Plus, RefreshCw } from 'lucide-react';
+import { ChevronsDown, PanelLeftClose, RefreshCw } from 'lucide-react';
 import type { ConversationHistoryResource } from '../viewmodel/use-conversation-history';
+import { botHref } from '../model/personal-bot';
 import { Brand } from '@/shared/ui/brand';
 
 const iconButton =
@@ -13,15 +14,13 @@ const iconButton =
 export const ConversationSidebar = memo(function ConversationSidebar({
   activeId,
   history,
-  onNew,
   onCollapse,
 }: {
   history: ConversationHistoryResource;
   activeId: string | null;
-  onNew: () => void;
   onCollapse: () => void;
 }) {
-  const { state, read } = history;
+  const { botId, state, read } = history;
   return (
     <aside
       aria-label="会话"
@@ -40,18 +39,8 @@ export const ConversationSidebar = memo(function ConversationSidebar({
           <PanelLeftClose className="size-4" aria-hidden="true" />
         </button>
       </div>
-      <div className="px-2 pb-1">
-        <Link
-          href="/conversations"
-          onClick={onNew}
-          className="flex min-h-8 items-center gap-2 rounded-control px-2 text-[13px] font-medium text-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
-        >
-          <Plus className="size-4" aria-hidden="true" />
-          新对话
-        </Link>
-      </div>
       <div className="flex items-center justify-between pr-2 pl-4">
-        <h2 className="py-2 text-xs font-medium text-muted-foreground">历史</h2>
+        <h2 className="py-2 text-xs font-medium text-muted-foreground">当前 Bot 的会话</h2>
         <button
           type="button"
           className={iconButton}
@@ -70,6 +59,11 @@ export const ConversationSidebar = memo(function ConversationSidebar({
         aria-label="历史会话"
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-3"
       >
+        {state.reading && !state.loaded ? (
+          <p role="status" className="px-2 py-2 text-sm text-muted-foreground">
+            正在读取会话…
+          </p>
+        ) : null}
         {state.error ? (
           <p role="alert" className="px-2 py-2 text-[13px] text-muted-foreground">
             读取失败，不表示没有历史。点上方刷新重试。
@@ -82,7 +76,7 @@ export const ConversationSidebar = memo(function ConversationSidebar({
           {state.items.map((item) => (
             <li key={item.conversation_id}>
               <Link
-                href={`/conversations?${new URLSearchParams({ conversation_id: item.conversation_id })}`}
+                href={botHref(botId, item.conversation_id)}
                 aria-current={item.conversation_id === activeId ? 'page' : undefined}
                 className={`block truncate rounded-control px-2 py-1.5 text-[13px] leading-5 focus-visible:outline-2 focus-visible:outline-ring ${item.conversation_id === activeId ? 'bg-muted font-medium text-foreground' : 'text-secondary-foreground hover:bg-muted hover:text-foreground'}`}
               >

@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
@@ -185,10 +186,7 @@ maybe('task creation provenance', () => {
       ])
     ).rows[0];
     const messageId = randomUUID();
-    await pool.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
-      invocation.conversation_id,
-      input.ownerId,
-    ]);
+    await createFixtureConversation(pool, input.ownerId, { id: invocation.conversation_id });
     await pool.query(
       "INSERT INTO messages(id,owner_id,conversation_id,role,content) VALUES($1,$2,$3,'user','remind me')",
       [messageId, input.ownerId, invocation.conversation_id],
@@ -278,10 +276,7 @@ maybe('task creation provenance', () => {
       ])
     ).rows[0].conversation_id;
     const localMessage = randomUUID();
-    await pool.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
-      localConversation,
-      input.ownerId,
-    ]);
+    await createFixtureConversation(pool, input.ownerId, { id: localConversation });
     await pool.query(
       "INSERT INTO messages(id,owner_id,conversation_id,role,content) VALUES($1,$2,$3,'user','remind me')",
       [localMessage, input.ownerId, localConversation],

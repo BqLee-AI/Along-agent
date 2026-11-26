@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { expectApplicationRejection } from '../helpers/application-error.js';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { createServer, type Server } from 'node:http';
@@ -83,14 +84,8 @@ maybe('local administrator password reset against actual PostgreSQL', () => {
     });
     adminCookies = (await accounts.signIn({ login_name: 'admin', password: forgotten }, ip))
       .cookies;
-    await pool.query('INSERT INTO conversations(id,owner_id,title) VALUES($1,$2,$3),($4,$5,$6)', [
-      randomUUID(),
-      adminId,
-      'admin history',
-      randomUUID(),
-      memberId,
-      'member history',
-    ]);
+    await createFixtureConversation(pool, adminId, { title: 'admin history' });
+    await createFixtureConversation(pool, memberId, { title: 'member history' });
   });
   afterEach(async () => {
     if (server) {

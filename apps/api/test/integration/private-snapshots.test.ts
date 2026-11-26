@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { randomBytes, randomUUID } from 'node:crypto';
 import type { HarnessSnapshot } from '@along/contracts';
@@ -88,10 +89,7 @@ suite('private Harness snapshots', () => {
       process.env[secretEnv] = 'synthetic-test-secret';
       process.env[observationKeyEnv] = randomBytes(32).toString('base64');
       const stored = await withTransaction(db.pool, async (client) => {
-        await client.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
-          conversationId,
-          ownerId,
-        ]);
+        await createFixtureConversation(client, ownerId, { id: conversationId });
         await client.query(
           `INSERT INTO messages(id,owner_id,conversation_id,role,content) VALUES($1,$2,$3,'user','synthetic')`,
           [messageId, ownerId, conversationId],
@@ -289,7 +287,12 @@ suite('private Harness snapshots', () => {
           beforeRestart,
           ownerId,
           randomUUID(),
-          { execution: 'harness', authorization_revision: 'delegation/1', raw_text: rawText },
+          {
+            conversation_id: await createFixtureConversation(db.pool, ownerId),
+            execution: 'harness',
+            authorization_revision: 'delegation/1',
+            raw_text: rawText,
+          },
           null,
           actor.sessionId,
         );

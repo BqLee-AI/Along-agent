@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { admitTestUser } from './setup.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
@@ -59,11 +60,17 @@ suite('request-owned reminder date anchors through HTTP and PostgreSQL', () => {
   async function at(time: string) {
     await pool.query('UPDATE test_clock SET at=$1', [time]);
   }
-  async function send(raw_text: string, body: Record<string, unknown> = {}, key = randomUUID()) {
+  async function send(
+    raw_text: string,
+    body: { conversation_id?: string; [key: string]: unknown } = {},
+    key = randomUUID(),
+  ) {
+    const conversation_id =
+      body.conversation_id ?? (await createFixtureConversation(pool, ownerId));
     const response = await fetch(`${base}/api/v1/conversations/messages`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'idempotency-key': key },
-      body: JSON.stringify({ raw_text, ...body }),
+      body: JSON.stringify({ raw_text, ...body, conversation_id }),
     });
     expect(response.status).toBe(200);
     return frames(await response.text());
@@ -161,10 +168,10 @@ suite('request-owned reminder date anchors through HTTP and PostgreSQL', () => {
         const conversationId = randomUUID(),
           messageId = randomUUID(),
           runId = randomUUID();
-        await pool.query(
-          `INSERT INTO conversations(id,owner_id,anchor_received_at_utc) VALUES($1,$2,'2026-10-30T02:00:00Z');`,
-          [conversationId, ownerId],
-        );
+        await createFixtureConversation(pool, ownerId, {
+          id: conversationId,
+          anchor: '2026-10-30T02:00:00Z',
+        });
         await pool.query(
           `INSERT INTO messages(id,owner_id,conversation_id,role,content) VALUES($1,$2,$3,'user','明天15:20提醒我喝水')`,
           [messageId, ownerId, conversationId],
@@ -206,7 +213,10 @@ suite('request-owned reminder date anchors through HTTP and PostgreSQL', () => {
     await actor();
     await at('2026-11-01T02:00:00Z');
     const key = randomUUID();
-    const body = { confirmed_timezone: 'Asia/Shanghai' };
+    const body = {
+      conversation_id: await createFixtureConversation(pool, ownerId),
+      confirmed_timezone: 'Asia/Shanghai',
+    };
     const original = await send('明天15:20提醒我喝水', body, key);
     const identity = started(original),
       approvalId = pending(original);
@@ -310,7 +320,11 @@ suite('request-owned reminder date anchors through HTTP and PostgreSQL', () => {
         { pool, timeContext },
         ownerId,
         randomUUID(),
-        { raw_text, confirmed_timezone: 'Asia/Shanghai' },
+        {
+          conversation_id: await createFixtureConversation(pool, ownerId),
+          raw_text,
+          confirmed_timezone: 'Asia/Shanghai',
+        },
         randomUUID(),
       );
       if (!run.context) throw new Error('fresh Run missing');

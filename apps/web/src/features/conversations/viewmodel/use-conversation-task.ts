@@ -24,7 +24,6 @@ import type { ThreadEvent } from '@along/stream-protocol';
 import { z } from 'zod';
 import { MeSchema } from '@/shared/session/identity';
 import type { Me } from '@/shared/session/identity';
-import type { ModelSelection, ProviderView } from '@along/contracts';
 import { ApiReadError, readEnvelope } from '@/shared/http/client';
 import { api, writeOptions } from '@/shared/http/eden';
 import { readHistoryCollectionPage } from '@/shared/http/page';
@@ -69,7 +68,6 @@ import {
   inlineDocumentWaiting,
 } from '@/features/approvals/model/inline-document';
 import { useConversationApprovalResults } from '@/features/approvals/viewmodel/use-conversation-approval-results';
-import { useModelCatalog } from '@/features/model-settings/viewmodel/model-catalog-context';
 import { readChatFiles } from '../model/chat-files';
 import { useConversationComposer } from './use-conversation-composer';
 import { useConversationNavigationGuard } from './use-conversation-navigation-guard';
@@ -91,7 +89,6 @@ export interface ConversationTask {
   fileBlockedReason: string | null;
   addFiles: (files: readonly File[]) => Promise<void>;
   removeFile: (index: number) => void;
-  clearFiles: () => void;
   intent: TaskIntent;
   setIntent: (value: TaskIntent) => void;
   workspaces: WorkspaceSummary[];
@@ -100,13 +97,8 @@ export interface ConversationTask {
   workspaceState: 'loading' | 'ready' | 'error';
   workspaceError: string | null;
   readWorkspaces: () => Promise<void>;
-  modelProviders: ProviderView[];
-  defaultSelection: ModelSelection | null;
-  modelSelection: ModelSelection | null;
-  setModelSelection: (value: ModelSelection | null) => void;
-  modelState: 'loading' | 'ready' | 'error';
-  modelError: string | null;
-  readModels: () => Promise<void>;
+  reminderAllowed: boolean;
+  documentAllowed: boolean;
   events: ThreadEvent[];
   messages: MessageHistoryItem[];
   runs: ConversationRunHistoryItem[];
@@ -163,24 +155,25 @@ export interface ConversationTask {
 }
 
 export function useConversationTask({
-  conversationId = null,
+  botId,
+  conversationId,
   runId = null,
   initialIntent = 'chat',
+  toolIds,
+  workspaceIds,
 }: {
-  conversationId?: string | null;
+  botId: string;
+  conversationId: string;
   runId?: string | null;
   initialIntent?: TaskIntent | null;
+  toolIds: readonly string[];
+  workspaceIds: readonly string[];
 }): ConversationTask {
-  const {
-    input,
-    setInput,
-    intent,
-    setIntent,
-    workspaceId,
-    setWorkspaceId,
-    modelSelection,
-    setModelSelection,
-  } = useConversationComposer(initialIntent);
+  const { input, setInput, intent, setIntent, workspaceId, setWorkspaceId } =
+    useConversationComposer(initialIntent);
+  const reminderAllowed = toolIds.includes('propose_task');
+  const documentAllowed =
+    workspaceIds.length > 0 && toolIds.some((tool) => tool.startsWith('workspace_'));
   const [files, setFiles] = useState<ChatFile[]>([]);
   const [fileError, setFileError] = useState<ConversationTask['fileError']>(null);
   const [readingFiles, setReadingFiles] = useState(false);
@@ -227,32 +220,29 @@ export function useConversationTask({
       }
     }
   }
-  const { workspaces, workspaceState, workspaceError, readWorkspaces } = useWorkspaceRegistration(
-    intent,
-    setWorkspaceId,
-  );
   const {
-    snapshot: modelCatalog,
-    state: modelState,
-    error: modelError,
-    refresh: readModels,
-  } = useModelCatalog();
-  const modelProviders = modelCatalog.items;
-  const defaultSelection = modelCatalog.default_selection;
+    workspaces: registered,
+    workspaceState,
+    workspaceError,
+    readWorkspaces,
+  } = useWorkspaceRegistration(intent, setWorkspaceId);
+  const workspaces = registered.filter((workspace) =>
+    workspaceIds.includes(workspace.workspace_id),
+  );
   const [events, setEvents] = useState<ThreadEvent[]>([]);
   const [messages, setMessages] = useState<MessageHistoryItem[]>([]);
   const [runs, setRuns] = useState<ConversationRunHistoryItem[]>([]);
-  const [historyReady, setHistoryReady] = useState(!conversationId);
+  const [historyReady, setHistoryReady] = useState(false);
   const [liveReply, setLiveReply] = useState(false);
   const [liveOriginal, setLiveOriginal] = useState<string | null>(null);
   const [run, setRun] = useState<RunView | null>(null);
   const [selected, setSelected] = useState<Identity | null>(
-    conversationId && runId ? { conversationId, runId } : null,
+    runId ? { conversationId, runId } : null,
   );
   const [error, setError] = useState<string | null>(null);
   const [readError, setReadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [reading, setReading] = useState(Boolean(conversationId));
+  const [reading, setReading] = useState(true);
   const [stopping, setStopping] = useState(false);
   const [pauseBusy, setPauseBusy] = useState(false);
   const [compactStatus, setCompactStatus] = useState<ConversationTask['compactStatus']>(null);
@@ -318,11 +308,9 @@ export function useConversationTask({
   function acceptEvent(event: ThreadEvent, text?: string) {
     if (!mounted.current) return;
     const { conversation_id: cid, run_id: rid } = event.payload;
-    if (conversationRef.current && conversationRef.current !== cid)
-      throw new Error('发送回执与原会话不匹配，未接纳新运行。');
+    if (conversationRef.current !== cid) throw new Error('发送回执与原会话不匹配，未接纳新运行。');
     if (text !== undefined && event.type === 'thread.started' && !selectedRef.current) {
       selectedRef.current = { conversationId: cid, runId: rid };
-      conversationRef.current = cid;
       setSelected(selectedRef.current);
       pendingSend.current = null;
       if (pendingStorage.current) sessionStorage.removeItem(pendingStorage.current);
@@ -349,7 +337,6 @@ export function useConversationTask({
             setReadError('运行状态读取失败，请重新读取会话。');
         });
     }
-    if (conversationRef.current !== cid) return;
     cursors.current.set(rid, Math.max(cursors.current.get(rid) ?? 0, event.seq));
     eventsRef.current = mergeThreadEvents(eventsRef.current, [event]);
     setEvents(eventsRef.current);
@@ -383,7 +370,7 @@ export function useConversationTask({
 
   async function refresh(clearError = false) {
     const cid = conversationRef.current;
-    if (!cid || !mounted.current) return;
+    if (!mounted.current) return;
     readRef.current?.abort();
     const request = new AbortController();
     readRef.current = request;
@@ -679,8 +666,15 @@ export function useConversationTask({
     : filePayloadLength && filePayloadLength + JSON.stringify(input).length - 2 > chatMessageLimit
       ? '消息和文件内容超出单条消息的容量。'
       : null;
-  const eligibility = fileBlockedReason
-    ? { allowed: false, reason: fileBlockedReason }
+  const scopeBlockedReason =
+    intent === 'reminder' && !reminderAllowed
+      ? '此 Bot 未获准提议创建提醒。'
+      : intent === 'document' && !documentAllowed
+        ? '此 Bot 没有获准使用已登记资料。'
+        : null;
+  const blockedBeforeAdmission = fileBlockedReason ?? scopeBlockedReason;
+  const eligibility = blockedBeforeAdmission
+    ? { allowed: false, reason: blockedBeforeAdmission }
     : taskSendEligibility({
         intent,
         text: ambiguousProposal?.raw_text ?? input,
@@ -814,6 +808,7 @@ export function useConversationTask({
       (ambiguousProposal && !foldChoice)
     )
       return;
+    const cid = conversationRef.current;
     busyRef.current = true;
     setAdmitting(true);
     setBusy(true);
@@ -832,7 +827,7 @@ export function useConversationTask({
           body: {
             raw_text: text,
             ...(files.length ? { files } : {}),
-            conversation_id: conversationRef.current ?? undefined,
+            conversation_id: cid,
             confirmed_timezone:
               proposal?.timezone_id ?? (intent === 'chat' ? undefined : me.confirmed_timezone),
             fold_choice: proposal ? foldChoice : undefined,
@@ -843,21 +838,12 @@ export function useConversationTask({
                 : undefined),
             ...taskAdmission(intent),
             ...(intent === 'document' ? { workspace_id: workspaceId } : {}),
-            ...(intent !== 'reminder' && modelSelection
-              ? {
-                  model_selection: {
-                    provider_id: modelSelection.provider_id,
-                    model_id: modelSelection.model_id,
-                  },
-                }
-              : {}),
             idempotency_key: crypto.randomUUID(),
           },
         };
         pendingSend.current = pending;
       }
-      const storageKey =
-        pendingStorage.current ?? `conversation-send:${conversationRef.current ?? 'new'}`;
+      const storageKey = `conversation-send:${cid}`;
       sessionStorage.setItem(storageKey, JSON.stringify(pending));
       pendingStorage.current = storageKey;
       selectionVersion.current++;
@@ -1269,16 +1255,15 @@ export function useConversationTask({
     }
   }
 
-  function restorePendingSend(id: string | null) {
-    const storageKey = `conversation-send:${id ?? 'new'}`;
+  function restorePendingSend(id: string) {
+    const storageKey = `conversation-send:${id}`;
     const stored = sessionStorage.getItem(storageKey);
     if (!stored) return;
     setSendUncertain(true);
     pendingStorage.current = storageKey;
     try {
       const pending = PendingSendSchema.parse(JSON.parse(stored));
-      if (pending.body.conversation_id !== (id ?? undefined))
-        throw new Error('原发送的会话身份不匹配。');
+      if (pending.body.conversation_id !== id) throw new Error('原发送的会话身份不匹配。');
       pendingSend.current = pending;
       setInput(pending.text);
       const restoredFiles = ChatFilesSchema.safeParse(pending.body.files);
@@ -1313,10 +1298,7 @@ export function useConversationTask({
 
   useEffect(() => {
     const sameConversation = conversationRef.current === conversationId;
-    if (sameConversation && (!runId || selectedRef.current?.runId === runId)) {
-      if (!conversationId) setIntent(initialIntent ?? 'chat');
-      return;
-    }
+    if (sameConversation && (!runId || selectedRef.current?.runId === runId)) return;
     selectionVersion.current++;
     streamRef.current?.abort();
     streamRef.current = null;
@@ -1327,7 +1309,7 @@ export function useConversationTask({
     setPauseBusy(false);
     sendRef.current?.abort();
     reminderController.current?.abort();
-    selectedRef.current = conversationId && runId ? { conversationId, runId } : null;
+    selectedRef.current = runId ? { conversationId, runId } : null;
     conversationRef.current = conversationId;
     eventsRef.current = [];
     cursors.current.clear();
@@ -1345,8 +1327,8 @@ export function useConversationTask({
     setInput('');
     clearFiles();
     setIntent(initialIntent ?? 'chat');
-    setHistoryReady(!conversationId);
-    setReading(Boolean(conversationId));
+    setHistoryReady(false);
+    setReading(true);
     setStreaming(false);
     setAdmitting(false);
     setClarificationReplyTo(null);
@@ -1375,7 +1357,6 @@ export function useConversationTask({
     compactLock.current = false;
     compactRequest.current = null;
     setCompactStatus(null);
-    if (!conversationId) return;
     const stored = sessionStorage.getItem(`conversation-compact:${conversationId}`);
     if (!stored) return;
     try {
@@ -1559,6 +1540,7 @@ export function useConversationTask({
     (selected ? transcript.get(selected.runId)?.execution_lifecycle : undefined);
 
   useConversationNavigationGuard({
+    botId,
     streaming,
     lifecycle,
     conversation: conversationRef,
@@ -1579,7 +1561,6 @@ export function useConversationTask({
       setFiles((draft) => draft.filter((_, i) => i !== index));
       setFileError(null);
     },
-    clearFiles,
     setInput: (text) => {
       setInput(text);
       setAmbiguousProposal(null);
@@ -1598,13 +1579,8 @@ export function useConversationTask({
     workspaceState,
     workspaceError,
     readWorkspaces,
-    modelProviders,
-    defaultSelection,
-    modelSelection,
-    setModelSelection,
-    modelState,
-    modelError,
-    readModels,
+    reminderAllowed,
+    documentAllowed,
     events,
     messages,
     runs,

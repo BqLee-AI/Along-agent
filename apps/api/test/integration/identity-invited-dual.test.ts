@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
@@ -381,10 +382,7 @@ suite('invited accounts signed dual public boundary', () => {
         ).status,
       ).toBe(400);
       const conversation = randomUUID();
-      await pool.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
-        conversation,
-        member.userId,
-      ]);
+      await createFixtureConversation(pool, member.userId, { id: conversation });
       expect(
         (await request(`/conversations/${conversation}/messages`, 'GET', undefined, member)).status,
       ).toBe(200);

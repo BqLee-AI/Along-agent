@@ -2,7 +2,11 @@ import { expectApplicationRejection } from '../helpers/application-error.js';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { createContextPolicy } from '../../src/features/conversations/public.js';
+import {
+  createBotConversation,
+  createContextPolicy,
+} from '../../src/features/conversations/public.js';
+import { createPersonalBot, updatePersonalBot } from '../../src/features/bots/public.js';
 import type { ConversationDeps } from '../../src/agent/execution/contracts.js';
 import type { HarnessServices } from '../../src/agent/execution/contracts.js';
 import { getRunView } from '../../src/agent/run/run-actions.js';
@@ -60,17 +64,57 @@ suite('model selection admission and historical projection', () => {
     await addModel(db.pool, owner.userId, provider.id, 'vendor/model');
     const selection = { provider_id: provider.id, model_id: 'vendor/model' };
     await setDefault(db.pool, owner.userId, selection);
+    const actor = {
+      ownerId: owner.userId,
+      sessionId: owner.sessionId,
+      displayName: 'Researcher',
+      timezoneId: null,
+    };
+    const config = {
+      name: 'Research',
+      introduction: '',
+      role: 'reviewer',
+      instructions: 'Check sources.',
+      model_selection: null,
+      tool_ids: ['list_tasks'],
+      workspace_ids: [],
+    };
+    const bot = await createPersonalBot(db.pool, actor, config);
+    const { conversation_id } = await createBotConversation(db.pool, actor, bot.id, randomUUID());
     const key = randomUUID();
-    const body = { execution: 'harness', raw_text: 'hello' };
+    const body = { conversation_id, execution: 'harness', raw_text: 'hello' };
     const start = (request: unknown) =>
       startConversationRun(deps, owner.userId, randomUUID(), request, key);
     const [a, b] = await Promise.all([start(body), start(body)]);
     expect(a.runId).toBe(b.runId);
     expect([a, b].filter((result) => result.context !== null)).toHaveLength(1);
+    expect((a.context ?? b.context)?.personalBot).toEqual({
+      id: bot.id,
+      revision: bot.revision,
+      role: 'reviewer',
+      instructions: 'Check sources.',
+    });
+    expect((a.context ?? b.context)?.allowlist).toEqual(['list_tasks']);
     await expectApplicationRejection(start({ ...body, model_selection: selection }), {
       status: 409,
     });
     await updateProvider(db.pool, owner.userId, provider.id, { name: 'Renamed' });
+    const edited = await updatePersonalBot(db.pool, actor, bot.id, bot.revision, {
+      ...config,
+      role: 'editor',
+      instructions: 'Check names.',
+      tool_ids: [],
+    });
+    const following = await startConversationRun(
+      deps,
+      owner.userId,
+      randomUUID(),
+      body,
+      randomUUID(),
+    );
+    expect(following.context?.personalBot?.revision).toBe(edited.revision);
+    expect(following.context?.personalBot?.role).toBe('editor');
+    expect(following.context?.allowlist).toEqual([]);
     await deleteProvider(db.pool, owner.userId, provider.id);
     const replay = await start(body);
     expect(replay.runId).toBe(a.runId);
@@ -88,7 +132,7 @@ suite('model selection admission and historical projection', () => {
       deps,
       owner.userId,
       randomUUID(),
-      { raw_text: 'ordinary business request' },
+      { conversation_id, raw_text: 'ordinary business request' },
       randomUUID(),
     );
     expect(
@@ -96,7 +140,9 @@ suite('model selection admission and historical projection', () => {
         .model_selection,
     ).toEqual({ state: 'not_applicable' });
     const history = await getConversationRuns(deps, owner.userId, a.conversationId, {});
-    expect(history.items[0]?.model_selection).toEqual(expected);
+    expect(history.items.find((item) => item.run_id === a.runId)?.model_selection).toEqual(
+      expected,
+    );
     await expect(getRunView(deps, other.userId, a.conversationId, a.runId)).rejects.toThrow();
     await expect(
       startConversationRun(

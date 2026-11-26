@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
@@ -45,6 +46,7 @@ maybe('routing authority trusted answer boundary', () => {
       actor.userId,
       randomUUID(),
       {
+        conversation_id: await createFixtureConversation(database.pool, actor.userId),
         execution: 'harness',
         raw_text: '/timezone',
         idempotency_key: randomUUID(),

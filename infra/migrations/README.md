@@ -107,3 +107,18 @@
 
 - 依赖 0037；为每个接入增加默认模型外键，将已有全局默认复制到所属接入，不改写全局默认。`0038-checks.json` 核验新增列和外键。
 - 旧实验库若以 0029/0030 记录模型迁移，版本号与主线暂停和记忆迁移冲突，不是受支持的主线升级基线；不要改写版本账或主线迁移。停写并备份后，从可信主线备份恢复或新建主线库，再按需单独迁移经核验的数据；本迁移不提供旧实验库的自动转换。
+
+## 0042：个人 Bot 与会话归属
+
+- `personal_bots` 按 owner 保存完整配置和修订。每条会话必须绑定同 owner 的 Bot，绑定建立后不可更改。迁移发现任何旧会话时回滚，保留旧结构和全部数据。
+- 停止旧 API、worker 和所有写入进程。备份并在隔离的 PostgreSQL 副本核对版本、会话、Run 与批准。通过旧系统先收尾运行中、暂停中、待批准或效果未确定的记录。保持旧进程停写直至切换完成。
+- 仅对确认为可丢弃测试数据的会话执行显式维护。副本数据库名使用 `along_bot_cutover_<suffix>`，版本应为 `0041`。在同一 psql 会话中为 `along.bot_cutover_ids` 设置逐条审核后的会话 UUID 列表，然后执行 `scripts/local/clean-disposable-bot-cutover.sql`，例如：
+
+  ```sql
+  \set ON_ERROR_STOP on
+  SET along.bot_cutover_ids = '<confirmed-test-conversation-uuid>,<another-confirmed-uuid>';
+  \i scripts/local/clean-disposable-bot-cutover.sql
+  ```
+
+- 清理按明确 ID 和持久关联圈定会话专属记录，在事务内核对仍保留的事实及其 UUID 引用。保留的任务、事件、账户、模型、资料或记忆引用清理目标时停止并报告依赖。已有提醒效果的批准也阻止清理。若仍有旧会话，保持停写及备份并停止升级。
+- 在已核对的副本上验证清理前后记录、已清理深链的不存在行为和 `0042` 升级。显式升级通过后，部署配套 Host、API 与 Web；恢复旧版本使用切换前快照。

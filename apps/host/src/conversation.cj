@@ -11,6 +11,7 @@ func conversationOperation(path: String, method: String): String {
     if (parts.size < 5 || parts[4].isEmpty()) { return "" }
     if (method == "GET") {
         if (parts.size == 5) { return "detail" }
+        if (parts.size == 6 && parts[5] == "bot") { return "bot" }
         if (parts.size == 6 && parts[5] == "messages") { return "messages" }
         if (parts[5] != "runs") { return "" }
         if (parts.size == 6) { return "runs" }

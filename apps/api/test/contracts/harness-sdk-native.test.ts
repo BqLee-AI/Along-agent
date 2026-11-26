@@ -177,6 +177,7 @@ test.skipIf(process.env.HARNESS_SDK_TEST_ISOLATED !== '1')(
       base_url: `${providerBase}/v1`,
     });
     const response = await fixture.request(actor, '/api/v1/conversations/messages', {
+      conversation_id: await actor.createConversation(),
       execution: 'harness',
       raw_text: 'Read my timezone and report it.',
       idempotency_key: randomUUID(),

@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
@@ -49,6 +50,7 @@ maybe('harness authority signed HTTP boundary', () => {
     await configureTestModel(database.pool, session.userId, 'http-test-model');
     return {
       session,
+      conversationId: await createFixtureConversation(database.pool, session.userId),
       headers: {
         cookie: `better-auth.session_token=${session.token}`,
         'x-csrf-token': session.csrfToken,
@@ -64,10 +66,11 @@ maybe('harness authority signed HTTP boundary', () => {
   }
 
   it('missing native services fails before SSE and writes no Run, message, invocation, or approval', async () => {
-    const { session, headers } = await actor();
+    const { session, headers, conversationId } = await actor();
     const response = await post(
       '/api/v1/conversations/messages',
       {
+        conversation_id: conversationId,
         execution: 'harness',
         raw_text: '你好',
         idempotency_key: randomUUID(),
@@ -89,8 +92,12 @@ maybe('harness authority signed HTTP boundary', () => {
   });
 
   it('business/harness share inbound idempotency while omitted and explicit business replay exactly', async () => {
-    const { headers } = await actor();
-    const body = { raw_text: '你好', idempotency_key: randomUUID() };
+    const { headers, conversationId } = await actor();
+    const body = {
+      conversation_id: conversationId,
+      raw_text: '你好',
+      idempotency_key: randomUUID(),
+    };
     const original = await post('/api/v1/conversations/messages', body, headers);
     expect(original.status).toBe(200);
     const events = await original.text();
@@ -124,7 +131,7 @@ maybe('harness authority signed HTTP boundary', () => {
   });
 
   it('owner GET and CSRF cancel are durable and idempotent without executing a model or native process', async () => {
-    const { session, headers } = await actor();
+    const { session, headers, conversationId } = await actor();
     const foreign = await actor();
     let models = 0;
     const started = await startConversationRun(
@@ -145,7 +152,12 @@ maybe('harness authority signed HTTP boundary', () => {
       }),
       session.userId,
       randomUUID(),
-      { execution: 'harness', raw_text: '你好', idempotency_key: randomUUID() },
+      {
+        conversation_id: conversationId,
+        execution: 'harness',
+        raw_text: '你好',
+        idempotency_key: randomUUID(),
+      },
       null,
     );
     const path = `/api/v1/conversations/${started.conversationId}/runs/${started.runId}`;
@@ -191,7 +203,7 @@ maybe('harness authority signed HTTP boundary', () => {
   });
 
   it('cancel reason bounds reject before writes and preserve the longest accepted reason once', async () => {
-    const { session, headers } = await actor();
+    const { session, headers, conversationId } = await actor();
     const started = await startConversationRun(
       controlledModelDeps({
         pool: database.pool,
@@ -209,7 +221,12 @@ maybe('harness authority signed HTTP boundary', () => {
       }),
       session.userId,
       randomUUID(),
-      { execution: 'harness', raw_text: 'cancel boundary', idempotency_key: randomUUID() },
+      {
+        conversation_id: conversationId,
+        execution: 'harness',
+        raw_text: 'cancel boundary',
+        idempotency_key: randomUUID(),
+      },
       null,
     );
     const path = `/api/v1/conversations/${started.conversationId}/runs/${started.runId}`;
@@ -266,6 +283,7 @@ maybe('harness authority signed HTTP boundary', () => {
 
   it('explicit business execution preserves successful deterministic response and freezes business Run', async () => {
     const session = await seedSession(database.pool, {});
+    const conversationId = await createFixtureConversation(database.pool, session.userId);
     const response = await fetch(`${base}/api/v1/conversations/messages`, {
       method: 'POST',
       headers: {
@@ -274,6 +292,7 @@ maybe('harness authority signed HTTP boundary', () => {
         'x-csrf-token': session.csrfToken,
       },
       body: JSON.stringify({
+        conversation_id: conversationId,
         execution: 'business',
         raw_text: '你好',
         idempotency_key: randomUUID(),

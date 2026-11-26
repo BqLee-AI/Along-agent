@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
@@ -117,6 +118,7 @@ maybe('server-owned native execution', () => {
         ownerId,
         randomUUID(),
         {
+          conversation_id: await createFixtureConversation(database.pool, ownerId),
           execution: 'harness',
           authorization_revision: 'delegation/1',
           raw_text: '请回答。',
@@ -269,6 +271,7 @@ maybe('server-owned native execution', () => {
           'x-csrf-token': session.csrfToken,
         },
         body: JSON.stringify({
+          conversation_id: await createFixtureConversation(database.pool, session.userId),
           execution: 'harness',
           authorization_revision: 'delegation/1',
           raw_text: `读取 ${url}`,
@@ -352,6 +355,7 @@ maybe('server-owned native execution', () => {
           ownerId,
           randomUUID(),
           {
+            conversation_id: await createFixtureConversation(database.pool, ownerId),
             execution: 'harness',
             authorization_revision: 'delegation/1',
             raw_text: '请回答。',

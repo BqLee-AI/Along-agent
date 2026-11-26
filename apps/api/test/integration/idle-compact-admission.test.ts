@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { createContextPolicy } from '../../src/features/conversations/public.js';
@@ -61,10 +62,7 @@ import {
       messageId = randomUUID(),
       key = randomUUID();
     await configureTestModel(db.pool, actor.userId, 'idle-test');
-    await db.pool.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
-      conversationId,
-      actor.userId,
-    ]);
+    await createFixtureConversation(db.pool, actor.userId, { id: conversationId });
     await db.pool.query(
       "INSERT INTO messages(id,owner_id,conversation_id,role,content) VALUES($1,$2,$3,'user','history')",
       [messageId, actor.userId, conversationId],
@@ -117,10 +115,7 @@ import {
     const actor = await seedAdmittedSession(db.pool),
       conversationId = randomUUID();
     await configureTestModel(db.pool, actor.userId, 'idle-test');
-    await db.pool.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
-      conversationId,
-      actor.userId,
-    ]);
+    await createFixtureConversation(db.pool, actor.userId, { id: conversationId });
     await db.pool.query(
       "INSERT INTO messages(id,owner_id,conversation_id,role,content) VALUES($1,$2,$3,'user','history')",
       [randomUUID(), actor.userId, conversationId],
@@ -154,7 +149,7 @@ import {
         (value) => ({ value }),
         (error) => ({ error }),
       );
-      await waitFor("query LIKE 'SELECT id FROM conversations WHERE id=%FOR UPDATE%'");
+      await waitFor("query LIKE 'SELECT status FROM conversations WHERE id=%FOR UPDATE%'");
       const idle = startIdleCompact(deps, actor.userId, conversationId, randomUUID(), randomUUID());
       const idleResult = idle.then(
         (value) => ({ value }),
@@ -174,10 +169,7 @@ import {
       conversationId = randomUUID(),
       key = randomUUID();
     await configureTestModel(db.pool, actor.userId, 'idle-test');
-    await db.pool.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
-      conversationId,
-      actor.userId,
-    ]);
+    await createFixtureConversation(db.pool, actor.userId, { id: conversationId });
     await db.pool.query(
       "INSERT INTO messages(id,owner_id,conversation_id,role,content) VALUES($1,$2,$3,'user','history')",
       [randomUUID(), actor.userId, conversationId],
@@ -214,10 +206,7 @@ import {
     const actor = await seedAdmittedSession(db.pool),
       conversationId = randomUUID(),
       key = randomUUID();
-    await db.pool.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
-      conversationId,
-      actor.userId,
-    ]);
+    await createFixtureConversation(db.pool, actor.userId, { id: conversationId });
     const before = starts.length;
     expect(await startIdleCompact(deps, actor.userId, conversationId, randomUUID(), key)).toEqual({
       status: 'no_content',

@@ -25,6 +25,7 @@ const conversationAdapters = [
 const featureAdapters = exactPaths([
   approvalController,
   ...conversationAdapters,
+  'apps/api/src/features/bots/controller.ts',
   'apps/api/src/features/brief/controller.ts',
   'apps/api/src/features/identity/account/controller.ts',
   'apps/api/src/features/memory/controller.ts',

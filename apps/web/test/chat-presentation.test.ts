@@ -12,6 +12,8 @@ import { RunStatusPanel, TaskComposer } from '../src/features/conversations/view
 import type { ConversationTask } from '../src/features/conversations/viewmodel/use-conversation-task';
 import { RunResults } from '../src/features/conversations/view/run-results';
 
+const botName = 'Research Bot';
+
 function composerTask(overrides: Partial<ConversationTask> = {}): ConversationTask {
   return {
     input: 'A real message',
@@ -21,7 +23,6 @@ function composerTask(overrides: Partial<ConversationTask> = {}): ConversationTa
     fileBlockedReason: null,
     async addFiles() {},
     removeFile() {},
-    clearFiles() {},
     intent: 'chat',
     setIntent() {},
     workspaces: [],
@@ -30,13 +31,8 @@ function composerTask(overrides: Partial<ConversationTask> = {}): ConversationTa
     workspaceState: 'ready',
     workspaceError: null,
     async readWorkspaces() {},
-    modelProviders: [],
-    defaultSelection: null,
-    modelSelection: null,
-    setModelSelection() {},
-    modelState: 'ready',
-    modelError: null,
-    async readModels() {},
+    reminderAllowed: true,
+    documentAllowed: true,
     events: [],
     messages: [],
     runs: [],
@@ -332,7 +328,7 @@ describe('durable goal result consumer', () => {
     expect(visible).not.toContain('本次运行模型');
     expect(visible).not.toContain('此运行绑定当前连接');
     const composer = renderToStaticMarkup(
-      createElement(TaskComposer, { task: { ...task, clarificationSourceId: rid } }),
+      createElement(TaskComposer, { botName, task: { ...task, clarificationSourceId: rid } }),
     );
     expect(composer).toContain('补充上一个问题');
     const unavailable = renderToStaticMarkup(
@@ -366,6 +362,7 @@ describe('composer consumer states', () => {
     for (const intent of ['chat', 'reminder', 'document'] as const) {
       const markup = renderToStaticMarkup(
         createElement(TaskComposer, {
+          botName,
           task: composerTask({
             intent,
             async send() {
@@ -377,6 +374,7 @@ describe('composer consumer states', () => {
       expect(openingTag(markup, 'chat-tools')).toContain('type="button"');
       expect(openingTag(markup, 'send-message')).toContain('type="submit"');
       expect(markup).not.toContain('name="task-intent"');
+      expect(markup).toContain(`aria-label="发给 ${botName} 的消息"`);
       expect(markup.includes('data-testid="selected-tool"')).toBe(intent !== 'chat');
       expect(markup.includes('id="workspace"')).toBe(intent === 'document');
     }
@@ -386,6 +384,7 @@ describe('composer consumer states', () => {
   it('exposes real stopping instead of a second send while a stream is active', () => {
     const markup = renderToStaticMarkup(
       createElement(TaskComposer, {
+        botName,
         task: composerTask({
           streaming: true,
           active: true,
@@ -406,6 +405,7 @@ describe('composer consumer states', () => {
   it('protects the original draft while a send acknowledgement is unknown', () => {
     const markup = renderToStaticMarkup(
       createElement(TaskComposer, {
+        botName,
         task: composerTask({
           sendUncertain: true,
           active: true,
@@ -422,6 +422,7 @@ describe('composer consumer states', () => {
   it('offers compact alongside stop while streaming', () => {
     const markup = renderToStaticMarkup(
       createElement(TaskComposer, {
+        botName,
         task: composerTask({
           input: '/compact',
           streaming: true,
@@ -439,6 +440,7 @@ describe('composer consumer states', () => {
   it('reports a status read failure without claiming compact completion', () => {
     const markup = renderToStaticMarkup(
       createElement(TaskComposer, {
+        botName,
         task: composerTask({
           compactStatus: {
             phase: 'read_error',
@@ -462,6 +464,7 @@ describe('composer consumer states', () => {
     const reason = '消息和文件内容超出单条消息的容量。';
     const markup = renderToStaticMarkup(
       createElement(TaskComposer, {
+        botName,
         task: composerTask({
           active: false,
           eligibility: { allowed: false, reason },
@@ -490,12 +493,13 @@ describe('composer consumer states', () => {
       { intent: 'reminder' as const, ambiguousProposal, foldChoice: '' as const },
     ]) {
       const markup = renderToStaticMarkup(
-        createElement(TaskComposer, { task: composerTask(overrides) }),
+        createElement(TaskComposer, { botName, task: composerTask(overrides) }),
       );
       expect(openingTag(markup, 'send-message')).toMatch(/\sdisabled(?:=|[\s>])/);
     }
     const chosen = renderToStaticMarkup(
       createElement(TaskComposer, {
+        botName,
         task: composerTask({ intent: 'reminder', ambiguousProposal, foldChoice: 'second' }),
       }),
     );
@@ -505,6 +509,7 @@ describe('composer consumer states', () => {
   it('keeps registration explicit and puts scope facts in expandable details', () => {
     const markup = renderToStaticMarkup(
       createElement(TaskComposer, {
+        botName,
         task: composerTask({
           intent: 'document',
           workspaceId: '',
@@ -524,6 +529,7 @@ describe('composer consumer states', () => {
     expect(openingTag(markup, 'send-message')).toContain('disabled');
     const selected = renderToStaticMarkup(
       createElement(TaskComposer, {
+        botName,
         task: composerTask({
           intent: 'document',
           workspaceId: 'managed',

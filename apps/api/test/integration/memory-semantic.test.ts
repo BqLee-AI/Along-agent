@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { forbidden } from '../../src/platform/errors.js';
@@ -36,10 +37,7 @@ maybe('memory semantic retrieval', () => {
       "SELECT 1 FROM pg_extension WHERE extname='vector'",
     );
     vectorAvailable = Boolean(extension.rowCount);
-    await database.pool.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
-      conversation,
-      owner,
-    ]);
+    await createFixtureConversation(database.pool, owner, { id: conversation });
     await database.pool.query(
       "INSERT INTO messages(id,owner_id,conversation_id,role,content) VALUES($1,$2,$3,'user','original')",
       [message, owner, conversation],
@@ -69,10 +67,7 @@ maybe('memory semantic retrieval', () => {
     const isolatedOwner = randomUUID();
     const isolatedConversation = randomUUID();
     const isolatedMessage = randomUUID();
-    await database.pool.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
-      isolatedConversation,
-      isolatedOwner,
-    ]);
+    await createFixtureConversation(database.pool, isolatedOwner, { id: isolatedConversation });
     await database.pool.query(
       "INSERT INTO messages(id,owner_id,conversation_id,role,content) VALUES($1,$2,$3,'user','我喜欢无糖茉莉花茶')",
       [isolatedMessage, isolatedOwner, isolatedConversation],
@@ -190,10 +185,7 @@ maybe('memory semantic retrieval', () => {
     const isolatedOwner = randomUUID();
     const isolatedConversation = randomUUID();
     const isolatedMessage = randomUUID();
-    await database.pool.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
-      isolatedConversation,
-      isolatedOwner,
-    ]);
+    await createFixtureConversation(database.pool, isolatedOwner, { id: isolatedConversation });
     await database.pool.query(
       "INSERT INTO messages(id,owner_id,conversation_id,role,content) VALUES($1,$2,$3,'user','原始资料')",
       [isolatedMessage, isolatedOwner, isolatedConversation],
@@ -242,10 +234,7 @@ maybe('memory semantic retrieval', () => {
     const isolatedOwner = randomUUID();
     const isolatedConversation = randomUUID();
     const isolatedMessage = randomUUID();
-    await database.pool.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
-      isolatedConversation,
-      isolatedOwner,
-    ]);
+    await createFixtureConversation(database.pool, isolatedOwner, { id: isolatedConversation });
     await database.pool.query(
       "INSERT INTO messages(id,owner_id,conversation_id,role,content) VALUES($1,$2,$3,'user','原始资料')",
       [isolatedMessage, isolatedOwner, isolatedConversation],
@@ -321,10 +310,7 @@ maybe('memory semantic retrieval', () => {
     const isolatedOwner = randomUUID();
     const isolatedConversation = randomUUID();
     const isolatedMessage = randomUUID();
-    await database.pool.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
-      isolatedConversation,
-      isolatedOwner,
-    ]);
+    await createFixtureConversation(database.pool, isolatedOwner, { id: isolatedConversation });
     await database.pool.query(
       "INSERT INTO messages(id,owner_id,conversation_id,role,content) VALUES($1,$2,$3,'user','原始资料')",
       [isolatedMessage, isolatedOwner, isolatedConversation],

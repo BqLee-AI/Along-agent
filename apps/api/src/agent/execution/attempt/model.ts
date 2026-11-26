@@ -7,8 +7,11 @@ import {
 } from '@along/contracts';
 import { ApplicationError, forbidden, stateConflict } from '../../../platform/errors.js';
 import { resolveRunSelection } from '../../../features/model-providers/public.js';
+import { botScopeAllows, lockRunBotScope } from '../../../features/bots/public.js';
+import { assertContextSourcesAuthorized } from '../../tools/invocations/context-source.js';
 import { requireCurrentFeishuBotAuthority } from '../../tools/invocations/accepted-result.js';
 import { readRunInvocationStates } from '../../tools/invocations/run-state.js';
+import { assertBotPromptScope, withBotInstructions } from './bot-prompt-scope.js';
 import { unavailable } from './context.js';
 import {
   approvalAuthorizesActions,
@@ -111,9 +114,16 @@ export function createModelHandlers(environment: AttemptEnvironment) {
     if (attemptState.cumulative.iterations >= context.maxIterations)
       throw new ApplicationError(429, 'BUDGET_EXCEEDED', '本轮推理预算用完，已停下。');
     if (!deps.modelTransport) throw unavailable();
-    const selected = await guarded((client) =>
-      resolveRunSelection(client, context.ownerId, context.runId),
-    );
+    const { selected, permittedTools } = await guarded(async (client) => {
+      const selected = await resolveRunSelection(client, context.ownerId, context.runId);
+      const scope = context.personalBot ? await lockRunBotScope(client, context) : null;
+      return {
+        selected,
+        permittedTools: scope
+          ? tools.filter((tool) => tool.name === 'finish_goal' || botScopeAllows(scope, tool.name))
+          : tools,
+      };
+    });
     if (!selected) throw stateConflict('legacy Run model binding unavailable');
     if (selected.model_id !== context.contextPolicy.model_binding.model) throw unavailable();
     const transport = await deps.modelTransport(selected, {
@@ -121,9 +131,10 @@ export function createModelHandlers(environment: AttemptEnvironment) {
       attemptId: context.attemptId,
       operation: 'model',
     });
+    const effective = withBotInstructions(request, context.personalBot);
     const measurement = await transport.measure(
-      { ...request, type: 'measure_context' },
-      tools,
+      { ...effective, type: 'measure_context' },
+      permittedTools,
       context.contextPolicy,
     );
     if (request.type === 'measure_context') {
@@ -157,6 +168,16 @@ export function createModelHandlers(environment: AttemptEnvironment) {
       }
       const states = await readRunInvocationStates(client, context);
       assertActionsUnblocked(states, initial.snapshot?.tool_refs);
+      const observations = context.personalBot
+        ? states
+            .filter(
+              (row) =>
+                row.state === 'completed' &&
+                row.outcome_kind !== 'denied' &&
+                row.outcome_kind !== 'failed',
+            )
+            .map((row) => row.invocation_id)
+        : [];
       const privateReceipt = states.some(
         (row) =>
           row.tool_id === 'feishu_docx_read' &&
@@ -165,20 +186,32 @@ export function createModelHandlers(environment: AttemptEnvironment) {
       );
       if (privateReceipt) await requireCurrentFeishuBotAuthority(client, context);
       // Hold the Run and Feishu grant locks through local enqueue, not the provider response.
-      const authorizeDispatch = privateReceipt
-        ? (enqueue: () => void) =>
-            guarded(async (current) => {
-              await assertActionAuthority(current);
-              await requireCurrentFeishuBotAuthority(current, context);
-              enqueue();
-            })
-        : undefined;
+      const authorizeDispatch =
+        privateReceipt || context.personalBot
+          ? (enqueue: () => void) =>
+              guarded(async (current) => {
+                await assertActionAuthority(current);
+                if (context.personalBot) {
+                  const scope = await lockRunBotScope(current, context);
+                  if (
+                    permittedTools.some(
+                      (tool) => tool.name !== 'finish_goal' && !botScopeAllows(scope, tool.name),
+                    )
+                  )
+                    throw forbidden('Bot tool scope changed before provider dispatch');
+                  await assertBotPromptScope(current, context, scope);
+                  await assertContextSourcesAuthorized(current, context, observations);
+                }
+                if (privateReceipt) await requireCurrentFeishuBotAuthority(current, context);
+                enqueue();
+              })
+          : undefined;
       // Establish the model reservation under the same attempt → Run
       // locks used by pause registration, before invoking the transport.
       attemptState.modelStream = {
         ref: request.request_ref,
         iterator: transport
-          .model(request, tools, modelSignal, authorizeDispatch)
+          .model({ ...effective, type: 'model' }, permittedTools, modelSignal, authorizeDispatch)
           [Symbol.asyncIterator](),
         pendingDelta: null,
         pulling: false,

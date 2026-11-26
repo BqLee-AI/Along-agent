@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
@@ -37,10 +38,7 @@ suite('idle compact admission facts', () => {
   async function fixture() {
     const ownerId = randomUUID(),
       conversationId = randomUUID();
-    await db.pool.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
-      conversationId,
-      ownerId,
-    ]);
+    await createFixtureConversation(db.pool, ownerId, { id: conversationId });
     return { ownerId, conversationId };
   }
   test('control snapshot is exact, immutable and owner-scoped without a user message', async () => {

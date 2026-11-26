@@ -37,7 +37,7 @@ import type { HarnessServices } from '../../src/agent/execution/contracts.js';
 import { createContextPolicy } from '../../src/features/conversations/public.js';
 import { measureSdkContext } from '../../src/features/model-providers/public.js';
 import { configureTestModel } from './model-selection.js';
-import { SendMessageBodySchema } from '../../src/features/conversations/schemas.js';
+import { createFixtureConversation } from './bot-conversation.js';
 import { seedAdmittedSession as seedSession } from '../integration/setup.js';
 import type { SeededSession } from '../../src/features/identity/session/seed.js';
 import { loadTimeContext } from '../../src/features/time/context.js';
@@ -353,12 +353,12 @@ export class HarnessConsumer {
   }
 
   input(id: string, kind: ModelCase) {
-    return SendMessageBodySchema.parse({
+    return {
       execution: 'harness',
       raw_text: `nativeCase:${id}:${kind} 2027-11-02 09:20`,
       confirmed_timezone: 'Asia/Shanghai',
       idempotency_key: randomUUID(),
-    });
+    } as const;
   }
 
   request(actor: HarnessActor, path: string, body?: unknown, csrf = true): Promise<Response> {
@@ -480,6 +480,14 @@ export class HarnessActor {
       context: null,
       events: this.fixture.track(response.text().then(frames)),
     };
+  }
+
+  createConversation(): Promise<string> {
+    return createFixtureConversation(this.fixture.database.pool, this.ownerId);
+  }
+
+  async createMessage<T extends object>(body: T): Promise<T & { conversation_id: string }> {
+    return { ...body, conversation_id: await this.createConversation() };
   }
 
   async message(body: unknown): Promise<ConsumerStream> {

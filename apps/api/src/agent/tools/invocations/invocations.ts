@@ -53,6 +53,7 @@ import {
   WorkspaceCreateInputSchema,
 } from '../schemas.js';
 import { assertContextSourceAuthorized } from './context-source.js';
+import { botScopeAllows, lockRunBotScope } from '../../../features/bots/public.js';
 import {
   readAcceptedInvocationResult,
   validateAcceptedMemoryObservation,
@@ -216,6 +217,18 @@ function workspaceAuthorized(ctx: ToolContext, row: Invocation): boolean {
   } catch {
     return false;
   }
+}
+
+async function liveBotAllows(
+  client: PoolClient,
+  ctx: ToolContext,
+  row: Invocation,
+): Promise<boolean> {
+  return botScopeAllows(
+    await lockRunBotScope(client, ctx),
+    row.tool_id,
+    row.frozen_context.workspaceGrant?.workspace_id,
+  );
 }
 
 function executionContext(ctx: ToolContext, row: Invocation): ToolContext {
@@ -774,6 +787,9 @@ async function gate(
     return denyInvocation(client, ctx, row);
   if (!ctx.allowlist.includes(row.tool_id))
     return denyInvocation(client, ctx, row, permissionDenied, 'complete-reservation');
+  // A previously issued permit may still be reconciled without granting another effect.
+  if (row.state !== 'unknown' && !(await liveBotAllows(client, ctx, row)))
+    return denyInvocation(client, ctx, row, permissionDenied, 'complete-reservation');
   if (
     ['set_user_timezone', 'create_reminder', 'get_task', 'cancel_reminder'].includes(row.tool_id) &&
     (ctx.authorizationRevision !== 'delegation/1' ||
@@ -1015,6 +1031,7 @@ export async function executeNonTransactionalInvocation(
       (await isActiveOwner(client, ctx.ownerId)) &&
       ctx.allowlist.includes(row.tool_id) &&
       workspaceAuthorized(ctx, row) &&
+      (await liveBotAllows(client, ctx, row)) &&
       (!row.tool_id.startsWith('workspace_') || (canExecute && !ctx.signal?.aborted));
     // Record external facts even after cancellation, but never disclose them
     // through a currently revoked allowlist.
@@ -1058,7 +1075,8 @@ export async function executeNonTransactionalInvocation(
         !canExecute ||
         row.state !== 'completed' ||
         !ctx.allowlist.includes(row.tool_id) ||
-        !workspaceAuthorized(ctx, row)
+        !workspaceAuthorized(ctx, row) ||
+        !(await liveBotAllows(client, ctx, row))
       )
         return { ...permissionDenied, invocationId: row.invocation_id, replayed: false };
       const accepted = await readAcceptedInvocationResult(client, ctx, row);

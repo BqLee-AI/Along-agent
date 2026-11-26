@@ -5,6 +5,7 @@ import {
 } from '@along/contracts';
 import type { PoolClient } from 'pg';
 import { ApplicationError } from '../../../platform/errors.js';
+import { lockRunBotScope } from '../../../features/bots/public.js';
 import type { ToolContext } from '../contracts.js';
 import { resultKind } from '../result-schema.js';
 import {
@@ -24,16 +25,19 @@ export async function readRunContextObservations(
   client: PoolClient,
   ctx: ToolContext,
   invocationIds: readonly string[],
-  options: { project: boolean },
+  options: { project: boolean; inspectOnly?: true },
 ): Promise<HarnessObservation[]> {
+  if (!invocationIds.length) return [];
+  // Release inspection runs on a read-only snapshot and never sends these observations.
+  const scope = options.inspectOnly ? undefined : await lockRunBotScope(client, ctx);
   const metadata = await readContextSourceMetadata(client, ctx, invocationIds);
   const observations: HarnessObservation[] = [];
   for (const invocationId of invocationIds) {
     const row = metadata.get(invocationId);
     if (!row || row.state !== 'completed') throw contextSourceCorrupt();
-    authorizeContextSource(ctx, row);
+    authorizeContextSource(ctx, row, scope);
     if (row.result_version !== 1 || !row.shape_valid) throw contextSourceCorrupt();
-    await authorizeSliceOrigin(client, ctx, row, metadata);
+    await authorizeSliceOrigin(client, ctx, row, scope, metadata);
     if (
       options.project &&
       ctx.allowlist.includes('read_run_observation') &&
@@ -86,8 +90,8 @@ export async function readRunContextObservations(
   for (const invocationId of invocationIds) {
     const row = current.get(invocationId);
     if (!row) throw contextSourceCorrupt();
-    authorizeContextSource(ctx, row);
-    await authorizeSliceOrigin(client, ctx, row, current);
+    authorizeContextSource(ctx, row, scope);
+    await authorizeSliceOrigin(client, ctx, row, scope, current);
   }
   return observations;
 }

@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { expectApplicationRejection } from '../helpers/application-error.js';
 import { readAcceptedInvocationResult } from '../../src/agent/tools/invocations/accepted-result.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
@@ -82,10 +83,7 @@ describe('direct reminder accepted facts', () => {
       [ownerId, `${ownerId}@reminder.test`],
     );
     await admitTestUser(db.pool, ownerId);
-    await db.pool.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
-      conversationId,
-      ownerId,
-    ]);
+    await createFixtureConversation(db.pool, ownerId, { id: conversationId });
     await db.pool.query(
       "INSERT INTO messages(id,owner_id,conversation_id,role,content) VALUES($1,$2,$3,'user',$4)",
       [messageId, ownerId, conversationId, request],

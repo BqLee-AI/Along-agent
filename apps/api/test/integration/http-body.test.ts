@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { Agent, createServer, request, type Server } from 'node:http';
 import { once } from 'node:events';
@@ -92,7 +93,11 @@ maybe('HTTP bounded bodies with real sessions and transactions', () => {
 
     const message = await post(
       '/api/v1/conversations/messages',
-      { raw_text: '你好', idempotency_key: randomUUID() },
+      {
+        conversation_id: await createFixtureConversation(database.pool, session.userId),
+        raw_text: '你好',
+        idempotency_key: randomUUID(),
+      },
       { ...headers, 'x-request-id': 'body-business-43' },
     );
     expect(message.status).toBe(200);

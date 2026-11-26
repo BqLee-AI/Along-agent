@@ -1,0 +1,154 @@
+{
+  "version": "0042",
+  "tables": ["personal_bots", "bot_conversation_requests"],
+  "columns": [
+    {
+      "table": "personal_bots",
+      "name": "id",
+      "type": "uuid",
+      "required": true,
+      "default": "gen_random_uuid()"
+    },
+    {
+      "table": "personal_bots",
+      "name": "owner_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "personal_bots",
+      "name": "revision",
+      "type": "int4",
+      "required": true,
+      "default": "1"
+    },
+    {
+      "table": "personal_bots",
+      "name": "config",
+      "type": "jsonb",
+      "required": true,
+      "default": ""
+    },
+    { "table": "conversations", "name": "bot_id", "type": "uuid", "required": true, "default": "" },
+    {
+      "table": "bot_conversation_requests",
+      "name": "owner_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "bot_conversation_requests",
+      "name": "idempotency_key",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "bot_conversation_requests",
+      "name": "conversation_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "bot_conversation_requests",
+      "name": "expires_at",
+      "type": "timestamptz",
+      "required": true,
+      "default": ""
+    }
+  ],
+  "constraints": [
+    { "table": "personal_bots", "name": "personal_bots_pkey", "type": "p", "columns": ["id"] },
+    {
+      "table": "personal_bots",
+      "name": "personal_bots_owner_id_id_key",
+      "type": "u",
+      "columns": ["owner_id", "id"]
+    },
+    {
+      "table": "personal_bots",
+      "name": "personal_bots_revision_check",
+      "type": "c",
+      "columns": ["revision"],
+      "expression": "(revision > 0)"
+    },
+    {
+      "table": "personal_bots",
+      "name": "personal_bot_config_shape",
+      "type": "c",
+      "columns": ["config"],
+      "expression": "personal_bot_config_valid(config)"
+    },
+    {
+      "table": "conversations",
+      "name": "conversations_personal_bot_fkey",
+      "type": "f",
+      "columns": ["owner_id", "bot_id"],
+      "target": "personal_bots",
+      "target_columns": ["owner_id", "id"],
+      "delete_action": "r"
+    },
+    {
+      "table": "bot_conversation_requests",
+      "name": "bot_conversation_requests_pkey",
+      "type": "p",
+      "columns": ["owner_id", "idempotency_key"]
+    },
+    {
+      "table": "bot_conversation_requests",
+      "name": "bot_conversation_requests_conversation_id_fkey",
+      "type": "f",
+      "columns": ["conversation_id"],
+      "target": "conversations",
+      "target_columns": ["id"],
+      "delete_action": "r"
+    }
+  ],
+  "functions": [
+    {
+      "name": "personal_bot_config_valid",
+      "arguments": "jsonb",
+      "result": "boolean",
+      "volatility": "i",
+      "strict": true
+    },
+    {
+      "name": "conversations_guard_personal_bot",
+      "arguments": "",
+      "result": "trigger",
+      "volatility": "v",
+      "strict": false
+    }
+  ],
+  "triggers": [
+    {
+      "table": "conversations",
+      "name": "conversations_personal_bot_immutable",
+      "function": "conversations_guard_personal_bot",
+      "type": 19,
+      "columns": ["owner_id", "bot_id"]
+    }
+  ],
+  "indexes": [
+    {
+      "table": "conversations",
+      "name": "conversations_bot_created_idx",
+      "method": "btree",
+      "unique": false,
+      "keys": ["owner_id", "bot_id", "created_at", "id"],
+      "options": [0, 0, 3, 3],
+      "predicate": null
+    },
+    {
+      "table": "bot_conversation_requests",
+      "name": "bot_conversation_requests_conversation_idx",
+      "method": "btree",
+      "unique": false,
+      "keys": ["conversation_id"],
+      "predicate": null
+    }
+  ]
+}

@@ -80,7 +80,7 @@ async function invokeTurnTool(
     runId: session.context.runId,
     attemptId: session.context.attemptId,
     requestId: session.context.requestId,
-    allowlist: [toolId],
+    allowlist: session.context.allowlist,
     confirmedTimezone: session.context.confirmedTimezone,
     anchorReceivedAtUtc: session.context.anchorReceivedAtUtc,
     receivedAtUtc: session.context.receivedAtUtc,

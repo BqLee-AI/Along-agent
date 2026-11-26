@@ -10,7 +10,7 @@ import {
 
 export const SendMessageBodySchema = z
   .object({
-    conversation_id: z.string().uuid().optional(),
+    conversation_id: z.string().uuid(),
     execution: z.enum(['business', 'harness']).optional(),
     model_selection: ModelSelectionSchema.optional(),
     authorization_revision: z.literal('delegation/1').optional(),
@@ -106,7 +106,7 @@ export const HistoryCursorSchema = z
   .strict()
   .refine(
     (cursor) =>
-      (cursor.kind === 'conversations') === (cursor.parent === '') &&
+      (cursor.kind === 'conversations' || cursor.parent !== '') &&
       (cursor.last_at < cursor.upper_at ||
         (cursor.last_at === cursor.upper_at &&
           cursor.last_id.toLowerCase() <= cursor.upper_id.toLowerCase())),

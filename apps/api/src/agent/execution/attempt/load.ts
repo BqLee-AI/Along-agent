@@ -23,6 +23,8 @@ import type { NativeHandoff } from '../../harness/harness-process.js';
 import type { ConversationDeps, RunContext } from '../contracts.js';
 import { withRunTransaction } from '../driver/ownership.js';
 import { decodeRunSnapshot, lockRun } from '../../../features/conversations/public.js';
+import { lockRunBotScope } from '../../../features/bots/public.js';
+import { assertBotPromptScope } from './bot-prompt-scope.js';
 import { readSnapshot } from './restore-snapshot.js';
 import { readRunApprovalDecision } from '../load-approval-decision.js';
 import {
@@ -52,6 +54,8 @@ export async function guardHarnessStart(
   await withRunTransaction(pool, context.ownership, async (client) => {
     await lockRun(client, context);
     await assertContextSourcesAuthorized(client, { ...context, signal }, snapshot?.tool_refs ?? []);
+    if (context.personalBot)
+      await assertBotPromptScope(client, context, await lockRunBotScope(client, context));
     signal.throwIfAborted();
     enqueue();
   });

@@ -7,6 +7,7 @@ import {
   type HarnessR3Snapshot,
 } from '@along/contracts';
 import { ApplicationError, forbidden } from '../../../platform/errors.js';
+import { botScopeAllows, lockRunBotScope, type BotScope } from '../../../features/bots/public.js';
 import { assertToolRunBinding } from '../../../features/conversations/public.js';
 import { validateWorkspaceGrant } from '../../../features/workspaces/public.js';
 import { isActiveOwner } from '../../../features/identity/public.js';
@@ -138,10 +139,25 @@ export async function readContextSourceMetadata(
   return new Map(rows.map((row) => [row.invocation_id, row]));
 }
 
-export function authorizeContextSource(ctx: ToolContext, row: ContextSourceMetadata): void {
-  if (ctx.signal?.aborted || !ctx.allowlist.includes(row.tool_id)) throw forbidden();
+export function authorizeContextSource(
+  ctx: ToolContext,
+  row: ContextSourceMetadata,
+  scope?: BotScope,
+): void {
+  const workspace = workspaceGrantSchema.safeParse(row.frozen_context.workspaceGrant);
+  if (
+    ctx.signal?.aborted ||
+    !ctx.allowlist.includes(row.tool_id) ||
+    (scope &&
+      !botScopeAllows(
+        scope,
+        row.tool_id,
+        workspace.success ? workspace.data.workspace_id : undefined,
+      ))
+  )
+    throw forbidden();
   if (row.tool_id.startsWith('workspace_')) {
-    const parsed = workspaceGrantSchema.safeParse(row.frozen_context.workspaceGrant);
+    const parsed = workspace;
     const current =
       ctx.authorizationRevision === 'delegation/1'
         ? ctx.workspaceGrants?.find(
@@ -176,6 +192,7 @@ export async function authorizeSliceOrigin(
   client: PoolClient,
   ctx: ToolContext,
   row: ContextSourceMetadata,
+  scope: BotScope | undefined,
   knownSources?: ReadonlyMap<string, ContextSourceMetadata>,
 ): Promise<void> {
   if (row.kind !== 'context_slice') return;
@@ -200,7 +217,7 @@ export async function authorizeSliceOrigin(
       source.source_invocation_id,
     );
   if (!origin || origin.state !== 'completed') throw forbidden();
-  authorizeContextSource(ctx, origin);
+  authorizeContextSource(ctx, origin, scope);
   if (
     !origin.shape_valid ||
     origin.result_status !== 'ok' ||
@@ -263,9 +280,10 @@ export async function assertContextSourceAuthorized(
   if (!(await isActiveOwner(client, ctx.ownerId))) throw forbidden('owner authorization revoked');
   const row = (await readContextSourceMetadata(client, ctx, [invocationId])).get(invocationId);
   if (!row || row.state !== 'completed') throw forbidden();
-  authorizeContextSource(ctx, row);
+  const scope = await lockRunBotScope(client, ctx);
+  authorizeContextSource(ctx, row, scope);
   if (row.result_version !== 1 || !row.shape_valid) throw contextSourceCorrupt();
-  await authorizeSliceOrigin(client, ctx, row);
+  await authorizeSliceOrigin(client, ctx, row, scope);
   return row;
 }
 
@@ -278,14 +296,16 @@ export async function assertContextSourcesAuthorized(
 ): Promise<void> {
   if (!(await isActiveOwner(client, ctx.ownerId, { lock: 'share' })))
     throw forbidden('owner authorization revoked');
+  if (!invocationIds.length) return;
+  const scope = await lockRunBotScope(client, ctx);
   const metadata = await readContextSourceMetadata(client, ctx, invocationIds);
   let privateContent = false;
   for (const id of invocationIds) {
     const row = metadata.get(id);
     if (!row || row.state !== 'completed') throw contextSourceCorrupt();
-    authorizeContextSource(ctx, row);
+    authorizeContextSource(ctx, row, scope);
     if (row.result_version !== 1 || !row.shape_valid) throw contextSourceCorrupt();
-    await authorizeSliceOrigin(client, ctx, row, metadata);
+    await authorizeSliceOrigin(client, ctx, row, scope, metadata);
     if (row.tool_id === 'feishu_docx_read' && row.outcome_kind === 'success') {
       if (row.kind !== 'feishu_docx_read' || row.result_status !== 'ok')
         throw contextSourceCorrupt();

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pg from 'pg';
 import { DeploymentDatabase } from '../local/database.mjs';
+import { copyMigrationsThrough } from './fixtures/migrations.js';
 
 const connectionString = process.env.DATABASE_URL;
 const databaseTests = connectionString ? describe : describe.skip;
@@ -150,7 +151,7 @@ databaseTests('direct reminder source schema admission against PG16', () => {
           await expect(database.initialize()).rejects.toMatchObject({
             code: 'explicit_upgrade_required',
           });
-          expect((await database.upgrade()).version).toBe('0041');
+          expect((await database.upgrade()).version).toBe('0042');
         });
         await sql(url, async (client) => {
           expect(
@@ -210,8 +211,8 @@ databaseTests('direct reminder source schema admission against PG16', () => {
           }
         });
         await deployment(url, async (database) => {
-          expect(await database.classify()).toMatchObject({ kind: 'supported', version: '0041' });
-          expect((await database.initialize()).version).toBe('0041');
+          expect(await database.classify()).toMatchObject({ kind: 'supported', version: '0042' });
+          expect((await database.initialize()).version).toBe('0042');
         });
       });
     } finally {
@@ -252,7 +253,7 @@ databaseTests('direct reminder source schema admission against PG16', () => {
             version: '0023',
             reason: 'explicit_upgrade_required',
           });
-          expect((await database.upgrade()).version).toBe('0041');
+          expect((await database.upgrade()).version).toBe('0042');
         });
         await sql(url, async (client) => {
           expect(
@@ -275,7 +276,19 @@ databaseTests('direct reminder source schema admission against PG16', () => {
             )
           ).rows[0].conversation_id;
           const messageId = randomUUID();
-          await client.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
+          await client.query('INSERT INTO personal_bots(id,owner_id,config) VALUES($1,$1,$2)', [
+            ownerId,
+            {
+              name: 'Reminder',
+              introduction: '',
+              role: '',
+              instructions: '',
+              model_selection: null,
+              tool_ids: [],
+              workspace_ids: [],
+            },
+          ]);
+          await client.query('INSERT INTO conversations(id,owner_id,bot_id) VALUES($1,$2,$2)', [
             conversationId,
             ownerId,
           ]);
@@ -405,14 +418,19 @@ databaseTests('direct reminder source schema admission against PG16', () => {
             ],
           );
         });
-        await deployment(url, async (database) => {
-          expect(await database.classify()).toMatchObject({
-            kind: 'supported',
-            version: '0025',
-            reason: 'explicit_upgrade_required',
-          });
-          expect((await database.upgrade()).version).toBe('0041');
-        });
+        await copyMigrationsThrough(directory, '0041');
+        await deployment(
+          url,
+          async (database) => {
+            expect(await database.classify()).toMatchObject({
+              kind: 'supported',
+              version: '0025',
+              reason: 'explicit_upgrade_required',
+            });
+            expect((await database.upgrade()).version).toBe('0041');
+          },
+          directory,
+        );
         await sql(url, async (client) => {
           expect(
             (
@@ -485,10 +503,14 @@ databaseTests('direct reminder source schema admission against PG16', () => {
             await expect(client.query(insert, values)).rejects.toMatchObject({ code: '23514' });
           }
         });
-        await deployment(url, async (database) => {
-          expect(await database.classify()).toMatchObject({ kind: 'supported', version: '0041' });
-          expect((await database.upgrade()).version).toBe('0041');
-        });
+        await deployment(
+          url,
+          async (database) => {
+            expect(await database.classify()).toMatchObject({ kind: 'supported', version: '0041' });
+            expect((await database.upgrade()).version).toBe('0041');
+          },
+          directory,
+        );
       });
     } finally {
       await rm(directory, { recursive: true, force: true });
@@ -498,7 +520,7 @@ databaseTests('direct reminder source schema admission against PG16', () => {
   it('enforces source cardinality, real invocation references and uniqueness on inserts and source updates', async () => {
     await isolated(async (url) => {
       await deployment(url, async (database) => {
-        expect((await database.initialize()).version).toBe('0041');
+        expect((await database.initialize()).version).toBe('0042');
       });
       await sql(url, async (client) => {
         const ownerId = randomUUID();
@@ -661,7 +683,7 @@ databaseTests('direct reminder source schema admission against PG16', () => {
     async (_name, mutation) => {
       await isolated(async (url) => {
         await deployment(url, async (database) => {
-          expect((await database.initialize()).version).toBe('0041');
+          expect((await database.initialize()).version).toBe('0042');
         });
         const snapshot = `SELECT jsonb_build_object(
         'ledger',(SELECT jsonb_agg(to_jsonb(m) ORDER BY version) FROM schema_migrations m),

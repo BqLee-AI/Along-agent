@@ -15,7 +15,7 @@ import {
   UserRound,
 } from 'lucide-react';
 import { AppShell as LumenAppShell } from '@lorelum/lumen-ui/pro/app-shell';
-import ConversationPane from '@/features/conversations/view/conversation-pane';
+import PersonalBotPane from '@/features/conversations/view/personal-bot-pane';
 import { isSettingsPath } from '@/features/capabilities/model/capabilities';
 import { ModelCatalogProvider } from '@/features/model-settings/viewmodel/model-catalog-context';
 import { SettingsPanel } from '@/features/capabilities/view/settings-panel';
@@ -93,42 +93,44 @@ export function AppShell({
               className={`${location.workspaceOpen ? 'hidden lg:flex' : 'flex w-full'} min-h-0 min-w-0 flex-col lg:flex-1`}
               data-testid="persistent-chat-pane"
             >
-              <div className={location.invalid ? 'hidden' : 'flex min-h-0 w-full min-w-0 flex-1'}>
-                <ConversationPane
-                  {...selection}
-                  sidebar={!location.workspaceOpen}
-                  headerActions={
-                    location.workspaceOpen ? null : (
-                      <>
-                        <ThemeToggle />
-                        {settingsLink}
-                        <button
-                          type="button"
-                          id="workspace-toggle"
-                          data-testid="workspace-toggle"
-                          className={headerIconClass}
-                          aria-controls="assistant-workspace"
-                          aria-expanded={false}
-                          aria-label="展开工作区"
-                          title="展开工作区"
-                          onClick={() => switchSurface(true)}
-                        >
-                          <PanelRightOpen className="size-4" aria-hidden="true" />
-                        </button>
-                      </>
-                    )
-                  }
-                />
-              </div>
+              {!location.invalid ? (
+                <div className="flex min-h-0 w-full min-w-0 flex-1">
+                  <PersonalBotPane
+                    {...selection}
+                    sidebar={!location.workspaceOpen}
+                    headerActions={
+                      location.workspaceOpen ? null : (
+                        <>
+                          <ThemeToggle />
+                          {settingsLink}
+                          <button
+                            type="button"
+                            id="workspace-toggle"
+                            data-testid="workspace-toggle"
+                            className={headerIconClass}
+                            aria-controls="assistant-workspace"
+                            aria-expanded={false}
+                            aria-label="展开工作区"
+                            title="展开工作区"
+                            onClick={() => switchSurface(true)}
+                          >
+                            <PanelRightOpen className="size-4" aria-hidden="true" />
+                          </button>
+                        </>
+                      )
+                    }
+                  />
+                </div>
+              ) : null}
               {location.invalid ? (
                 <section className="mx-auto w-full max-w-xl space-y-5 p-6">
-                  <h1 className="text-2xl leading-8 font-semibold">会话地址无法读取</h1>
-                  <ErrorNotice message="会话或运行地址无效，未读取或执行该地址中的操作。" />
+                  <h1 className="text-2xl leading-8 font-semibold">Bot 或会话地址无法读取</h1>
+                  <ErrorNotice message="Bot、会话或运行地址无效，未读取或执行该地址中的操作。" />
                   <Link
                     className="inline-flex min-h-11 items-center text-brand-ink underline"
                     href="/conversations"
                   >
-                    打开新对话
+                    返回 Bot 列表
                   </Link>
                 </section>
               ) : null}
@@ -217,7 +219,7 @@ export function AppShell({
               pathname={pathname}
               onClose={() => {
                 setSettingsPending(false);
-                router.push(href('/conversations'));
+                router.push(href('/?surface=chat'));
               }}
             >
               {settingsRoute ? children : null}

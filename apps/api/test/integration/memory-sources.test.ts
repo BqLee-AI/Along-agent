@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { withTransaction } from '../../src/db/transaction.js';
@@ -30,11 +31,8 @@ maybe('conversation memory sources', () => {
   beforeAll(async () => {
     database = await createIntegrationDatabase();
     const pool = database.pool;
-    await pool.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2),($3,$2)', [
-      conversationId,
-      ownerId,
-      otherConversation,
-    ]);
+    await createFixtureConversation(pool, ownerId, { id: conversationId });
+    await createFixtureConversation(pool, ownerId, { id: otherConversation });
     await pool.query(
       `INSERT INTO messages(id,owner_id,conversation_id,role,content) VALUES
        ($1,$6,$7,'user','本人原话'),($2,$6,$7,'assistant','回复'),

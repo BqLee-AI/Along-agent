@@ -67,6 +67,18 @@ async function user(pool: Pool): Promise<string> {
     `${id}@history.test`,
   ]);
   await admitTestUser(pool, id);
+  await pool.query('INSERT INTO personal_bots(id,owner_id,config) VALUES ($1,$1,$2)', [
+    id,
+    {
+      name: 'History',
+      introduction: '',
+      role: '',
+      instructions: '',
+      model_selection: null,
+      tool_ids: [],
+      workspace_ids: [],
+    },
+  ]);
   return id;
 }
 async function conversation(
@@ -75,12 +87,10 @@ async function conversation(
   at = '2026-10-28T09:00:00.123456Z',
   id = randomUUID(),
 ): Promise<string> {
-  await pool.query('INSERT INTO conversations(id,owner_id,title,created_at) VALUES ($1,$2,$3,$4)', [
-    id,
-    owner,
-    'do not use stored title',
-    at,
-  ]);
+  await pool.query(
+    'INSERT INTO conversations(id,owner_id,bot_id,title,created_at) VALUES ($1,$2,$2,$3,$4)',
+    [id, owner, 'do not use stored title', at],
+  );
   return id;
 }
 async function message(
@@ -308,8 +318,8 @@ maybe('owner-scoped read-only conversation history HTTP', () => {
   it('continues beyond the maximum collection page size without truncating any collection', async () => {
     const owner = await user(pool);
     await pool.query(
-      `INSERT INTO conversations(id,owner_id,created_at)
-      SELECT gen_random_uuid(),$1,'2026-10-28T09:00:00Z'::timestamptz+g*interval '1 microsecond' FROM generate_series(1,51) g`,
+      `INSERT INTO conversations(id,owner_id,bot_id,created_at)
+      SELECT gen_random_uuid(),$1,$1,'2026-10-28T09:00:00Z'::timestamptz+g*interval '1 microsecond' FROM generate_series(1,51) g`,
       [owner],
     );
     const first = ConversationListPageSchema.parse(
@@ -372,7 +382,7 @@ maybe('owner-scoped read-only conversation history HTTP', () => {
     try {
       await delayed.query('BEGIN');
       await delayed.query(
-        `INSERT INTO conversations(id,owner_id,created_at) VALUES ($1,$2,'2026-10-28T09:00:00.123465Z')`,
+        `INSERT INTO conversations(id,owner_id,bot_id,created_at) VALUES ($1,$2,$2,'2026-10-28T09:00:00.123465Z')`,
         [lateId, owner],
       );
       const first = ConversationListPageSchema.parse(

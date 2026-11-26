@@ -295,6 +295,7 @@ for (const mode of ['local', 'http'] as const satisfies readonly ConsumerMode[])
     });
     const events = await (
       await actor.message({
+        conversation_id: await actor.createConversation(),
         execution: 'harness',
         authorization_revision: 'delegation/1',
         raw_text: `createResolutionCase:${scenario.id} ${quote}`,

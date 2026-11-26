@@ -11,6 +11,7 @@ import {
   getDocumentApproval,
 } from '../../../features/approvals/public.js';
 import { lockDocumentApprovalRun } from '../../../features/conversations/public.js';
+import { botScopeAllows, lockRunBotScope } from '../../../features/bots/public.js';
 import { terminateRejectedDocumentRun } from './reject-document.js';
 
 export async function confirmDocumentApproval(
@@ -61,12 +62,24 @@ async function decideDocumentApproval(
     runId: located.run_id,
     workspaceGrant: located.workspace_grant,
   });
+  const canAuthorize =
+    authority.canAuthorize &&
+    (action === 'reject' ||
+      botScopeAllows(
+        await lockRunBotScope(client, {
+          ownerId,
+          conversationId: located.conversation_id,
+          runId: located.run_id,
+        }),
+        'workspace_apply_replace',
+        located.workspace_grant.workspace_id,
+      ));
   const { result, conversationId, runId } = await decideDocumentApprovalWithinTransaction(
     client,
     ownerId,
     approvalId,
     action,
-    authority.canAuthorize,
+    canAuthorize,
     body,
   );
   if (action === 'reject' && !result.duplicate) {

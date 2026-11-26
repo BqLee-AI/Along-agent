@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { expectApplicationRejection } from '../helpers/application-error.js';
 import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
@@ -163,6 +164,7 @@ maybe('server-owned driver retains an in-flight workspace write', () => {
           actor.userId,
           randomUUID(),
           {
+            conversation_id: await createFixtureConversation(database.pool, actor.userId),
             execution: 'harness',
             authorization_revision: 'delegation/1',
             raw_text:

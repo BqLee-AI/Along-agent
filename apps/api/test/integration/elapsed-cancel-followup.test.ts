@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { confirmApproval } from '../../src/features/approvals/reminder/confirm.js';
@@ -48,10 +49,7 @@ maybe('elapsed UTC cancellation follow-up', () => {
       [ownerId, `${ownerId}@fixture.test`],
     );
     await admitTestUser(db.pool, ownerId);
-    await db.pool.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
-      conversationId,
-      ownerId,
-    ]);
+    await createFixtureConversation(db.pool, ownerId, { id: conversationId });
     await db.pool.query(
       "INSERT INTO messages(id,owner_id,conversation_id,role,content) VALUES($1,$2,$3,'user',$4)",
       [messageId, ownerId, conversationId, text],
@@ -138,7 +136,10 @@ maybe('elapsed UTC cancellation follow-up', () => {
       { pool: db.pool, timeContext: loadTimeContext(undefined) },
       ownerId,
       randomUUID(),
-      { raw_text: `取消任务 ${taskId}` },
+      {
+        conversation_id: await createFixtureConversation(db.pool, ownerId),
+        raw_text: `取消任务 ${taskId}`,
+      },
       randomUUID(),
     );
     if (!started.context) throw new Error('expected business run');

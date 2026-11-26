@@ -31,6 +31,7 @@ export interface RunRow {
   goal_result: GoalResult | null;
 }
 export interface FrozenContext {
+  personalBot?: RunContext['personalBot'];
   confirmedTimezone: string | null;
   anchorReceivedAtUtc: string;
   receivedAtUtc: string;

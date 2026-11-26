@@ -1,3 +1,4 @@
+import { createFixtureConversation, seedFixtureBot } from '../helpers/bot-conversation.js';
 import { admitTestUser } from './setup.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
@@ -68,9 +69,10 @@ maybe('harness frozen admission context', () => {
       `${ownerId}@context.test`,
     ]);
     await admitTestUser(pool, ownerId);
+    const botId = await seedFixtureBot(pool, ownerId);
     await pool.query(
-      `INSERT INTO conversations(id,owner_id,anchor_received_at_utc) VALUES($1,$2,now())`,
-      [conversationId, ownerId],
+      `INSERT INTO conversations(id,owner_id,bot_id,anchor_received_at_utc) VALUES($1,$2,$3,now())`,
+      [conversationId, ownerId, botId],
     );
     await pool.query(
       `INSERT INTO messages(id,owner_id,conversation_id,role,content) VALUES($1,$2,$3,'user','legacy full input')`,
@@ -112,12 +114,15 @@ maybe('harness frozen admission context', () => {
       meterRevision: 'fixture/1',
     });
     const deps = dependencies(pool, globalPolicy);
-    const start = (model_id: string) =>
+    const start = async (model_id: string) =>
       startConversationRun(
         deps,
         ownerId,
         randomUUID(),
         {
+          conversation_id: await createFixtureConversation(pool, ownerId, {
+            modelSelection: { provider_id: provider.id, model_id },
+          }),
           execution: 'harness',
           raw_text: 'window',
           model_selection: { provider_id: provider.id, model_id },
@@ -170,10 +175,11 @@ maybe('harness frozen admission context', () => {
     ]);
     await admitTestUser(pool, ownerId);
     await configureTestModel(pool, ownerId, 'context-fixture');
+    const botId = await seedFixtureBot(pool, ownerId);
     await pool.query(
-      `INSERT INTO conversations(id,owner_id,anchor_received_at_utc,confirmed_timezone_id)
-      VALUES($1,$2,'2026-10-01T00:00:00Z','Asia/Shanghai')`,
-      [conversationId, ownerId],
+      `INSERT INTO conversations(id,owner_id,bot_id,anchor_received_at_utc,confirmed_timezone_id)
+      VALUES($1,$2,$3,'2026-10-01T00:00:00Z','Asia/Shanghai')`,
+      [conversationId, ownerId, botId],
     );
     const predecessors: string[] = [];
     for (let i = 0; i < 70; i++) {
@@ -242,7 +248,11 @@ maybe('harness frozen admission context', () => {
     ]);
     await admitTestUser(database.pool, ownerId);
     await configureTestModel(database.pool, ownerId, 'context-fixture');
-    const body = { execution: 'harness', raw_text: 'frozen policy input' };
+    const body = {
+      conversation_id: await createFixtureConversation(database.pool, ownerId),
+      execution: 'harness',
+      raw_text: 'frozen policy input',
+    };
     const started = await startConversationRun(
       dependencies(database.pool),
       ownerId,
@@ -316,7 +326,10 @@ maybe('harness frozen admission context', () => {
       dependencies(pool),
       binding.ownerId,
       randomUUID(),
-      { raw_text: 'business chat' },
+      {
+        conversation_id: await createFixtureConversation(pool, binding.ownerId),
+        raw_text: 'business chat',
+      },
       randomUUID(),
     );
     expect(await readRunContextPolicy(pool, binding.ownerId, business.runId)).toBeNull();
@@ -403,17 +416,18 @@ maybe('harness frozen admission context', () => {
       `${ownerId}@context.test`,
     ]);
     await admitTestUser(pool, ownerId);
+    await configureTestModel(pool, ownerId, 'context-fixture');
+    const conversationId = await createFixtureConversation(pool, ownerId);
     await expect(
       startConversationRun(
         dependencies(pool, { ...policy, completion_cap: 0 }),
         ownerId,
         randomUUID(),
-        { execution: 'harness', raw_text: 'must roll back' },
+        { conversation_id: conversationId, execution: 'harness', raw_text: 'must roll back' },
         randomUUID(),
       ),
     ).rejects.toThrow();
     for (const table of [
-      'conversations',
       'messages',
       'agent_runs',
       'run_attempts',
@@ -425,6 +439,14 @@ maybe('harness frozen admission context', () => {
           .rows[0].n,
       ).toBe(0);
     }
+    expect(
+      (
+        await pool.query(
+          'SELECT id, anchor_received_at_utc, title FROM conversations WHERE owner_id=$1',
+          [ownerId],
+        )
+      ).rows,
+    ).toEqual([{ id: conversationId, anchor_received_at_utc: null, title: '' }]);
   });
 
   it('database rejects owner mismatch, business binding and invalid strict policy payloads', async () => {

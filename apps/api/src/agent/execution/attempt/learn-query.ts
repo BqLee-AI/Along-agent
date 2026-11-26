@@ -4,6 +4,7 @@ import {
   LearnDocsQuerySchema,
 } from '@along/contracts';
 import { z } from 'zod';
+import { botScopeAllows, lockRunBotScope } from '../../../features/bots/public.js';
 import {
   lockUsableRunModel,
   resolveRunSelection,
@@ -40,6 +41,7 @@ export async function formLearnQuery(
 
   const selected = await guarded(async (client) => {
     await assertActionAuthority(client);
+    if (!botScopeAllows(await lockRunBotScope(client, context), 'learn_docs_search')) return null;
     return resolveRunSelection(client, context.ownerId, context.runId);
   });
   if (!selected || selected.model_id !== context.contextPolicy.model_binding.model) return null;
@@ -78,6 +80,8 @@ export async function formLearnQuery(
           (await lockUsableRunModel(client, context.ownerId, context.runId)) !== selected.model_id
         )
           throw forbidden('Learn query model binding unavailable');
+        if (!botScopeAllows(await lockRunBotScope(client, context), 'learn_docs_search'))
+          throw forbidden('Bot no longer permits Learn search');
         signal.throwIfAborted();
         enqueue();
         state.cumulative.iterations++;

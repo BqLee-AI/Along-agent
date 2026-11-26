@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
@@ -40,7 +41,11 @@ maybe('business Run terminal accounting after account deactivation', () => {
       deps,
       ownerId,
       randomUUID(),
-      { raw_text: '提醒我喝水', confirmed_timezone: 'Asia/Shanghai' },
+      {
+        conversation_id: await createFixtureConversation(pool, ownerId),
+        raw_text: '提醒我喝水',
+        confirmed_timezone: 'Asia/Shanghai',
+      },
       null,
     );
     if (!started.context) throw new Error('expected accepted Run context');

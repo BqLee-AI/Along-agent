@@ -49,7 +49,6 @@ export {
 } from './run/checkpoints.js';
 export {
   getConversation,
-  createConversation,
   freezeConversationTimezone,
   insertMessage,
   listHarnessMessageRefs,
@@ -91,11 +90,13 @@ export { listReleaseWaitingRuns, readReleaseWaitingRun } from './history/release
 export type { ReleaseWaitingRun } from './history/release-waiting.js';
 export { listHistoricalOwners } from './history/owner-history.js';
 export {
+  getConversationBot,
   getConversationList,
   getConversationMessages,
   getConversationRuns,
 } from './history/history-service.js';
 export { getConversationDetail } from './history/conversation-detail.js';
+export { createBotConversation } from './bot-conversations.js';
 export {
   readRunSnapshotPayload,
   readLatestRunSnapshotPayload,

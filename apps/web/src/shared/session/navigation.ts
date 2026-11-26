@@ -82,7 +82,12 @@ export function clearAppRetryState(
         ? Array.from({ length: target.length }, (_, index) => target.key!(index))
         : Object.keys(target);
     for (const key of keys) {
-      if (key && /^(?:run-resume:|run-cancel:|document-decision:)/.test(key)) {
+      if (
+        key &&
+        /^(?:conversation-send:|conversation-compact:|run-resume:|run-cancel:|run-pause:|run-continue:|document-decision:)/.test(
+          key,
+        )
+      ) {
         target.removeItem(key);
       }
     }

@@ -16,6 +16,7 @@ import {
   modelSelectionWritePath,
 } from '../features/model-providers/http/controller.js';
 import { createApprovalController, approvalWriteScopes } from '../features/approvals/controller.js';
+import { botWriteScopes, createBotController } from '../features/bots/controller.js';
 import { createTaskController, taskWriteScopes } from '../features/tasks/controller.js';
 import { createMemoryController, memoryWriteScopes } from '../features/memory/controller.js';
 import { createFeishuController } from '../features/office-connectors/controller.js';
@@ -42,6 +43,7 @@ export function createApp(deps: AppDeps) {
     ...taskWriteScopes,
     ...memoryWriteScopes,
     ...conversationWriteScopes,
+    ...botWriteScopes,
   ];
   return (
     new Elysia({ name: 'along-api', strictPath: true, normalize: false })
@@ -91,6 +93,7 @@ export function createApp(deps: AppDeps) {
         ),
       )
       .use(createApprovalController({ pool: deps.pool, timeContext }, access))
+      .use(createBotController(deps.pool, access))
       .use(createTaskController({ pool: deps.pool }, access))
       .use(createMemoryController(deps.memoryService, access))
       .use(createFeishuController(deps.pool, access))

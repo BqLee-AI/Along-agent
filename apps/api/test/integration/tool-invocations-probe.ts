@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { admitTestUser } from './setup.js';
 import { expect } from 'bun:test';
 import { spawn } from 'node:child_process';
@@ -29,10 +30,13 @@ export async function seedContext(
     `${ownerId}@along.test`,
   ]);
   await admitTestUser(pool, ownerId);
-  await pool.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
-    conversationId,
-    ownerId,
-  ]);
+  await createFixtureConversation(pool, ownerId, { id: conversationId });
+  await pool.query(
+    `UPDATE personal_bots b
+     SET config = jsonb_set(b.config, '{tool_ids}', (b.config->'tool_ids') || $2::jsonb)
+     FROM conversations c WHERE c.id=$1 AND b.id=c.bot_id`,
+    [conversationId, JSON.stringify([toolId, 'internal.local-probe', 'internal.read-probe'])],
+  );
   await pool.query(
     "INSERT INTO agent_runs(id,owner_id,conversation_id,agent_revision,mode,budget_max_iterations,budget_max_tokens,frozen_context) VALUES($1,$2,$3,'probe','chat',1,100,$4)",
     [

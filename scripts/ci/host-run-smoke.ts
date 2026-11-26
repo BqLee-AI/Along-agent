@@ -20,6 +20,7 @@ import {
   sendModelSse,
   started,
 } from '../../apps/api/test/helpers/harness-consumer.js';
+import { fixtureBotConfig } from '../../apps/api/test/helpers/bot-conversation.js';
 
 const db = await createIntegrationDatabase();
 const modelCalls = { approval: 0, pause: 0, compact: 0 };
@@ -198,12 +199,19 @@ try {
       return false;
     }
   }, Boolean);
-  const send = (text: string, delegated = false, conversationId?: string) =>
+  const { id: botId } = await json(
+    await post('/api/v1/bots', { ...fixtureBotConfig(session.userId), name: 'Native Run smoke' }),
+  );
+  const newConversation = async (): Promise<string> => {
+    const { conversation_id } = await json(await post(`/api/v1/bots/${botId}/conversations`, {}));
+    return conversation_id;
+  };
+  const send = async (text: string, delegated = false, conversationId?: string) =>
     post(root + '/messages', {
       raw_text: text,
       execution: 'harness',
       confirmed_timezone: 'Asia/Shanghai',
-      ...(conversationId ? { conversation_id: conversationId } : {}),
+      conversation_id: conversationId ?? (await newConversation()),
       ...(delegated ? { authorization_revision: 'delegation/1' } : {}),
     });
   const normal = await collect(await send('plain historical chat'));

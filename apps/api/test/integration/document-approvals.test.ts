@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { expectApplicationRejection } from '../helpers/application-error.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
@@ -94,6 +95,7 @@ maybe('document approval PostgreSQL authority and frozen content', () => {
       actor.userId,
       randomUUID(),
       {
+        conversation_id: await createFixtureConversation(pool, actor.userId),
         execution: 'harness',
         workspace_id: 'document-test',
         raw_text: 'Replace the document literal.',

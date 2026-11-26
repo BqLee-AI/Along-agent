@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -66,6 +67,7 @@ maybe('workspace create once permit', () => {
       actor.userId,
       randomUUID(),
       {
+        conversation_id: await createFixtureConversation(database.pool, actor.userId),
         execution: 'harness',
         authorization_revision: 'delegation/1',
         raw_text: 'Create a file',

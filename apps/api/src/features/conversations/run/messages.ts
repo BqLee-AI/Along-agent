@@ -6,6 +6,7 @@ import type { RunContext } from '../contracts.js';
 export interface ConversationRow {
   id: string;
   owner_id: string;
+  bot_id: string;
   status: string;
   confirmed_timezone_id: string | null;
   anchor_received_at_utc: Date | null;
@@ -16,26 +17,11 @@ export async function getConversation(
   conversationId: string,
 ): Promise<ConversationRow | null> {
   const { rows } = await client.query<ConversationRow>(
-    `SELECT id, owner_id, status, confirmed_timezone_id, anchor_received_at_utc
+    `SELECT id, owner_id, bot_id, status, confirmed_timezone_id, anchor_received_at_utc
      FROM conversations WHERE id = $1`,
     [conversationId],
   );
   return rows[0] ?? null;
-}
-
-export async function createConversation(
-  client: Pick<Pool | PoolClient, 'query'>,
-  args: { ownerId: string; anchorIso: string; title: string },
-): Promise<ConversationRow> {
-  const { rows } = await client.query<ConversationRow>(
-    `INSERT INTO conversations (id, owner_id, title, anchor_received_at_utc)
-     VALUES (gen_random_uuid(), $1, $2, $3)
-     RETURNING id, owner_id, status, confirmed_timezone_id, anchor_received_at_utc`,
-    [args.ownerId, args.title, args.anchorIso],
-  );
-  const row = rows[0];
-  if (!row) throw new Error('conversation insert returned no row');
-  return row;
 }
 
 // First confirmed timezone wins and freezes for the conversation; later
