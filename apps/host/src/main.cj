@@ -17,12 +17,33 @@ let notReady = "{\"status\":\"not_ready\",\"reason\":\"NOT_READY\"}"
 func requestId(ctx: HttpContext): String {
     let incoming = ctx.request.headers.getFirst("x-request-id").getOrDefault({ => "" }).trimAscii()
     if (!incoming.isEmpty() && incoming.size <= 200) { return incoming }
+    return newId()
+}
+
+func newId(): String {
     let file = File("/proc/sys/kernel/random/uuid", OpenMode.Read)
     try {
         let bytes = Array<Byte>(37, repeat: 0)
         return String.fromUtf8(bytes.slice(0, file.read(bytes))).trimAscii()
     } finally {
         file.close()
+    }
+}
+
+func callWorkerPhase(socketPath: String, phase: String, workerId: String): Bool {
+    let client = ClientBuilder().connector({ _: SocketAddress =>
+        let socket = UnixSocket(socketPath)
+        socket.connect()
+        socket
+    }).build()
+    try {
+        let request = HttpRequestBuilder().post().url("http://localhost/worker/" + phase)
+            .header("x-request-id", workerId + ":" + phase).header("x-worker-id", workerId).build()
+        return client.send(request).status == 204
+    } catch (_: Exception) {
+        return false
+    } finally {
+        client.close()
     }
 }
 
@@ -90,17 +111,40 @@ class ReadinessEvents <: InputStream {
 }
 
 main(args: Array<String>) {
-    let port: UInt16 = if (args.size == 0) { 3000 } else { UInt16.parse(args[0]) }
+    let port = UInt16.parse(if (args.size == 0) { getVariable("PORT") ?? "3000" } else { args[0] })
+    let role = (getVariable("ROLE") ?? "all").trimAscii().toAsciiLower()
+    if (role != "api" && role != "worker" && role != "all") {
+        throw Exception("invalid ROLE: expected api, worker or all")
+    }
+    if (unsafe { along_install_stop_handlers() } != 0) {
+        throw Exception("cannot install host stop handlers")
+    }
     let directory = Directory.createTemp("/tmp")
     let socketPath = directory.toString() + "/capability.sock"
     try {
-        let capability = launch("bun", ["/app/apps/api/dist/bin/host-readiness.js", socketPath], stdIn: Pipe)
+        let capability = launch("bun", ["/app/apps/api/dist/bin/host-readiness.js", socketPath, role], stdIn: Pipe)
         try {
             for (_ in 0..100) {
-                if (exists(socketPath)) { break }
+                if (exists(socketPath) || stopping()) { break }
                 sleep(20 * Duration.millisecond)
             }
-            serve(port, socketPath)
+            if (stopping()) { return }
+            let work = { =>
+                runWorker(
+                    { phase: String, id: String => callWorkerPhase(socketPath, phase, id) },
+                    "worker-" + newId(),
+                    stopping
+                )
+            }
+            if (role == "worker") {
+                work()
+            } else if (role == "all") {
+                let worker = spawn { work() }
+                serve(port, socketPath)
+                worker.get()
+            } else {
+                serve(port, socketPath)
+            }
         } finally {
             capability.terminate()
             try {
@@ -113,6 +157,10 @@ main(args: Array<String>) {
     } finally {
         remove(directory, recursive: true)
     }
+}
+
+func stopping(): Bool {
+    return unsafe { along_stop_requested() } != 0
 }
 
 func serve(port: UInt16, socketPath: String): Unit {
@@ -142,11 +190,8 @@ func serve(port: UInt16, socketPath: String): Unit {
         ctx.responseBuilder.header("x-request-id", id).header("Content-Type", "text/event-stream")
             .header("Transfer-Encoding", "chunked").body(ReadinessEvents(socketPath, id))
     })
-    if (unsafe { along_install_stop_handlers() } != 0) {
-        throw Exception("cannot install host stop handlers")
-    }
     spawn {
-        while (unsafe { along_stop_requested() } == 0) { sleep(50 * Duration.millisecond) }
+        while (!stopping()) { sleep(50 * Duration.millisecond) }
         server.closeGracefully()
     }
     server.serve()

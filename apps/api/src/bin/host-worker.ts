@@ -1,0 +1,57 @@
+import { createPool, type Pool } from '../db/pool.js';
+import { createLocalInAppProvider, type InAppProvider } from '../features/notifications/public.js';
+import {
+  runAckPhase,
+  runCancelPhase,
+  runClaimPhase,
+  runMissedPhase,
+  runSchedulePhase,
+  runSendPhase,
+} from '../features/tasks/public.js';
+
+type PhaseRunner = (pool: Pool, provider: InAppProvider, workerId: string) => Promise<unknown>;
+
+const phases: Partial<Record<string, PhaseRunner>> = {
+  cancel: runCancelPhase,
+  schedule: runSchedulePhase,
+  claim: (pool, _provider, workerId) => runClaimPhase(pool, workerId),
+  send: (pool, provider) => runSendPhase(pool, provider),
+  ack: (pool) => runAckPhase(pool),
+  missed: (pool) => runMissedPhase(pool),
+};
+
+export function createHostWorker(pool: Pool | null) {
+  // pg hides explicit passwords from enumeration on Pool.options.
+  const receivePool = pool
+    ? createPool({ ...pool.options, password: pool.options.password, max: 1 })
+    : null;
+  const provider = receivePool ? createLocalInAppProvider(receivePool) : null;
+  let activePhase: Promise<unknown> | null = null;
+  let stopping: Promise<void> | null = null;
+
+  async function runPhase(phase: string, workerId: string): Promise<void> {
+    const run = Object.hasOwn(phases, phase) ? phases[phase] : undefined;
+    if (!run) throw new Error('unknown host worker phase');
+    if (stopping) throw new Error('host worker is stopping');
+    if (!pool || !provider) return;
+    // An HTTP timeout may abandon a request before its database phase finishes.
+    if (activePhase) throw new Error('host worker phase already active');
+    activePhase = run(pool, provider, workerId);
+    try {
+      await activePhase;
+    } finally {
+      activePhase = null;
+    }
+  }
+
+  function stop(): Promise<void> {
+    stopping ??= (async () => {
+      // A phase failure is reported to its own caller; only pool close can fail shutdown.
+      await activePhase?.catch(() => undefined);
+      await receivePool?.end();
+    })();
+    return stopping;
+  }
+
+  return { runPhase, stop };
+}
