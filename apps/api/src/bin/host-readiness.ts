@@ -1,21 +1,26 @@
-import { createServer, type ServerResponse } from 'node:http';
+import { createServer, type RequestListener, type ServerResponse } from 'node:http';
 import { httpStatusForError } from '@along/contracts';
 import { createRunDriver } from '../agent/execution/driver/driver.js';
 import { createRoutingRuntime } from '../agent/routing/index.js';
 import { createConfiguredAccountService } from '../bootstrap/identity.js';
 import { loadHarnessServices } from '../bootstrap/harness-services.js';
 import { createPool } from '../db/pool.js';
+import { conversationMemorySources } from '../features/conversations/public.js';
 import { createInvitedAccountService } from '../features/identity/public.js';
+import { createMemoryService } from '../features/memory/public.js';
+import { loadWorkspaceRegistry } from '../features/workspaces/public.js';
 import { createUserModelTransport } from '../features/model-providers/public.js';
 import { loadTimeContext } from '../features/time/public.js';
 import { readiness } from '../http/health/model.js';
+import { createAccess } from '../http/access.js';
+import { unmatchedError } from '../http/routing/fallback-controller.js';
 import { failEnvelope, okEnvelope } from '../http/errors.js';
 import { toWebRequest } from '../http/transport/request.js';
 import { ApplicationError, validationError } from '../platform/errors.js';
-import { writeFiniteReply } from './finite-http.js';
+import { finiteRequest, writeFiniteReply } from './finite-http.js';
 import { createHostAccount } from './host-account.js';
 import { createHostBusinessCapability } from './host-business-capability.js';
-import { createHostReminderActions } from './host-reminder-actions.js';
+import { createHostProductRoutes } from './host-product-routes.js';
 import { createHostWorker } from './host-worker.js';
 
 const socketPath = process.argv[2];
@@ -38,7 +43,15 @@ const business = createHostBusinessCapability({
   routing: apiPool ? createRoutingRuntime() : undefined,
   runDriver: driver,
 });
-const actions = createHostReminderActions({ pool: apiPool });
+if (apiPool) await loadWorkspaceRegistry();
+const product = createHostProductRoutes({
+  pool: apiPool,
+  timeContext: time,
+  modelTransport: createUserModelTransport,
+  memoryService: apiPool
+    ? createMemoryService({ pool: apiPool, sources: conversationMemorySources })
+    : undefined,
+});
 const account = createHostAccount({
   pool: apiPool,
   timeContext: time,
@@ -50,6 +63,7 @@ const account = createHostAccount({
       }
     : {}),
 });
+const fallbackAccess = createAccess({ pool: apiPool });
 
 function sendCapabilityJson(
   res: ServerResponse,
@@ -69,11 +83,28 @@ function sendCapabilityJson(
     .end(body);
 }
 
-const server = createServer(async (request, response) => {
+const server = createServer();
+const handleRequest: RequestListener = async (request, response) => {
+  const onRead =
+    request.headers.expect === '100-continue' ? () => response.writeContinue() : undefined;
   const path = request.url ?? '';
   const requestId = request.headers['x-request-id'];
   if (typeof requestId !== 'string' || !requestId || requestId.length > 200) {
     response.writeHead(400).end();
+    return;
+  }
+  const operation = request.headers['x-along-host-operation'];
+  if (operation === 'fallback') {
+    const web = finiteRequest(
+      toWebRequest(request, new URL(path, 'http://localhost'), undefined, onRead),
+    );
+    const error = await unmatchedError(web, !!apiPool, fallbackAccess);
+    sendCapabilityJson(
+      response,
+      httpStatusForError(error.code),
+      failEnvelope(error, requestId),
+      requestId,
+    );
     return;
   }
   if (request.method === 'POST' && path.startsWith('/worker/')) {
@@ -91,14 +122,14 @@ const server = createServer(async (request, response) => {
     }
     return;
   }
-  if (request.headers['x-along-host-operation'] === 'account') {
+  if (operation === 'account' || operation === 'product') {
     const abort = new AbortController();
     const onClose = () => abort.abort();
     response.once('close', onClose);
     try {
-      const result = await account(
-        toWebRequest(request, new URL(path, 'http://localhost'), abort.signal),
-      );
+      const web = toWebRequest(request, new URL(path, 'http://localhost'), abort.signal, onRead);
+      const result =
+        operation === 'account' ? await account(web) : await product(finiteRequest(web));
       if (result) await writeFiniteReply(result, response);
       else response.writeHead(404, { 'content-length': 0 }).end();
     } catch {
@@ -113,16 +144,13 @@ const server = createServer(async (request, response) => {
   }
   const conversationEntry = request.headers['x-along-conversation-operation'];
   if (
-    (request.method === 'POST' &&
-      (path.startsWith('/api/v1/') || path === '/business/step' || path === '/harness/step')) ||
-    (request.method === 'GET' &&
-      typeof conversationEntry === 'string' &&
-      path.startsWith('/api/v1/conversations'))
+    (request.method === 'POST' && (path === '/business/step' || path === '/harness/step')) ||
+    (typeof conversationEntry === 'string' && path.startsWith('/api/v1/conversations'))
   ) {
     try {
-      const web = toWebRequest(request, new URL(path, 'http://localhost'));
+      const web = toWebRequest(request, new URL(path, 'http://localhost'), undefined, onRead);
       if (typeof conversationEntry === 'string' && path.startsWith('/api/v1/conversations')) {
-        const opened = await business.open(web, conversationEntry);
+        const opened = await business.open(finiteRequest(web), conversationEntry);
         if ('data' in opened) {
           sendCapabilityJson(
             response,
@@ -153,19 +181,6 @@ const server = createServer(async (request, response) => {
             requestId,
           );
         }
-      } else {
-        const result = await actions(web);
-        if (result) {
-          const body = await result.text();
-          response
-            .writeHead(result.status, {
-              ...Object.fromEntries(result.headers),
-              'content-length': Buffer.byteLength(body),
-            })
-            .end(body);
-        } else {
-          response.writeHead(404, { 'content-length': 0 }).end();
-        }
       }
     } catch (error) {
       if (response.destroyed || response.headersSent) return;
@@ -195,7 +210,9 @@ const server = createServer(async (request, response) => {
     'x-request-id': requestId,
   });
   response.end(body);
-});
+};
+server.on('request', handleRequest);
+server.on('checkContinue', handleRequest);
 server.listen(socketPath);
 
 let stopping = false;

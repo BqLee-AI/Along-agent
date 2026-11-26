@@ -19,22 +19,73 @@ func isAccountPath(path: String): Bool {
 // One byte beyond the JSON cap preserves the validator's streamed-overflow result.
 class FiniteUpload <: InputStream {
     let source: InputStream
-    var remaining = finiteUploadLimit + 1
+    let length: Int64
+    var remaining: Int64
+    var ended = false
 
-    init(source: InputStream) { this.source = source }
+    init(source: InputStream, length: Int64) {
+        this.source = source
+        this.length = length
+        remaining = if (length < 0) { finiteUploadLimit + 1 } else { length }
+    }
 
     public func read(buffer: Array<Byte>): Int64 {
         if (remaining == 0) { return 0 }
         let count = source.read(buffer.slice(0, min(remaining, buffer.size)))
+        if (count == 0) { ended = true }
         remaining -= count
         return count
     }
+
+    func complete(): Bool { ended || (length >= 0 && remaining == 0) }
+}
+
+// The capability reads the upload only after the existing TS admission checks.
+func forwardUpload(incoming: HttpRequest, outgoing: HttpRequestBuilder): (?FiniteUpload, Bool) {
+    if (incoming.method != "POST") {
+        return (None, incoming.headers.getFirst("transfer-encoding") != None ||
+            (incoming.headers.getFirst("content-length") ?? "0") != "0")
+    }
+    if (let Some(length) <- incoming.headers.getFirst("content-length")) {
+        let count = Int64.parse(length)
+        if (count > finiteUploadLimit) {
+            outgoing.header("x-along-host-body-length", length)
+            return (None, true)
+        }
+        if (count <= 0) { return (None, false) }
+        let stream = FiniteUpload(incoming.body, count)
+        outgoing.header("expect", "100-continue").header("content-length", length).body(stream)
+        return (Some(stream), false)
+    }
+    if (incoming.headers.getFirst("transfer-encoding") != None || incoming.version != Protocol.HTTP1_1) {
+        let stream = FiniteUpload(incoming.body, -1)
+        outgoing.header("expect", "100-continue").header("transfer-encoding", "chunked").body(stream)
+        return (Some(stream), false)
+    }
+    return (None, false)
+}
+
+func finishFinite(ctx: HttpContext, body: String, unread: Bool, connection: ?FiniteConnection): Unit {
+    if (unread) {
+        if (let Some(bound) <- connection) {
+            // stdx drains unread input before it sends a normal handler response.
+            let bytes = body.toArray()
+            ctx.responseBuilder.header("connection", "close").header("content-length", bytes.size.toString())
+            HttpResponseWriter(ctx).write(bytes)
+            sleep(250 * Duration.millisecond)
+            bound.close()
+            return
+        }
+    }
+    ctx.responseBuilder.body(body)
 }
 
 func serveFinite(ctx: HttpContext, socketPath: String, operation: String,
                  encrypted!: Bool = false, listener!: ?FiniteListener = None): Unit {
     let id = requestId(ctx)
     let client = privateClient(socketPath, readTimeout: 35 * Duration.second)
+    let peer = ctx.request.remoteAddr
+    let connection = listener.flatMap { bound => bound.connectionFor(peer) }
     try {
         let target = "http://localhost" + ctx.request.url.rawPath + (match (ctx.request.url.rawQuery) {
             case Some(query) => "?" + query
@@ -43,13 +94,10 @@ func serveFinite(ctx: HttpContext, socketPath: String, operation: String,
         let request = HttpRequestBuilder().method(ctx.request.method).url(target)
             .header("x-request-id", id).header("x-along-host-operation", operation)
         if (encrypted) { request.header("x-along-host-tls", "1") }
-        let peer = ctx.request.remoteAddr
         if (let Some(inet) <- IPSocketAddress.tryParse(peer)) {
             request.header("x-along-host-peer", inet.address.toString())
-            if (let Some(bound) <- listener) {
-                if (let Some(local) <- bound.localFor(peer)) {
-                    request.header("x-along-host-local", local)
-                }
+            if (let Some(bound) <- connection) {
+                request.header("x-along-host-local", bound.localIp)
             }
         }
         for (name in ["cookie", "authorization", "x-csrf-token", "idempotency-key", "content-type",
@@ -64,22 +112,7 @@ func serveFinite(ctx: HttpContext, socketPath: String, operation: String,
             }
             if (!combined.isEmpty()) { request.header(name, combined) }
         }
-        if (ctx.request.method == "POST") {
-            match (ctx.request.headers.getFirst("content-length")) {
-                case Some(length) =>
-                    if (Int64.parse(length) > finiteUploadLimit) {
-                        // The private validator still sees the declared size after auth/CSRF.
-                        request.header("x-along-host-body-length", length)
-                    } else if (length != "0") {
-                        request.header("content-length", length).body(ctx.request.body)
-                    }
-                case None =>
-                    if (ctx.request.headers.getFirst("transfer-encoding") != None ||
-                        ctx.request.version != Protocol.HTTP1_1) {
-                        request.header("transfer-encoding", "chunked").body(FiniteUpload(ctx.request.body))
-                    }
-            }
-        }
+        let (upload, skipped) = forwardUpload(ctx.request, request)
         let reply = client.send(request.build())
         let body = if (ctx.request.method == "HEAD") { "" } else { boundedBody(reply) }
         // add preserves separate Set-Cookie fields, including Expires commas.
@@ -87,7 +120,8 @@ func serveFinite(ctx: HttpContext, socketPath: String, operation: String,
         for (name in ["content-type", "cache-control", "x-request-id", "retry-after", "set-cookie"]) {
             for (value in reply.headers.get(name)) { headers.add(name, value) }
         }
-        ctx.responseBuilder.status(reply.status).addHeaders(headers).body(body)
+        ctx.responseBuilder.status(reply.status).addHeaders(headers)
+        finishFinite(ctx, body, skipped || upload.map { stream => !stream.complete() }.getOrDefault({ => false }), connection)
     } catch (_: Exception) {
         // Exceptions from the HTTP libraries may carry request data. Emit a fixed envelope.
         let error = JsonObject()

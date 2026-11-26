@@ -31,18 +31,19 @@ func conversationOperation(path: String, method: String): String {
     return ""
 }
 
-func serveConversation(ctx: HttpContext, socketPath: String): Unit {
+func serveConversation(ctx: HttpContext, socketPath: String, listener: FiniteListener): Unit {
     let path = ctx.request.url.rawPath
     let operation = conversationOperation(path, ctx.request.method)
     if (operation.isEmpty()) {
-        notFound(ctx)
+        serveFinite(ctx, socketPath, "fallback", listener: Some(listener))
         return
     }
     let id = requestId(ctx)
     let builder = ctx.responseBuilder.header("x-request-id", id)
     let client = privateClient(socketPath)
     try {
-        let admitted = requestConversation(ctx, client, path, id, operation)
+        let (request, upload, skipped) = requestConversation(ctx, path, id, operation)
+        let admitted = client.send(request)
         if (admitted.headers.getFirst("x-request-id") != Some(id)) { throw Exception("mismatched Run response") }
         if (let Some(native) <- admitted.headers.getFirst("x-native-handoff")) {
             spawn { driveNativeRun(socketPath, id, native) }
@@ -50,7 +51,9 @@ func serveConversation(ctx: HttpContext, socketPath: String): Unit {
         let body = boundedBody(admitted, maximum: 16 * 1048576)
         if (admitted.status != 200 || admitted.headers.getFirst("x-run-stream") != Some("1")) {
             builder.status(admitted.status).header("content-type", "application/json")
-                .header("cache-control", "no-store").body(body)
+                .header("cache-control", "no-store")
+            let unread = skipped || upload.map { stream => !stream.complete() }.getOrDefault({ => false })
+            finishFinite(ctx, body, unread, listener.connectionFor(ctx.request.remoteAddr))
             return
         }
         let run = JsonValue.fromStr(body).asObject()
@@ -117,7 +120,7 @@ func serveConversation(ctx: HttpContext, socketPath: String): Unit {
     }
 }
 
-func requestConversation(ctx: HttpContext, client: Client, path: String, id: String, operation: String): HttpResponse {
+func requestConversation(ctx: HttpContext, path: String, id: String, operation: String): (HttpRequest, ?FiniteUpload, Bool) {
     let target = "http://localhost" + path + (match (ctx.request.url.rawQuery) {
         case Some(query) => "?" + query
         case None => ""
@@ -128,12 +131,6 @@ func requestConversation(ctx: HttpContext, client: Client, path: String, id: Str
     for (name in ["cookie", "authorization", "x-csrf-token", "idempotency-key", "content-type"]) {
         if (let Some(value) <- ctx.request.headers.getFirst(name)) { request.header(name, value) }
     }
-    if (post) {
-        match (ctx.request.headers.getFirst("content-length")) {
-            case Some(length) => request.header("content-length", length)
-            case None => request.header("transfer-encoding", "chunked")
-        }
-        request.body(ctx.request.body)
-    }
-    return client.send(request.build())
+    let (upload, skipped) = forwardUpload(ctx.request, request)
+    return (request.build(), upload, skipped)
 }
