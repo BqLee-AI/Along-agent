@@ -20,5 +20,5 @@
 ## References
 
 - [迁移矩阵](../plans/cangjie-backend-migration.md)
-- [迁移设计](../../openspec/changes/migrate-cangjie-backend-host/design.md)
+- [迁移设计](../../openspec/changes/archive/2026-11-26-migrate-cangjie-backend-host/design.md)
 - design/08 §2–9、design/09 §1–8、design/10 §1–6、design/15 §5–7

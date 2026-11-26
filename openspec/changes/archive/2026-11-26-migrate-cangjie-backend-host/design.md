@@ -2,7 +2,7 @@
 
 ## 背景与目标
 
-当前 `apps/api/src/bootstrap/application.ts` 启动 TS listener 和 Worker，`agent/execution/attempt/session.ts` 持有原生 Harness 的宿主请求。现行语言分工见 ADR 0009。目标是仓颉进程直接持有 HTTP/SSE 连接，负责 Run 编排并驱动 Worker。阶段与入口归属由 [迁移矩阵](../../../docs/plans/cangjie-backend-migration.md) 记录。
+迁移前，`apps/api/src/bootstrap/application.ts` 启动 TS listener 和 Worker，`agent/execution/attempt/session.ts` 持有原生 Harness 的宿主请求。原分工见 ADR 0009。迁移将 HTTP/SSE 连接、Run 编排和 Worker 推进交给仓颉。阶段与入口归属见[迁移矩阵](../../../../docs/plans/cangjie-backend-migration.md)。
 
 ## 决策
 
