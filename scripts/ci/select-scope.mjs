@@ -112,7 +112,10 @@ export function classifyChanges(changes, nativeTests = []) {
     } else if (path.startsWith('apps/harness/')) {
       checks.add('harness');
       runtime = true;
-    } else if (path.startsWith('apps/host/') || path.startsWith('scripts/ci/host-smoke.')) {
+    } else if (
+      path.startsWith('apps/host/') ||
+      /^scripts\/ci\/host-(?:chat-|worker-)?smoke\./.test(path)
+    ) {
       runtime = true;
     } else if (path.startsWith('infra/migrations/')) {
       database('full');

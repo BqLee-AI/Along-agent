@@ -164,7 +164,7 @@ func stopping(): Bool {
 }
 
 func serve(port: UInt16, socketPath: String): Unit {
-    let builder = ServerBuilder().addr("0.0.0.0").port(port)
+    let builder = ServerBuilder().addr("0.0.0.0").port(port).distributor(HostDistributor(socketPath))
     match ((getVariable("ALONG_HOST_TLS_CERT"), getVariable("ALONG_HOST_TLS_KEY"))) {
         case (Some(cert), Some(key)) =>
             builder.tlsConfig(TlsServerConfig(
@@ -190,6 +190,7 @@ func serve(port: UInt16, socketPath: String): Unit {
         ctx.responseBuilder.header("x-request-id", id).header("Content-Type", "text/event-stream")
             .header("Transfer-Encoding", "chunked").body(ReadinessEvents(socketPath, id))
     })
+    server.distributor.register(messagesPath, { ctx => serveBusinessChat(ctx, socketPath) })
     spawn {
         while (!stopping()) { sleep(50 * Duration.millisecond) }
         server.closeGracefully()

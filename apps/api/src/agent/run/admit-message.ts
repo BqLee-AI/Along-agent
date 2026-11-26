@@ -144,6 +144,11 @@ function textOf(body: SendMessageBody): string {
   return body.raw_text;
 }
 
+/** Accepts the live lease after commit; the recipient must release it when done. */
+export type ServerOwnedRunHandoff = (
+  context: RunContext & { ownership: RunOwnership },
+) => undefined;
+
 // Runs before any SSE byte is written, so validation/idempotency failures can
 // still use the JSON envelope.
 export async function startConversationRun(
@@ -153,6 +158,7 @@ export async function startConversationRun(
   body: unknown,
   idempotencyKeyHeader: string | null,
   sessionId: string | null = null,
+  handoff?: ServerOwnedRunHandoff,
 ): Promise<StartResult> {
   const parsed = SendMessageBodySchema.safeParse(body);
   if (!parsed.success) throw validationError('invalid message body');
@@ -721,7 +727,8 @@ export async function startConversationRun(
   }
   if (ownership) {
     try {
-      deps.runDriver!.start(deps, started.context, executeRuntimeCompact);
+      if (handoff) handoff({ ...started.context, ownership });
+      else deps.runDriver!.start(deps, started.context, executeRuntimeCompact);
     } catch (error) {
       await deps.runDriver!.release(ownership);
       throw error;
