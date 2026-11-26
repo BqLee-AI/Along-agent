@@ -164,8 +164,12 @@ func stopping(): Bool {
 }
 
 func serve(port: UInt16, socketPath: String): Unit {
-    let builder = ServerBuilder().addr("0.0.0.0").port(port).distributor(HostDistributor(socketPath))
-    match ((getVariable("ALONG_HOST_TLS_CERT"), getVariable("ALONG_HOST_TLS_KEY"))) {
+    let certPath = getVariable("ALONG_HOST_TLS_CERT")
+    let keyPath = getVariable("ALONG_HOST_TLS_KEY")
+    let listener = FiniteListener(port)
+    let builder = ServerBuilder().listener(listener)
+        .distributor(HostDistributor(socketPath, certPath != None && keyPath != None, listener))
+    match ((certPath, keyPath)) {
         case (Some(cert), Some(key)) =>
             builder.tlsConfig(TlsServerConfig(
                 X509Certificate.decodeFromPem(String.fromUtf8(File.readFrom(cert))),

@@ -30,8 +30,14 @@ func boundedBody(response: HttpResponse, maximum!: Int64 = 1048576): String {
 class HostDistributor <: HttpRequestDistributor {
     let routes = HashMap<String, HttpRequestHandler>()
     let socketPath: String
+    let encrypted: Bool
+    let listener: FiniteListener
 
-    init(socketPath: String) { this.socketPath = socketPath }
+    init(socketPath: String, encrypted: Bool, listener: FiniteListener) {
+        this.socketPath = socketPath
+        this.encrypted = encrypted
+        this.listener = listener
+    }
 
     public func register(path: String, handler: HttpRequestHandler): Unit {
         routes.add(path, handler)
@@ -49,6 +55,11 @@ class HostDistributor <: HttpRequestDistributor {
             ((parts[3] == "approvals" && parts[6] == "confirm") ||
              (parts[3] == "tasks" && parts[6] == "cancel"))) {
             return FuncHandler({ ctx => serveReminderAction(ctx, socketPath, path) })
+        }
+        if (isAccountPath(path)) {
+            return FuncHandler({ ctx =>
+                serveFinite(ctx, socketPath, "account", encrypted: encrypted, listener: Some(listener))
+            })
         }
         return NotFoundHandler()
     }
