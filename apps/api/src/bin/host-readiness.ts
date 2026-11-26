@@ -90,11 +90,20 @@ const server = createServer(async (request, response) => {
         const operation = web.headers.get('x-run-operation');
         if (!lease || !operation) throw validationError('missing Run operation');
         const input: unknown = await web.json();
-        const result =
-          path === '/business/step'
-            ? await business.step(lease, operation, input)
-            : await business.harnessStep(lease, operation, input);
-        sendCapabilityJson(response, 200, result, requestId);
+        if (path === '/business/step') {
+          await business.step(lease, operation, input, (value) => {
+            if (response.destroyed || response.writableEnded) return false;
+            sendCapabilityJson(response, 200, value, requestId);
+            return true;
+          });
+        } else {
+          sendCapabilityJson(
+            response,
+            200,
+            await business.harnessStep(lease, operation, input),
+            requestId,
+          );
+        }
       } else {
         const result = await actions(web);
         if (result) {

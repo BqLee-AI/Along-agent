@@ -168,7 +168,8 @@ func serveBusinessChat(ctx: HttpContext, socketPath: String): Unit {
                 while (!ctx.isClosed()) {
                     let frame = step("replay", JsonNull())
                     if (businessNull(frame)) { break }
-                    writer.write(frame.asString().getValue().toArray())
+                    let text = frame.asString().getValue()
+                    if (!text.isEmpty()) { writer.write(text.toArray()) }
                 }
             } else if (run.get("replay").getOrThrow().asBool().getValue()) {
                 while (!ctx.isClosed()) {

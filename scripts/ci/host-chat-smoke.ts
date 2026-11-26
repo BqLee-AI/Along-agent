@@ -24,12 +24,24 @@ try {
   let invocationId;
   const providerEntered = Promise.withResolvers<void>();
   const releaseProvider = Promise.withResolvers<void>();
+  const revocationEntered = Promise.withResolvers<void>();
+  const releaseRevocation = Promise.withResolvers<void>();
   upstream = createServer(async (request, response) => {
     try {
       const body = (await jsonBody(request)) as { model: string };
       assert.equal(request.url, '/v1/chat/completions');
       assert.equal(body.model, 'native-reminder');
       let next;
+      if (providerCalls === 2) {
+        providerCalls++;
+        revocationEntered.resolve();
+        await releaseRevocation.promise;
+        sendModelSse(response, {
+          message: { content: 'revoked-session-content', tool_calls: [] },
+          usage: { total_tokens: 25 },
+        });
+        return;
+      }
       if (providerCalls++ === 0) {
         providerEntered.resolve();
         await releaseProvider.promise;
@@ -78,7 +90,8 @@ try {
       });
     } catch (error) {
       console.error(error);
-      response.writeHead(500).end();
+      if (response.headersSent) response.destroy(error instanceof Error ? error : undefined);
+      else response.writeHead(500).end();
     }
   });
   const origin = await listen(upstream);
@@ -226,6 +239,25 @@ try {
   assert.equal(delegatedEvents.at(-1).type, 'thread.completed', delegatedText);
   assert.equal(providerCalls, 2);
   assert.ok(invocationId);
+  const revokedSubscription = await fetch(base + '/api/v1/conversations/messages', {
+    method: 'POST',
+    headers: { ...headers, 'x-request-id': randomUUID(), 'idempotency-key': randomUUID() },
+    body: JSON.stringify({
+      raw_text: '回答一个问题',
+      execution: 'harness',
+      authorization_revision: 'delegation/1',
+    }),
+    signal: AbortSignal.timeout(20_000),
+  });
+  assert.equal(revokedSubscription.status, 200);
+  const revokedReader = revokedSubscription.body!.getReader();
+  assert.match(new TextDecoder().decode((await revokedReader.read()).value), /thread\.started/);
+  await revocationEntered.promise;
+  await database.pool.query('UPDATE sessions SET revoked_at=clock_timestamp() WHERE id=$1', [
+    session.sessionId,
+  ]);
+  releaseRevocation.resolve();
+  assert.equal((await revokedReader.read()).done, true, 'revoked subscriber received a new event');
   const until = performance.now() + 110_000;
   let restarted = false;
   for (;;) {
