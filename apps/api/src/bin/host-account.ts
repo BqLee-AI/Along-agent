@@ -1,6 +1,9 @@
 import { httpStatusForError } from '@along/contracts';
 import { Elysia } from 'elysia';
-import { createAccountController, createMeController } from '../features/identity/account/controller.js';
+import {
+  createAccountController,
+  createMeController,
+} from '../features/identity/account/controller.js';
 import { createModelProviderController } from '../features/model-providers/http/controller.js';
 import { isModelProviderPath } from '../features/model-providers/http/path.js';
 import type { TimeContext } from '../features/time/public.js';

@@ -19,9 +19,9 @@ const requestId = 'host-account-smoke';
 const database = await createIntegrationDatabase();
 const port = process.argv[2] === 'legacy' ? '3098' : '3097';
 const base = `http://127.0.0.1:${port}/api/v1`;
-const external = Object.values(networkInterfaces()).flat().find((address) =>
-  address?.family === 'IPv4' && !address.internal,
-);
+const external = Object.values(networkInterfaces())
+  .flat()
+  .find((address) => address?.family === 'IPv4' && !address.internal);
 assert(external, 'run on a disposable Docker network');
 const webBase = `http://${external.address}:${port}`;
 process.env.API_BASE = webBase;
@@ -29,9 +29,7 @@ process.env.ALONG_LOCAL_MODEL_PROXY_TOKEN = proxy;
 // The Next route reads API_BASE at module initialization, after the test chooses its listener.
 const web = await import('../../apps/web/src/app/api/[...path]/route.js');
 const child = Bun.spawn(
-  process.argv[2] === 'legacy'
-    ? ['bun', 'apps/api/dist/main.js']
-    : ['/app/host/bin/along-host'],
+  process.argv[2] === 'legacy' ? ['bun', 'apps/api/dist/main.js'] : ['/app/host/bin/along-host'],
   {
     env: {
       ...process.env,
@@ -54,14 +52,18 @@ const child = Bun.spawn(
 const output = Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()]);
 
 type Session = { cookie: string; csrf: string };
-async function request(path: string, expected: number, opts: {
-  body?: unknown;
-  session?: Session;
-  method?: string;
-  headers?: Record<string, string>;
-  viaWeb?: boolean;
-  outsideLoopback?: boolean;
-} = {}) {
+async function request(
+  path: string,
+  expected: number,
+  opts: {
+    body?: unknown;
+    session?: Session;
+    method?: string;
+    headers?: Record<string, string>;
+    viaWeb?: boolean;
+    outsideLoopback?: boolean;
+  } = {},
+) {
   const method = opts.method ?? (opts.body === undefined ? 'GET' : 'POST');
   const init: RequestInit = {
     method,
@@ -92,7 +94,11 @@ async function request(path: string, expected: number, opts: {
 }
 
 async function sessionFrom(cookies: string[]): Promise<Session> {
-  assert(cookies.some((cookie) => cookie.includes('better-auth.session_token=') && /HttpOnly/i.test(cookie)));
+  assert(
+    cookies.some(
+      (cookie) => cookie.includes('better-auth.session_token=') && /HttpOnly/i.test(cookie),
+    ),
+  );
   const cookie = cookies.map((value) => value.split(';')[0]).join('; ');
   const me = await request('/me', 200, { headers: { cookie } });
   const csrf = MeSchema.parse(me.data).csrf_token;
@@ -107,16 +113,18 @@ async function deliveryToken(purpose: string) {
   );
   assert.equal(rows.length, 1);
   const row = rows[0];
-  const payload = JSON.parse(openIdentity(
-    loadIdentityKeyring(),
-    {
-      ciphertext: row.payload_ciphertext,
-      nonce: row.payload_nonce,
-      tag: row.payload_tag,
-      encryption_key_id: row.encryption_key_id,
-    },
-    `identity:delivery:${row.id}:${row.challenge_id}:${row.purpose}:${row.generation}`,
-  ));
+  const payload = JSON.parse(
+    openIdentity(
+      loadIdentityKeyring(),
+      {
+        ciphertext: row.payload_ciphertext,
+        nonce: row.payload_nonce,
+        tag: row.payload_tag,
+        encryption_key_id: row.encryption_key_id,
+      },
+      `identity:delivery:${row.id}:${row.challenge_id}:${row.purpose}:${row.generation}`,
+    ),
+  );
   assert.equal(typeof payload.token, 'string');
   return payload.token as string;
 }
@@ -125,38 +133,63 @@ try {
   for (let attempt = 0; ; attempt++) {
     const ready = await fetch(`http://127.0.0.1:${port}/readyz`).catch(() => null);
     if (ready?.ok) break;
-    if (attempt === 49 || child.exitCode !== null) throw new Error('account smoke service unavailable');
+    if (attempt === 49 || child.exitCode !== null)
+      throw new Error('account smoke service unavailable');
     await Bun.sleep(100);
   }
   contracts.authStatusSchema.parse((await request('/auth/status', 200)).data);
-  const admin = await sessionFrom((await request('/auth/initialize', 201, {
-    body: { login_name: 'smoke_admin', password, display_name: 'Smoke administrator' },
-  })).cookies);
+  const admin = await sessionFrom(
+    (
+      await request('/auth/initialize', 201, {
+        body: { login_name: 'smoke_admin', password, display_name: 'Smoke administrator' },
+      })
+    ).cookies,
+  );
   const contact = await request('/auth/contact/request', 202, {
-    session: admin, body: { email: 'admin@example.test', current_password: password },
+    session: admin,
+    body: { email: 'admin@example.test', current_password: password },
   });
   contracts.authContactRequestedSchema.parse(contact.data);
   await request('/auth/contact/verify', 200, {
-    session: admin, body: { token: await deliveryToken('verify_contact') },
+    session: admin,
+    body: { token: await deliveryToken('verify_contact') },
   });
   const inviteBody = {
-    email: 'member@example.test', current_password: password, idempotency_key: randomUUID(),
+    email: 'member@example.test',
+    current_password: password,
+    idempotency_key: randomUUID(),
   };
   const invitation = await request('/auth/invitations', 201, { session: admin, body: inviteBody });
   contracts.authInvitationCreatedSchema.parse(invitation.data);
-  assert.deepEqual((await request('/auth/invitations', 200, { session: admin, body: inviteBody })).data, invitation.data);
+  assert.deepEqual(
+    (await request('/auth/invitations', 200, { session: admin, body: inviteBody })).data,
+    invitation.data,
+  );
   const accepted = await request('/auth/invitations/accept', 201, {
-    body: { token: await deliveryToken('invitation'), login_name: 'smoke_member', password, display_name: 'Smoke member' },
+    body: {
+      token: await deliveryToken('invitation'),
+      login_name: 'smoke_member',
+      password,
+      display_name: 'Smoke member',
+    },
     viaWeb: true,
   });
   contracts.authInvitationAcceptedSchema.parse(accepted.data);
   assert.deepEqual(accepted.cookies, []);
-  const member = await sessionFrom((await request('/auth/sign-in', 200, {
-    body: { login_name: 'smoke_member', password },
-    viaWeb: true,
-  })).cookies);
-  contracts.AccountViewSchema.parse((await request('/auth/account', 200, { session: member })).data);
-  contracts.authSessionsSchema.parse((await request('/auth/sessions?limit=1', 200, { session: member })).data);
+  const member = await sessionFrom(
+    (
+      await request('/auth/sign-in', 200, {
+        body: { login_name: 'smoke_member', password },
+        viaWeb: true,
+      })
+    ).cookies,
+  );
+  contracts.AccountViewSchema.parse(
+    (await request('/auth/account', 200, { session: member })).data,
+  );
+  contracts.authSessionsSchema.parse(
+    (await request('/auth/sessions?limit=1', 200, { session: member })).data,
+  );
   await request('/auth/sessions?limit=1&limit=2', 400, { session: member });
   await request('/auth/status/', 404);
   await request('/auth/status', 404, { method: 'PUT' });
@@ -167,10 +200,18 @@ try {
   });
   contracts.authPasswordResetResultSchema.parse(reset.data);
   await request('/me', 401, { session: member });
-  const recovered = await sessionFrom((await request('/auth/sign-in', 200, {
-    body: { email: 'member@example.test', password: replacement },
-  })).cookies);
-  const revoked = await request('/auth/sign-out', 200, { session: recovered, body: {}, viaWeb: true });
+  const recovered = await sessionFrom(
+    (
+      await request('/auth/sign-in', 200, {
+        body: { email: 'member@example.test', password: replacement },
+      })
+    ).cookies,
+  );
+  const revoked = await request('/auth/sign-out', 200, {
+    session: recovered,
+    body: {},
+    viaWeb: true,
+  });
   assert(revoked.cookies.length > 1, 'sign-out must retain separate clearing cookies');
   assert(revoked.cookies.every((cookie) => /max-age=0/i.test(cookie)));
   await request('/me', 401, { session: recovered });
@@ -178,12 +219,16 @@ try {
   const oversize = { name: 'z'.repeat(131072) };
   await request('/model-providers', 401, { body: oversize });
   await request('/model-providers', 403, {
-    session: admin, body: oversize, headers: { 'x-csrf-token': 'invalid' },
+    session: admin,
+    body: oversize,
+    headers: { 'x-csrf-token': 'invalid' },
   });
   await request('/model-providers', 413, { session: admin, body: oversize });
   await request('/model-providers', 413, { session: admin, body: oversize, viaWeb: true });
   await request('/model-providers', 403, {
-    session: admin, body: { name: 'forbidden' }, outsideLoopback: true,
+    session: admin,
+    body: { name: 'forbidden' },
+    outsideLoopback: true,
     headers: {
       'x-along-host-tls': '1',
       'x-along-host-peer': '127.0.0.1',
@@ -192,29 +237,62 @@ try {
       'x-along-local-model-proxy': '0'.repeat(64),
     },
   });
-  const created = contracts.ProviderViewSchema.parse((await request('/model-providers', 200, {
-    session: admin, body: { name: 'Smoke provider' },
-  })).data);
+  const created = contracts.ProviderViewSchema.parse(
+    (
+      await request('/model-providers', 200, {
+        session: admin,
+        body: { name: 'Smoke provider' },
+      })
+    ).data,
+  );
   const providerPath = `/model-providers/${created.id}`;
-  const settings = { enabled: true, base_url: 'https://provider.example.test/v1', credential: { action: 'replace', api_key: credential } };
-  const updated = contracts.ProviderViewSchema.parse((await request(`${providerPath}/actions/update`, 200, {
-    session: admin, body: settings,
-    viaWeb: true,
-  })).data);
+  const settings = {
+    enabled: true,
+    base_url: 'https://provider.example.test/v1',
+    credential: { action: 'replace', api_key: credential },
+  };
+  const updated = contracts.ProviderViewSchema.parse(
+    (
+      await request(`${providerPath}/actions/update`, 200, {
+        session: admin,
+        body: settings,
+        viaWeb: true,
+      })
+    ).data,
+  );
   assert.equal(updated.has_api_key, true);
   assert.equal(updated.key_hint, null);
   await request(`${providerPath}/models`, 200, { session: admin, body: { model_id: 'smoke' } });
   await request('/model-selection/actions/set-default', 200, {
-    session: admin, body: { selection: { provider_id: updated.id, model_id: 'smoke' } },
-  });
-  assert.equal(contracts.ProviderListSchema.parse((await request('/model-providers', 200, {
     session: admin,
-  })).data).default_selection?.model_id, 'smoke');
-  assert.equal((await database.pool.query('SELECT count(*)::int AS count FROM identity_mail_deliveries WHERE status = $1', ['submitted'])).rows[0].count, 0);
+    body: { selection: { provider_id: updated.id, model_id: 'smoke' } },
+  });
+  assert.equal(
+    contracts.ProviderListSchema.parse(
+      (
+        await request('/model-providers', 200, {
+          session: admin,
+        })
+      ).data,
+    ).default_selection?.model_id,
+    'smoke',
+  );
+  assert.equal(
+    (
+      await database.pool.query(
+        'SELECT count(*)::int AS count FROM identity_mail_deliveries WHERE status = $1',
+        ['submitted'],
+      )
+    ).rows[0].count,
+    0,
+  );
   console.log('account, sessions, invitation, reset, cookies and provider settings passed');
 } finally {
   child.kill('SIGTERM');
   await child.exited;
-  assert(!(await output).some((text) => text.includes(credential)), 'provider credential escaped in service diagnostics');
+  assert(
+    !(await output).some((text) => text.includes(credential)),
+    'provider credential escaped in service diagnostics',
+  );
   await database.close();
 }
