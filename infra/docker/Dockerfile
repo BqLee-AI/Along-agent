@@ -17,7 +17,24 @@ RUN bash scripts/build-harness.sh
 FROM scratch AS harness-artifact
 COPY --from=harness-native /out/ /
 
-FROM oven/bun:1.4.2@sha256:9114c058aeae42162ee16dd5084b95fe9473970bb6bcb5b232ab1630f0546895
+FROM harness-toolchain AS host-native
+COPY apps/host/cjpm.toml apps/host/cjpm.lock apps/host/
+COPY apps/host/src apps/host/src
+COPY apps/host/signal.c apps/host/signal.c
+RUN bash -ec '\
+    source /opt/along-toolchain/cangjie/envsetup.sh; \
+    cd /src/apps/host; \
+    gcc -O2 -c signal.c -o /tmp/along_host_signal.o; \
+    ar rcs /tmp/libalong_host_signal.a /tmp/along_host_signal.o; \
+    cjpm build --skip-script -o along-host; \
+    install -Dm755 target/release/bin/along-host /out/bin/along-host; \
+    mkdir -p /out/lib; \
+    export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/opt/along-toolchain/stdx/linux_x86_64_cjnative/dynamic/stdx"; \
+    ldd /out/bin/along-host | while read -r lib arrow path rest; do \
+      if [[ "$arrow" == "=>" && "$path" == /opt/along-toolchain/* ]]; then cp -L "$path" "/out/lib/$lib"; fi; \
+    done'
+
+FROM oven/bun:1.4.2@sha256:9114c058aeae42162ee16dd5084b95fe9473970bb6bcb5b232ab1630f0546895 AS api-runtime
 
 WORKDIR /app
 COPY package.json bun.lock ./
@@ -56,3 +73,10 @@ ENV ROLE=all
 ENV PORT=3000
 EXPOSE 3000
 CMD ["bun", "apps/api/dist/main.js"]
+
+FROM api-runtime AS host-runtime
+COPY --from=host-native /out/ /app/host/
+ENV LD_LIBRARY_PATH=/app/host/lib
+CMD ["/app/host/bin/along-host"]
+
+FROM api-runtime AS release
