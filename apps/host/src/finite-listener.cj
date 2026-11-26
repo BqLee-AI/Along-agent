@@ -8,7 +8,7 @@ import std.net.*
 class FiniteListener <: ServerSocket {
     let socket: TcpServerSocket
     let lock = Mutex()
-    let localAddresses = HashMap<String, (Int64, String)>()
+    let connections = HashMap<String, (Int64, ?FiniteConnection)>()
 
     init(port: UInt16) {
         socket = TcpServerSocket(bindAt: IPSocketAddress("0.0.0.0", port))
@@ -26,30 +26,31 @@ class FiniteListener <: ServerSocket {
         let connected = socket.accept(timeout: timeout)
         if (let local: IPSocketAddress <- connected.localAddress) {
             let peer = connected.remoteAddress.toString()
+            let connection = FiniteConnection(connected, local.address.toString(), { => forget(peer) })
             synchronized(lock) {
-                let (count, _) = localAddresses.get(peer).getOrDefault({ => (0, "") })
-                localAddresses[peer] = (count + 1, if (count == 0) { local.address.toString() } else { "" })
+                let (count, _) = connections.get(peer).getOrDefault({ => (0, None) })
+                connections[peer] = (count + 1, if (count == 0) { Some(connection) } else { None })
             }
-            return FiniteConnection(connected, { => forget(peer) })
+            return connection
         }
         return connected
     }
     // stdx only exposes the peer string. Concurrent connections using the same
     // peer tuple are ambiguous on a wildcard listener and fail closed.
-    func localFor(peer: String): ?String {
+    func connectionFor(peer: String): ?FiniteConnection {
         synchronized(lock) {
-            let (_, local) = localAddresses.get(peer).getOrDefault({ => (0, "") })
-            return if (local.isEmpty()) { None } else { Some(local) }
+            let (_, connection) = connections.get(peer).getOrDefault({ => (0, None) })
+            return connection
         }
     }
 
     func forget(peer: String): Unit {
         synchronized(lock) {
-            let (count, _) = localAddresses.get(peer).getOrDefault({ => (0, "") })
+            let (count, _) = connections.get(peer).getOrDefault({ => (0, None) })
             if (count <= 1) {
-                localAddresses.remove(peer)
+                connections.remove(peer)
             } else {
-                localAddresses[peer] = (count - 1, "")
+                connections[peer] = (count - 1, None)
             }
         }
     }
@@ -57,10 +58,12 @@ class FiniteListener <: ServerSocket {
 
 class FiniteConnection <: StreamingSocket {
     let socket: StreamingSocket
+    let localIp: String
     let forget: () -> Unit
     let closed = AtomicBool(false)
-    init(socket: StreamingSocket, forget: () -> Unit) {
+    init(socket: StreamingSocket, localIp: String, forget: () -> Unit) {
         this.socket = socket
+        this.localIp = localIp
         this.forget = forget
     }
 

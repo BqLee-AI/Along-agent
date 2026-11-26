@@ -48,7 +48,7 @@ class HostDistributor <: HttpRequestDistributor {
         let parts = path.split("/")
         if (parts.size >= 4 && parts[0].isEmpty() && parts[1] == "api" &&
             parts[2] == "v1" && parts[3] == "conversations") {
-            return FuncHandler({ ctx => serveConversation(ctx, socketPath) })
+            return FuncHandler({ ctx => serveConversation(ctx, socketPath, listener) })
         }
         if (isAccountPath(path)) {
             return FuncHandler({ ctx =>
@@ -60,7 +60,7 @@ class HostDistributor <: HttpRequestDistributor {
                 serveFinite(ctx, socketPath, "product", encrypted: encrypted, listener: Some(listener))
             })
         }
-        return NotFoundHandler()
+        return FuncHandler({ ctx => serveFinite(ctx, socketPath, "fallback", listener: Some(listener)) })
     }
 }
 
