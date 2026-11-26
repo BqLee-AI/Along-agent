@@ -32,6 +32,7 @@ const workspace = await mkdtemp(join(tmpdir(), 'along-product-proof-'));
 const document = join(workspace, 'brief.txt');
 const registry = join(workspace, 'registry.json');
 const original = 'Original brief.\n';
+const workspaceId = randomUUID();
 const updated = 'Updated brief.\n';
 await writeFile(document, original);
 await writeFile(
@@ -39,7 +40,7 @@ await writeFile(
   JSON.stringify([
     {
       owner_id: owner.userId,
-      workspace_id: 'documents',
+      workspace_id: workspaceId,
       label: 'Documents',
       root: workspace,
       readable_paths: ['brief.txt'],
@@ -67,7 +68,7 @@ const upstream = createServer(async (request, response) => {
     let args: object;
     if (round === 1 || round === 4) {
       name = 'workspace_read';
-      args = { workspace_id: 'documents', path: 'brief.txt' };
+      args = { workspace_id: workspaceId, path: 'brief.txt' };
     } else if (round === 2) {
       const {
         rows: [read],
@@ -147,10 +148,10 @@ try {
     'content-type': 'application/json',
     origin: appOrigin,
   };
-  async function request(path: string, body?: unknown, status = 200) {
+  async function request(path: string, body?: unknown, status = 200, key?: string) {
     const id = randomUUID();
     const response = await fetch(`${apiOrigin}/api/v1${path}`, {
-      headers: { ...headers, 'x-request-id': id },
+      headers: { ...headers, 'x-request-id': id, ...(key ? { 'idempotency-key': key } : {}) },
       ...(body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) }),
       signal: AbortSignal.timeout(10_000),
     });
@@ -179,15 +180,55 @@ try {
     (await request('/workspaces')).items.map(
       ({ workspace_id }: { workspace_id: string }) => workspace_id,
     ),
-    ['documents'],
+    [workspaceId],
   );
 
-  const conversationId = randomUUID();
+  const config = {
+    name: 'Native product Bot',
+    introduction: '',
+    role: '',
+    instructions: '',
+    model_selection: null,
+    tool_ids: [
+      'workspace_read',
+      'workspace_propose_replace',
+      'workspace_apply_replace',
+      'finish_goal',
+    ],
+    workspace_ids: [workspaceId],
+  };
+  const personalBot = await request('/bots', config);
+  const botPath = `/bots/${personalBot.id}`;
+  assert.deepEqual(await request('/bots'), { items: [personalBot] });
+  assert.deepEqual(await request(botPath), personalBot);
+  const savedBot = await request(botPath, { ...config, introduction: 'Native save', revision: 1 });
+  assert.equal(savedBot.revision, 2);
+  assert.equal(savedBot.config.introduction, 'Native save');
+  const createKey = randomUUID();
+  const { conversation_id: conversationId } = await request(
+    `${botPath}/conversations`,
+    {},
+    200,
+    createKey,
+  );
+  assert.deepEqual(await request(`${botPath}/conversations`, {}, 200, createKey), {
+    conversation_id: conversationId,
+  });
+  assert.deepEqual(await request(`/conversations/${conversationId}/bot`), {
+    bot_id: personalBot.id,
+  });
+  const page = await request(`${botPath}/conversations`);
+  assert.deepEqual(
+    page.items.map(({ conversation_id }: { conversation_id: string }) => conversation_id),
+    [conversationId],
+  );
   const messageId = randomUUID();
-  await database.pool.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
-    conversationId,
-    owner.userId,
-  ]);
+  const { conversation_id: documentConversationId } = await request(
+    `${botPath}/conversations`,
+    {},
+    200,
+    randomUUID(),
+  );
   await database.pool.query(
     "INSERT INTO messages(id,owner_id,conversation_id,role,content) VALUES($1,$2,$3,'user','tea')",
     [messageId, owner.userId, conversationId],
@@ -272,11 +313,11 @@ try {
     return frames(text);
   }
   const proposal = await stream('/conversations/messages', {
+    conversation_id: documentConversationId,
     execution: 'harness',
     authorization_revision: 'delegation/1',
     raw_text:
       'Document approval fixture. Read brief.txt, propose replacing Original with Updated, wait for approval, then apply and independently read it back.',
-    workspace_ids: ['documents'],
   });
   approvalId = pending(proposal);
   const ids = started(proposal);
@@ -324,6 +365,7 @@ try {
   ]);
   await request(`/memories/${memory.id}`, undefined, 401);
   await request(bot, undefined, 401);
+  await request(botPath, undefined, 401);
   console.log(
     'Native product HTTP verified brief, workspaces, memory, Feishu disconnect, office summary, document approval, independent reread and session revocation.',
   );

@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
@@ -60,10 +61,7 @@ suite('R3 immutable admission context', () => {
         `${ownerId}@example.test`,
       ]);
       await admitTestUser(c, ownerId);
-      await c.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
-        conversationId,
-        ownerId,
-      ]);
+      await createFixtureConversation(c, ownerId, { id: conversationId });
       for (const [id, role, text, date] of [
         [first, 'user', 'first', '2020-01-01'],
         [second, 'assistant', 'second', '2020-01-02'],

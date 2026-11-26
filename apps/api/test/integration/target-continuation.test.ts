@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { expectApplicationRejection } from '../helpers/application-error.js';
 import {
   listReminderClarifications,
@@ -75,10 +76,7 @@ async function fixture(
   );
   await admitTestUser(db.pool, ownerId);
   await configureTestModel(db.pool, ownerId, 'test');
-  await db.pool.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
-    conversationId,
-    ownerId,
-  ]);
+  await createFixtureConversation(db.pool, ownerId, { id: conversationId });
   await db.pool.query(
     "INSERT INTO messages(id,owner_id,conversation_id,role,content,created_at) VALUES($1,$2,$3,'user',$4,clock_timestamp()-interval '1 minute')",
     [messageId, ownerId, conversationId, options.text ?? '取消提醒'],

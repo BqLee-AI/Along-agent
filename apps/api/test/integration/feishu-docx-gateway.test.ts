@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { setImmediate } from 'node:timers/promises';
@@ -92,6 +93,7 @@ run(
           viewer.ownerId,
           randomUUID(),
           {
+            conversation_id: await createFixtureConversation(db.pool, viewer.ownerId),
             execution: 'harness',
             authorization_revision: 'delegation/1',
             raw_text: text,

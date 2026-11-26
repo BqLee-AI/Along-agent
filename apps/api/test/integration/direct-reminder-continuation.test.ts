@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import {
   listReminderClarifications,
   readReminderTimeErrors,
@@ -33,10 +34,7 @@ test('explicit same-goal time clarification inherits only the accepted unresolve
     [ownerId, `${ownerId}@clarification.test`],
   );
   await admitTestUser(db.pool, ownerId);
-  await db.pool.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
-    conversationId,
-    ownerId,
-  ]);
+  await createFixtureConversation(db.pool, ownerId, { id: conversationId });
   await db.pool.query(
     "INSERT INTO messages(id,owner_id,conversation_id,role,content,created_at) VALUES($1,$2,$3,'user','明天提醒我核对报告',clock_timestamp()-interval '2 minutes'),($4,$2,$3,'user','下午三点，上海时间',clock_timestamp())",
     [oldMessage, ownerId, conversationId, messageId],
@@ -181,10 +179,7 @@ test('timezone-only clarification preserves each selected reminder time and its 
     [ownerId, `${ownerId}@clarification.test`],
   );
   await admitTestUser(db.pool, ownerId);
-  await db.pool.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
-    conversationId,
-    ownerId,
-  ]);
+  await createFixtureConversation(db.pool, ownerId, { id: conversationId });
   await db.pool.query(
     "INSERT INTO messages(id,owner_id,conversation_id,role,content,created_at) VALUES($1,$2,$3,'user',$4,clock_timestamp()-interval '2 minutes')",
     [

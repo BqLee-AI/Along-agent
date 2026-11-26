@@ -338,6 +338,7 @@ async function contextConsumer(mode: ConsumerMode): Promise<void> {
   });
   await configureWorkspaceRegistry(registrations);
   const body = {
+    conversation_id: await actor.createConversation(),
     execution: 'harness',
     workspace_id: workspaceId,
     raw_text: `contextCase:${scenario.id} Compare all six dated sources and a failed read. Recheck the original accepted source after it changes. Preview the current date and original evidence in brief.md; save only after approval, then read back.`,

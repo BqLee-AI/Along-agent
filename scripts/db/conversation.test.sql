@@ -7,8 +7,13 @@
 BEGIN;
 
 -- GREEN: conversation + messages round trip.
-INSERT INTO conversations (id, owner_id, title)
-VALUES ('10000000-0000-0000-0000-000000000001', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'green');
+INSERT INTO personal_bots (id, owner_id, config)
+VALUES ('10000000-0000-0000-0000-000000000002', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        '{"name":"Conversation test","introduction":"","role":"","instructions":"","model_selection":null,"tool_ids":[],"workspace_ids":[]}');
+
+INSERT INTO conversations (id, owner_id, bot_id, title)
+VALUES ('10000000-0000-0000-0000-000000000001', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        '10000000-0000-0000-0000-000000000002', 'green');
 
 INSERT INTO messages (id, owner_id, conversation_id, role, content, request_id)
 VALUES ('10000000-0000-0000-0000-000000000011', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
@@ -144,8 +149,9 @@ DECLARE
 BEGIN
   FOREACH bad_status IN ARRAY ARRAY['archived', 'draft'] LOOP
     BEGIN
-      INSERT INTO conversations (id, owner_id, status)
-      VALUES (md5(bad_status)::uuid, 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', bad_status);
+      INSERT INTO conversations (id, owner_id, bot_id, status)
+      VALUES (md5(bad_status)::uuid, 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+              '10000000-0000-0000-0000-000000000002', bad_status);
       RAISE EXCEPTION 'D6-FAIL: illegal conversation status % unexpectedly succeeded', bad_status USING ERRCODE = 'P0999';
     EXCEPTION
       WHEN check_violation THEN

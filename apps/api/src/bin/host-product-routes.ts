@@ -5,6 +5,7 @@ import { createErrorHandler, failEnvelope, jsonResponse } from '../http/errors.j
 import { unmatchedError } from '../http/routing/fallback-controller.js';
 import { httpStatusForError } from '@along/contracts';
 import { approvalWriteScopes, createApprovalController } from '../features/approvals/controller.js';
+import { botWriteScopes, createBotController } from '../features/bots/controller.js';
 import { createBriefController } from '../features/brief/controller.js';
 import { createMemoryController, memoryWriteScopes } from '../features/memory/controller.js';
 import { createModelProviderController } from '../features/model-providers/http/controller.js';
@@ -17,11 +18,17 @@ const summaryPath = '/api/v1/model-providers/actions/summarize-notes';
 const productScopes = [
   '/api/v1/approvals',
   '/api/v1/document-approvals',
+  '/api/v1/bots',
   '/api/v1/tasks',
   '/api/v1/memories',
   '/api/v1/office/feishu/bot',
 ];
-const writeScopes = [...approvalWriteScopes, ...taskWriteScopes, ...memoryWriteScopes];
+const writeScopes = [
+  ...approvalWriteScopes,
+  ...taskWriteScopes,
+  ...memoryWriteScopes,
+  ...botWriteScopes,
+];
 
 function withinScope(path: string, scope: string) {
   return scope.endsWith('/')
@@ -50,6 +57,7 @@ export function createHostProductRoutes(deps: AppDeps) {
     })
     .onError({ as: 'global' }, createErrorHandler(!!deps.pool, access))
     .use(createApprovalController({ pool: deps.pool, timeContext }, access))
+    .use(createBotController(deps.pool, access))
     .use(
       createBriefController(
         { pool: deps.pool, tzdbVersion: deps.tzdbVersion, timeContext },

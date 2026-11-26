@@ -3,7 +3,8 @@ import { shellLocation, workspaceHref } from '../src/shell/model/navigation';
 
 const conversationId = '11111111-1111-4111-8111-111111111111';
 const runId = '22222222-2222-4222-8222-222222222222';
-const selection = { conversationId, runId, initialIntent: null };
+const botId = '44444444-4444-4444-8444-444444444444';
+const selection = { botId, conversationId, runId, initialIntent: null };
 
 describe('workspace URL ownership', () => {
   it('preserves the current conversation while retaining resource filters, opaque cursors and fragments', () => {
@@ -14,6 +15,7 @@ describe('workspace URL ownership', () => {
     expect(target.pathname).toBe('/tasks');
     expect(target.searchParams.get('state')).toBe('cancel_pending');
     expect(target.searchParams.get('cursor')).toBe('original+/=');
+    expect(target.searchParams.get('bot_id')).toBe(botId);
     expect(target.searchParams.get('conversation_id')).toBe(conversationId);
     expect(target.searchParams.get('run_id')).toBe(runId);
     expect(target.hash).toBe('#events');
@@ -22,6 +24,7 @@ describe('workspace URL ownership', () => {
     const explicit = '/tasks?conversation_id=33333333-3333-4333-8333-333333333333';
     expect(workspaceHref(explicit, selection)).toBe(explicit);
     expect(workspaceHref('/tasks?run_id=bad', selection)).toBe('/tasks?run_id=bad');
+    expect(workspaceHref(`/tasks?bot_id=${botId}`, selection)).toBe(`/tasks?bot_id=${botId}`);
   });
   it.each([
     '/conversations',
@@ -37,10 +40,17 @@ describe('workspace URL ownership', () => {
   it('restores a conversation without requiring a Run and does not reinterpret its intent', () => {
     const location = shellLocation('/tasks', `conversation_id=${conversationId}&intent=document`);
     expect(location.invalid).toBe(false);
-    expect(location.selection).toEqual({ conversationId, runId: null, initialIntent: null });
+    expect(location.selection).toEqual({
+      botId: null,
+      conversationId,
+      runId: null,
+      initialIntent: null,
+    });
     expect(location.workspaceOpen).toBe(true);
   });
   it.each([
+    'bot_id=invalid',
+    `bot_id=${botId}&bot_id=${botId}`,
     `run_id=${runId}`,
     'conversation_id=invalid',
     `conversation_id=${conversationId}&conversation_id=${conversationId}`,
@@ -48,6 +58,7 @@ describe('workspace URL ownership', () => {
   ])('rejects ambiguous or invalid identity without choosing a partial target: %s', (query) => {
     const location = shellLocation('/conversations', query);
     expect(location.invalid).toBe(true);
+    expect(location.selection.botId).toBeNull();
     expect(location.selection.conversationId).toBeNull();
     expect(location.selection.runId).toBeNull();
   });
@@ -60,7 +71,18 @@ describe('workspace URL ownership', () => {
     expect(shellLocation('/conversations', 'intent=reminder')).toMatchObject({
       explicit: true,
       workspaceOpen: false,
-      selection: { conversationId: null, runId: null, initialIntent: 'reminder' },
+      selection: { botId: null, conversationId: null, runId: null, initialIntent: 'reminder' },
     });
+  });
+  it('retains a selected Bot whose conversation has not been created', () => {
+    const location = shellLocation('/conversations', `bot_id=${botId}&intent=document`);
+    expect(location).toMatchObject({
+      invalid: false,
+      explicit: true,
+      selection: { botId, conversationId: null, runId: null, initialIntent: 'document' },
+    });
+    expect(workspaceHref('/tasks', location.selection)).toBe(
+      `/tasks?bot_id=${botId}&intent=document`,
+    );
   });
 });

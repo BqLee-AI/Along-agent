@@ -14,6 +14,20 @@
 
 ## 1. 路由
 
+Bot 是对话归属的入口。下列路由与既有对话接口同属 `/api/v1`。
+
+| 方法 | 路径                       | 行为                                                         |
+| ---- | -------------------------- | ------------------------------------------------------------ |
+| GET  | `/bots`                    | 列出本人 Bot                                                 |
+| POST | `/bots`                    | 创建 Bot                                                     |
+| GET  | `/bots/{id}`               | 读取 Bot 的配置和修订                                        |
+| POST | `/bots/{id}`               | 携带当前 `revision` 保存完整配置，修订过时返回 `409`         |
+| GET  | `/bots/{id}/conversations` | 使用 `cursor`、`limit` 分页读取这一 Bot 的对话               |
+| POST | `/bots/{id}/conversations` | `{}` 和 `Idempotency-Key` 创建空对话，返回 `conversation_id` |
+| GET  | `/conversations/{id}/bot`  | 由本人对话深链解析持久 `bot_id`                              |
+
+Bot 配置字段为 `name`、`introduction`、`role`、`instructions`、`model_selection`、`tool_ids` 和 `workspace_ids`。`model_selection:null` 继承个人默认模型。工具与资料的空列表表示无权限。所有 POST 沿用认证、写入准入和 CSRF。
+
 | 方法 | 路径                                             | 鉴权 | CSRF | 幂等键      | 说明                             |
 | ---- | ------------------------------------------------ | ---- | ---- | ----------- | -------------------------------- |
 | POST | `/conversations/messages`                        | 是   | 是   | body 或头部 | 默认 business，显式 harness；SSE |
@@ -39,7 +53,7 @@
 }
 ```
 
-- `conversation_id`：缺省则服务端新建并在首个 SSE 事件返回；传入则续写（跨用户 id 返回 `403`）。
+- `conversation_id`：必填，指向由所属 Bot 创建的对话。跨用户 ID 返回 `403`。首次接纳成功后冻结对话时间锚。
 - `card_ref`：可选，围绕某卡片追问时带；服务端只做关联，不做授权旁路。
 - `raw_text`：用户原话，按不可信输入解析，原样进回显引用。
 - `files` 可选。普通 `delegation/1` Harness 消息可随指令提交 1–5 项 `{name,text}`。文件正文作为分析数据随消息保存并参与幂等校验，序列化后的完整消息上限为 20,000 字符。带文件的 Run 使用只读工具范围，不接纳目录绑定、运行澄清引用、飞书读取或 Microsoft Learn 搜索。
@@ -50,7 +64,7 @@
 - 新 Harness Run 在接纳事务内冻结同 owner、同 conversation 最新63条可见 user/assistant 消息引用并按 `created_at/id` 排序，随后追加本轮完整用户输入一次，总计最多64条。执行和批准恢复按冻结引用读原文，不混入后来消息、其他会话或 system 消息，不把旧 tool_calls 作为待执行动作。该窗口不是永久记忆；完整窗口、工具定义与观察超1MiB时明确失败 `HARNESS_CONTEXT_LIMIT`，不截断当前输入。缺跨轮引用的旧 Run 保持仅原输入的上下文。
 - 入站幂等为同 owner/key：legacy 的原 hash 域及材料保持不变；显式 `workspace_ids` 规范排序后绑定新请求材料，顺序变化不扩大权限。同键异绑定输入为409；已存同键先补读原 Run，不随当前登记变化重新解析或扩权。实际冻结集合不是客户端自报的身份或路径。
 - `workspace_id`：可选非空字符串，仅 legacy 显式 `execution=harness` 可携带，选择一个本人有效登记；business、缺省 execution 或与 delegation 共用均为400。
-- `workspace_ids`：可选非空且去重的 ID 数组，仅显式 delegation harness 可携带，与 `workspace_id` 互斥；省略表示接纳时本人全部有效登记，显式值只能收窄。未知、他人、撤销或不符合原目标范围的项不得获得授权；无登记保留空集合，不阻断其他能力。集合超出上下文容量时明确失败，不静默截断。
+- `workspace_ids`：可选非空且去重的 ID 数组，仅显式 delegation harness 可携带，与 `workspace_id` 互斥。省略时使用 Bot 范围内仍有效的本人登记。显式值只能收窄。未知、他人、撤销或超出 Bot 范围的登记不得获得授权。集合超出上下文容量时明确失败。
 - `confirmed_timezone` / `confirmed_timezone_id`：schema 均已有、可空，取 `confirmed_timezone_id ?? confirmed_timezone`。legacy 保留原文明确时区 > 本轮确认值 > 会话先前明确值的归一/澄清合同，详见 design/05 §9.2。新 delegation 的本轮明确提示优先，否则接纳时读取 identity 已保存偏好，不回退会话旧时区；Web 不把缓存 `/me` 偏好自动作为本轮明确提示。保存/清除偏好仅经真实工具用例，单次时区提示不自动保存。
 - `fold_choice`：`first | second | none`，默认 `none`；只有结构化字段决定选择，原话“第一次/第二次”不自动覆盖。歧义未选为 `AMBIGUOUS_LOCAL_TIME`；候选字段仍是 fold_choice，成功的现有归一结果与快照 `fold` 为 `0 | 1`，不混为字符串列。
 - `clarification_of_run_id`：可选 UUID，精确 fold 候选重提议必填，指向原 `AMBIGUOUS_LOCAL_TIME` 失败 Run。必须同 owner/conversation、全会话唯一尚未完成候选、紧邻上一 user 消息且有实际已接受失败及冻结来源；原文完全相同、请求所选时区等于实际候选并带结构化 first/second 才可继承原锚。它不是批准、resume、任意 Run 复制或客户端时钟授权；无效/关系不明只要求完整重述，不任挑锚。

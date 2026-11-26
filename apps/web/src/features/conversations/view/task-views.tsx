@@ -2,7 +2,7 @@
 
 import { useRef } from 'react';
 import Link from '@/shell/view/workspace-link';
-import { ArrowUp, Bell, ChevronDown, Files, MessageSquare, Plus, Square, X } from 'lucide-react';
+import { ArrowUp, Bell, Files, MessageSquare, Plus, Square, X } from 'lucide-react';
 import type { GoalResult } from '@along/contracts';
 import { Dropdown } from '@lorelum/lumen-ui/components/dropdown';
 import { Button } from '@lorelum/lumen-ui/components/button';
@@ -482,7 +482,7 @@ export function RunStatusPanel({ task }: { task: ConversationTask }) {
   );
 }
 
-export function TaskComposer({ task }: { task: ConversationTask }) {
+export function TaskComposer({ task, botName }: { task: ConversationTask; botName: string }) {
   const workspace = task.workspaces.find((item) => item.workspace_id === task.workspaceId);
   const textarea = useComposerDisplay(task.input);
   const composing = useRef(false);
@@ -564,12 +564,15 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
                 >
                   重试原发送（同键）
                 </Button>
-                <Link
-                  className="inline-flex min-h-8 max-lg:min-h-11 items-center text-brand-ink underline"
-                  href="/conversations"
+                <Button
+                  type="button"
+                  variant="glass"
+                  color="default"
+                  disabled={task.reading}
+                  onClick={() => void task.refresh()}
                 >
-                  读取会话历史
-                </Link>
+                  读取当前会话历史
+                </Button>
               </div>
             </Alert.Description>
           </Alert.Content>
@@ -811,7 +814,7 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
           ) : null}
         </div>
         <Label htmlFor="task-message" className="sr-only">
-          发给 Along 的消息
+          发给 {botName} 的消息
         </Label>
         <div className="flex min-w-0 shrink-0 items-end gap-1.5">
           <Dropdown>
@@ -851,16 +854,22 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
                   { value: 'document', label: '使用已登记目录', icon: Files },
                   { value: 'chat', label: '普通对话', icon: MessageSquare },
                 ] as const
-              ).map(({ value, label, icon: Icon }) => (
-                <Dropdown.Item
-                  key={value}
-                  className="min-h-8 max-lg:min-h-11 gap-3"
-                  onClick={() => task.setIntent(value)}
-                >
-                  <Icon className="size-4" aria-hidden="true" />
-                  {label}
-                </Dropdown.Item>
-              ))}
+              )
+                .filter(
+                  ({ value }) =>
+                    value === 'chat' ||
+                    (value === 'reminder' ? task.reminderAllowed : task.documentAllowed),
+                )
+                .map(({ value, label, icon: Icon }) => (
+                  <Dropdown.Item
+                    key={value}
+                    className="min-h-8 max-lg:min-h-11 gap-3"
+                    onClick={() => task.setIntent(value)}
+                  >
+                    <Icon className="size-4" aria-hidden="true" />
+                    {label}
+                  </Dropdown.Item>
+                ))}
               <Dropdown.Separator />
               <p className="max-w-52 px-3 py-2 text-xs leading-5 text-muted-foreground">
                 公开检索可能使用从问题提取的搜索词，请勿输入敏感信息。
@@ -870,14 +879,14 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
           <PromptInput.Textarea
             ref={textarea}
             id="task-message"
-            aria-label="发给 Along 的消息"
+            aria-label={`发给 ${botName} 的消息`}
             rows={1}
             autoSize={false}
             submitOnEnter={false}
             className="max-h-40 min-h-8 min-w-0 flex-1 resize-none border-0 bg-transparent! px-1.5 py-1 text-base leading-6 shadow-none! outline-none ring-0! focus-visible:ring-0 lg:text-[15px]"
             placeholder={
               task.files.length
-                ? '告诉 Along 怎样处理这些文件'
+                ? `告诉 ${botName} 怎样处理这些文件`
                 : task.intent === 'document'
                   ? '你希望如何处理这些资料？'
                   : task.intent === 'reminder'
@@ -908,62 +917,6 @@ export function TaskComposer({ task }: { task: ConversationTask }) {
               }
             }}
           />
-          {task.intent !== 'reminder' ? (
-            <Dropdown>
-              <Dropdown.Trigger
-                render={
-                  <Button
-                    type="button"
-                    variant="clear"
-                    color="default"
-                    className="max-w-48 shrink-0 gap-1 rounded-full border-0 bg-transparent! bg-none! text-secondary-foreground shadow-none! hover:bg-muted! hover:text-foreground"
-                  />
-                }
-                disabled={task.sendUncertain}
-                aria-label="选择模型"
-              >
-                <span className="hidden truncate sm:inline">
-                  {task.modelSelection?.model_id ?? task.defaultSelection?.model_id ?? '选择模型'}
-                </span>
-                <ChevronDown className="size-3.5 shrink-0" aria-hidden="true" />
-              </Dropdown.Trigger>
-              <Dropdown.Content
-                align="start"
-                side="top"
-                sideOffset={8}
-                className="max-h-72 min-w-52 max-w-[calc(100vw-24px)] overflow-y-auto"
-                aria-label="选择模型"
-              >
-                <Dropdown.Item onClick={() => task.setModelSelection(null)}>
-                  使用默认模型
-                  {task.defaultSelection ? ` · ${task.defaultSelection.model_id}` : '（未设置）'}
-                </Dropdown.Item>
-                {task.modelProviders
-                  .filter((provider) => provider.enabled)
-                  .flatMap((provider) =>
-                    provider.models.map((model_id) => (
-                      <Dropdown.Item
-                        key={JSON.stringify([provider.id, model_id])}
-                        onClick={() =>
-                          task.setModelSelection({ provider_id: provider.id, model_id })
-                        }
-                      >
-                        {provider.name} · {model_id}
-                      </Dropdown.Item>
-                    )),
-                  )}
-                {task.modelState === 'loading' ? (
-                  <Dropdown.Item disabled>正在读取模型…</Dropdown.Item>
-                ) : null}
-                {task.modelError ? (
-                  <Dropdown.Item onClick={() => void task.readModels()}>
-                    读取失败，点击重试
-                  </Dropdown.Item>
-                ) : null}
-                <Dropdown.Item render={<Link href="/models" />}>模型设置</Dropdown.Item>
-              </Dropdown.Content>
-            </Dropdown>
-          ) : null}
           {canStop ? (
             <Button
               type="button"

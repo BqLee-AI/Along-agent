@@ -293,6 +293,10 @@ describe('history resource state consumed by the Web', () => {
       ['run-resume:one', 'a'],
       ['run-cancel:two', 'b'],
       ['document-decision:three', 'c'],
+      ['conversation-send:four', 'pending body'],
+      ['conversation-compact:five', 'pending action'],
+      ['run-pause:six', 'd'],
+      ['run-continue:seven', 'e'],
       ['unrelated', 'keep'],
     ]);
     const storage = {

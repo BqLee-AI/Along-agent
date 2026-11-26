@@ -18,7 +18,6 @@ import {
   createAutoCompactPolicy,
   SendMessageBodySchema,
   type SendMessageBody,
-  createConversation,
   deleteExpiredIdempotency,
   findIdempotency,
   freezeConversationTimezone,
@@ -29,7 +28,6 @@ import {
   insertRun,
   listHarnessMessageRefs,
   listRunEvents,
-  type ConversationRow,
   acceptReminderDate,
   CANCEL_INTENT,
   requirePool,
@@ -82,6 +80,7 @@ import {
   readFeishuBotObservationKey,
   suppliedFeishuDocxUrl,
 } from '../../features/office-connectors/public.js';
+import { lockPersonalBot } from '../../features/bots/public.js';
 
 const BUSINESS_MAX_ITERATIONS = 10;
 const BUSINESS_MAX_TOKENS = 8000;
@@ -218,6 +217,19 @@ export async function startConversationRun(
       // Model selection and idle control admission share owner -> conversation
       // lock order; resolveSelection reuses this transaction-scoped lock.
       if (execution === 'harness') await lockOwner(client, ownerId);
+      const conversation = await getConversation(client, input.conversation_id);
+      if (!conversation) throw notFound('conversation not found');
+      if (conversation.owner_id !== ownerId) throw forbidden('conversation not found');
+      const bot = await lockPersonalBot(client, ownerId, conversation.bot_id);
+      if (!bot) throw notFound('Bot not found');
+      const allowedWorkspaces = new Set(bot.config.workspace_ids);
+      const allowedTools = new Set(bot.config.tool_ids);
+      const requestedWorkspaces = input.workspace_ids ?? [];
+      if (
+        (input.workspace_id && !allowedWorkspaces.has(input.workspace_id)) ||
+        requestedWorkspaces.some((id) => !allowedWorkspaces.has(id))
+      )
+        throw forbidden('workspace outside Bot scope');
       const workspaceGrant =
         input.workspace_id !== undefined ? getWorkspaceGrant(ownerId, input.workspace_id) : null;
       const workspaceSummary = workspaceGrant
@@ -227,6 +239,12 @@ export async function startConversationRun(
       let workspaceSet = delegation
         ? resolveWorkspaceGrants(ownerId, input.workspace_ids)
         : { grants: [], summaries: [] };
+      workspaceSet = {
+        grants: workspaceSet.grants.filter((grant) => allowedWorkspaces.has(grant.workspace_id)),
+        summaries: workspaceSet.summaries.filter((item) =>
+          allowedWorkspaces.has(item.workspace_id),
+        ),
+      };
       let allowlist: readonly string[] =
         execution === 'harness'
           ? workspaceGrant
@@ -245,28 +263,21 @@ export async function startConversationRun(
               : HARNESS_BASE_TOOL_IDS
           : BUSINESS_TOOL_IDS;
 
-      let conversation: ConversationRow | null = null;
-      if (input.conversation_id) {
-        const found = await getConversation(client, input.conversation_id);
-        if (!found) throw notFound('conversation not found') as ApplicationError;
-        if (found.owner_id !== ownerId)
-          throw forbidden('conversation not found') as ApplicationError;
-        if (found.status !== 'open') throw stateConflict('conversation closed') as ApplicationError;
-        conversation = found;
-      }
+      allowlist = allowlist.filter((tool) => allowedTools.has(tool));
       const acceptedClock = (await client.query<{ now: Date }>('SELECT clock_timestamp() AS now'))
         .rows[0]?.now;
       if (!acceptedClock) throw new Error('database clock unavailable');
       const receivedAtUtc = utcSecondIso(acceptedClock);
-      if (!conversation) {
-        const anchorIso = acceptedClock;
-        conversation = await createConversation(client, {
-          ownerId,
-          anchorIso: utcSecondIso(anchorIso),
-          title: text.slice(0, 40),
-        });
-      }
-      await client.query('SELECT id FROM conversations WHERE id=$1 FOR UPDATE', [conversation.id]);
+      const locked = await client.query<{ status: string }>(
+        `SELECT status FROM conversations WHERE id=$1 FOR UPDATE`,
+        [conversation.id],
+      );
+      if (locked.rows[0]?.status !== 'open') throw stateConflict('conversation closed');
+      await client.query(
+        `UPDATE conversations SET anchor_received_at_utc=$2, title=$3
+         WHERE id=$1 AND anchor_received_at_utc IS NULL`,
+        [conversation.id, receivedAtUtc, text.slice(0, 40)],
+      );
       const paused = await client.query(
         "SELECT 1 FROM agent_runs WHERE owner_id=$1 AND conversation_id=$2 AND status='paused' LIMIT 1",
         [ownerId, conversation.id],
@@ -356,7 +367,12 @@ export async function startConversationRun(
         );
         if (input.workspace_ids?.some((id) => !priorIds.has(id)))
           throw validationError('workspace selection exceeds the original goal scope');
-        workspaceSet = resolveWorkspaceGrants(ownerId, input.workspace_ids ?? [...priorIds]);
+        const continuedIds = (input.workspace_ids ?? [...priorIds]).filter((id) =>
+          allowedWorkspaces.has(id),
+        );
+        workspaceSet = continuedIds.length
+          ? resolveWorkspaceGrants(ownerId, continuedIds)
+          : { grants: [], summaries: [] };
         const continuedGrants = workspaceSet.grants.map((grant) => {
           const previous = targetContinuation.workspaceGrants!.find(
             (candidate) => candidate.workspace_id === grant.workspace_id,
@@ -391,10 +407,17 @@ export async function startConversationRun(
             : []),
         ];
       }
-      if (execution === 'harness') allowlist = [...allowlist, ...R3_MEMORY_TOOL_IDS];
-      if (delegation && execution === 'harness') allowlist = [...allowlist, 'learn_docs_search'];
+      allowlist = allowlist.filter((tool) => allowedTools.has(tool));
+      if (execution === 'harness')
+        allowlist = [...allowlist, ...R3_MEMORY_TOOL_IDS.filter((tool) => allowedTools.has(tool))];
+      if (delegation && execution === 'harness' && allowedTools.has('learn_docs_search'))
+        allowlist = [...allowlist, 'learn_docs_search'];
       const feishuUrl =
-        !input.files && delegation && execution === 'harness' && sessionId
+        allowedTools.has('feishu_docx_read') &&
+        !input.files &&
+        delegation &&
+        execution === 'harness' &&
+        sessionId
           ? suppliedFeishuDocxUrl(text)
           : null;
       const feishuConfig = feishuUrl ? loadFeishuBotDocxConfiguration() : null;
@@ -454,11 +477,19 @@ export async function startConversationRun(
       const compactCompletionCap = useR3Context
         ? (deps.harness!.compactCompletionCap ?? deps.harness!.contextPolicy.completion_cap)
         : undefined;
-      if (useR3Context) allowlist = [...allowlist, R3_MEMORY_SOURCE_TOOL_ID];
+      if (useR3Context && allowedTools.has(R3_MEMORY_SOURCE_TOOL_ID))
+        allowlist = [...allowlist, R3_MEMORY_SOURCE_TOOL_ID];
+      const configuredModel = bot.config.model_selection;
       const selected =
         execution === 'harness'
-          ? await resolveSelection(client, ownerId, input.model_selection)
+          ? await resolveSelection(client, ownerId, configuredModel ?? undefined)
           : null;
+      if (
+        input.model_selection &&
+        (input.model_selection.provider_id !== selected?.provider_id ||
+          input.model_selection.model_id !== selected?.model_id)
+      )
+        throw stateConflict('message model selection conflicts with Bot settings');
       const autoCompactPolicy = useR3Context
         ? deps.harness?.autoCompactPolicy
           ? AutoCompactPolicySchema.parse(deps.harness.autoCompactPolicy)
@@ -525,6 +556,12 @@ export async function startConversationRun(
           })
         : undefined;
       const frozenContext = {
+        personalBot: {
+          id: bot.id,
+          revision: bot.revision,
+          role: bot.config.role,
+          instructions: bot.config.instructions,
+        },
         ...(execution === 'harness'
           ? {
               execution_profile: useR3Context
@@ -653,6 +690,7 @@ export async function startConversationRun(
           : {}),
         userMessageId,
         allowlist,
+        personalBot: frozenContext.personalBot,
         ...(autoCompactPolicy ? { autoCompactPolicy } : {}),
         ...(compactCompletionCap === undefined ? {} : { compactCompletionCap }),
         ...(messageRefs ? { messageRefs } : {}),

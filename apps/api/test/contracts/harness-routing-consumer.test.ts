@@ -61,6 +61,7 @@ for (const mode of ['local', 'http'] as const) {
           actor.ownerId,
         ]);
       const body = {
+        conversation_id: await actor.createConversation(),
         execution: 'harness',
         authorization_revision: 'delegation/1',
         raw_text: command,
@@ -104,6 +105,7 @@ for (const mode of ['local', 'http'] as const) {
           actor.ownerId,
         ]);
       const body = {
+        conversation_id: await actor.createConversation(),
         execution: 'harness',
         raw_text: command,
         confirmed_timezone: 'Asia/Shanghai',
@@ -169,6 +171,7 @@ for (const mode of ['local', 'http'] as const) {
   ] as const) {
     test(`D8.${mode}.readonly-required-${kind.replaceAll('_', '-')}`, async () => {
       const actor = await fixture.actor(mode);
+      const conversationId = await actor.createConversation();
       const before = await fixture.facts(actor.ownerId);
       const beforeProvider = providerCalls;
       const beforeEncoder = encoderCalls;
@@ -183,6 +186,7 @@ for (const mode of ['local', 'http'] as const) {
       try {
         events = await (
           await actor.message({
+            conversation_id: conversationId,
             execution: 'harness',
             raw_text: '/timezone',
             idempotency_key: randomUUID(),
@@ -214,10 +218,11 @@ for (const mode of ['local', 'http'] as const) {
     test(`D8.${mode}.${profile}-workspace-refuses-direct`, async () => {
       const actor = await fixture.actor(mode);
       const root = await mkdtemp(join(tmpdir(), 'along-routing-workspace-'));
+      const workspaceId = randomUUID();
       try {
         await configureWorkspaceRegistry([
           {
-            workspace_id: 'documents',
+            workspace_id: workspaceId,
             label: 'Documents',
             owner_id: actor.ownerId,
             root,
@@ -228,12 +233,13 @@ for (const mode of ['local', 'http'] as const) {
         const callsBefore = providerCalls;
         const events = await (
           await actor.message({
+            conversation_id: await actor.createConversation(),
             execution: 'harness',
             ...(profile === 'legacy'
-              ? { workspace_id: 'documents' }
+              ? { workspace_id: workspaceId }
               : {
                   authorization_revision: 'delegation/1',
-                  ...(profile === 'delegation-selected' ? { workspace_ids: ['documents'] } : {}),
+                  ...(profile === 'delegation-selected' ? { workspace_ids: [workspaceId] } : {}),
                 }),
             raw_text: '/timezone',
             idempotency_key: randomUUID(),

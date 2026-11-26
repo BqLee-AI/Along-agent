@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { admitTestUser } from './setup.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
@@ -159,9 +160,10 @@ maybe('A4 real HTTP and database boundaries', () => {
   it('bad rules reject before every new audit/commitment row and leave the key reusable', async () => {
     await withApi(pool, async (base, deps, ownerId) => {
       deps.timeContext = unavailable;
+      const body = { ...proposal, conversation_id: await createFixtureConversation(pool, ownerId) };
       const before = await counts(pool, ownerId);
       const key = randomUUID();
-      const response = await post(base, proposal, key);
+      const response = await post(base, body, key);
       expect(response.status).toBe(503);
       expect(response.headers.get('content-type')).toContain('application/json');
       expect(await response.json()).toMatchObject({
@@ -171,7 +173,7 @@ maybe('A4 real HTTP and database boundaries', () => {
       });
       expect(await counts(pool, ownerId)).toEqual(before);
       deps.timeContext = healthy;
-      const repaired = await post(base, proposal, key);
+      const repaired = await post(base, body, key);
       expect(repaired.status).toBe(200);
       expect(frames(await repaired.text()).at(-1)).toMatchObject({
         type: 'thread.failed',
@@ -183,7 +185,12 @@ maybe('A4 real HTTP and database boundaries', () => {
   it('bad rules reject inherited timezone replies without consuming their source or idempotency key', async () => {
     await withApi(pool, async (base, deps, ownerId) => {
       const first = frames(
-        await (await post(base, { raw_text: '2027-01-02 15:20提醒我喝水' })).text(),
+        await (
+          await post(base, {
+            conversation_id: await createFixtureConversation(pool, ownerId),
+            raw_text: '2027-01-02 15:20提醒我喝水',
+          })
+        ).text(),
       );
       const source = first.find((event) => event.type === 'thread.started');
       if (!source || source.type !== 'thread.started') throw new Error('missing source Run');
@@ -235,52 +242,57 @@ maybe('A4 real HTTP and database boundaries', () => {
         { pool, timeContext: healthy },
         ownerId,
         randomUUID(),
-        { raw_text: '你好' },
+        { conversation_id: await createFixtureConversation(pool, ownerId), raw_text: '你好' },
         randomUUID(),
       );
       const key = randomUUID();
+      const body = { ...proposal, conversation_id: await createFixtureConversation(pool, ownerId) };
       const original = await startConversationRun(
         { pool, timeContext: healthy },
         ownerId,
         randomUUID(),
-        proposal,
+        body,
         key,
       );
       deps.timeContext = unavailable;
       const before = await counts(pool, ownerId);
       const ownerResolver = deps.resolveActor;
       deps.resolveActor = async () => null;
-      expect((await post(base, proposal)).status).toBe(401);
+      expect((await post(base, body)).status).toBe(401);
       deps.resolveActor = async () => ({
         ownerId,
         sessionId: randomUUID(),
         displayName: 'tester',
         timezoneId: null,
       });
-      const csrf = await post(base, proposal);
+      const csrf = await post(base, body);
       expect(csrf.status).toBe(403);
       expect(await csrf.json()).toMatchObject({
         error: { code: 'FORBIDDEN', details: { reason: 'CSRF_MISMATCH' } },
       });
       deps.resolveActor = ownerResolver;
       expect((await post(base, {})).status).toBe(400);
-      expect((await post(base, { ...proposal, conversation_id: randomUUID() })).status).toBe(404);
-      expect((await post(base, { ...proposal, raw_text: 'different 提醒我' }, key)).status).toBe(
-        409,
-      );
-      const replay = await post(base, proposal, key);
+      expect((await post(base, { ...body, conversation_id: randomUUID() })).status).toBe(404);
+      expect((await post(base, { ...body, raw_text: 'different 提醒我' }, key)).status).toBe(409);
+      const replay = await post(base, body, key);
       expect(replay.status).toBe(200);
       expect(replay.headers.get('x-run-id')).toBe(original.runId);
       await replay.text();
+      const foreignOwnerId = randomUUID();
+      await pool.query('INSERT INTO users(id,auth_email) VALUES($1,$2)', [
+        foreignOwnerId,
+        `a4-${foreignOwnerId}@along.test`,
+      ]);
+      await admitTestUser(pool, foreignOwnerId);
       deps.resolveActor = async () => ({
-        ownerId: randomUUID(),
+        ownerId: foreignOwnerId,
         sessionId: null,
         displayName: 'other',
         timezoneId: null,
       });
-      expect(
-        (await post(base, { ...proposal, conversation_id: started.conversationId })).status,
-      ).toBe(403);
+      expect((await post(base, { ...body, conversation_id: started.conversationId })).status).toBe(
+        403,
+      );
       expect(await counts(pool, ownerId)).toEqual(before);
     });
   });
@@ -295,7 +307,11 @@ maybe('A4 real HTTP and database boundaries', () => {
         ['Mars/Olympus 2026-11-01 01:30 提醒我', '', 'UNKNOWN_TIMEZONE', 422],
       ] as const) {
         deps.timeContext = healthy;
-        const body = { raw_text, confirmed_timezone: timezone || undefined };
+        const body = {
+          conversation_id: await createFixtureConversation(pool, ownerId),
+          raw_text,
+          confirmed_timezone: timezone || undefined,
+        };
         const key = randomUUID();
         const response = await post(base, body, key);
         expect(response.status).toBe(200);
@@ -327,7 +343,11 @@ maybe('A4 real HTTP and database boundaries', () => {
         { pool, timeContext: healthy },
         ownerId,
         randomUUID(),
-        { raw_text: '你好', confirmed_timezone: 'Asia/Shanghai' },
+        {
+          conversation_id: await createFixtureConversation(pool, ownerId),
+          raw_text: '你好',
+          confirmed_timezone: 'Asia/Shanghai',
+        },
         randomUUID(),
       );
       const override = await post(base, {
@@ -394,7 +414,10 @@ maybe('A4 real HTTP and database boundaries', () => {
       const confirmed = (await confirm.json()) as { data: { task_id: string } };
       const task = await fetch(`${base}/api/v1/tasks/${confirmed.data.task_id}`);
       expect(task.status).toBe(200);
-      const cancel = await post(base, { raw_text: `取消任务 ${confirmed.data.task_id}` });
+      const cancel = await post(base, {
+        conversation_id: await createFixtureConversation(pool, ownerId),
+        raw_text: `取消任务 ${confirmed.data.task_id}`,
+      });
       expect(cancel.status).toBe(200);
       const events = frames(await cancel.text());
       expect(events.at(-1)?.type).toBe('thread.completed');
@@ -437,11 +460,15 @@ maybe('A4 real HTTP and database boundaries', () => {
     await withApi(pool, async (_base, _deps, ownerId) => {
       for (const fault of ['return_false', 'writer_throw', 'assistant_audit'] as const) {
         const key = randomUUID();
+        const body = {
+          ...proposal,
+          conversation_id: await createFixtureConversation(pool, ownerId),
+        };
         const started = await startConversationRun(
           { pool, timeContext: healthy },
           ownerId,
           randomUUID(),
-          proposal,
+          body,
           key,
         );
         if (!started.context) throw new Error('new run required');
@@ -477,7 +504,7 @@ maybe('A4 real HTTP and database boundaries', () => {
           { pool, timeContext: unavailable },
           ownerId,
           randomUUID(),
-          proposal,
+          body,
           key,
         );
         expect(replay.replay).toEqual(events);
@@ -487,7 +514,14 @@ maybe('A4 real HTTP and database boundaries', () => {
   it('first/second HTTP re-proposals freeze the selected occurrence, UTC and offset without confirming or moving the conversation anchor', async () => {
     await withApi(pool, async (base, deps, ownerId) => {
       const key = randomUUID();
-      const original = await post(base, proposal, key);
+      const original = await post(
+        base,
+        {
+          ...proposal,
+          conversation_id: await createFixtureConversation(pool, ownerId),
+        },
+        key,
+      );
       const failed = frames(await original.text());
       const conversationId = failed[0].payload.conversation_id;
       let sourceRunId = failed[0].payload.run_id;
@@ -560,9 +594,12 @@ maybe('A4 real HTTP and database boundaries', () => {
   });
 
   it('bad rules do not globally reject new read-only conversation turns', async () => {
-    await withApi(pool, async (base, deps) => {
+    await withApi(pool, async (base, deps, ownerId) => {
       deps.timeContext = unavailable;
-      const readOnly = await post(base, { raw_text: '你好' });
+      const readOnly = await post(base, {
+        conversation_id: await createFixtureConversation(pool, ownerId),
+        raw_text: '你好',
+      });
       expect(readOnly.status).toBe(200);
       expect(frames(await readOnly.text()).at(-1)).toMatchObject({
         type: 'thread.completed',

@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { expectApplicationRejection } from '../helpers/application-error.js';
 import { admitTestUser } from './setup.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
@@ -40,10 +41,7 @@ maybe('delegation personal timezone transactions', () => {
       [ownerId, `${ownerId}@timezone.test`],
     );
     await admitTestUser(pool, ownerId);
-    await pool.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
-      conversationId,
-      ownerId,
-    ]);
+    await createFixtureConversation(pool, ownerId, { id: conversationId });
     await pool.query(
       "INSERT INTO messages(id,owner_id,conversation_id,role,content) VALUES($1,$2,$3,'user','记住我的时区')",
       [messageId, ownerId, conversationId],

@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
@@ -68,6 +69,7 @@ maybe('cross-run created workspace files', () => {
         ownerId,
         randomUUID(),
         {
+          conversation_id: await createFixtureConversation(database.pool, ownerId),
           execution: 'harness',
           authorization_revision: 'delegation/1',
           raw_text: 'Work with outputs',

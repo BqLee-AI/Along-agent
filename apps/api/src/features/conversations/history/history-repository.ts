@@ -10,6 +10,7 @@ import type { HistoryCursor } from '../schemas.js';
 
 export interface HistoryPageArgs {
   ownerId: string;
+  botId?: string;
   conversationId?: string;
   cursor: HistoryCursor | null;
   limit: number;
@@ -45,7 +46,7 @@ function pageSql(kind: HistoryCursor['kind']): string {
     kind === 'conversations' ? 'conversations' : kind === 'messages' ? 'messages' : 'agent_runs';
   const scope = `x.owner_id=$1 ${
     kind === 'conversations'
-      ? ''
+      ? 'AND ($2::uuid IS NULL OR x.bot_id=$2)'
       : `AND x.conversation_id=$2 AND EXISTS (
     SELECT 1 FROM conversations parent WHERE parent.id=x.conversation_id AND parent.owner_id=$1)`
   }
@@ -75,7 +76,7 @@ function pageSql(kind: HistoryCursor['kind']): string {
 function values(args: HistoryPageArgs): unknown[] {
   return [
     args.ownerId,
-    args.conversationId ?? null,
+    args.conversationId ?? args.botId ?? null,
     args.cursor?.upper_at ?? null,
     args.cursor?.upper_id ?? null,
     args.cursor?.last_at ?? null,
@@ -89,8 +90,6 @@ export async function listConversationHistory(
   db: Pool,
   args: HistoryPageArgs,
 ): Promise<ConversationHistoryRow[]> {
-  // $2 is reserved for the parent in child pages; explicitly type it in this
-  // projection so PostgreSQL can infer every bind slot consistently.
   const result = await db.query<ConversationHistoryRow>(
     `${pageSql('conversations')}
     SELECT p.id AS conversation_id,p.status,${utc('p.created_at')} AS created_at,
@@ -109,7 +108,6 @@ export async function listConversationHistory(
           WHERE r.owner_id=$1 AND r.conversation_id=p.id
       ) fact
     ) activity ON true
-    WHERE $2::uuid IS NULL
     ORDER BY p.created_at DESC,p.id DESC`,
     values(args),
   );

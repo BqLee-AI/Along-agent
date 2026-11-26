@@ -26,6 +26,35 @@ import {
   createTaskWithinTransaction,
   findOutboxTaskByKey,
 } from '../../tasks/public.js';
+import { botScopeAllows, lockRunBotScope } from '../../bots/public.js';
+
+async function assertReminderBotScope(client: PoolClient, row: ApprovalRow): Promise<void> {
+  // A revised draft inherits the durable source of its original proposal.
+  const { rows } = await client.query<{ conversation_id: string; run_id: string; tool_id: string }>(
+    `WITH RECURSIVE predecessors AS (
+       SELECT id, supersedes_approval_id FROM approvals WHERE id=$1 AND owner_id=$2
+       UNION
+       SELECT a.id, a.supersedes_approval_id FROM approvals a
+       JOIN predecessors p ON p.supersedes_approval_id=a.id WHERE a.owner_id=$2
+     )
+     SELECT i.conversation_id, i.run_id, i.tool_id FROM tool_invocations i
+     JOIN predecessors p ON p.id=i.approval_id WHERE i.owner_id=$2 AND i.state='completed'`,
+    [row.id, row.owner_id],
+  );
+  for (const origin of rows) {
+    if (
+      !botScopeAllows(
+        await lockRunBotScope(client, {
+          ownerId: row.owner_id,
+          conversationId: origin.conversation_id,
+          runId: origin.run_id,
+        }),
+        origin.tool_id,
+      )
+    )
+      throw forbidden('Bot no longer permits this reminder approval');
+  }
+}
 
 export interface ConfirmDeps {
   pool: Pool | null;
@@ -136,6 +165,7 @@ export async function confirmApproval(
       presentationVersion: row.presentation_version,
     });
     if (!ok) throw presentationMismatch() as ApplicationError;
+    await assertReminderBotScope(client, row);
 
     // cancel_task approvals commit the cancel request in the same transaction
     // as the approval consume (single sanctioned cross-module transaction).

@@ -3,6 +3,7 @@ import {
   readReminderTimeErrors,
 } from '../../src/agent/tools/reminders/reminder-source.js';
 import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
@@ -212,6 +213,7 @@ for (const mode of ['local', 'http'] as const) {
     const value = { observations: new Map<string, z.infer<typeof Observation>>(), calls: 0 };
     cases.set(id, value);
     const body = {
+      conversation_id: await createFixtureConversation(database.pool, session.userId),
       execution: 'harness',
       authorization_revision: 'delegation/1',
       raw_text: `directCase:${id} ${time1}；${time2}。`,
@@ -339,8 +341,10 @@ for (const mode of ['local', 'http'] as const) {
     };
     cases.set(id, value);
     const original = `directCase:${id} ${singleTime}`;
+    const conversationId = await createFixtureConversation(database.pool, session.userId);
     async function send(extra: Record<string, unknown> = {}) {
       const body = {
+        conversation_id: conversationId,
         execution: 'harness',
         authorization_revision: 'delegation/1',
         raw_text: original,
@@ -422,7 +426,6 @@ for (const mode of ['local', 'http'] as const) {
     }
     const second = started(
       await send({
-        conversation_id: first.conversation_id,
         clarification_of_run_id: first.run_id,
         confirmed_timezone: 'America/New_York',
         fold_choice: 'second',

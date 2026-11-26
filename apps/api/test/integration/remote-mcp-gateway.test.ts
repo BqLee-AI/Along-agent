@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { startConversationRun } from '../../src/agent/run/admit-message.js';
@@ -116,6 +117,7 @@ test('ordinary Runs search attempt-formed queries with frozen scopes, immutable 
         session.userId,
         randomUUID(),
         {
+          conversation_id: await createFixtureConversation(db.pool, session.userId),
           execution: 'harness',
           authorization_revision: 'delegation/1',
           raw_text:

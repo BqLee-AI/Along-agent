@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { admitTestUser } from './setup.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
@@ -54,7 +55,11 @@ maybe('persistent tool invocation identity and local results', () => {
       { pool, timeContext: loadTimeContext('fixture-v1') },
       ownerId,
       randomUUID(),
-      { raw_text: rawText, confirmed_timezone: 'Asia/Shanghai' },
+      {
+        conversation_id: await createFixtureConversation(pool, ownerId),
+        raw_text: rawText,
+        confirmed_timezone: 'Asia/Shanghai',
+      },
       randomUUID(),
     );
     if (!started.context) throw new Error('expected a fresh run');

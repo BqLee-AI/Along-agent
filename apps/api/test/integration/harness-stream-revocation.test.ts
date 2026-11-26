@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
@@ -83,6 +84,7 @@ maybe('harness stream authority at a concurrent deactivation', () => {
       ownerId,
       randomUUID(),
       {
+        conversation_id: await createFixtureConversation(database.pool, ownerId),
         execution: 'harness',
         raw_text: 'Please answer briefly.',
         confirmed_timezone: 'Asia/Shanghai',

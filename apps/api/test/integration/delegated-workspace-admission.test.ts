@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { expectApplicationRejection } from '../helpers/application-error.js';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
@@ -78,12 +79,18 @@ maybe('delegated conversation workspace admission against PostgreSQL', () => {
       writable_paths: writable ? ['memo.txt'] : [],
     };
   }
-  async function start(ownerId: string, input: unknown = body, key: string | null = null) {
+  async function start(
+    ownerId: string,
+    input: typeof body & { conversation_id?: string; workspace_ids?: string[] } = body,
+    key: string | null = null,
+  ) {
     if (!configuredOwners.has(ownerId)) {
       await configureTestModel(database.pool, ownerId, 'admission-test-model');
       configuredOwners.add(ownerId);
     }
-    return startConversationRun(deps, ownerId, randomUUID(), input, key);
+    const conversation_id =
+      input.conversation_id ?? (await createFixtureConversation(database.pool, ownerId));
+    return startConversationRun(deps, ownerId, randomUUID(), { ...input, conversation_id }, key);
   }
   async function stored(runId: string) {
     const result = await database.pool.query<{
@@ -176,7 +183,12 @@ maybe('delegated conversation workspace admission against PostgreSQL', () => {
     const c = await registration(owner.userId, 'charlie');
     await configureWorkspaceRegistry([c, b, a]);
     const key = randomUUID();
-    const run = await start(owner.userId, { ...body, workspace_ids: ['beta', 'alpha'] }, key);
+    const conversation_id = await createFixtureConversation(database.pool, owner.userId);
+    const run = await start(
+      owner.userId,
+      { ...body, conversation_id, workspace_ids: ['beta', 'alpha'] },
+      key,
+    );
     expect(
       (await stored(run.runId)).frozen_context.workspaceGrants.map((g) => g.workspace_id),
     ).toEqual(['alpha', 'beta']);
@@ -184,12 +196,16 @@ maybe('delegated conversation workspace admission against PostgreSQL', () => {
       idempotency_key: randomUUID(),
     });
     await configureWorkspaceRegistry([c]);
-    const replay = await start(owner.userId, { ...body, workspace_ids: ['alpha', 'beta'] }, key);
+    const replay = await start(
+      owner.userId,
+      { ...body, conversation_id, workspace_ids: ['alpha', 'beta'] },
+      key,
+    );
     expect(replay.runId).toBe(run.runId);
     expect(replay.context).toBeNull();
     expect(replay.replay?.at(-1)?.type).toBe('thread.cancelled');
     await expectApplicationRejection(
-      start(owner.userId, { ...body, workspace_ids: ['alpha', 'charlie'] }, key),
+      start(owner.userId, { ...body, conversation_id, workspace_ids: ['alpha', 'charlie'] }, key),
       { status: 409 },
     );
     expect(
@@ -203,6 +219,7 @@ maybe('delegated conversation workspace admission against PostgreSQL', () => {
     const own = await registration(owner.userId, 'own');
     const foreign = await registration(other.userId, 'foreign');
     await configureWorkspaceRegistry([own, foreign]);
+    const conversation_id = await createFixtureConversation(database.pool, owner.userId);
     for (const workspace_ids of [
       ['foreign'],
       ['own', 'foreign'],
@@ -210,10 +227,14 @@ maybe('delegated conversation workspace admission against PostgreSQL', () => {
       ['own', 'own'],
       [],
     ]) {
-      await expect(start(owner.userId, { ...body, workspace_ids })).rejects.toThrow();
+      await expect(
+        start(owner.userId, { ...body, conversation_id, workspace_ids }),
+      ).rejects.toThrow();
     }
     await configureWorkspaceRegistry([foreign]);
-    await expect(start(owner.userId, { ...body, workspace_ids: ['own'] })).rejects.toThrow();
+    await expect(
+      start(owner.userId, { ...body, conversation_id, workspace_ids: ['own'] }),
+    ).rejects.toThrow();
     const count = await database.pool.query<{ n: number }>(
       'SELECT count(*)::int n FROM agent_runs WHERE owner_id=$1',
       [owner.userId],

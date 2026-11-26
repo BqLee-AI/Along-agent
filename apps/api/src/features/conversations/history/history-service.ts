@@ -16,7 +16,7 @@ import {
   validationError,
 } from '../../../platform/errors.js';
 import type { ConversationDeps } from '../contracts.js';
-import { getConversation } from '../run/messages.js';
+import { getConversation, type ConversationRow } from '../run/messages.js';
 import { HistoryCursorSchema, type HistoryCursor } from '../schemas.js';
 import {
   listConversationHistory,
@@ -27,6 +27,7 @@ import {
 import { isActiveOwner } from '../../identity/public.js';
 import { withClient } from '../../../db/transaction.js';
 import { getRunSelections } from '../../model-providers/public.js';
+import { requirePersonalBot } from '../../bots/public.js';
 
 async function requireEligibleHistoryOwner(pool: Pool, ownerId: string): Promise<void> {
   const client = await pool.connect();
@@ -43,11 +44,21 @@ export async function requireHistoryConversation(
   pool: Pool,
   ownerId: string,
   conversationId: string,
-): Promise<void> {
+): Promise<ConversationRow> {
   await requireEligibleHistoryOwner(pool, ownerId);
   const parent = await getConversation(pool, conversationId);
   if (!parent) throw notFound('conversation not found');
   if (parent.owner_id !== ownerId) throw forbidden('conversation not found');
+  return parent;
+}
+
+export async function getConversationBot(
+  deps: Pick<ConversationDeps, 'pool'>,
+  ownerId: string,
+  conversationId: string,
+): Promise<{ bot_id: string }> {
+  const conversation = await requireHistoryConversation(requirePool(deps), ownerId, conversationId);
+  return { bot_id: conversation.bot_id };
 }
 
 function cursorOf(
@@ -114,14 +125,16 @@ export async function getConversationList(
   deps: Pick<ConversationDeps, 'pool'>,
   ownerId: string,
   query: HistoryQuery,
+  botId?: string,
 ): Promise<ConversationListPage> {
   const parsed = ConversationListQuerySchema.safeParse(query);
   if (!parsed.success) throw validationError('invalid conversations query');
   const { limit, cursor: raw } = parsed.data;
-  const cursor = cursorOf(raw, 'conversations', ownerId);
+  const cursor = cursorOf(raw, 'conversations', ownerId, botId);
   const pool = requirePool(deps);
   await requireEligibleHistoryOwner(pool, ownerId);
-  const rows = await listConversationHistory(pool, { ownerId, cursor, limit });
+  if (botId) await requirePersonalBot(pool, ownerId, botId);
+  const rows = await listConversationHistory(pool, { ownerId, botId, cursor, limit });
   const items = rows.slice(0, limit).map((row) => ({
     conversation_id: row.conversation_id,
     status: row.status,
@@ -136,7 +149,7 @@ export async function getConversationList(
     next_cursor: nextCursor(
       'conversations',
       ownerId,
-      '',
+      botId ?? '',
       rows[0],
       last?.created_at,
       last?.conversation_id,

@@ -23,6 +23,8 @@ let upstream: ReturnType<typeof createServer> | undefined;
 try {
   const session = await seedAdmittedSession(database.pool);
   const elapsed = '六十五秒后提醒我核对报告';
+  const initialInstructions = 'Use exact evidence when preparing reminders.';
+  const changedInstructions = 'Use brief replies when preparing reminders.';
   let providerCalls = 0;
   let invocationId;
   const providerEntered = Promise.withResolvers<void>();
@@ -31,9 +33,15 @@ try {
   const releaseRevocation = Promise.withResolvers<void>();
   upstream = createServer(async (request, response) => {
     try {
-      const body = (await jsonBody(request)) as { model: string };
+      const body = (await jsonBody(request)) as {
+        model: string;
+        messages: { role: string; content: string }[];
+      };
       assert.equal(request.url, '/v1/chat/completions');
       assert.equal(body.model, 'native-reminder');
+      const system = body.messages.find((message) => message.role === 'system')?.content ?? '';
+      assert.ok(system.includes(providerCalls < 2 ? initialInstructions : changedInstructions));
+      assert.ok(!system.includes(providerCalls < 2 ? changedInstructions : initialInstructions));
       let next;
       if (providerCalls === 2) {
         providerCalls++;
@@ -142,11 +150,38 @@ try {
     'x-request-id': 'native-chat-test',
     'idempotency-key': randomUUID(),
   };
+  const createdBot = await fetch(base + '/api/v1/bots', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      name: 'Native reminder proof',
+      introduction: '',
+      role: '',
+      instructions: initialInstructions,
+      model_selection: null,
+      tool_ids: ['propose_task', 'create_reminder', 'list_tasks'],
+      workspace_ids: [],
+    }),
+  });
+  const bot = await createdBot.json();
+  assert.equal(createdBot.status, 200, JSON.stringify(bot));
+  async function newConversation(): Promise<string> {
+    const response = await fetch(`${base}/api/v1/bots/${bot.data.id}/conversations`, {
+      method: 'POST',
+      headers: { ...headers, 'idempotency-key': randomUUID() },
+      body: '{}',
+    });
+    const payload = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(payload));
+    return payload.data.conversation_id;
+  }
+  const firstConversation = await newConversation();
   const raw_text = '明天 9:20 提醒我喝水';
   const init = {
     method: 'POST',
     headers,
     body: JSON.stringify({
+      conversation_id: firstConversation,
       raw_text,
       ...taskAdmission('reminder'),
       confirmed_timezone: 'Asia/Shanghai',
@@ -205,11 +240,13 @@ try {
     'x-request-id': 'native-delegation-test',
     'idempotency-key': randomUUID(),
   };
+  const delegatedConversation = await newConversation();
   const sendDelegated = () =>
     fetch(base + '/api/v1/conversations/messages', {
       method: 'POST',
       headers: delegatedHeaders,
       body: JSON.stringify({
+        conversation_id: delegatedConversation,
         raw_text: elapsed,
         execution: 'harness',
         authorization_revision: 'delegation/1',
@@ -223,6 +260,16 @@ try {
   const reader = delegated.body!.getReader();
   await readStarted(reader);
   await providerEntered.promise;
+  const updated = await fetch(`${base}/api/v1/bots/${bot.data.id}`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      ...bot.data.config,
+      revision: bot.data.revision,
+      instructions: changedInstructions,
+    }),
+  });
+  assert.equal(updated.status, 200, await updated.text());
   await reader.cancel();
   releaseProvider.resolve();
   for (const deadline = performance.now() + 15_000; ;) {
@@ -249,6 +296,7 @@ try {
     method: 'POST',
     headers: { ...headers, 'x-request-id': randomUUID(), 'idempotency-key': randomUUID() },
     body: JSON.stringify({
+      conversation_id: await newConversation(),
       raw_text: '回答一个问题',
       execution: 'harness',
       authorization_revision: 'delegation/1',

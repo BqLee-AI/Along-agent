@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { HARNESS_CONTEXT_PROTOCOL_VERSION, type HarnessRequest } from '@along/contracts';
@@ -67,10 +68,7 @@ const frame = <T extends HarnessRequest['type']>(
     const actor = await seedAdmittedSession(db.pool);
     await configureTestModel(db.pool, actor.userId, model);
     const conversationId = randomUUID();
-    await db.pool.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
-      conversationId,
-      actor.userId,
-    ]);
+    await createFixtureConversation(db.pool, actor.userId, { id: conversationId });
     await db.pool.query(
       `INSERT INTO messages(id,owner_id,conversation_id,role,content,created_at)
       VALUES($1,$2,$3,'user','previous source','2020-01-01')`,

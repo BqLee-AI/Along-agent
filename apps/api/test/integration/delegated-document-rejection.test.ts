@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { expectApplicationRejection } from '../helpers/application-error.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
@@ -75,6 +76,7 @@ maybe('delegated document rejection', () => {
       actor.userId,
       randomUUID(),
       {
+        conversation_id: await createFixtureConversation(pool, actor.userId),
         execution: 'harness',
         authorization_revision: 'delegation/1',
         raw_text: 'Edit the document.',

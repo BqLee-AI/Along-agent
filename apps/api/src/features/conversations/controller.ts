@@ -18,6 +18,7 @@ import {
   requestRuntimeCompactPause,
 } from '../../agent/run/public.js';
 import {
+  getConversationBot,
   getConversationList,
   getConversationMessages,
   getConversationRuns,
@@ -77,6 +78,12 @@ export function createConversationController(deps: ConversationDeps, access: Htt
           requestId,
         ),
       { response: responses(model.ConversationDetailSchema) },
+    )
+    .get(
+      '/api/v1/conversations/:id/bot',
+      async ({ actor, path, requestId }) =>
+        okEnvelope(await getConversationBot(deps, actor.ownerId, conversationId(path)), requestId),
+      { response: responses(model.ConversationBotSchema) },
     )
     .get(
       '/api/v1/conversations/:id/messages',

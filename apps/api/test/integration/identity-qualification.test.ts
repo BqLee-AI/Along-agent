@@ -164,7 +164,7 @@ suite('invited account qualification and independent delivery locking', () => {
         { pool, timeContext: loadTimeContext('fixture-v1') },
         id,
         randomUUID(),
-        { raw_text: 'hello' },
+        { conversation_id: randomUUID(), raw_text: 'hello' },
         null,
       ),
       { status: 403 },

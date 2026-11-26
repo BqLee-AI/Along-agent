@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { expectApplicationRejection } from '../helpers/application-error.js';
 import { admitTestUser } from './setup.js';
 // Issue #9: conversation SSE contract — deterministic triage, approval
@@ -70,6 +71,7 @@ async function postReminderMessage(pool: Pool, ownerId: string, requestId: strin
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-request-id': requestId },
       body: JSON.stringify({
+        conversation_id: await createFixtureConversation(pool, ownerId),
         raw_text: '明天 9:20 提醒我喝水',
         confirmed_timezone: 'Asia/Shanghai',
       }),
@@ -114,7 +116,11 @@ maybe('conversation runtime', () => {
       { pool, timeContext },
       ownerId,
       randomUUID(),
-      { raw_text: '明天 9:20 提醒我喝水', confirmed_timezone: 'Asia/Shanghai' },
+      {
+        conversation_id: await createFixtureConversation(pool, ownerId),
+        raw_text: '明天 9:20 提醒我喝水',
+        confirmed_timezone: 'Asia/Shanghai',
+      },
       randomUUID(),
     );
     expect(started.replay).toBeNull();
@@ -167,7 +173,11 @@ maybe('conversation runtime', () => {
       { pool, timeContext },
       ownerId,
       randomUUID(),
-      { raw_text: '提醒我喝水', confirmed_timezone: 'Asia/Shanghai' },
+      {
+        conversation_id: await createFixtureConversation(pool, ownerId),
+        raw_text: '提醒我喝水',
+        confirmed_timezone: 'Asia/Shanghai',
+      },
       randomUUID(),
     );
     const events = await collect(pool, started);
@@ -194,7 +204,11 @@ maybe('conversation runtime', () => {
       { pool, timeContext },
       ownerId,
       randomUUID(),
-      { raw_text: '2026-11-01 01:30 提醒我喝水', confirmed_timezone: 'America/New_York' },
+      {
+        conversation_id: await createFixtureConversation(pool, ownerId),
+        raw_text: '2026-11-01 01:30 提醒我喝水',
+        confirmed_timezone: 'America/New_York',
+      },
       randomUUID(),
     );
     const events = await collect(pool, started);
@@ -234,7 +248,11 @@ maybe('conversation runtime', () => {
       { pool, timeContext },
       ownerId,
       randomUUID(),
-      { raw_text: '2027-03-14 02:30 提醒我喝水', confirmed_timezone: 'America/New_York' },
+      {
+        conversation_id: await createFixtureConversation(pool, ownerId),
+        raw_text: '2027-03-14 02:30 提醒我喝水',
+        confirmed_timezone: 'America/New_York',
+      },
       randomUUID(),
     );
     const events = await collect(pool, started);
@@ -257,6 +275,7 @@ maybe('conversation runtime', () => {
       ownerId,
       randomUUID(),
       {
+        conversation_id: await createFixtureConversation(pool, ownerId),
         raw_text: '2026-11-01 01:30 提醒我喝水',
         confirmed_timezone: 'America/New_York',
         fold_choice: 'first',
@@ -289,6 +308,7 @@ maybe('conversation runtime', () => {
       ownerId,
       randomUUID(),
       {
+        conversation_id: await createFixtureConversation(pool, ownerId),
         raw_text: '2027-11-07 01:30 提醒我喝水',
         confirmed_timezone: 'America/New_York',
         fold_choice: 'second',
@@ -326,7 +346,11 @@ maybe('conversation runtime', () => {
       { pool, timeContext },
       ownerId,
       randomUUID(),
-      { raw_text: `你好${'水'.repeat(8000)}`, confirmed_timezone: 'Asia/Shanghai' },
+      {
+        conversation_id: await createFixtureConversation(pool, ownerId),
+        raw_text: `你好${'水'.repeat(8000)}`,
+        confirmed_timezone: 'Asia/Shanghai',
+      },
       randomUUID(),
     );
     const events = await collect(pool, started);
@@ -344,7 +368,11 @@ maybe('conversation runtime', () => {
   it('same Idempotency-Key replays the stored events; a changed body is 409', async () => {
     const ownerId = await seedUser(pool);
     const key = randomUUID();
-    const body = { raw_text: '明天 9:20 提醒我喝水', confirmed_timezone: 'Asia/Shanghai' };
+    const body = {
+      conversation_id: await createFixtureConversation(pool, ownerId),
+      raw_text: '明天 9:20 提醒我喝水',
+      confirmed_timezone: 'Asia/Shanghai',
+    };
     const first = await startConversationRun(
       { pool, timeContext },
       ownerId,
@@ -374,7 +402,11 @@ maybe('conversation runtime', () => {
   it('does not replay stored SSE after the owner is disabled following admission', async () => {
     const session = await seedAdmittedSession(pool);
     const key = randomUUID();
-    const body = { raw_text: '明天 9:20 提醒我喝水', confirmed_timezone: 'Asia/Shanghai' };
+    const body = {
+      conversation_id: await createFixtureConversation(pool, session.userId),
+      raw_text: '明天 9:20 提醒我喝水',
+      confirmed_timezone: 'Asia/Shanghai',
+    };
     const first = await startConversationRun(
       { pool, timeContext },
       session.userId,
@@ -468,7 +500,11 @@ maybe('conversation runtime', () => {
     };
     const deps = { pool, timeContext };
     const key = randomUUID();
-    const body = { raw_text: '明天 9:20 提醒我喝水', confirmed_timezone: 'Asia/Shanghai' };
+    const body = {
+      conversation_id: await createFixtureConversation(pool, actor.ownerId),
+      raw_text: '明天 9:20 提醒我喝水',
+      confirmed_timezone: 'Asia/Shanghai',
+    };
     const original = await collect(
       pool,
       await startConversationRun(deps, actor.ownerId, randomUUID(), body, key),
@@ -491,7 +527,11 @@ maybe('conversation runtime', () => {
   it('an expired idempotency key starts a fresh run instead of colliding', async () => {
     const ownerId = await seedUser(pool);
     const key = randomUUID();
-    const body = { raw_text: '明天 9:20 提醒我喝水', confirmed_timezone: 'Asia/Shanghai' };
+    const body = {
+      conversation_id: await createFixtureConversation(pool, ownerId),
+      raw_text: '明天 9:20 提醒我喝水',
+      confirmed_timezone: 'Asia/Shanghai',
+    };
     const first = await startConversationRun(
       { pool, timeContext },
       ownerId,
@@ -507,7 +547,7 @@ maybe('conversation runtime', () => {
       { pool, timeContext },
       ownerId,
       randomUUID(),
-      body,
+      { ...body, conversation_id: await createFixtureConversation(pool, ownerId) },
       key,
     );
     expect(second.replay).toBeNull();
@@ -518,7 +558,11 @@ maybe('conversation runtime', () => {
   it('concurrent requests with one key create one run and replay the stored prefix', async () => {
     const ownerId = await seedUser(pool);
     const key = randomUUID();
-    const body = { raw_text: '明天 9:20 提醒我喝水', confirmed_timezone: 'Asia/Shanghai' };
+    const body = {
+      conversation_id: await createFixtureConversation(pool, ownerId),
+      raw_text: '明天 9:20 提醒我喝水',
+      confirmed_timezone: 'Asia/Shanghai',
+    };
     const results = await Promise.all([
       startConversationRun({ pool, timeContext }, ownerId, randomUUID(), body, key),
       startConversationRun({ pool, timeContext }, ownerId, randomUUID(), body, key),
@@ -543,7 +587,11 @@ maybe('conversation runtime', () => {
   it('retrying while the original run is still running returns its stored prefix', async () => {
     const ownerId = await seedUser(pool);
     const key = randomUUID();
-    const body = { raw_text: '明天 9:20 提醒我喝水', confirmed_timezone: 'Asia/Shanghai' };
+    const body = {
+      conversation_id: await createFixtureConversation(pool, ownerId),
+      raw_text: '明天 9:20 提醒我喝水',
+      confirmed_timezone: 'Asia/Shanghai',
+    };
     const first = await startConversationRun(
       { pool, timeContext },
       ownerId,
@@ -589,7 +637,11 @@ maybe('conversation runtime', () => {
       { pool, timeContext },
       ownerId,
       randomUUID(),
-      { raw_text: `取消任务 ${confirmed.task_id}`, confirmed_timezone: 'Asia/Shanghai' },
+      {
+        conversation_id: await createFixtureConversation(pool, ownerId),
+        raw_text: `取消任务 ${confirmed.task_id}`,
+        confirmed_timezone: 'Asia/Shanghai',
+      },
       randomUUID(),
     );
     const firstEvents = await collect(pool, first);
@@ -603,6 +655,7 @@ maybe('conversation runtime', () => {
       ownerId,
       randomUUID(),
       {
+        conversation_id: await createFixtureConversation(pool, ownerId),
         raw_text: `取消任务 ${confirmed.task_id}，我改主意了`,
         confirmed_timezone: 'Asia/Shanghai',
       },
@@ -635,7 +688,11 @@ maybe('conversation runtime', () => {
       { pool, timeContext },
       ownerId,
       randomUUID(),
-      { raw_text: '明天 9:20 提醒我喝水', confirmed_timezone: 'Asia/Shanghai' },
+      {
+        conversation_id: await createFixtureConversation(pool, ownerId),
+        raw_text: '明天 9:20 提醒我喝水',
+        confirmed_timezone: 'Asia/Shanghai',
+      },
       randomUUID(),
     );
     if (!started.context) throw new Error('expected fresh run');
@@ -660,7 +717,11 @@ maybe('conversation runtime', () => {
       { pool, timeContext },
       ownerId,
       randomUUID(),
-      { raw_text: '明天 9:20 提醒我喝水', confirmed_timezone: 'Asia/Shanghai' },
+      {
+        conversation_id: await createFixtureConversation(pool, ownerId),
+        raw_text: '明天 9:20 提醒我喝水',
+        confirmed_timezone: 'Asia/Shanghai',
+      },
       randomUUID(),
     );
     const events = await collect(pool, started);
@@ -684,7 +745,11 @@ maybe('conversation runtime', () => {
       { pool, timeContext },
       ownerId,
       randomUUID(),
-      { raw_text: '明天 9:20 提醒我喝水', confirmed_timezone: 'Asia/Shanghai' },
+      {
+        conversation_id: await createFixtureConversation(pool, ownerId),
+        raw_text: '明天 9:20 提醒我喝水',
+        confirmed_timezone: 'Asia/Shanghai',
+      },
       randomUUID(),
     );
     const seen = await collect(pool, started, 1);
@@ -761,6 +826,7 @@ maybe('conversation runtime', () => {
           'idempotency-key': key,
         },
         body: JSON.stringify({
+          conversation_id: await createFixtureConversation(pool, session.userId),
           raw_text: '明天 9:20 提醒我喝水',
           confirmed_timezone: 'Asia/Shanghai',
         }),
@@ -823,7 +889,11 @@ maybe('conversation runtime', () => {
       { pool, timeContext },
       ownerId,
       randomUUID(),
-      { raw_text: `取消任务 ${confirmed.task_id}`, confirmed_timezone: 'Asia/Shanghai' },
+      {
+        conversation_id: await createFixtureConversation(pool, ownerId),
+        raw_text: `取消任务 ${confirmed.task_id}`,
+        confirmed_timezone: 'Asia/Shanghai',
+      },
       randomUUID(),
     );
     const events = await collect(pool, started);
@@ -865,7 +935,11 @@ maybe('conversation runtime', () => {
       { pool, timeContext },
       ownerId,
       randomUUID(),
-      { raw_text: '你好', confirmed_timezone: 'Asia/Shanghai' },
+      {
+        conversation_id: await createFixtureConversation(pool, ownerId),
+        raw_text: '你好',
+        confirmed_timezone: 'Asia/Shanghai',
+      },
       randomUUID(),
     );
     if (!started.context) throw new Error('expected a fresh run');
@@ -891,7 +965,11 @@ maybe('conversation runtime', () => {
       { pool, timeContext },
       ownerId,
       randomUUID(),
-      { raw_text: '明天 9:20 提醒我喝水', confirmed_timezone: 'Asia/Shanghai' },
+      {
+        conversation_id: await createFixtureConversation(pool, ownerId),
+        raw_text: '明天 9:20 提醒我喝水',
+        confirmed_timezone: 'Asia/Shanghai',
+      },
       randomUUID(),
     );
     const events = await collect(pool, started);
@@ -981,7 +1059,11 @@ maybe('conversation runtime', () => {
       { pool, timeContext },
       ownerId,
       randomUUID(),
-      { raw_text: '你好', confirmed_timezone: 'Asia/Shanghai' },
+      {
+        conversation_id: await createFixtureConversation(pool, ownerId),
+        raw_text: '你好',
+        confirmed_timezone: 'Asia/Shanghai',
+      },
       randomUUID(),
     );
     const original = await collect(pool, started);
@@ -1024,7 +1106,11 @@ maybe('conversation runtime', () => {
       { pool, timeContext },
       session.userId,
       randomUUID(),
-      { raw_text: '你好', confirmed_timezone: 'Asia/Shanghai' },
+      {
+        conversation_id: await createFixtureConversation(pool, session.userId),
+        raw_text: '你好',
+        confirmed_timezone: 'Asia/Shanghai',
+      },
       randomUUID(),
     );
     const path = `/api/v1/conversations/${started.conversationId}/runs/${started.runId}/events`;

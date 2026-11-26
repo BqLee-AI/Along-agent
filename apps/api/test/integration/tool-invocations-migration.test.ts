@@ -2,13 +2,14 @@ import { describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { Pool } from 'pg';
-import { admitTestUser, databaseUrl, createIntegrationDatabase } from './setup.js';
+import { databaseUrl, createIntegrationDatabase } from './setup.js';
 import { loadTimeContext } from '../../src/features/time/context.js';
 import type { ToolContext } from '../../src/agent/tools/contracts.js';
 import {
   executeLocalInvocation,
   reserveInvocation,
 } from '../../src/agent/tools/invocations/invocations.js';
+import { seedContext } from './tool-invocations-probe.js';
 
 const maybe = databaseUrl ? describe : describe.skip;
 const migrations = new URL('../../../../infra/migrations/', import.meta.url);
@@ -121,7 +122,7 @@ maybe('0014 durable invocation migration stop-write cutover', () => {
     }
   });
 
-  it('upgrades actual legacy audit unchanged, removes hash uniqueness, enforces new immutable results and preserves append-only audit', async () => {
+  it('upgrades the legacy audit unchanged and removes hash uniqueness', async () => {
     const database = await legacyDatabase();
     try {
       const { ctx, auditId } = await seedLegacy(database.pool);
@@ -153,14 +154,16 @@ maybe('0014 durable invocation migration stop-write cutover', () => {
       await expect(
         database.pool.query('DELETE FROM tool_calls WHERE id=$1', [auditId]),
       ).rejects.toMatchObject({ code: 'P0001' });
-      // The 0014-only assertions above exercise that exact cutover. Runtime
-      // writers require the complete deployed schema, including later fences.
-      for (const filename of (await readdir(migrations))
-        .filter((file) => file.endsWith('.sql') && file > '0014_conversation_tool_invocations.sql')
-        .sort()) {
-        await database.pool.query(await readFile(new URL(filename, migrations), 'utf8'));
-      }
-      await admitTestUser(database.pool, ctx.ownerId);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it('preserves accepted invocation results and correlated audit in the current schema', async () => {
+    const database = await createIntegrationDatabase();
+    try {
+      const original = await seedContext(database.pool);
+      const ctx = { ...original, allowlist: ['get_user_prefs'] };
       const input = { toolId: 'get_user_prefs', args: {} };
       const { invocationId } = await reserveInvocation(database.pool, ctx, {
         ...input,

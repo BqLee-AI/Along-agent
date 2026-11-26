@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
@@ -130,6 +131,7 @@ maybe('cross-session memory through native harness', () => {
           'x-csrf-token': actor.csrfToken,
         },
         body: JSON.stringify({
+          conversation_id: await createFixtureConversation(database.pool, actor.userId),
           execution: 'harness',
           authorization_revision: 'delegation/1',
           raw_text: text,

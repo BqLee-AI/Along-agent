@@ -484,6 +484,7 @@ async function setup(mode: ConsumerMode, conflict: boolean) {
   });
   await configureWorkspaceRegistry(registrations);
   const body = {
+    conversation_id: await actor.createConversation(),
     execution: 'harness',
     workspace_id: scenario.workspaceId,
     raw_text: `workspaceCase:${scenario.id} Read project evidence and replace the PENDING section in brief.md; ask approval before saving and independently read it back.`,
@@ -751,12 +752,13 @@ test('D8.workspace-unknown.http', async () => {
 }, 30_000);
 
 async function setupDelegated(mode: ConsumerMode) {
-  const { actor, scenario } = await setup(mode, false);
+  const { actor, scenario, body } = await setup(mode, false);
   scenario.delegated = true;
   return {
     actor,
     scenario,
     body: {
+      conversation_id: body.conversation_id,
       execution: 'harness',
       authorization_revision: 'delegation/1',
       raw_text: `workspaceCase:${scenario.id} Find the decision and update the existing brief, preserving other bytes; independently read it back.`,

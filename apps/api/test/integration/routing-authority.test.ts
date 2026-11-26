@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
@@ -95,7 +96,7 @@ interface Fixture {
   frame: HarnessSession['handleRequest'];
   counts(): { factsCalls: number; embeddingCalls: number; modelCalls: number; renderCalls: number };
   modelInputs: Extract<HarnessRequest, { type: 'model' }>[];
-  body: { execution: string; raw_text: string; idempotency_key: string };
+  body: { conversation_id: string; execution: string; raw_text: string; idempotency_key: string };
   key: string;
 }
 interface AcceptedRoute {
@@ -205,6 +206,7 @@ maybe('routing authority durable consumer behavior', () => {
     await configureTestModel(database.pool, actor.userId, 'routing-integration');
     const key = randomUUID();
     const body = {
+      conversation_id: await createFixtureConversation(database.pool, actor.userId),
       execution: 'harness',
       raw_text: options.text ?? '/timezone',
       idempotency_key: key,
@@ -953,7 +955,12 @@ maybe('routing authority durable consumer behavior', () => {
             f.deps,
             f.actor.userId,
             randomUUID(),
-            { execution: 'harness', raw_text: '/timezone', idempotency_key: randomUUID() },
+            {
+              conversation_id: await createFixtureConversation(database.pool, f.actor.userId),
+              execution: 'harness',
+              raw_text: '/timezone',
+              idempotency_key: randomUUID(),
+            },
             null,
           ),
         ).rejects.toThrow('injected policy failure');

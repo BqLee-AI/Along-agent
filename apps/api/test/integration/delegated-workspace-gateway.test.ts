@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
@@ -66,6 +67,7 @@ maybe('delegated workspace gateway', () => {
       actor.userId,
       randomUUID(),
       {
+        conversation_id: await createFixtureConversation(database.pool, actor.userId),
         execution: 'harness',
         authorization_revision: 'delegation/1',
         raw_text: 'Edit the document.',
@@ -198,6 +200,7 @@ maybe('delegated workspace gateway', () => {
         actor.userId,
         randomUUID(),
         {
+          conversation_id: await createFixtureConversation(database.pool, actor.userId),
           execution: 'harness',
           authorization_revision: 'delegation/1',
           raw_text: 'List the output directory and create a file.',
@@ -288,6 +291,7 @@ maybe('delegated workspace gateway', () => {
         actor.userId,
         randomUUID(),
         {
+          conversation_id: await createFixtureConversation(database.pool, actor.userId),
           execution: 'harness',
           authorization_revision: 'delegation/1',
           raw_text: 'Create an output file, using an alias if occupied.',

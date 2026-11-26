@@ -8,7 +8,7 @@
 
 - [Required] 1 简报：用户打开 Web，GET /brief 聚合今日 tasks 与待确认 approvals；无事则页面安静，只留记录入口。
 - [Required] 2 卡片：每条简报条目为结构化卡片，只读 presentation 冻结字段做固定格式呈现，不换算、不推断、不改写。
-- [Required] 3 对话：POST /conversations/messages 经 SSE 流式返回思考 / 工具调用 / 回复 / 待审批；预算超限（BUDGET_EXCEEDED）自动停并告知。
+- [Required] 3 对话：用户进入自己的 Bot，创建或打开一个对话。可在独立页面设置 Bot 的名称、简介、角色、指令、模型和可用工具及资料。消息经 SSE 流式返回回复和待审批。预算超限时停止并告知。
 - [Required] 4 提议：Agent 产出待确认方案并冻结 presentation（含 presentation_version）；confirm 请求携带当时看到的完整内容 + presentation_hash，对不上即停（PRESENTATION_MISMATCH）。
 - [Required] 5 确认：只认明确按钮确认，不把“是的/好”当写入授权；回显有效24小时，确认绑定所见冻结内容。
 - [Required] 6 调度：Approval 消费 + 建 Task 同事务；收到 Scheduler 登记回执才标 scheduled，否则停在 pending_schedule。

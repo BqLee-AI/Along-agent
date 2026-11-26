@@ -1,5 +1,6 @@
 import { expectApplicationRejection } from '../helpers/application-error.js';
 import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
@@ -400,7 +401,7 @@ async function actor(mode: Mode): Promise<Actor> {
   await configureTestModel(database.pool, session.userId, 'timezone-controlled-provider');
   return { mode, session };
 }
-function input(value: Scenario, overrides: Record<string, unknown> = {}) {
+async function input(who: Actor, value: Scenario, overrides: Record<string, unknown> = {}) {
   const descriptions: Record<Kind, string> = {
     save: '请把我的默认时区保存为纽约时间。',
     clear: '请清除我保存的默认时区。',
@@ -416,6 +417,7 @@ function input(value: Scenario, overrides: Record<string, unknown> = {}) {
     'control-exhausted': '请保存我指定的默认时区，不支持就保留原值并如实说明。',
   };
   return {
+    conversation_id: await createFixtureConversation(database.pool, who.session.userId),
     execution: 'harness',
     ...(value.kind === 'legacy' ? {} : { authorization_revision: 'delegation/1' }),
     raw_text: `timezoneCase:${value.id} ${descriptions[value.kind]}`,
@@ -626,7 +628,7 @@ for (const mode of ['local', 'http'] as const) {
       const who = await actor(mode);
       const before = await preferences(who);
       const value = scenario(kind);
-      const events = await (await message(who, input(value))).events;
+      const events = await (await message(who, await input(who, value))).events;
       const completed = await final(who, events, kind === 'control-correction' ? 'done' : 'failed');
       const rows = await invocations(completed.run.run_id);
       expect(rows.map((row) => row.tool_id)).toEqual(['get_user_prefs', 'set_user_timezone']);
@@ -661,7 +663,8 @@ for (const mode of ['local', 'http'] as const) {
     const who = await actor(mode);
     const before = await preferences(who);
     const value = scenario('unsupported');
-    const completed = await final(who, await (await message(who, input(value))).events, 'done');
+    const events = await (await message(who, await input(who, value))).events;
+    const completed = await final(who, events, 'done');
     expect(completed.result.status).toBe('blocked');
     expect(completed.result.outcomes).toMatchObject([{ status: 'blocked', receipt_refs: [] }]);
     expect(await preferences(who)).toEqual(before);
@@ -678,7 +681,7 @@ for (const mode of ['local', 'http'] as const) {
   test(`D8.timezone-${mode}-save-clear`, async () => {
     const who = await actor(mode);
     const save = scenario('save');
-    const body = input(save);
+    const body = await input(who, save);
     const opened = await message(who, body);
     if (opened.context) expect(opened.context.authorizationRevision).toBe('delegation/1');
     const savedEvents = await opened.events;
@@ -718,7 +721,7 @@ for (const mode of ['local', 'http'] as const) {
     expect(await facts(who)).toEqual(frozen);
     expect(save.transcript).toHaveLength(2);
     const read = scenario('read');
-    const readEvents = await (await message(who, input(read))).events;
+    const readEvents = await (await message(who, await input(who, read))).events;
     const readResult = await final(who, readEvents, 'done');
     expect(readResult.run.conversation_id).not.toBe(saved.run.conversation_id);
     expect(trusted(read.transcript[0]!).timezone).toMatchObject({
@@ -728,7 +731,8 @@ for (const mode of ['local', 'http'] as const) {
     });
     expect(readResult.result.answer).toBe('当前默认时区：America/New_York。');
     const clear = scenario('clear');
-    const clearResult = await final(who, await (await message(who, input(clear))).events, 'done');
+    const clearEvents = await (await message(who, await input(who, clear))).events;
+    const clearResult = await final(who, clearEvents, 'done');
     const clearRows = await invocations(clearResult.run.run_id);
     expect(clearRows).toHaveLength(1);
     expect(clearRows[0]!.accepted_result).toMatchObject({
@@ -745,7 +749,7 @@ for (const mode of ['local', 'http'] as const) {
     const afterClearResult = await final(
       who,
       await (
-        await message(who, input(afterClear))
+        await message(who, await input(who, afterClear))
       ).events,
       'done',
     );
@@ -759,7 +763,7 @@ for (const mode of ['local', 'http'] as const) {
     const before = await preferences(who);
     const value = scenario('once');
     const events = await (
-      await message(who, input(value, { confirmed_timezone: 'America/New_York' }))
+      await message(who, await input(who, value, { confirmed_timezone: 'America/New_York' }))
     ).events;
     const completed = await final(who, events, 'done');
     expect(await preferences(who)).toEqual(before);
@@ -792,7 +796,7 @@ for (const mode of ['local', 'http'] as const) {
     for (const kind of ['forged', 'omit'] as const) {
       const who = await actor(mode);
       const value = scenario(kind);
-      const events = await (await message(who, input(value))).events;
+      const events = await (await message(who, await input(who, value))).events;
       const failed = await final(who, events, 'failed');
       const rows = await invocations(failed.run.run_id);
       expect(rows).toHaveLength(1);
@@ -821,7 +825,7 @@ for (const mode of ['local', 'http'] as const) {
   test(`D8.timezone-${mode}-cancel-accepted`, async () => {
     const who = await actor(mode);
     const value = scenario('interrupt');
-    const body = input(value);
+    const body = await input(who, value);
     const stream = await message(who, body);
     await value.held.promise;
     const running = (
@@ -864,7 +868,7 @@ for (const mode of ['local', 'http'] as const) {
     const who = await actor(mode);
     const other = await actor(mode);
     const value = scenario('revoke');
-    const body = input(value);
+    const body = await input(who, value);
     const stream = await message(who, body);
     await value.held.promise;
     const runs = (
@@ -1038,7 +1042,7 @@ for (const mode of ['local', 'http'] as const) {
     const who = await actor(mode);
     const before = await preferences(who);
     const value = scenario('legacy');
-    const stream = await message(who, input(value));
+    const stream = await message(who, await input(who, value));
     if (stream.context) {
       expect(stream.context.authorizationRevision).toBeUndefined();
       expect(stream.context.trustedExecutionContext).toBeUndefined();

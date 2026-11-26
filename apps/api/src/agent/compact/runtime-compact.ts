@@ -22,6 +22,11 @@ import { validateWorkspaceGrant } from '../../features/workspaces/public.js';
 import { resolveRunSelection } from '../../features/model-providers/public.js';
 import type { ConversationDeps, RunContext } from '../execution/contracts.js';
 import {
+  assertBotPromptScope,
+  withBotInstructions,
+} from '../execution/attempt/bot-prompt-scope.js';
+import { botScopeAllows, lockRunBotScope } from '../../features/bots/public.js';
+import {
   ActionKeySchema,
   insertPauseSuccessor,
   activatePauseSuccessor,
@@ -525,6 +530,11 @@ async function executeRuntimeCompactWork(
                   { ...context, signal },
                   snapshot.tool_refs,
                 );
+                await assertBotPromptScope(
+                  current,
+                  context,
+                  await lockRunBotScope(current, context),
+                );
                 signal.throwIfAborted();
                 enqueue();
               }),
@@ -549,10 +559,14 @@ async function executeRuntimeCompactWork(
               seen = true;
               const { pending_model: _pending, ...preview } = request;
               void _pending;
+              const scope = await tx((client) => lockRunBotScope(client, context));
+              const permittedTools = start.tools.filter((tool) => botScopeAllows(scope, tool.name));
               const measurement = HarnessContextMeasurementSchema.parse(
                 await transport.measure(
-                  { ...preview, type: 'measure_context' },
-                  context.authorizationRevision ? [...start.tools, GOAL_CONTROL_TOOL] : start.tools,
+                  { ...withBotInstructions(preview, context.personalBot), type: 'measure_context' },
+                  context.authorizationRevision
+                    ? [...permittedTools, GOAL_CONTROL_TOOL]
+                    : permittedTools,
                   context.contextPolicy!,
                 ),
               );

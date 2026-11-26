@@ -14,6 +14,7 @@ export {
   ContinueRunBodySchema,
   CompactRunBodySchema,
 } from './schemas.js';
+export const ConversationBotSchema = z.object({ bot_id: z.string().uuid() }).strict();
 export const ConversationDetailSchema = z.object({
   conversation_id: z.string(),
   status: z.string(),

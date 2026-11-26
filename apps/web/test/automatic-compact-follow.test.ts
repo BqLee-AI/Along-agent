@@ -7,7 +7,6 @@ import {
   useConversationTask,
   type ConversationTask,
 } from '../src/features/conversations/viewmodel/use-conversation-task';
-import { ModelCatalogProvider } from '../src/features/model-settings/viewmodel/model-catalog-context';
 
 const cid = '11111111-1111-4111-8111-111111111111';
 const rid = '22222222-2222-4222-8222-222222222222';
@@ -57,7 +56,7 @@ async function host(initial: Selection): Promise<HookHost> {
   document.body.appendChild(container);
   const root = createRoot(container);
   function Consumer(props: Selection) {
-    result = useConversationTask(props);
+    result = useConversationTask({ ...props, botId: other, toolIds: [], workspaceIds: [] });
     return createElement(
       'output',
       null,
@@ -67,9 +66,7 @@ async function host(initial: Selection): Promise<HookHost> {
     );
   }
   await act(async () => {
-    root.render(
-      createElement(ModelCatalogProvider, { children: createElement(Consumer, initial) }),
-    );
+    root.render(createElement(Consumer, initial));
   });
   return {
     get value() {
@@ -80,9 +77,7 @@ async function host(initial: Selection): Promise<HookHost> {
     },
     async select(next) {
       await act(async () => {
-        root.render(
-          createElement(ModelCatalogProvider, { children: createElement(Consumer, next) }),
-        );
+        root.render(createElement(Consumer, next));
       });
     },
     async unmount() {
@@ -163,7 +158,6 @@ async function fixture(
   globalThis.fetch = (async (input, init) => {
     const url = String(input);
     calls.push({ url, method: init?.method ?? 'GET' });
-    if (url.endsWith('/model-providers')) return envelope({ items: [], default_selection: null });
     if (url.includes('/events?')) {
       if (pauseFirst) {
         pauseFirst = false;

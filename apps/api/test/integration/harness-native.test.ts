@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { configureTestModel } from '../helpers/model-selection.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
@@ -311,11 +312,12 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
     await database?.close();
   });
 
-  async function actor() {
+  async function actor(options?: { title: string; anchor: string }) {
     const session = await seedSession(database.pool, { timezoneId: 'Europe/London' });
     await configureTestModel(database.pool, session.userId, 'fixture-transport-only');
     return {
       session,
+      conversationId: await createFixtureConversation(database.pool, session.userId, options),
       headers: {
         cookie: `better-auth.session_token=${session.token}`,
         'x-csrf-token': session.csrfToken,
@@ -334,8 +336,9 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
     expect(response.status).toBe(200);
     return Run.parse(await response.json()).data;
   }
-  function input(id: string, kind: string) {
+  function input(conversationId: string, id: string, kind: string) {
     return {
+      conversation_id: conversationId,
       execution: 'harness',
       raw_text: `nativeCase:${id}:${kind} 2027-11-02 09:20`,
       confirmed_timezone: 'Asia/Shanghai',
@@ -360,7 +363,7 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
 
   for (const kind of ['stream', 'streamerror', 'streamcancel'] as const) {
     it(`native accepts and persists content before provider completion: ${kind}`, async () => {
-      const { headers } = await actor();
+      const { headers, conversationId } = await actor();
       const id = randomUUID();
       const gate = {
         release: Promise.withResolvers<void>(),
@@ -368,7 +371,7 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
         closed: Promise.withResolvers<boolean>(),
       };
       streams.set(id, gate);
-      const body = input(id, kind === 'streamcancel' ? 'stream' : kind);
+      const body = input(conversationId, id, kind === 'streamcancel' ? 'stream' : kind);
       const response = await post('/api/v1/conversations/messages', body, headers);
       expect(response.status).toBe(200);
       const reader = response.body!.getReader();
@@ -457,9 +460,9 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
 
   for (const answer of longAnswers) {
     it(`native ${answer.kind} final answer survives public chunking and durable replay exactly`, async () => {
-      const { headers } = await actor();
+      const { headers, conversationId } = await actor();
       const id = randomUUID();
-      const body = input(id, answer.kind);
+      const body = input(conversationId, id, answer.kind);
       const response = await post('/api/v1/conversations/messages', body, headers);
       expect(response.status).toBe(200);
       const text = await response.text();
@@ -495,9 +498,9 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
   }
 
   it('native observes the real owner preference and reread/repeated POST never execute again', async () => {
-    const { session, headers } = await actor();
+    const { session, headers, conversationId } = await actor();
     const id = randomUUID();
-    const body = input(id, 'read');
+    const body = input(conversationId, id, 'read');
     const response = await post('/api/v1/conversations/messages', body, headers);
     expect(response.status).toBe(200);
     const text = await response.text();
@@ -528,10 +531,10 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
   });
 
   it('new native Runs see prior visible turns, not another conversation, owner, system message or old tool calls', async () => {
-    const { session, headers } = await actor();
+    const { session, headers, conversationId } = await actor();
     const other = await actor();
     const firstId = randomUUID();
-    const firstBody = input(firstId, 'read');
+    const firstBody = input(conversationId, firstId, 'read');
     const first = frames(
       await (await post('/api/v1/conversations/messages', firstBody, headers)).text(),
     );
@@ -543,7 +546,7 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
       [session.userId, other.session.userId, run.conversation_id],
     );
     const secondId = randomUUID();
-    const secondBody = { ...input(secondId, 'read'), conversation_id: run.conversation_id };
+    const secondBody = input(run.conversation_id, secondId, 'read');
     const second = frames(
       await (await post('/api/v1/conversations/messages', secondBody, headers)).text(),
     );
@@ -558,7 +561,11 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
     expect(JSON.stringify(secondRequest)).not.toContain('private system context');
     expect(JSON.stringify(secondRequest)).not.toContain('foreign owner context');
     const isolatedId = randomUUID();
-    const isolatedBody = input(isolatedId, 'read');
+    const isolatedBody = input(
+      await createFixtureConversation(database.pool, session.userId),
+      isolatedId,
+      'read',
+    );
     const isolated = frames(
       await (await post('/api/v1/conversations/messages', isolatedBody, headers)).text(),
     );
@@ -567,7 +574,7 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
       modelRequests.get(isolatedId)?.[0]?.messages.filter((message) => message.role !== 'system'),
     ).toEqual([{ role: 'user', content: isolatedBody.raw_text }]);
     const otherId = randomUUID();
-    const otherBody = input(otherId, 'read');
+    const otherBody = input(other.conversationId, otherId, 'read');
     const otherEvents = frames(
       await (await post('/api/v1/conversations/messages', otherBody, other.headers)).text(),
     );
@@ -579,7 +586,7 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
       (
         await post(
           '/api/v1/conversations/messages',
-          { ...input(randomUUID(), 'read'), conversation_id: run.conversation_id },
+          input(run.conversation_id, randomUUID(), 'read'),
           other.headers,
         )
       ).status,
@@ -588,10 +595,13 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
 
   for (const scenario of learnCases) {
     it(`isolates the Microsoft Learn query and lets the native model handle ${scenario.code}`, async () => {
-      const { headers } = await actor();
+      const { headers, conversationId } = await actor();
       const firstId = randomUUID();
       const secret = `synthetic-private-history-${randomUUID()}`;
-      const prior = { ...input(firstId, 'read'), raw_text: `nativeCase:${firstId}:read ${secret}` };
+      const prior = {
+        ...input(conversationId, firstId, 'read'),
+        raw_text: `nativeCase:${firstId}:read ${secret}`,
+      };
       const first = await post('/api/v1/conversations/messages', prior, headers);
       expect(first.status).toBe(200);
       const firstEvents = frames(await first.text());
@@ -599,8 +609,7 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
       expect(modelCalls.get(firstId)).toBe(2);
       const id = randomUUID();
       const body = {
-        ...input(id, scenario.kind),
-        conversation_id: started(firstEvents).conversation_id,
+        ...input(started(firstEvents).conversation_id, id, scenario.kind),
         authorization_revision: 'delegation/1',
         raw_text: `nativeCase:${id}:${scenario.kind} ${scenario.current}`,
       };
@@ -733,13 +742,10 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
   }
 
   it('native receives the deterministic newest 63 visible predecessors and the complete 20000-unit current input once', async () => {
-    const { session, headers } = await actor();
-    const conversationId = randomUUID();
-    await database.pool.query(
-      `INSERT INTO conversations(id,owner_id,title,anchor_received_at_utc)
-       VALUES ($1,$2,'bounded context',now())`,
-      [conversationId, session.userId],
-    );
+    const { session, headers, conversationId } = await actor({
+      title: 'bounded context',
+      anchor: new Date().toISOString(),
+    });
     await database.pool.query(
       `INSERT INTO messages(id,owner_id,conversation_id,role,content,created_at)
        SELECT ($3 || lpad(n::text,12,'0'))::uuid,$1,$2,
@@ -749,7 +755,7 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
       [session.userId, conversationId, randomUUID().slice(0, 24)],
     );
     const id = randomUUID();
-    const body = { ...input(id, 'read'), conversation_id: conversationId };
+    const body = input(conversationId, id, 'read');
     body.raw_text += '界😀'.repeat(6000);
     body.raw_text += '尾'.repeat(20000 - body.raw_text.length);
     const response = await post('/api/v1/conversations/messages', body, headers);
@@ -777,20 +783,17 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
   });
 
   it('an oversized complete bootstrap fails explicitly without truncating the current message or contacting the model', async () => {
-    const { session, headers } = await actor();
-    const conversationId = randomUUID();
-    await database.pool.query(
-      `INSERT INTO conversations(id,owner_id,title,anchor_received_at_utc)
-       VALUES ($1,$2,'large context',now())`,
-      [conversationId, session.userId],
-    );
+    const { session, headers, conversationId } = await actor({
+      title: 'large context',
+      anchor: new Date().toISOString(),
+    });
     await database.pool.query(
       `INSERT INTO messages(id,owner_id,conversation_id,role,content,created_at)
        VALUES (gen_random_uuid(),$1,$2,'assistant',$3,now()-interval '1 day')`,
       [session.userId, conversationId, '界'.repeat(350000)],
     );
     const id = randomUUID();
-    const body = { ...input(id, 'read'), conversation_id: conversationId };
+    const body = input(conversationId, id, 'read');
     const response = await post('/api/v1/conversations/messages', body, headers);
     expect(response.status).toBe(200);
     const events = frames(await response.text());
@@ -818,9 +821,13 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
   });
 
   it('native publishes tool-call content as visible progress and retains it alongside the real next-round observation', async () => {
-    const { headers } = await actor();
+    const { headers, conversationId } = await actor();
     const id = randomUUID();
-    const response = await post('/api/v1/conversations/messages', input(id, 'plan'), headers);
+    const response = await post(
+      '/api/v1/conversations/messages',
+      input(conversationId, id, 'plan'),
+      headers,
+    );
     expect(response.status).toBe(200);
     const events = frames(await response.text());
     expect(
@@ -831,14 +838,14 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
   });
 
   it('approval resume preserves the accepted visible context despite later turns and consumes the original task only once', async () => {
-    const { session, headers } = await actor();
-    const priorBody = input(randomUUID(), 'read');
+    const { session, headers, conversationId } = await actor();
+    const priorBody = input(conversationId, randomUUID(), 'read');
     const prior = frames(
       await (await post('/api/v1/conversations/messages', priorBody, headers)).text(),
     );
     const priorRun = started(prior);
     const id = randomUUID();
-    const body = { ...input(id, 'create'), conversation_id: priorRun.conversation_id };
+    const body = input(priorRun.conversation_id, id, 'create');
     body.raw_text += ' Please reply in English.';
     const initial = frames(
       await (await post('/api/v1/conversations/messages', body, headers)).text(),
@@ -859,7 +866,7 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
     );
     expect(replay).toEqual(initial);
     const laterId = randomUUID();
-    const laterBody = { ...input(laterId, 'read'), conversation_id: run.conversation_id };
+    const laterBody = input(run.conversation_id, laterId, 'read');
     const later = frames(
       await (await post('/api/v1/conversations/messages', laterBody, headers)).text(),
     );
@@ -928,10 +935,12 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
   });
 
   it('a real rejection stops resumed native without asking the model or re-proposing', async () => {
-    const { session, headers } = await actor();
+    const { session, headers, conversationId } = await actor();
     const id = randomUUID();
     const events = frames(
-      await (await post('/api/v1/conversations/messages', input(id, 'create'), headers)).text(),
+      await (
+        await post('/api/v1/conversations/messages', input(conversationId, id, 'create'), headers)
+      ).text(),
     );
     const run = started(events);
     const approvalId = pending(events);
@@ -973,14 +982,18 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
   });
 
   it('durable stop interrupts the actual model HTTP body and native wait without any tool effect', async () => {
-    const { session, headers } = await actor();
+    const { session, headers, conversationId } = await actor();
     const id = randomUUID();
     const gate = {
       started: Promise.withResolvers<void>(),
       closed: Promise.withResolvers<boolean>(),
     };
     hold.set(id, gate);
-    const response = await post('/api/v1/conversations/messages', input(id, 'hold'), headers);
+    const response = await post(
+      '/api/v1/conversations/messages',
+      input(conversationId, id, 'hold'),
+      headers,
+    );
     const finished = response.text();
     await gate.started.promise;
     const row = (
@@ -1051,7 +1064,13 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
         routing_policy: { revision: 'r2b/1', mode: 'off' },
         eligible_phase: 'disabled',
         context_policy: contextPolicy,
-        messages: [{ message_id: randomUUID(), role: 'user', content: input(id, 'hold').raw_text }],
+        messages: [
+          {
+            message_id: randomUUID(),
+            role: 'user',
+            content: `nativeCase:${id}:hold 2027-11-02 09:20`,
+          },
+        ],
         tools: [],
         budget: { max_iterations: 8, max_tokens: 8000 },
         snapshot: null,
@@ -1090,13 +1109,15 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
   });
 
   it('the native iteration ceiling stops repeated real read effects instead of a TS character estimate', async () => {
-    const { headers } = await actor();
+    const { headers, conversationId } = await actor();
     const id = randomUUID();
     maxIterations = 3;
     let events: ThreadEvent[];
     try {
       events = frames(
-        await (await post('/api/v1/conversations/messages', input(id, 'loop'), headers)).text(),
+        await (
+          await post('/api/v1/conversations/messages', input(conversationId, id, 'loop'), headers)
+        ).text(),
       );
     } finally {
       maxIterations = 8;
@@ -1122,7 +1143,7 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
   });
 
   it('accepted approval facts survive a genuine snapshot INSERT failure and subsequent rereads do not repeat them', async () => {
-    const { session, headers } = await actor();
+    const { session, headers, conversationId } = await actor();
     const id = randomUUID();
     const suffix = randomUUID().replaceAll('-', '');
     const fn = `fail_native_snapshot_${suffix}`;
@@ -1130,7 +1151,7 @@ maybe('production native with actual signed HTTP, model HTTP and PostgreSQL', ()
     await database.pool.query(`CREATE FUNCTION ${fn}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
       IF NEW.owner_id='${session.userId}'::uuid AND NEW.kind='harness_snapshot' THEN RAISE EXCEPTION 'snapshot storage unavailable'; END IF;
       RETURN NEW; END $$; CREATE TRIGGER ${trigger} BEFORE INSERT ON run_checkpoints FOR EACH ROW EXECUTE FUNCTION ${fn}()`);
-    const body = input(id, 'create');
+    const body = input(conversationId, id, 'create');
     let events: ThreadEvent[];
     try {
       events = frames(await (await post('/api/v1/conversations/messages', body, headers)).text());

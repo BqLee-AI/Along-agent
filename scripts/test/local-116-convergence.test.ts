@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pg from 'pg';
 import { DeploymentDatabase } from '../local/database.mjs';
+import { copyMigrationsThrough } from './fixtures/migrations.js';
 
 const connectionString = process.env.DATABASE_URL;
 const databaseTests = connectionString ? describe : describe.skip;
@@ -14,6 +15,7 @@ const elapsedFixture = new URL('./fixtures/0024_tasks_elapsed_basis.sql', import
 databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
   const admin = new pg.Pool({ connectionString, max: 1 });
   let baseDirectory: string;
+  let preBotDirectory: string;
 
   beforeAll(async () => {
     expect(
@@ -26,10 +28,13 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
     )) {
       await copyFile(new URL(name, migrations), join(baseDirectory, name));
     }
+    preBotDirectory = await mkdtemp(join(tmpdir(), 'convergence-0041-'));
+    await copyMigrationsThrough(preBotDirectory, '0041');
   });
   afterAll(async () => {
     await admin.end();
     if (baseDirectory) await rm(baseDirectory, { recursive: true, force: true });
+    if (preBotDirectory) await rm(preBotDirectory, { recursive: true, force: true });
   });
 
   async function isolated(action: (url: string) => Promise<void>) {
@@ -192,8 +197,8 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
   it('initializes an empty database at the converged version', async () => {
     await isolated(async (url) => {
       await deployment(url, async (db) => {
-        expect((await db.initialize()).version).toBe('0041');
-        expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0041' });
+        expect((await db.initialize()).version).toBe('0042');
+        expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0042' });
       });
       await sql(url, async (client) => {
         expect(
@@ -224,6 +229,7 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
           '0039',
           '0040',
           '0041',
+          '0042',
         ]);
       });
     });
@@ -247,8 +253,8 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
         );
         await deployment(url, async (db) => {
           expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0028' });
-          expect((await db.upgrade()).version).toBe('0041');
-          expect((await db.initialize()).version).toBe('0041');
+          expect((await db.upgrade()).version).toBe('0042');
+          expect((await db.initialize()).version).toBe('0042');
         });
         await sql(url, async (client) => {
           await client.query(
@@ -311,8 +317,8 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
         });
         await deployment(url, async (db) => {
           expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0037' });
-          expect((await db.upgrade()).version).toBe('0041');
-          expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0041' });
+          expect((await db.upgrade()).version).toBe('0042');
+          expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0042' });
         });
         await sql(url, async (client) => {
           expect((await client.query('SELECT * FROM model_provider_defaults')).rows).toEqual(
@@ -389,20 +395,25 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
   }, 30000);
 
   for (const history of ['main', 'legacy'] as const) {
+    const target = history === 'legacy' ? '0041' : '0042';
     it(`upgrades the actual ${history} migration history without rewriting facts or granting ordinary accounts admission`, async () => {
       await isolated(async (url) => {
         const ids = await historical(url, history);
         const before = await sql(url, (client) => facts(client, history));
-        await deployment(url, async (db) => {
-          expect(await db.classify()).toMatchObject({
-            kind: 'supported',
-            version: history === 'main' ? '0024' : '0025',
-          });
-          await expect(db.initialize()).rejects.toMatchObject({
-            code: 'explicit_upgrade_required',
-          });
-          expect((await db.upgrade()).version).toBe('0041');
-        });
+        await deployment(
+          url,
+          async (db) => {
+            expect(await db.classify()).toMatchObject({
+              kind: 'supported',
+              version: history === 'main' ? '0024' : '0025',
+            });
+            await expect(db.initialize()).rejects.toMatchObject({
+              code: 'explicit_upgrade_required',
+            });
+            expect((await db.upgrade()).version).toBe(target);
+          },
+          history === 'legacy' ? preBotDirectory : undefined,
+        );
         await sql(url, async (client) => {
           expect(await facts(client, history)).toEqual(before);
           expect(
@@ -444,12 +455,17 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
             '0039',
             '0040',
             '0041',
+            ...(history === 'legacy' ? [] : ['0042']),
           ]);
         });
-        await deployment(url, async (db) => {
-          expect((await db.initialize()).version).toBe('0041');
-          expect((await db.upgrade()).version).toBe('0041');
-        });
+        await deployment(
+          url,
+          async (db) => {
+            expect((await db.initialize()).version).toBe(target);
+            expect((await db.upgrade()).version).toBe(target);
+          },
+          history === 'legacy' ? preBotDirectory : undefined,
+        );
       });
     }, 30000);
   }
@@ -475,7 +491,9 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
         });
         const directory = await mkdtemp(join(tmpdir(), 'convergence-endings-'));
         try {
-          for (const name of (await readdir(migrations)).filter((name) => name.endsWith('.sql'))) {
+          for (const name of (await readdir(migrations)).filter(
+            (name) => name.endsWith('.sql') && name.slice(0, 4) <= '0041',
+          )) {
             const source = await readFile(new URL(name, migrations), 'utf8');
             await writeFile(
               join(directory, name),
@@ -529,14 +547,18 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
           ).rows,
         };
       });
-      await deployment(url, async (db) => {
-        expect(await db.classify()).toMatchObject({
-          kind: 'supported',
-          version: '0026',
-          reason: 'explicit_upgrade_required',
-        });
-        expect((await db.upgrade()).version).toBe('0041');
-      });
+      await deployment(
+        url,
+        async (db) => {
+          expect(await db.classify()).toMatchObject({
+            kind: 'supported',
+            version: '0026',
+            reason: 'explicit_upgrade_required',
+          });
+          expect((await db.upgrade()).version).toBe('0041');
+        },
+        preBotDirectory,
+      );
       await sql(url, async (client) => {
         expect(await facts(client, 'legacy')).toEqual(before.facts);
         expect(
@@ -609,7 +631,9 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
       const before = await sql(url, (client) => facts(client, 'legacy'));
       const directory = await mkdtemp(join(tmpdir(), 'convergence-interrupted-'));
       try {
-        for (const name of (await readdir(migrations)).filter((name) => name.endsWith('.sql'))) {
+        for (const name of (await readdir(migrations)).filter(
+          (name) => name.endsWith('.sql') && name.slice(0, 4) <= '0041',
+        )) {
           const source = await readFile(new URL(name, migrations), 'utf8');
           await writeFile(
             join(directory, name),
@@ -644,9 +668,13 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
               .rows[0].count,
           ).toBe('0');
         });
-        await deployment(url, async (db) => {
-          expect((await db.upgrade()).version).toBe('0041');
-        });
+        await deployment(
+          url,
+          async (db) => {
+            expect((await db.upgrade()).version).toBe('0041');
+          },
+          preBotDirectory,
+        );
         await sql(url, async (client) => expect(await facts(client, 'legacy')).toEqual(before));
       } finally {
         await rm(directory, { recursive: true, force: true });

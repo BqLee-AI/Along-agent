@@ -472,6 +472,7 @@ export async function createHarnessSession(
                 throw stateConflict('routing render is immutable');
               return null;
             }
+            await assertContextSourcesAuthorized(client, context, [request.invocation_ref]);
             const accepted = (
               await readInvocationSnapshots(client, context, [request.invocation_ref])
             )[0];
@@ -507,6 +508,7 @@ export async function createHarnessSession(
           if (chunk) chunks.push(chunk);
           const events = await guarded(async (client) => {
             await directInvocation(client, request.invocation_ref);
+            await assertContextSourcesAuthorized(client, context, [request.invocation_ref]);
             if (await readRoutingRecord(client, context, 'harness_routing_render'))
               throw stateConflict('routing render already accepted');
             const events: ThreadEvent[] = [];

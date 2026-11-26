@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
@@ -189,6 +190,7 @@ maybe('server-owned approval resume across processes', () => {
         actor.userId,
         randomUUID(),
         {
+          conversation_id: await createFixtureConversation(database.pool, actor.userId),
           execution: 'harness',
           authorization_revision: 'delegation/1',
           raw_text:

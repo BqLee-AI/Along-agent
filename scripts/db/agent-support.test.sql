@@ -11,8 +11,13 @@ INSERT INTO users (id, display_name, auth_email)
 VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'agent-test', 'agent-test@local.invalid')
 ON CONFLICT (id) DO NOTHING;
 
-INSERT INTO conversations (id, owner_id, title)
-VALUES ('20000000-0000-0000-0000-000000000001', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'agent');
+INSERT INTO personal_bots (id, owner_id, config)
+VALUES ('20000000-0000-0000-0000-000000000002', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        '{"name":"Agent test","introduction":"","role":"","instructions":"","model_selection":null,"tool_ids":[],"workspace_ids":[]}');
+
+INSERT INTO conversations (id, owner_id, bot_id, title)
+VALUES ('20000000-0000-0000-0000-000000000001', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        '20000000-0000-0000-0000-000000000002', 'agent');
 
 INSERT INTO messages (id, owner_id, conversation_id, role, content, request_id)
 VALUES ('20000000-0000-0000-0000-000000000011', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',

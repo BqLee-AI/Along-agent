@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
@@ -32,10 +33,7 @@ run('Feishu-derived answers stay in UI history only', async () => {
   try {
     const { userId: ownerId } = await seedAdmittedSession(db.pool);
     const conversationId = randomUUID();
-    await db.pool.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
-      conversationId,
-      ownerId,
-    ]);
+    await createFixtureConversation(db.pool, ownerId, { id: conversationId });
     const scope = { ownerId, conversationId };
     const tx = <T>(f: (client: PoolClient) => Promise<T>) => withTransaction(db.pool, f);
     const sourceInput = await insertMessage(db.pool, {
@@ -176,10 +174,7 @@ run('Feishu-derived answers stay in UI history only', async () => {
     const emptyScope = { ownerId, conversationId: randomUUID() };
     const emptyRunId = randomUUID();
     await tx(async (client) => {
-      await client.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
-        emptyScope.conversationId,
-        ownerId,
-      ]);
+      await createFixtureConversation(client, ownerId, { id: emptyScope.conversationId });
       await client.query(
         `INSERT INTO agent_runs(id,owner_id,conversation_id,agent_revision,mode,status,
            budget_max_iterations,budget_max_tokens) VALUES($1,$2,$3,'test','chat','done',10,4096)`,

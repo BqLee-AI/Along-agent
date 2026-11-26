@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import pg from 'pg';
 import { DeploymentDatabase } from '../local/database.mjs';
 import { createAuth } from '../../apps/api/src/features/identity/session/better-auth.js';
+import { copyMigrationsThrough } from './fixtures/migrations.js';
 
 const connectionString = process.env.DATABASE_URL;
 const databaseTests = connectionString ? describe : describe.skip;
@@ -13,6 +14,7 @@ const databaseTests = connectionString ? describe : describe.skip;
 databaseTests('invited account schema explicit local upgrade against isolated PG16', () => {
   const admin = new pg.Pool({ connectionString, max: 1 });
   let oldDirectory: string;
+  let preBotDirectory: string;
   let passwordHash: string;
   beforeAll(async () => {
     oldDirectory = await mkdtemp(join(tmpdir(), 'identity-0023-migrations-'));
@@ -21,6 +23,8 @@ databaseTests('invited account schema explicit local upgrade against isolated PG
       (name) => name.endsWith('.sql') && name.slice(0, 4) <= '0023',
     ))
       await copyFile(new URL(file, source), join(oldDirectory, file));
+    preBotDirectory = await mkdtemp(join(tmpdir(), 'identity-0041-migrations-'));
+    await copyMigrationsThrough(preBotDirectory, '0041');
     passwordHash = await (
       await createAuth(admin, { secret: 'isolated-112-p1-migration-library-only' })!.$context
     ).password.hash('original isolated password');
@@ -28,6 +32,7 @@ databaseTests('invited account schema explicit local upgrade against isolated PG
   afterAll(async () => {
     await admin.end();
     if (oldDirectory) await rm(oldDirectory, { recursive: true, force: true });
+    if (preBotDirectory) await rm(preBotDirectory, { recursive: true, force: true });
   });
 
   async function isolated(action: (url: string) => Promise<void>) {
@@ -122,17 +127,21 @@ databaseTests('invited account schema explicit local upgrade against isolated PG
         );
         original = (await client.query(originalFacts)).rows[0].value;
       });
-      await deployment(url, async (database) => {
-        expect(await database.classify()).toMatchObject({
-          kind: 'supported',
-          version: '0023',
-          reason: 'explicit_upgrade_required',
-        });
-        await expect(database.initialize()).rejects.toMatchObject({
-          code: 'explicit_upgrade_required',
-        });
-        expect((await database.upgrade()).version).toBe('0041');
-      });
+      await deployment(
+        url,
+        async (database) => {
+          expect(await database.classify()).toMatchObject({
+            kind: 'supported',
+            version: '0023',
+            reason: 'explicit_upgrade_required',
+          });
+          await expect(database.initialize()).rejects.toMatchObject({
+            code: 'explicit_upgrade_required',
+          });
+          expect((await database.upgrade()).version).toBe('0041');
+        },
+        preBotDirectory,
+      );
       await sql(url, async (client) => {
         expect((await client.query(originalFacts)).rows[0].value).toEqual(original);
         expect(
@@ -161,11 +170,15 @@ databaseTests('invited account schema explicit local upgrade against isolated PG
           CREATE EVENT TRIGGER identity_restart_readonly ON ddl_command_start EXECUTE FUNCTION identity_reject_restart_ddl()`);
       });
       for (let restart = 0; restart < 2; restart++) {
-        await deployment(url, async (database) => {
-          expect(await database.classify()).toMatchObject({ kind: 'supported', version: '0041' });
-          expect((await database.initialize()).version).toBe('0041');
-          expect((await database.upgrade()).version).toBe('0041');
-        });
+        await deployment(
+          url,
+          async (database) => {
+            expect(await database.classify()).toMatchObject({ kind: 'supported', version: '0041' });
+            expect((await database.initialize()).version).toBe('0041');
+            expect((await database.upgrade()).version).toBe('0041');
+          },
+          preBotDirectory,
+        );
       }
     });
   }, 30000);
@@ -275,7 +288,7 @@ databaseTests('invited account schema explicit local upgrade against isolated PG
         await client.query('DROP EVENT TRIGGER identity_upgrade_failure');
       });
       await deployment(url, async (database) => {
-        expect((await database.upgrade()).version).toBe('0041');
+        expect((await database.upgrade()).version).toBe('0042');
       });
     });
   }, 30000);

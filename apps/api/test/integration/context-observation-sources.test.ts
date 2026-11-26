@@ -458,6 +458,11 @@ maybe('immutable accepted context sources', () => {
     const f = await fresh();
     const toolId = 'internal.context-conflict';
     f.ctx.allowlist = [...f.ctx.allowlist, toolId];
+    await database.pool.query(
+      `UPDATE personal_bots b SET config=jsonb_set(b.config,'{tool_ids}',(b.config->'tool_ids') || to_jsonb($2::text))
+       FROM conversations c WHERE c.id=$1 AND b.id=c.bot_id`,
+      [f.ctx.conversationId, toolId],
+    );
     const args = {};
     const conflictInput = {
       ...(await reserveInvocation(database.pool, f.ctx, {

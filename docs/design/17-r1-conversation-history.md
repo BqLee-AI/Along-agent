@@ -33,6 +33,12 @@ conversations拥有集合、消息/Run关系、owner校验和事件读。approva
 
 拒绝仅保存URL/sessionStorage：无法满足服务器发现。拒绝offset和每页重算最新活动排序：新插入/旧运行更新会搬页。拒绝物化历史/新任务表/持久分页会话：增加第二生命周期且无本期证据。选择建立时间keyset；活动时间真实展示但不用于会移动的排序。
 
+### 2.1 个人 Bot 与对话归属
+
+Bot 持有本人角色、行为指令、模型选择和资源范围。每个对话在空对话创建时获得不可变的同 owner 父 Bot，首次成功接纳消息时冻结时间锚。打开对话深链只读解析父级。Web 按 Bot 列出对话并管理设置。Run 冻结 Bot 修订和行为上下文，工具效果和资料再披露还须满足当前 Bot 范围及原有授权。接口见 [对话与 SSE](../api/conversations/conversations_routes.md#1-路由)。
+
+启用强制归属的数据库迁移前，停止旧写入并处理未归属的测试会话。清理只涉及可丢弃的本地测试会话和专属记录。现有提醒、记忆或其他需保留记录引用这些会话时，保留原数据并阻止切换。部署发现未处理的无 Bot 会话会终止升级。
+
 ## 3. 列表、排序与cursor
 
 ### 3.1 HTTP与共享DTO
@@ -55,7 +61,7 @@ packages/contracts/src/conversations.ts定义并导出以下strict schema和对�
 
 ### 3.2 排序与字段事实
 
-列表按(conversations.created_at DESC,id DESC)。此字段是初始接纳事务的真实建立时间，当前初始user message/Run与conversation同事务使用DB now()产生；界面明确标为“按建立时间”，不冒充最近活跃排序。消息、Run集合分别按(created_at ASC,id ASC)。UUID用PG uuid比较作为确定tie-break。
+列表按 `(conversations.created_at DESC,id DESC)` 排序。建立时间由创建空对话的事务写入，与首次消息接受和最近活跃时间分开。消息和 Run 按 `(created_at ASC,id ASC)` 排序。时间相同时使用 PG UUID 稳定排序。
 
 last_activity_at取本人本会话可见user/assistant消息created_at与Run created_at/ended_at的最大值，无事实为null；不能取conversations.updated_at、内部snapshot时间或模型叙述。它表示最新已存消息/Run事实时间，不承诺每次状态转移都有独立更新时间。
 

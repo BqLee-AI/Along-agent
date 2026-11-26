@@ -67,7 +67,8 @@ if [[ "$scope" == full ]]; then
     scripts/test/local-goal-database.test.ts \
     scripts/test/local-direct-reminder-database.test.ts \
     scripts/test/local-invited-database.test.ts \
-    scripts/test/local-116-convergence.test.ts
+    scripts/test/local-116-convergence.test.ts \
+    scripts/test/local-personal-bot-database.test.ts
 else
   echo 'Skipping historical upgrade tests for API module changes'
 fi

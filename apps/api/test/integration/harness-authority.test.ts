@@ -1,3 +1,4 @@
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { expectApplicationRejection } from '../helpers/application-error.js';
 import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
 import { afterAll, beforeAll, describe, expect, it, spyOn } from 'bun:test';
@@ -212,6 +213,7 @@ maybe('harness durable authority against PostgreSQL', () => {
       actor.userId,
       randomUUID(),
       {
+        conversation_id: await createFixtureConversation(database.pool, actor.userId),
         execution: 'harness',
         raw_text: '2027-11-02 09:20 提醒我喝水',
         confirmed_timezone: 'Asia/Shanghai',
@@ -457,6 +459,7 @@ maybe('harness durable authority against PostgreSQL', () => {
       actor.userId,
       randomUUID(),
       {
+        conversation_id: await createFixtureConversation(database.pool, actor.userId),
         execution: 'harness',
         workspace_id: summary.workspace_id,
         raw_text: 'Replace Original with Updated in the brief.',
@@ -985,6 +988,7 @@ maybe('harness durable authority against PostgreSQL', () => {
       fixture.actor.userId,
       randomUUID(),
       {
+        conversation_id: fixture.context.conversationId,
         execution: 'harness',
         raw_text: fixture.context.inputText,
         confirmed_timezone: 'Asia/Shanghai',
@@ -2124,6 +2128,7 @@ maybe('harness durable authority against PostgreSQL', () => {
         actor.userId,
         randomUUID(),
         {
+          conversation_id: await createFixtureConversation(database.pool, actor.userId),
           execution: 'harness',
           authorization_revision: 'delegation/1',
           raw_text: 'Read my documents.',
@@ -2201,6 +2206,7 @@ maybe('harness durable authority against PostgreSQL', () => {
         { ...summary, owner_id: actor.userId, root: firstRoot },
         { ...summary, workspace_id: 'second', owner_id: actor.userId, root: secondRoot },
       ]);
+      const conversationId = await createFixtureConversation(database.pool, actor.userId);
       for (const invalid of [
         { execution: 'business', workspace_id: 'first' },
         { workspace_id: 'first' },
@@ -2213,6 +2219,7 @@ maybe('harness durable authority against PostgreSQL', () => {
             actor.userId,
             randomUUID(),
             {
+              conversation_id: conversationId,
               raw_text: 'Read the project.',
               ...invalid,
             },
@@ -2226,6 +2233,7 @@ maybe('harness durable authority against PostgreSQL', () => {
           outsider.userId,
           randomUUID(),
           {
+            conversation_id: await createFixtureConversation(database.pool, outsider.userId),
             execution: 'harness',
             workspace_id: 'first',
             raw_text: 'Read the project.',
@@ -2243,6 +2251,7 @@ maybe('harness durable authority against PostgreSQL', () => {
       ).toBe(0);
       const key = randomUUID();
       const body = {
+        conversation_id: conversationId,
         execution: 'harness',
         workspace_id: 'first',
         raw_text: 'Read the project.',
@@ -2301,7 +2310,7 @@ maybe('harness durable authority against PostgreSQL', () => {
       expect(requestHash).toBe(
         createHash('sha256')
           .update('harness/workspace/v2\0')
-          .update(JSON.stringify([null, body.raw_text, null, 'none', 'first']))
+          .update(JSON.stringify([conversationId, body.raw_text, null, 'none', 'first']))
           .digest('hex'),
       );
       await expectApplicationRejection(
@@ -2315,11 +2324,13 @@ maybe('harness durable authority against PostgreSQL', () => {
         { status: 409 },
       );
       const legacyKey = randomUUID();
+      const legacyConversationId = await createFixtureConversation(database.pool, actor.userId);
       const legacy = await startConversationRun(
         deps,
         actor.userId,
         randomUUID(),
         {
+          conversation_id: legacyConversationId,
           execution: 'harness',
           raw_text: 'Original five tools.',
           idempotency_key: legacyKey,
@@ -2341,7 +2352,7 @@ maybe('harness durable authority against PostgreSQL', () => {
       ).toBe(
         createHash('sha256')
           .update('harness/v1\0')
-          .update(JSON.stringify([null, 'Original five tools.', null, 'none']))
+          .update(JSON.stringify([legacyConversationId, 'Original five tools.', null, 'none']))
           .digest('hex'),
       );
       await configureWorkspaceRegistry([]);
@@ -2910,6 +2921,7 @@ maybe('harness durable authority against PostgreSQL', () => {
       fixture.actor.userId,
       randomUUID(),
       {
+        conversation_id: fixture.context.conversationId,
         execution: 'harness',
         raw_text: fixture.context.inputText,
         confirmed_timezone: 'Asia/Shanghai',

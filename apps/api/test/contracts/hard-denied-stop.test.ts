@@ -1,4 +1,5 @@
 import { configureTestModel, controlledModelDeps } from '../helpers/model-selection.js';
+import { createFixtureConversation } from '../helpers/bot-conversation.js';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
@@ -181,6 +182,7 @@ async function fresh(): Promise<ToolContext> {
     session.userId,
     randomUUID(),
     {
+      conversation_id: await createFixtureConversation(database.pool, session.userId),
       execution: 'harness',
       authorization_revision: 'delegation/1',
       raw_text: '保存默认时区',
@@ -297,6 +299,7 @@ for (const mode of ['local', 'http']) {
       const value: Scenario = { partial, requests: 0, denialSeen: false, receipt: null };
       scenarios.set(id, value);
       const input = {
+        conversation_id: await createFixtureConversation(database.pool, session.userId),
         execution: 'harness' as const,
         authorization_revision: 'delegation/1' as const,
         raw_text: `hardDeniedCase:${id} ${partial ? '先保存上海。' : ''}读取外部调用；若权限拒绝不得再设置纽约。`,

@@ -204,6 +204,7 @@ export async function contextOf(
     maxIterations: run.budget_max_iterations,
     maxTokens: run.budget_max_tokens,
     allowlist: run.tools_allowlist,
+    ...(frozen.personalBot ? { personalBot: frozen.personalBot } : {}),
     ...(frozen.autoCompactPolicy
       ? { autoCompactPolicy: AutoCompactPolicySchema.parse(frozen.autoCompactPolicy) }
       : {}),
@@ -252,9 +253,11 @@ export function readSnapshotObservations(
   client: PoolClient,
   context: RunContext,
   snapshot: Pick<HarnessSnapshot, 'tool_refs'>,
+  options?: { inspectOnly: true },
 ) {
   return readRunContextObservations(client, context, snapshot.tool_refs, {
     project: context.allowlist.includes('read_run_observation'),
+    ...options,
   });
 }
 

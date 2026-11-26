@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pg from 'pg';
 import { DeploymentDatabase } from '../local/database.mjs';
+import { copyMigrationsThrough } from './fixtures/migrations.js';
 
 const connectionString = process.env.DATABASE_URL;
 const databaseTests = connectionString ? describe : describe.skip;
@@ -149,18 +150,23 @@ databaseTests('trusted goal schema lifecycle admission against PG16', () => {
               )
             ).rows[0].value;
           });
-          await deployment(url, async (database) => {
-            expect(database.targetVersion).toBe('0041');
-            expect(await database.classify()).toMatchObject({
-              kind: 'supported',
-              version,
-              reason: 'explicit_upgrade_required',
-            });
-            await expect(database.initialize()).rejects.toMatchObject({
-              code: 'explicit_upgrade_required',
-            });
-            expect((await database.upgrade()).version).toBe('0041');
-          });
+          await copyMigrationsThrough(directory, '0041');
+          await deployment(
+            url,
+            async (database) => {
+              expect(database.targetVersion).toBe('0041');
+              expect(await database.classify()).toMatchObject({
+                kind: 'supported',
+                version,
+                reason: 'explicit_upgrade_required',
+              });
+              await expect(database.initialize()).rejects.toMatchObject({
+                code: 'explicit_upgrade_required',
+              });
+              expect((await database.upgrade()).version).toBe('0041');
+            },
+            directory,
+          );
           await sql(url, async (client) => {
             expect(
               (
@@ -213,14 +219,18 @@ databaseTests('trusted goal schema lifecycle admission against PG16', () => {
               CREATE EVENT TRIGGER goal_restart_readonly ON ddl_command_start EXECUTE FUNCTION goal_reject_restart_ddl()`);
           });
           for (let restart = 0; restart < 2; restart++) {
-            await deployment(url, async (database) => {
-              expect(await database.classify()).toMatchObject({
-                kind: 'supported',
-                version: '0041',
-              });
-              expect((await database.initialize()).version).toBe('0041');
-              expect((await database.upgrade()).version).toBe('0041');
-            });
+            await deployment(
+              url,
+              async (database) => {
+                expect(await database.classify()).toMatchObject({
+                  kind: 'supported',
+                  version: '0041',
+                });
+                expect((await database.initialize()).version).toBe('0041');
+                expect((await database.upgrade()).version).toBe('0041');
+              },
+              directory,
+            );
           }
         });
       } finally {
@@ -232,12 +242,24 @@ databaseTests('trusted goal schema lifecycle admission against PG16', () => {
   it('requires true delegated terminal facts rather than SQL NULL from missing legacy or goal keys', async () => {
     await isolated(async (url) => {
       await deployment(url, async (database) => {
-        expect((await database.initialize()).version).toBe('0041');
+        expect((await database.initialize()).version).toBe('0042');
       });
       await sql(url, async (client) => {
         const ownerId = randomUUID();
         const conversationId = randomUUID();
-        await client.query('INSERT INTO conversations(id,owner_id) VALUES($1,$2)', [
+        await client.query('INSERT INTO personal_bots(id,owner_id,config) VALUES($1,$1,$2)', [
+          ownerId,
+          {
+            name: 'Goal',
+            introduction: '',
+            role: '',
+            instructions: '',
+            model_selection: null,
+            tool_ids: [],
+            workspace_ids: [],
+          },
+        ]);
+        await client.query('INSERT INTO conversations(id,owner_id,bot_id) VALUES($1,$2,$2)', [
           conversationId,
           ownerId,
         ]);
@@ -382,7 +404,7 @@ databaseTests('trusted goal schema lifecycle admission against PG16', () => {
     async (_name, mutation) => {
       await isolated(async (url) => {
         await deployment(url, async (database) => {
-          expect((await database.initialize()).version).toBe('0041');
+          expect((await database.initialize()).version).toBe('0042');
         });
         await sql(url, async (client) => {
           await client.query(mutation);
@@ -431,7 +453,7 @@ databaseTests('trusted goal schema lifecycle admission against PG16', () => {
     async (_name, mutation) => {
       await isolated(async (url) => {
         await deployment(url, async (database) => {
-          expect((await database.initialize()).version).toBe('0041');
+          expect((await database.initialize()).version).toBe('0042');
         });
         let before: unknown;
         const snapshot = `SELECT jsonb_build_object(

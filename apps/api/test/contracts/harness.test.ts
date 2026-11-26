@@ -45,7 +45,7 @@ async function typedFailure(work: Promise<unknown>, status: number, code: string
 async function approval(mode: ConsumerMode) {
   const actor = await fixture.actor(mode);
   const id = randomUUID();
-  const body = fixture.input(id, 'create');
+  const body = await actor.createMessage(fixture.input(id, 'create'));
   const stream = await actor.message(body);
   const initial = await stream.events;
   const run = started(initial);
@@ -294,7 +294,8 @@ async function approval(mode: ConsumerMode) {
 async function rejected(mode: ConsumerMode) {
   const actor = await fixture.actor(mode);
   const id = randomUUID();
-  const initial = await (await actor.message(fixture.input(id, 'create'))).events;
+  const body = await actor.createMessage(fixture.input(id, 'create'));
+  const initial = await (await actor.message(body)).events;
   const run = started(initial);
   const approvalId = pending(initial);
   const waiting = await actor.view(run.conversation_id, run.run_id);
@@ -368,7 +369,7 @@ async function rejected(mode: ConsumerMode) {
 async function cancelHeld(actor: HarnessActor) {
   const id = randomUUID();
   const gate = fixture.gate(id);
-  const body = fixture.input(id, 'hold');
+  const body = await actor.createMessage(fixture.input(id, 'hold'));
   const stream = await actor.message(body);
   await gate.started.promise;
   const rows = await fixture.database.pool.query<{ id: string; conversation_id: string }>(
@@ -440,7 +441,7 @@ async function cancelled(mode: ConsumerMode) {
 async function replay(mode: ConsumerMode) {
   const actor = await fixture.actor(mode);
   const id = randomUUID();
-  const body = fixture.input(id, 'create');
+  const body = await actor.createMessage(fixture.input(id, 'create'));
   const initial = await (await actor.message(body)).events;
   const run = started(initial);
   const waiting = await actor.view(run.conversation_id, run.run_id);
@@ -476,7 +477,8 @@ async function replay(mode: ConsumerMode) {
 
 async function dto(mode: ConsumerMode) {
   const actor = await fixture.actor(mode);
-  const body = fixture.input(randomUUID(), 'create');
+  const withoutConversation = fixture.input(randomUUID(), 'create');
+  const body = await actor.createMessage(withoutConversation);
   const original = await fixture.facts(actor.ownerId);
   const transcript = structuredClone([...fixture.transcripts]);
   for (const authority of [
@@ -495,6 +497,7 @@ async function dto(mode: ConsumerMode) {
     );
   }
   for (const invalid of [
+    withoutConversation,
     { ...body, execution: 'native' },
     { ...body, execution: null },
     { ...body, conversation_id: 'not-a-uuid' },
@@ -518,14 +521,21 @@ async function dto(mode: ConsumerMode) {
   ])
     await typedFailure(actor.cancel(cid, rid, invalid), 400, 'VALIDATION_ERROR');
   if (mode === 'http') {
-    const forbidden = await fixture.request(actor, '/api/v1/conversations/messages', body, false);
-    expect(forbidden.status).toBe(403);
-    expect(forbidden.headers.get('content-type')).not.toContain('text/event-stream');
-    const envelope = EnvelopeSchema.parse(await forbidden.json());
-    expect(envelope.error).toMatchObject({
-      code: 'FORBIDDEN',
-      details: { reason: 'CSRF_MISMATCH' },
-    });
+    for (const input of [body, withoutConversation]) {
+      const forbidden = await fixture.request(
+        actor,
+        '/api/v1/conversations/messages',
+        input,
+        false,
+      );
+      expect(forbidden.status).toBe(403);
+      expect(forbidden.headers.get('content-type')).not.toContain('text/event-stream');
+      const envelope = EnvelopeSchema.parse(await forbidden.json());
+      expect(envelope.error).toMatchObject({
+        code: 'FORBIDDEN',
+        details: { reason: 'CSRF_MISMATCH' },
+      });
+    }
   }
   expect(await fixture.facts(actor.ownerId)).toEqual(original);
   expect([...fixture.transcripts]).toEqual(transcript);
@@ -534,7 +544,8 @@ async function dto(mode: ConsumerMode) {
 async function toolDenied(mode: ConsumerMode) {
   const actor = await fixture.actor(mode);
   const id = randomUUID();
-  const events = await (await actor.message(fixture.input(id, 'denied'))).events;
+  const body = await actor.createMessage(fixture.input(id, 'denied'));
+  const events = await (await actor.message(body)).events;
   const run = started(events);
   expect(events.filter((event) => event.type === 'thread.failed')).toHaveLength(1);
   expect(events.at(-1)).toMatchObject({
