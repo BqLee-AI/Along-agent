@@ -6,6 +6,7 @@ export interface ConversationLocation {
   conversationId: string | null;
   runId: string | null;
   initialIntent: TaskIntent | null;
+  newsEditionId?: string;
 }
 
 export const workspaceItems = [
@@ -16,7 +17,7 @@ export const workspaceItems = [
 ] as const;
 
 const protectedWorkspace =
-  /^\/(?:tasks|approvals|activity|document-approvals|account|models|memories|materials|profile|journal|skills|connectors|channels|devices|todos|settings)(?:\/|$)/;
+  /^\/(?:tasks|approvals|activity|document-approvals|account|models|memories|materials|profile|journal|skills|connectors|channels|devices|todos|settings|news)(?:\/|$)/;
 export function isWorkspacePath(pathname: string): boolean {
   return pathname === '/' || protectedWorkspace.test(pathname);
 }
@@ -36,18 +37,26 @@ export function shellLocation(pathname: string, search: string) {
   const conversation = query.getAll('conversation_id');
   const run = query.getAll('run_id');
   const bot = query.getAll('bot_id');
+  const news = query.getAll('news_edition_id');
   const explicit =
-    bot.length > 0 || conversation.length > 0 || run.length > 0 || pathname === '/conversations';
+    bot.length > 0 ||
+    conversation.length > 0 ||
+    run.length > 0 ||
+    news.length > 0 ||
+    pathname === '/conversations';
   const value = routeIdentity.safeParse({
     botId: bot[0] ?? null,
     conversationId: conversation[0] ?? null,
     runId: run[0] ?? null,
   });
+  const newsEditionId = uuid.safeParse(news[0]);
   const invalid =
     !value.success ||
     bot.length > 1 ||
     conversation.length > 1 ||
     run.length > 1 ||
+    news.length > 1 ||
+    (news.length > 0 && (!newsEditionId.success || conversation.length === 0)) ||
     (run.length > 0 && conversation.length === 0);
   const initialIntent: TaskIntent =
     query.get('intent') === 'document'
@@ -57,13 +66,17 @@ export function shellLocation(pathname: string, search: string) {
         : 'chat';
   const selection: ConversationLocation =
     value.success && !invalid
-      ? { ...value.data, initialIntent: value.data.conversationId ? null : initialIntent }
+      ? {
+          ...value.data,
+          initialIntent: value.data.conversationId ? null : initialIntent,
+          ...(newsEditionId.success ? { newsEditionId: newsEditionId.data } : {}),
+        }
       : { botId: null, conversationId: null, runId: null, initialIntent };
   return {
     explicit,
     invalid,
     selection,
-    identityKey: `${selection.botId ?? ''}:${selection.conversationId ?? ''}:${selection.runId ?? ''}:${selection.initialIntent ?? ''}`,
+    identityKey: `${selection.botId ?? ''}:${selection.conversationId ?? ''}:${selection.runId ?? ''}:${selection.initialIntent ?? ''}:${selection.newsEditionId ?? ''}`,
     workspaceOpen: pathname !== '/conversations' && query.get('surface') !== 'chat',
     authPage:
       /^\/(?:login|setup|claim|logout|invite|reset-password|verify-contact|forgot-password)(?:\/|$)/.test(
@@ -79,12 +92,14 @@ export function workspaceHref(href: string, selection: ConversationLocation): st
   if (
     !target.searchParams.has('bot_id') &&
     !target.searchParams.has('conversation_id') &&
-    !target.searchParams.has('run_id')
+    !target.searchParams.has('run_id') &&
+    !target.searchParams.has('news_edition_id')
   ) {
     if (selection.botId) target.searchParams.set('bot_id', selection.botId);
     if (selection.conversationId)
       target.searchParams.set('conversation_id', selection.conversationId);
     if (selection.runId) target.searchParams.set('run_id', selection.runId);
+    if (selection.newsEditionId) target.searchParams.set('news_edition_id', selection.newsEditionId);
     if (
       selection.initialIntent &&
       selection.initialIntent !== 'chat' &&

@@ -3,7 +3,6 @@ import {
   BookOpen,
   Cable,
   ListChecks,
-  MessagesSquare,
   Monitor,
   Sparkles,
   UserRound,
@@ -19,7 +18,6 @@ const icons: Record<Capability, LucideIcon> = {
   profile: UserRound,
   skills: Sparkles,
   connectors: Cable,
-  channels: MessagesSquare,
   devices: Monitor,
   todos: ListChecks,
 };

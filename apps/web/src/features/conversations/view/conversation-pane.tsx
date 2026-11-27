@@ -22,6 +22,7 @@ interface ConversationPaneProps {
   conversationId: string;
   runId: string | null;
   initialIntent: TaskIntent | null;
+  newsEditionId?: string;
   creatingConversation: boolean;
   header: (blockNewConversation: boolean) => ReactNode;
 }
@@ -31,6 +32,7 @@ export default function ConversationPane({
   conversationId,
   runId,
   initialIntent,
+  newsEditionId,
   creatingConversation,
   header,
 }: ConversationPaneProps) {
@@ -39,6 +41,7 @@ export default function ConversationPane({
     conversationId,
     runId,
     initialIntent,
+    newsEditionId,
     toolIds: bot.config.tool_ids,
     workspaceIds: bot.config.workspace_ids,
   });
@@ -238,6 +241,15 @@ export default function ConversationPane({
         data-testid="composer-dock"
       >
         <fieldset className="mx-auto w-full max-w-[720px]" disabled={creatingConversation}>
+          {task.pendingNewsEditionId ? (
+            <div className="mb-2 px-2 text-sm text-secondary-foreground">
+              首条消息将附上
+              <Link href={`/news/editions/${task.pendingNewsEditionId}`} className="mx-1 text-brand-ink underline">
+                本期新闻简报
+              </Link>
+              。
+            </div>
+          ) : null}
           <TaskComposer task={task} botName={bot.config.name} />
         </fieldset>
       </div>

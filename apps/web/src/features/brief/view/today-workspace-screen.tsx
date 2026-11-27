@@ -14,14 +14,22 @@ export function TodayWorkspaceScreen({ query }: { query: PageQuery }) {
       <PageHeading
         title="概览"
         actions={
-          <Link
-            href="/activity"
-            aria-label="活动记录"
-            title="活动记录"
-            className="inline-flex size-8 items-center justify-center rounded-control text-secondary-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring max-lg:size-11"
-          >
-            <History className="size-4" aria-hidden="true" />
-          </Link>
+          <>
+            <Link
+              href="/news"
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-control px-2 text-sm text-brand-ink hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring lg:min-h-8"
+            >
+              新闻订阅
+            </Link>
+            <Link
+              href="/activity"
+              aria-label="活动记录"
+              title="活动记录"
+              className="inline-flex size-8 items-center justify-center rounded-control text-secondary-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring max-lg:size-11"
+            >
+              <History className="size-4" aria-hidden="true" />
+            </Link>
+          </>
         }
       />
       <section aria-label="日期简报" className="min-w-0">

@@ -84,6 +84,7 @@ const PendingSendSchema = z.object({ text: z.string(), body: z.record(z.unknown(
 export interface ConversationTask {
   input: string;
   setInput: (value: string) => void;
+  pendingNewsEditionId: string | null;
   files: readonly ChatFile[];
   fileError: { message: string } | null;
   fileBlockedReason: string | null;
@@ -159,6 +160,7 @@ export function useConversationTask({
   conversationId,
   runId = null,
   initialIntent = 'chat',
+  newsEditionId,
   toolIds,
   workspaceIds,
 }: {
@@ -166,6 +168,7 @@ export function useConversationTask({
   conversationId: string;
   runId?: string | null;
   initialIntent?: TaskIntent | null;
+  newsEditionId?: string;
   toolIds: readonly string[];
   workspaceIds: readonly string[];
 }): ConversationTask {
@@ -199,6 +202,10 @@ export function useConversationTask({
 
   async function addFiles(incoming: readonly File[]) {
     if (!incoming.length || fileRead.current || busyRef.current || sendUncertain) return;
+    if (pendingNewsEditionId) {
+      setFileError({ message: '附上新闻简报的首条消息不能同时添加本地文件。' });
+      return;
+    }
     const read = new AbortController();
     fileRead.current = read;
     setReadingFiles(true);
@@ -233,6 +240,7 @@ export function useConversationTask({
   const [messages, setMessages] = useState<MessageHistoryItem[]>([]);
   const [runs, setRuns] = useState<ConversationRunHistoryItem[]>([]);
   const [historyReady, setHistoryReady] = useState(false);
+  const [newsAdmitted, setNewsAdmitted] = useState(false);
   const [liveReply, setLiveReply] = useState(false);
   const [liveOriginal, setLiveOriginal] = useState<string | null>(null);
   const [run, setRun] = useState<RunView | null>(null);
@@ -646,6 +654,11 @@ export function useConversationTask({
     }
   }
 
+  const pendingNewsEditionId =
+    newsEditionId && historyReady && !newsAdmitted && !messages.length && !runs.length
+      ? newsEditionId
+      : null;
+
   const active = conversationSendBlocked({
     busy: busy || stopping || Boolean(compactStatus && compactStatus.phase !== 'done'),
     reading,
@@ -672,7 +685,12 @@ export function useConversationTask({
       : intent === 'document' && !documentAllowed
         ? '此 Bot 没有获准使用已登记资料。'
         : null;
-  const blockedBeforeAdmission = fileBlockedReason ?? scopeBlockedReason;
+  const blockedBeforeAdmission =
+    fileBlockedReason ??
+    scopeBlockedReason ??
+    (pendingNewsEditionId && (intent !== 'chat' || files.length)
+      ? '附上新闻简报的首条消息需要使用普通对话，且不能添加本地文件。'
+      : null);
   const eligibility = blockedBeforeAdmission
     ? { allowed: false, reason: blockedBeforeAdmission }
     : taskSendEligibility({
@@ -828,6 +846,7 @@ export function useConversationTask({
             raw_text: text,
             ...(files.length ? { files } : {}),
             conversation_id: cid,
+            ...(pendingNewsEditionId ? { news_edition_id: pendingNewsEditionId } : {}),
             confirmed_timezone:
               proposal?.timezone_id ?? (intent === 'chat' ? undefined : me.confirmed_timezone),
             fold_choice: proposal ? foldChoice : undefined,
@@ -857,6 +876,7 @@ export function useConversationTask({
       setAmbiguousProposal(null);
       setSendUncertain(false);
       const submittedText = pending.text;
+      const submittedNews = Boolean(pending.body.news_edition_id);
       // Keep the submitted draft intact until the server accepts the request.
       const submittedFiles = ChatFilesSchema.safeParse(pending.body.files);
       const sentFiles = submittedFiles.success ? submittedFiles.data : [];
@@ -874,6 +894,7 @@ export function useConversationTask({
         submittedMessage,
         undefined,
         () => {
+          if (submittedNews) setNewsAdmitted(true);
           if (sameDraft) {
             setInput('');
             clearFiles();
@@ -1328,6 +1349,7 @@ export function useConversationTask({
     clearFiles();
     setIntent(initialIntent ?? 'chat');
     setHistoryReady(false);
+    if (!sameConversation) setNewsAdmitted(false);
     setReading(true);
     setStreaming(false);
     setAdmitting(false);
@@ -1552,6 +1574,7 @@ export function useConversationTask({
 
   return {
     input,
+    pendingNewsEditionId,
     files,
     fileError,
     fileBlockedReason,

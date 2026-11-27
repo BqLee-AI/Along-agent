@@ -179,7 +179,7 @@ describe('Bot navigation and settings over the Web proxy', () => {
   });
 });
 
-it('loads an empty existing conversation with GET and sends the first message only on explicit submit', async () => {
+it.each([undefined, secondCid])('loads an empty conversation and sends its first message only on explicit submit (edition %s)', async (newsEditionId) => {
   const browser = new Window({ url: `${base}${botHref(a, cid)}` });
   const globals = {
     window: browser,
@@ -213,7 +213,7 @@ it('loads an empty existing conversation with GET and sends the first message on
   const root = createRoot(document.createElement('div'));
   let task!: ConversationTask;
   function Consumer() {
-    task = useConversationTask({ botId: a, conversationId: cid, workspaceIds: [], toolIds: [] });
+    task = useConversationTask({ botId: a, conversationId: cid, newsEditionId, workspaceIds: [], toolIds: [] });
     return null;
   }
   try {
@@ -223,6 +223,7 @@ it('loads an empty existing conversation with GET and sends the first message on
     expect(task.reading).toBe(false);
     expect(task.messages).toEqual([]);
     expect(task.runs).toEqual([]);
+    expect(task.pendingNewsEditionId).toBe(newsEditionId ?? null);
     await act(async () => {
       task.setInput('第一条消息');
     });
@@ -233,6 +234,8 @@ it('loads an empty existing conversation with GET and sends the first message on
     expect(submitted).toHaveLength(1);
     expect(submitted[0]).toMatchObject({ conversation_id: cid, raw_text: '第一条消息' });
     expect(submitted[0]).not.toHaveProperty('model_selection');
+    if (newsEditionId) expect(submitted[0]).toHaveProperty('news_edition_id', newsEditionId);
+    else expect(submitted[0]).not.toHaveProperty('news_edition_id');
     expect(task.messages).toEqual([]);
     expect(task.sendUncertain).toBe(false);
     expect(task.eligibility.allowed).toBe(true);

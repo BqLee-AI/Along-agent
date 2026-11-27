@@ -36,6 +36,7 @@ export default function PersonalBotPane({
   conversationId,
   runId,
   initialIntent,
+  newsEditionId,
   headerActions,
   sidebar,
 }: ConversationLocation & {
@@ -173,6 +174,7 @@ export default function PersonalBotPane({
           conversationId={conversationId}
           runId={runId}
           initialIntent={newIntent?.id === conversationId ? newIntent.intent : initialIntent}
+          newsEditionId={newsEditionId}
           headerActions={headerActions}
           botControls={botControls}
           sidebar={sidebar}
@@ -307,6 +309,7 @@ function BotConversations({
   conversationId,
   runId,
   initialIntent,
+  newsEditionId,
   headerActions,
   botControls,
   sidebar,
@@ -316,6 +319,7 @@ function BotConversations({
   conversationId: string | null;
   runId: string | null;
   initialIntent: TaskIntent | null;
+  newsEditionId?: string;
   headerActions?: ReactNode;
   botControls: ReactNode;
   sidebar: boolean;
@@ -415,6 +419,7 @@ function BotConversations({
           conversationId={conversationId}
           runId={runId}
           initialIntent={initialIntent}
+          newsEditionId={newsEditionId}
           creatingConversation={creating}
           header={header}
         />

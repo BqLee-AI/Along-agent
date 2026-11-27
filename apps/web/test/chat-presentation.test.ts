@@ -18,6 +18,7 @@ function composerTask(overrides: Partial<ConversationTask> = {}): ConversationTa
   return {
     input: 'A real message',
     setInput() {},
+    pendingNewsEditionId: null,
     files: [],
     fileError: null,
     fileBlockedReason: null,
