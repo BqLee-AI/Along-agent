@@ -222,7 +222,7 @@
 
 ## 13. 每日新闻简报和微信绑定
 
-- `/channels/wechat` 支持读取和解除本人绑定，`POST /channels/wechat/pair` 启动限时配对，`POST /channels/wechat/poll` 接收配对 ID 和可选验证码，`POST /channels/wechat/test` 向当前绑定试发。配对材料和结果按本人会话读取。
+- `/channels/wechat` 支持读取和解除本人绑定，`POST /channels/wechat/pair` 启动限时配对，`POST /channels/wechat/poll` 接收配对 ID 和可选验证码。扫码确认后返回 `activation_required`，收到本人微信发来的「绑定」后返回 `bound`。`POST /channels/wechat/test` 向当前绑定试发。配对材料和结果按本人会话读取。
 - `GET` 和 `PUT /news/subscription` 读取和更新主题、可选地区、启用状态及微信绑定。响应含账户时区。发送时刻由 [design/25 §3](../design/25-daily-news-briefing.md#3-订阅与每日触发) 统一定义。
 - `GET /news/editions` 按日期倒序列出本人已发布的简报。`GET /news/editions/{id}` 加载原期内容及来源链接，独立返回采集与投递状态。
 - 首次向空的 Agent 会话发送消息可携带 `news_edition_id`。服务端检查期次归属，再将摘要及原文链接作为引用数据保存。

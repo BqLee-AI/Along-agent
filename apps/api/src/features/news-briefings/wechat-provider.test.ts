@@ -29,6 +29,34 @@ void test('iLink self binding follows a Tencent region redirect and submits the 
       ilink_bot_id: 'bot',
       ilink_user_id: 'recipient',
     }),
+    new Response(null, { status: 204 }),
+    Response.json({
+      get_updates_buf: 'next-cursor',
+      msgs: [
+        {
+          from_user_id: 'another-recipient',
+          message_type: 1,
+          context_token: 'foreign',
+          item_list: [{ type: 1, text_item: { text: '绑定' } }],
+        },
+        {
+          from_user_id: 'recipient',
+          message_type: 1,
+          context_token: 'unrelated',
+          item_list: [{ type: 1, text_item: { text: '你好' } }],
+        },
+      ],
+    }),
+    Response.json({
+      msgs: [
+        {
+          from_user_id: 'recipient',
+          message_type: 1,
+          context_token: 'activated',
+          item_list: [{ type: 1, text_item: { text: '绑定' } }],
+        },
+      ],
+    }),
   );
   const begun = await provider.begin();
   assert.match(begun.qrDataUrl, /^data:image\/png;base64,/);
@@ -38,10 +66,21 @@ void test('iLink self binding follows a Tencent region redirect and submits the 
   const pinRequired = await provider.poll(scanned.pairing);
   assert.equal(pinRequired.status, 'pin_required');
   assert.ok('pairing' in pinRequired);
-  const bound = await provider.poll(pinRequired.pairing, '0073');
-  assert.deepEqual(bound, {
+  const activation = await provider.poll(pinRequired.pairing, '0073');
+  assert.equal(activation.status, 'activation_required');
+  assert.ok('pairing' in activation);
+  const waiting = await provider.poll(activation.pairing);
+  assert.equal(waiting.status, 'activation_required');
+  assert.ok('pairing' in waiting);
+  assert.deepEqual(await provider.poll(waiting.pairing), {
     status: 'bound',
-    credential: { origin: regionOrigin, token, botId: 'bot', recipient: 'recipient' },
+    credential: {
+      origin: regionOrigin,
+      token,
+      botId: 'bot',
+      recipient: 'recipient',
+      contextToken: 'activated',
+    },
   });
   assert.equal(requests[0]?.url.href, `${defaultOrigin}/ilink/bot/get_bot_qrcode?bot_type=3`);
   assert.deepEqual(JSON.parse(String(requests[0]?.init?.body)), { local_token_list: [] });
@@ -51,6 +90,9 @@ void test('iLink self binding follows a Tencent region redirect and submits the 
   assert.equal(requests[2]?.url.searchParams.has('verify_code'), false);
   assert.equal(requests[3]?.url.searchParams.get('verify_code'), '0073');
   assert.equal(new Headers(requests[3]?.init?.headers).get('Authorization'), null);
+  assert.equal(requests[4]?.url.href, `${regionOrigin}/ilink/bot/msg/notifystart`);
+  assert.equal(requests[6]?.url.href, `${regionOrigin}/ilink/bot/getupdates`);
+  assert.equal(JSON.parse(String(requests[6]?.init?.body)).get_updates_buf, 'next-cursor');
 });
 
 void test('iLink will not send a QR secret to a host outside WeChat', async () => {
@@ -72,12 +114,21 @@ void test('iLink sends only to the bound recipient and distinguishes success, re
   try {
     const { provider, requests } = simulate(
       Response.json({ ret: 0 }),
+      Response.json({ message_id: '18446744073709551615' }),
+      Response.json({ message_id: 123456 }),
+      Response.json({ message_id: '0' }),
       Response.json({ ret: 0, errcode: -14 }),
       Response.json({}),
       new Response(null, { status: 502 }),
       new Error('connection closed'),
     );
-    const credential = { origin: defaultOrigin, token, botId: 'test-bot', recipient: 'recipient' };
+    const credential = {
+      origin: defaultOrigin,
+      token,
+      botId: 'test-bot',
+      recipient: 'recipient',
+      contextToken: 'activated',
+    };
     const ciphertext = sealWechatBinding('owner', 'binding', credential);
     for (const [owner, id, recipient] of [
       ['other', 'binding', 'recipient'],
@@ -96,7 +147,16 @@ void test('iLink sends only to the bound recipient and distinguishes success, re
       status: 'failed',
     });
     assert.equal(requests.length, 0);
-    for (const status of ['accepted', 'failed', 'unknown', 'unknown', 'unknown']) {
+    for (const status of [
+      'accepted',
+      'accepted',
+      'accepted',
+      'unknown',
+      'failed',
+      'unknown',
+      'unknown',
+      'unknown',
+    ]) {
       assert.deepEqual(await provider.send(ciphertext, 'owner', 'binding', 'recipient', 'News'), {
         status,
       });

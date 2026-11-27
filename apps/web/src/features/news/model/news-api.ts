@@ -13,7 +13,9 @@ const pair = z.object({
 });
 const poll = z.discriminatedUnion('status', [
   z.object({ status: z.literal('bound'), binding_id: uuid.optional() }),
-  z.object({ status: z.enum(['waiting', 'scanned', 'pin_required', 'expired']) }),
+  z.object({
+    status: z.enum(['waiting', 'scanned', 'pin_required', 'activation_required', 'expired']),
+  }),
 ]);
 const test = z.object({ status: z.enum(['accepted', 'failed', 'unknown']) });
 const preferences = z.object({

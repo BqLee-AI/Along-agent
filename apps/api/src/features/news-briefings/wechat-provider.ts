@@ -7,21 +7,31 @@ import { credentialKey, decryptCredential, encryptCredential } from '../model-pr
 const origin = 'https://ilinkai.weixin.qq.com';
 const channelVersion = '3.0.0';
 const appHeaders = { 'iLink-App-Id': 'bot', 'iLink-App-ClientVersion': '196608' };
-export const WECHAT_POLL_TIMEOUT_MS = 35_000;
+// Leave room for the start notification inside the Native Host's 35-second request.
+export const WECHAT_POLL_TIMEOUT_MS = 30_000;
 const requestTimeoutMs = 15_000;
-const pairingSchema = z.object({
-  qrcode: z.string().min(1).max(4096),
-  origin: z.string(),
-  status: z.enum(['waiting', 'scanned', 'pin_required']),
-});
 const credentialSchema = z.object({
   origin: z.string(),
   token: z.string().regex(/^[\x21-\x7e]+$/),
   botId: z.string().min(1),
   recipient: z.string().min(1),
 });
+const pairingSchema = z.discriminatedUnion('status', [
+  z.object({
+    qrcode: z.string().min(1).max(4096),
+    origin: z.string(),
+    status: z.enum(['waiting', 'scanned', 'pin_required']),
+  }),
+  z.object({
+    status: z.literal('activation_required'),
+    credential: credentialSchema,
+    cursor: z.string(),
+  }),
+]);
+const deliveryCredentialSchema = credentialSchema.extend({ contextToken: z.string().min(1) });
+const baseInfo = { channel_version: channelVersion, bot_agent: 'Along/1.0.0' };
 const qrResponseSchema = z.object({
-  qrcode: pairingSchema.shape.qrcode,
+  qrcode: z.string().min(1).max(4096),
   qrcode_img_content: z.string().min(1).max(2048),
 });
 const pollResponseSchema = z.object({
@@ -35,10 +45,11 @@ const pollResponseSchema = z.object({
 const receiptSchema = z.object({
   ret: z.number().int().optional(),
   errcode: z.number().int().optional(),
+  message_id: z.union([z.string(), z.number()]).optional(),
 });
 
 export type WechatPairing = z.infer<typeof pairingSchema>;
-type Credential = z.infer<typeof credentialSchema>;
+type Credential = z.infer<typeof deliveryCredentialSchema>;
 export type WechatPoll =
   | { status: WechatPairing['status']; pairing: WechatPairing }
   | { status: 'expired' }
@@ -80,6 +91,22 @@ function post(body: unknown, token?: string): RequestInit {
 
 type FetchWechat = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
+const updatesSchema = z.object({
+  ret: z.number().optional(),
+  errcode: z.number().optional(),
+  get_updates_buf: z.string().optional(),
+  msgs: z.array(z.unknown()).optional(),
+});
+const activationMessageSchema = z.object({
+  from_user_id: z.string(),
+  message_type: z.literal(1),
+  group_id: z.literal('').optional(),
+  context_token: z.string().min(1),
+  item_list: z.array(
+    z.object({ type: z.number(), text_item: z.object({ text: z.string() }).optional() }),
+  ),
+});
+
 export function createWechatProvider(fetcher: FetchWechat = (input, init) => fetch(input, init)) {
   return {
     async begin() {
@@ -102,6 +129,36 @@ export function createWechatProvider(fetcher: FetchWechat = (input, init) => fet
     async poll(pairing: WechatPairing, pin?: string): Promise<WechatPoll> {
       const unchanged = { status: pairing.status, pairing };
       try {
+        if (pairing.status === 'activation_required') {
+          const { credential, cursor } = pairing;
+          const response = await fetcher(
+            new URL('/ilink/bot/getupdates', trustedOrigin(credential.origin)),
+            post({ base_info: baseInfo, get_updates_buf: cursor }, credential.token),
+          );
+          if (!response.ok) return unchanged;
+          const updates = updatesSchema.parse(await response.json());
+          if (updates.ret === -14 || updates.errcode === -14) return { status: 'expired' };
+          if (updates.ret || updates.errcode) return unchanged;
+          for (const candidate of updates.msgs ?? []) {
+            const message = activationMessageSchema.safeParse(candidate);
+            if (
+              message.success &&
+              message.data.from_user_id === credential.recipient &&
+              message.data.item_list.some(
+                (item) => item.type === 1 && item.text_item?.text.trim() === '绑定',
+              )
+            ) {
+              return {
+                status: 'bound',
+                credential: { ...credential, contextToken: message.data.context_token },
+              };
+            }
+          }
+          return {
+            status: pairing.status,
+            pairing: { ...pairing, cursor: updates.get_updates_buf || cursor },
+          };
+        }
         const url = new URL('/ilink/bot/get_qrcode_status', trustedOrigin(pairing.origin));
         url.searchParams.set('qrcode', pairing.qrcode);
         if (pin !== undefined) url.searchParams.set('verify_code', pin);
@@ -138,9 +195,18 @@ export function createWechatProvider(fetcher: FetchWechat = (input, init) => fet
               botId: data.ilink_bot_id,
               recipient: data.ilink_user_id,
             });
-            return credential.success
-              ? { status: 'bound', credential: credential.data }
-              : { status: 'expired' };
+            if (!credential.success) return { status: 'expired' };
+            const value = credential.data;
+            await fetcher(new URL('/ilink/bot/msg/notifystart', trustedOrigin(value.origin)), {
+              ...post({ base_info: baseInfo }, value.token),
+              signal: AbortSignal.timeout(3000),
+            })
+              .then((response) => response.body?.cancel())
+              .catch(() => undefined);
+            return {
+              status: 'activation_required',
+              pairing: { status: 'activation_required', credential: value, cursor: '' },
+            };
           }
           default:
             return unchanged;
@@ -160,7 +226,7 @@ export function createWechatProvider(fetcher: FetchWechat = (input, init) => fet
       let url: URL;
       let init: RequestInit;
       try {
-        const credential = credentialSchema.parse(open('binding', owner, id, ciphertext));
+        const credential = deliveryCredentialSchema.parse(open('binding', owner, id, ciphertext));
         if (credential.recipient !== recipient) return { status: 'failed' };
         url = new URL('/ilink/bot/sendmessage', trustedOrigin(credential.origin));
         init = post(
@@ -171,9 +237,10 @@ export function createWechatProvider(fetcher: FetchWechat = (input, init) => fet
               client_id: `along-${randomUUID()}`,
               message_type: 2,
               message_state: 2,
+              context_token: credential.contextToken,
               item_list: [{ type: 1, text_item: { text } }],
             },
-            base_info: { channel_version: channelVersion, bot_agent: 'Along/1.0.0' },
+            base_info: baseInfo,
           },
           credential.token,
         );
@@ -187,11 +254,17 @@ export function createWechatProvider(fetcher: FetchWechat = (input, init) => fet
         if (!response.ok) return { status: 'unknown' };
         const receipt = receiptSchema.safeParse(await response.json());
         if (!receipt.success) return { status: 'unknown' };
-        const { ret, errcode } = receipt.data;
+        const { ret, errcode, message_id: messageId } = receipt.data;
         if ((ret !== undefined && ret !== 0) || (errcode !== undefined && errcode !== 0)) {
           return { status: 'failed' };
         }
-        return { status: ret === 0 ? 'accepted' : 'unknown' };
+        const hasMessageId =
+          typeof messageId === 'string'
+            ? /^[1-9][0-9]{0,19}$/.test(messageId)
+            : typeof messageId === 'number' && Number.isInteger(messageId) && messageId > 0;
+        return {
+          status: ret === 0 || errcode === 0 || hasMessageId ? 'accepted' : 'unknown',
+        };
       } catch {
         return { status: 'unknown' };
       }

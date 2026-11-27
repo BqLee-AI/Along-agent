@@ -25,6 +25,7 @@ const pairLabels: Record<PairStatus, string> = {
   waiting: '请用微信扫描二维码。',
   scanned: '已扫码，请在微信中确认绑定。',
   pin_required: '请输入微信中显示的验证码。',
+  activation_required: '请在刚连接的微信助手会话里发送一次「绑定」。',
   expired: '此二维码已过期，请重新获取。',
 };
 const testLabels: Record<WechatTestStatus, string> = {
@@ -78,7 +79,7 @@ export function WechatConnectionScreen() {
   }, []);
 
   const polling = Boolean(
-    pairing && !pollError && (pairStatus === 'waiting' || pairStatus === 'scanned'),
+    pairing && !pollError && pairStatus !== 'expired' && pairStatus !== 'pin_required',
   );
   useEffect(() => {
     if (!pairing || !polling) return;
@@ -90,7 +91,11 @@ export function WechatConnectionScreen() {
         const result = await pollWechat(pair_id, csrf, controller.signal);
         if (controller.signal.aborted) return;
         applyPoll(result);
-        if (result.status === 'waiting' || result.status === 'scanned') {
+        if (
+          result.status !== 'bound' &&
+          result.status !== 'expired' &&
+          result.status !== 'pin_required'
+        ) {
           timer = window.setTimeout(tick, 2000);
         }
       } catch (failure) {
@@ -190,7 +195,7 @@ export function WechatConnectionScreen() {
                 ? pairLabels[pairStatus]
                 : '未绑定'}
         </p>
-        {pairing && pairStatus !== 'expired' ? (
+        {pairing && pairStatus !== 'expired' && pairStatus !== 'activation_required' ? (
           <Image
             src={pairing.qr_data_url}
             alt="微信绑定二维码"
