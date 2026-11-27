@@ -1,4 +1,4 @@
-import { CapabilityScreen } from '@/features/capabilities/view/capability-screen';
+import { WechatConnectionScreen } from '@/features/capabilities/view/wechat-connection-screen';
 export default function ChannelsPage() {
-  return <CapabilityScreen capability="channels" />;
+  return <WechatConnectionScreen />;
 }

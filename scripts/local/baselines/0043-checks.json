@@ -1,0 +1,401 @@
+{
+  "version": "0043",
+  "tables": [
+    "news_deliveries",
+    "news_editions",
+    "news_subscriptions",
+    "news_wechat_bindings",
+    "news_wechat_pairings"
+  ],
+  "columns": [
+    {
+      "table": "news_deliveries",
+      "name": "edition_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "news_deliveries",
+      "name": "status",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "news_deliveries",
+      "name": "permitted_at",
+      "type": "timestamptz",
+      "required": true,
+      "default": "clock_timestamp()"
+    },
+    {
+      "table": "news_editions",
+      "name": "id",
+      "type": "uuid",
+      "required": true,
+      "default": "gen_random_uuid()"
+    },
+    {
+      "table": "news_editions",
+      "name": "owner_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "news_editions",
+      "name": "binding_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "news_editions",
+      "name": "local_date",
+      "type": "date",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "news_editions",
+      "name": "timezone_id",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "news_editions",
+      "name": "cutoff_at",
+      "type": "timestamptz",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "news_editions",
+      "name": "topics",
+      "type": "_text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "news_editions",
+      "name": "region",
+      "type": "text",
+      "required": false,
+      "default": ""
+    },
+    {
+      "table": "news_editions",
+      "name": "claim_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "news_editions",
+      "name": "lease_until",
+      "type": "timestamptz",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "news_editions",
+      "name": "coverage",
+      "type": "text",
+      "required": false,
+      "default": ""
+    },
+    {
+      "table": "news_editions",
+      "name": "items",
+      "type": "jsonb",
+      "required": false,
+      "default": ""
+    },
+    {
+      "table": "news_subscriptions",
+      "name": "owner_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "news_subscriptions",
+      "name": "binding_id",
+      "type": "uuid",
+      "required": false,
+      "default": ""
+    },
+    {
+      "table": "news_subscriptions",
+      "name": "topics",
+      "type": "_text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "news_subscriptions",
+      "name": "region",
+      "type": "text",
+      "required": false,
+      "default": ""
+    },
+    {
+      "table": "news_subscriptions",
+      "name": "enabled",
+      "type": "bool",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "news_subscriptions",
+      "name": "enabled_at",
+      "type": "timestamptz",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "news_wechat_bindings",
+      "name": "id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "news_wechat_bindings",
+      "name": "owner_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "news_wechat_bindings",
+      "name": "platform_user_id",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "news_wechat_bindings",
+      "name": "credential_ciphertext",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "news_wechat_bindings",
+      "name": "revoked_at",
+      "type": "timestamptz",
+      "required": false,
+      "default": ""
+    },
+    {
+      "table": "news_wechat_pairings",
+      "name": "owner_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "news_wechat_pairings",
+      "name": "id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "news_wechat_pairings",
+      "name": "secret_ciphertext",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "news_wechat_pairings",
+      "name": "expires_at",
+      "type": "timestamptz",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "news_wechat_pairings",
+      "name": "poll_lease_id",
+      "type": "uuid",
+      "required": false,
+      "default": ""
+    },
+    {
+      "table": "news_wechat_pairings",
+      "name": "poll_lease_expires_at",
+      "type": "timestamptz",
+      "required": false,
+      "default": ""
+    }
+  ],
+  "constraints": [
+    {
+      "name": "news_deliveries_edition_id_fkey",
+      "type": "f",
+      "table": "news_deliveries",
+      "target": "news_editions",
+      "columns": ["edition_id"],
+      "delete_action": "a",
+      "target_columns": ["id"]
+    },
+    {
+      "name": "news_deliveries_pkey",
+      "type": "p",
+      "table": "news_deliveries",
+      "columns": ["edition_id"]
+    },
+    {
+      "name": "news_deliveries_status_check",
+      "type": "c",
+      "table": "news_deliveries",
+      "columns": ["status"],
+      "expression": "(status = ANY (ARRAY['sending'::text, 'accepted'::text, 'failed'::text, 'unknown'::text, 'skipped'::text]))"
+    },
+    {
+      "name": "news_editions_check",
+      "type": "c",
+      "table": "news_editions",
+      "columns": ["coverage", "items"],
+      "expression": "((coverage IS NULL) = (items IS NULL))"
+    },
+    {
+      "name": "news_editions_coverage_check",
+      "type": "c",
+      "table": "news_editions",
+      "columns": ["coverage"],
+      "expression": "(coverage = ANY (ARRAY['complete'::text, 'partial'::text, 'failed'::text]))"
+    },
+    {
+      "name": "news_editions_owner_id_binding_id_fkey",
+      "type": "f",
+      "table": "news_editions",
+      "target": "news_wechat_bindings",
+      "columns": ["owner_id", "binding_id"],
+      "delete_action": "a",
+      "target_columns": ["owner_id", "id"]
+    },
+    {
+      "name": "news_editions_owner_id_fkey",
+      "type": "f",
+      "table": "news_editions",
+      "target": "news_subscriptions",
+      "columns": ["owner_id"],
+      "delete_action": "a",
+      "target_columns": ["owner_id"]
+    },
+    {
+      "name": "news_editions_owner_id_id_key",
+      "type": "u",
+      "table": "news_editions",
+      "columns": ["owner_id", "id"]
+    },
+    {
+      "name": "news_editions_owner_id_local_date_key",
+      "type": "u",
+      "table": "news_editions",
+      "columns": ["owner_id", "local_date"]
+    },
+    {
+      "name": "news_editions_pkey",
+      "type": "p",
+      "table": "news_editions",
+      "columns": ["id"]
+    },
+    {
+      "name": "news_subscriptions_check",
+      "type": "c",
+      "table": "news_subscriptions",
+      "columns": ["enabled", "binding_id"],
+      "expression": "((NOT enabled) OR (binding_id IS NOT NULL))"
+    },
+    {
+      "name": "news_subscriptions_owner_id_binding_id_fkey",
+      "type": "f",
+      "table": "news_subscriptions",
+      "target": "news_wechat_bindings",
+      "columns": ["owner_id", "binding_id"],
+      "delete_action": "a",
+      "target_columns": ["owner_id", "id"]
+    },
+    {
+      "name": "news_subscriptions_owner_id_fkey",
+      "type": "f",
+      "table": "news_subscriptions",
+      "target": "users",
+      "columns": ["owner_id"],
+      "delete_action": "a",
+      "target_columns": ["id"]
+    },
+    {
+      "name": "news_subscriptions_pkey",
+      "type": "p",
+      "table": "news_subscriptions",
+      "columns": ["owner_id"]
+    },
+    {
+      "name": "news_wechat_bindings_owner_id_fkey",
+      "type": "f",
+      "table": "news_wechat_bindings",
+      "target": "users",
+      "columns": ["owner_id"],
+      "delete_action": "a",
+      "target_columns": ["id"]
+    },
+    {
+      "name": "news_wechat_bindings_owner_id_id_key",
+      "type": "u",
+      "table": "news_wechat_bindings",
+      "columns": ["owner_id", "id"]
+    },
+    {
+      "name": "news_wechat_bindings_pkey",
+      "type": "p",
+      "table": "news_wechat_bindings",
+      "columns": ["id"]
+    },
+    {
+      "name": "news_wechat_pairings_id_key",
+      "type": "u",
+      "table": "news_wechat_pairings",
+      "columns": ["id"]
+    },
+    {
+      "name": "news_wechat_pairings_owner_id_fkey",
+      "type": "f",
+      "table": "news_wechat_pairings",
+      "target": "users",
+      "columns": ["owner_id"],
+      "delete_action": "a",
+      "target_columns": ["id"]
+    },
+    {
+      "name": "news_wechat_pairings_pkey",
+      "type": "p",
+      "table": "news_wechat_pairings",
+      "columns": ["owner_id"]
+    }
+  ],
+  "indexes": [
+    {
+      "table": "news_wechat_bindings",
+      "name": "news_wechat_active_owner_idx",
+      "method": "btree",
+      "unique": true,
+      "keys": ["owner_id"],
+      "predicate": "(revoked_at IS NULL)"
+    },
+    {
+      "table": "news_wechat_bindings",
+      "name": "news_wechat_active_recipient_idx",
+      "method": "btree",
+      "unique": true,
+      "keys": ["platform_user_id"],
+      "predicate": "(revoked_at IS NULL)"
+    }
+  ]
+}

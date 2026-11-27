@@ -5,8 +5,10 @@ import std.time.MonoTime
 func runWorker(call: (String, String) -> Bool, workerId: String, stopping: () -> Bool): Unit {
     let due = MonoTime.now() + 30 * Duration.second
     let mail = spawn { runWorkerPhases(call, workerId, stopping, ["identity-mail"], due) }
+    let news = spawn { runWorkerPhases(call, workerId, stopping, ["news"], due) }
     runWorkerPhases(call, workerId, stopping, ["cancel", "schedule", "claim", "send", "ack", "missed"], due)
     mail.get()
+    news.get()
 }
 
 func runWorkerPhases(call: (String, String) -> Bool, workerId: String, stopping: () -> Bool,

@@ -19,6 +19,8 @@ import { createApprovalController, approvalWriteScopes } from '../features/appro
 import { botWriteScopes, createBotController } from '../features/bots/controller.js';
 import { createTaskController, taskWriteScopes } from '../features/tasks/controller.js';
 import { createMemoryController, memoryWriteScopes } from '../features/memory/controller.js';
+import { createNewsController } from '../features/news-briefings/controller.js';
+import { createWechatController } from '../features/news-briefings/wechat-controller.js';
 import { createFeishuController } from '../features/office-connectors/controller.js';
 import {
   createConversationController,
@@ -38,6 +40,8 @@ export function createApp(deps: AppDeps) {
   const access = createAccess(deps);
   const timeContext = deps.timeContext ?? loadTimeContext(deps.tzdbVersion);
   const writeScopes = [
+    '/api/v1/channels/wechat',
+    '/api/v1/news',
     ...modelProviderWriteScopes,
     ...approvalWriteScopes,
     ...taskWriteScopes,
@@ -52,16 +56,20 @@ export function createApp(deps: AppDeps) {
         set.headers['x-request-id'] = access.requestId(request);
         set.headers['cache-control'] = 'no-store';
         const pathname = new URL(request.url).pathname;
-        if (request.method !== 'GET' && request.method !== 'POST')
+        const newsWrite =
+          (request.method === 'PUT' && pathname === '/api/v1/news/subscription') ||
+          (request.method === 'DELETE' && pathname === '/api/v1/channels/wechat');
+        if (!newsWrite && request.method !== 'GET' && request.method !== 'POST')
           return unsupportedMethod(request, !!deps.pool, access);
         if (
-          request.method === 'POST' &&
-          (pathname === modelSelectionWritePath ||
-            writeScopes.some((scope) =>
-              scope.endsWith('/')
-                ? pathname.startsWith(scope)
-                : pathname === scope || pathname.startsWith(scope + '/'),
-            ))
+          newsWrite ||
+          (request.method === 'POST' &&
+            (pathname === modelSelectionWritePath ||
+              writeScopes.some((scope) =>
+                scope.endsWith('/')
+                  ? pathname.startsWith(scope)
+                  : pathname === scope || pathname.startsWith(scope + '/'),
+              )))
         )
           await access.admitWrite(request);
       })
@@ -97,6 +105,8 @@ export function createApp(deps: AppDeps) {
       .use(createTaskController({ pool: deps.pool }, access))
       .use(createMemoryController(deps.memoryService, access))
       .use(createFeishuController(deps.pool, access))
+      .use(createNewsController(deps.pool, access))
+      .use(createWechatController(deps.pool, access))
       .use(
         createConversationController(
           {

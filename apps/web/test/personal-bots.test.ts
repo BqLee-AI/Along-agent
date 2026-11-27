@@ -179,71 +179,83 @@ describe('Bot navigation and settings over the Web proxy', () => {
   });
 });
 
-it('loads an empty existing conversation with GET and sends the first message only on explicit submit', async () => {
-  const browser = new Window({ url: `${base}${botHref(a, cid)}` });
-  const globals = {
-    window: browser,
-    document: browser.document,
-    navigator: browser.navigator,
-    location: browser.location,
-    sessionStorage: browser.sessionStorage,
-    IS_REACT_ACT_ENVIRONMENT: true,
-  };
-  const original = new Map(
-    Object.keys(globals).map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]),
-  );
-  for (const [key, value] of Object.entries(globals))
-    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
-  const oldFetch = globalThis.fetch;
-  const submitted: Record<string, unknown>[] = [];
-  globalThis.fetch = (async (input, init) => {
-    const url = new URL(String(input), base);
-    if (init?.method === 'POST' && url.pathname === '/api/v1/conversations/messages') {
-      submitted.push(JSON.parse(String(init.body)));
-      return rejected(403, 'FORBIDDEN');
+it.each([undefined, secondCid])(
+  'loads an empty conversation and sends its first message only on explicit submit (edition %s)',
+  async (newsEditionId) => {
+    const browser = new Window({ url: `${base}${botHref(a, cid)}` });
+    const globals = {
+      window: browser,
+      document: browser.document,
+      navigator: browser.navigator,
+      location: browser.location,
+      sessionStorage: browser.sessionStorage,
+      IS_REACT_ACT_ENVIRONMENT: true,
+    };
+    const original = new Map(
+      Object.keys(globals).map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]),
+    );
+    for (const [key, value] of Object.entries(globals))
+      Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+    const oldFetch = globalThis.fetch;
+    const submitted: Record<string, unknown>[] = [];
+    globalThis.fetch = (async (input, init) => {
+      const url = new URL(String(input), base);
+      if (init?.method === 'POST' && url.pathname === '/api/v1/conversations/messages') {
+        submitted.push(JSON.parse(String(init.body)));
+        return rejected(403, 'FORBIDDEN');
+      }
+      if (url.pathname === '/api/v1/me') return ok(me);
+      if (
+        url.pathname === `/api/v1/conversations/${cid}/runs` ||
+        url.pathname === `/api/v1/conversations/${cid}/messages`
+      )
+        return ok(empty);
+      throw new Error(`unexpected request: ${url}`);
+    }) as typeof fetch;
+    const root = createRoot(document.createElement('div'));
+    let task!: ConversationTask;
+    function Consumer() {
+      task = useConversationTask({
+        botId: a,
+        conversationId: cid,
+        newsEditionId,
+        workspaceIds: [],
+        toolIds: [],
+      });
+      return null;
     }
-    if (url.pathname === '/api/v1/me') return ok(me);
-    if (
-      url.pathname === `/api/v1/conversations/${cid}/runs` ||
-      url.pathname === `/api/v1/conversations/${cid}/messages`
-    )
-      return ok(empty);
-    throw new Error(`unexpected request: ${url}`);
-  }) as typeof fetch;
-  const root = createRoot(document.createElement('div'));
-  let task!: ConversationTask;
-  function Consumer() {
-    task = useConversationTask({ botId: a, conversationId: cid, workspaceIds: [], toolIds: [] });
-    return null;
-  }
-  try {
-    await act(async () => {
-      root.render(createElement(Consumer));
-    });
-    expect(task.reading).toBe(false);
-    expect(task.messages).toEqual([]);
-    expect(task.runs).toEqual([]);
-    await act(async () => {
-      task.setInput('第一条消息');
-    });
-    expect(submitted).toEqual([]);
-    await act(async () => {
-      await task.send();
-    });
-    expect(submitted).toHaveLength(1);
-    expect(submitted[0]).toMatchObject({ conversation_id: cid, raw_text: '第一条消息' });
-    expect(submitted[0]).not.toHaveProperty('model_selection');
-    expect(task.messages).toEqual([]);
-    expect(task.sendUncertain).toBe(false);
-    expect(task.eligibility.allowed).toBe(true);
-  } finally {
-    await act(async () => {
-      root.unmount();
-    });
-    globalThis.fetch = oldFetch;
-    for (const [key, descriptor] of original)
-      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
-      else Reflect.deleteProperty(globalThis, key);
-    await browser.happyDOM.close();
-  }
-});
+    try {
+      await act(async () => {
+        root.render(createElement(Consumer));
+      });
+      expect(task.reading).toBe(false);
+      expect(task.messages).toEqual([]);
+      expect(task.runs).toEqual([]);
+      expect(task.pendingNewsEditionId).toBe(newsEditionId ?? null);
+      await act(async () => {
+        task.setInput('第一条消息');
+      });
+      expect(submitted).toEqual([]);
+      await act(async () => {
+        await task.send();
+      });
+      expect(submitted).toHaveLength(1);
+      expect(submitted[0]).toMatchObject({ conversation_id: cid, raw_text: '第一条消息' });
+      expect(submitted[0]).not.toHaveProperty('model_selection');
+      if (newsEditionId) expect(submitted[0]).toHaveProperty('news_edition_id', newsEditionId);
+      else expect(submitted[0]).not.toHaveProperty('news_edition_id');
+      expect(task.messages).toEqual([]);
+      expect(task.sendUncertain).toBe(false);
+      expect(task.eligibility.allowed).toBe(true);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      globalThis.fetch = oldFetch;
+      for (const [key, descriptor] of original)
+        if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+        else Reflect.deleteProperty(globalThis, key);
+      await browser.happyDOM.close();
+    }
+  },
+);

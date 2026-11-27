@@ -9,6 +9,8 @@ import { botWriteScopes, createBotController } from '../features/bots/controller
 import { createBriefController } from '../features/brief/controller.js';
 import { createMemoryController, memoryWriteScopes } from '../features/memory/controller.js';
 import { createModelProviderController } from '../features/model-providers/http/controller.js';
+import { createNewsController } from '../features/news-briefings/controller.js';
+import { createWechatController } from '../features/news-briefings/wechat-controller.js';
 import { createFeishuController } from '../features/office-connectors/controller.js';
 import { createTaskController, taskWriteScopes } from '../features/tasks/controller.js';
 import { loadTimeContext } from '../features/time/public.js';
@@ -22,8 +24,12 @@ const productScopes = [
   '/api/v1/tasks',
   '/api/v1/memories',
   '/api/v1/office/feishu/bot',
+  '/api/v1/channels/wechat',
+  '/api/v1/news',
 ];
 const writeScopes = [
+  '/api/v1/channels/wechat',
+  '/api/v1/news',
   ...approvalWriteScopes,
   ...taskWriteScopes,
   ...memoryWriteScopes,
@@ -45,13 +51,17 @@ export function createHostProductRoutes(deps: AppDeps) {
       set.headers['x-request-id'] = id;
       set.headers['cache-control'] = 'no-store';
       const pathname = new URL(request.url).pathname;
-      if (request.method !== 'GET' && request.method !== 'POST') {
+      const newsWrite =
+        (request.method === 'PUT' && pathname === '/api/v1/news/subscription') ||
+        (request.method === 'DELETE' && pathname === '/api/v1/channels/wechat');
+      if (!newsWrite && request.method !== 'GET' && request.method !== 'POST') {
         const error = await unmatchedError(request, !!deps.pool, access);
         return jsonResponse(httpStatusForError(error.code), failEnvelope(error, id), id);
       }
       if (
-        request.method === 'POST' &&
-        (pathname === summaryPath || writeScopes.some((scope) => withinScope(pathname, scope)))
+        newsWrite ||
+        (request.method === 'POST' &&
+          (pathname === summaryPath || writeScopes.some((scope) => withinScope(pathname, scope))))
       )
         await access.admitWrite(request);
     })
@@ -68,6 +78,8 @@ export function createHostProductRoutes(deps: AppDeps) {
     .use(createWorkspaceController(access))
     .use(createMemoryController(deps.memoryService, access))
     .use(createFeishuController(deps.pool, access))
+    .use(createNewsController(deps.pool, access))
+    .use(createWechatController(deps.pool, access))
     .use(
       createModelProviderController(
         { pool: deps.pool, modelTransport: deps.modelTransport },

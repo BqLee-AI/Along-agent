@@ -23,12 +23,6 @@ export const capabilities = {
     boundary: '这个功能还在准备中，现在不会向任何应用请求授权。',
     related: [],
   },
-  channels: {
-    title: '聊天工具',
-    description: '在其他聊天工具里也能和 Along 对话。',
-    boundary: '这个功能还在准备中，现在还不能绑定任何聊天工具。',
-    related: [],
-  },
   devices: {
     title: '设备',
     description: '把你的电脑或手机连给 Along。',

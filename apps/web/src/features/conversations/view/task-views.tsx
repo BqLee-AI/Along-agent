@@ -828,7 +828,8 @@ export function TaskComposer({ task, botName }: { task: ConversationTask; botNam
                   className="chat-composer-tool shrink-0 rounded-full border-0 bg-none! shadow-none!"
                 />
               }
-              disabled={task.active}
+              disabled={task.active || Boolean(task.pendingNewsEditionId)}
+              title={task.pendingNewsEditionId ? '发送简报后可添加文件或工具' : undefined}
               aria-label="添加文件或工具"
               data-testid="chat-tools"
             >

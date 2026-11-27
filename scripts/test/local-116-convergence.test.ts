@@ -197,8 +197,8 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
   it('initializes an empty database at the converged version', async () => {
     await isolated(async (url) => {
       await deployment(url, async (db) => {
-        expect((await db.initialize()).version).toBe('0042');
-        expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0042' });
+        expect((await db.initialize()).version).toBe('0043');
+        expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0043' });
       });
       await sql(url, async (client) => {
         expect(
@@ -230,6 +230,7 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
           '0040',
           '0041',
           '0042',
+          '0043',
         ]);
       });
     });
@@ -253,8 +254,8 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
         );
         await deployment(url, async (db) => {
           expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0028' });
-          expect((await db.upgrade()).version).toBe('0042');
-          expect((await db.initialize()).version).toBe('0042');
+          expect((await db.upgrade()).version).toBe('0043');
+          expect((await db.initialize()).version).toBe('0043');
         });
         await sql(url, async (client) => {
           await client.query(
@@ -317,8 +318,8 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
         });
         await deployment(url, async (db) => {
           expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0037' });
-          expect((await db.upgrade()).version).toBe('0042');
-          expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0042' });
+          expect((await db.upgrade()).version).toBe('0043');
+          expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0043' });
         });
         await sql(url, async (client) => {
           expect((await client.query('SELECT * FROM model_provider_defaults')).rows).toEqual(
@@ -395,7 +396,7 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
   }, 30000);
 
   for (const history of ['main', 'legacy'] as const) {
-    const target = history === 'legacy' ? '0041' : '0042';
+    const target = history === 'legacy' ? '0041' : '0043';
     it(`upgrades the actual ${history} migration history without rewriting facts or granting ordinary accounts admission`, async () => {
       await isolated(async (url) => {
         const ids = await historical(url, history);
@@ -455,7 +456,7 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
             '0039',
             '0040',
             '0041',
-            ...(history === 'legacy' ? [] : ['0042']),
+            ...(history === 'legacy' ? [] : ['0042', '0043']),
           ]);
         });
         await deployment(

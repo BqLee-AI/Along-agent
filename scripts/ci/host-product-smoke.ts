@@ -49,6 +49,7 @@ await writeFile(
   ]),
 );
 let documentCalls = 0;
+let modelSawNewsEdition = false;
 let approvalId: string;
 const apiOrigin = 'http://127.0.0.1:3002';
 const appOrigin = 'http://localhost:3000';
@@ -56,6 +57,13 @@ const proxyToken = randomUUID().replaceAll('-', '') + randomUUID().replaceAll('-
 const upstream = createServer(async (request, response) => {
   try {
     const { messages } = (await jsonBody(request)) as { messages: { content?: string }[] };
+    if (messages.some(({ content }) => content?.includes('News discussion fixture.'))) {
+      modelSawNewsEdition = messages.some(
+        ({ content }) =>
+          content?.includes('Native news edition summary') &&
+          content.includes('https://example.org/news-edition'),
+      );
+    }
     if (!messages.some(({ content }) => content?.includes('Document approval fixture'))) {
       sendModelSse(response, {
         message: { content: '会议摘要：周五确认交付。', tool_calls: [] },
@@ -312,6 +320,56 @@ try {
     assert.match(response.headers.get('content-type') ?? '', /^text\/event-stream/);
     return frames(text);
   }
+  const bindingId = randomUUID();
+  const editionId = randomUUID();
+  await database.pool.query(
+    `INSERT INTO news_wechat_bindings(id,owner_id,platform_user_id,credential_ciphertext)
+     VALUES ($1,$2,'native-news-fixture','unused')`,
+    [bindingId, owner.userId],
+  );
+  await database.pool.query(
+    `INSERT INTO news_subscriptions VALUES ($1,$2,ARRAY['科技'],NULL,false,clock_timestamp())`,
+    [owner.userId, bindingId],
+  );
+  await database.pool.query(
+    `INSERT INTO news_editions(id,owner_id,binding_id,local_date,timezone_id,cutoff_at,topics,
+         claim_id,lease_until,coverage,items)
+     VALUES ($1,$2,$3,'2026-11-26','Asia/Shanghai',clock_timestamp(),ARRAY['科技'],
+         gen_random_uuid(),clock_timestamp(),'complete',$4)`,
+    [
+      editionId,
+      owner.userId,
+      bindingId,
+      JSON.stringify([
+        {
+          section: 'topic',
+          summary: 'Native news edition summary',
+          sources: [{ name: 'Fixture publisher', url: 'https://example.org/news-edition' }],
+        },
+      ]),
+    ],
+  );
+  const { conversation_id: newsConversationId } = await request(
+    `${botPath}/conversations`,
+    {},
+    200,
+    randomUUID(),
+  );
+  started(
+    await stream('/conversations/messages', {
+      conversation_id: newsConversationId,
+      execution: 'harness',
+      authorization_revision: 'delegation/1',
+      raw_text: 'News discussion fixture. Summarize the edition.',
+      news_edition_id: editionId,
+    }),
+  );
+  assert.equal(
+    modelSawNewsEdition,
+    true,
+    'first send did not pass the frozen news edition to the model',
+  );
+
   const proposal = await stream('/conversations/messages', {
     conversation_id: documentConversationId,
     execution: 'harness',

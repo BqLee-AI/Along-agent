@@ -6,6 +6,7 @@ import {
 import { createHash, randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import {
+  chatMessageLimit,
   encodeChatMessage,
   TrustedExecutionContextSchema,
   type ExecutionKind,
@@ -81,6 +82,7 @@ import {
   suppliedFeishuDocxUrl,
 } from '../../features/office-connectors/public.js';
 import { lockPersonalBot } from '../../features/bots/public.js';
+import { readEdition } from '../../features/news-briefings/public.js';
 
 const BUSINESS_MAX_ITERATIONS = 10;
 const BUSINESS_MAX_TOKENS = 8000;
@@ -107,6 +109,7 @@ function requestHashOf(input: {
   clarificationOfRunId?: string;
   authorizationRevision?: 'delegation/1';
   modelSelection?: { provider_id: string; model_id: string };
+  newsEditionId?: string;
 }): string {
   const material: unknown[] = [
     input.conversationId ?? null,
@@ -118,6 +121,7 @@ function requestHashOf(input: {
   if (input.workspaceId !== undefined) material.push(input.workspaceId);
   if (input.workspaceIds !== undefined) material.push([...input.workspaceIds].sort());
   if (input.clarificationOfRunId !== undefined) material.push(input.clarificationOfRunId);
+  if (input.newsEditionId) material.push({ news_edition_id: input.newsEditionId });
   if (input.authorizationRevision) material.push(input.authorizationRevision);
   if (input.modelSelection !== undefined)
     material.push({
@@ -158,12 +162,12 @@ export async function startConversationRun(
   const input = parsed.data;
   const execution = input.execution ?? 'business';
   const text = textOf(input);
-  const content = encodeChatMessage(text, input.files ?? []);
+  const requestContent = encodeChatMessage(text, input.files ?? []);
   const timezone = input.confirmed_timezone_id ?? input.confirmed_timezone ?? null;
   const key = idempotencyKeyHeader ?? input.idempotency_key ?? requestId;
   const requestHash = requestHashOf({
     conversationId: input.conversation_id,
-    text: input.files ? content : text,
+    text: input.files ? requestContent : text,
     ...(input.files ? { hasFiles: true } : {}),
     timezone,
     fold: input.fold_choice,
@@ -174,6 +178,7 @@ export async function startConversationRun(
       : {}),
     ...(input.workspace_id !== undefined ? { workspaceId: input.workspace_id } : {}),
     ...(input.workspace_ids !== undefined ? { workspaceIds: input.workspace_ids } : {}),
+    ...(input.news_edition_id ? { newsEditionId: input.news_edition_id } : {}),
     ...(input.clarification_of_run_id
       ? { clarificationOfRunId: input.clarification_of_run_id }
       : {}),
@@ -273,6 +278,29 @@ export async function startConversationRun(
         [conversation.id],
       );
       if (locked.rows[0]?.status !== 'open') throw stateConflict('conversation closed');
+      let content = requestContent;
+      if (input.news_edition_id) {
+        if (execution !== 'harness' || !delegation || input.files || input.clarification_of_run_id)
+          throw validationError('news edition requires a new standalone Agent conversation');
+        const existingMessages = await client.query(
+          'SELECT 1 FROM messages WHERE conversation_id=$1 LIMIT 1',
+          [conversation.id],
+        );
+        if (existingMessages.rowCount) throw stateConflict('news discussion has already started');
+        const edition = await readEdition(client, ownerId, input.news_edition_id);
+        content = encodeChatMessage(text, [
+          {
+            name: `新闻简报 ${edition.local_date}.json`,
+            text: JSON.stringify({
+              date: edition.local_date,
+              coverage: edition.coverage,
+              items: edition.items,
+            }),
+          },
+        ]);
+        if (content.length > chatMessageLimit)
+          throw validationError('message and news edition exceed size limit');
+      }
       await client.query(
         `UPDATE conversations SET anchor_received_at_utc=$2, title=$3
          WHERE id=$1 AND anchor_received_at_utc IS NULL`,
