@@ -23,7 +23,7 @@ Microsoft Learn 公开资料搜索由普通对话的现有模型按需使用，�
 | 4    | [风险约束与阶段门](prd/03-risk-constraints-and-stage-gates.md) | Top3 风险、指标、准入准出、不承诺口径                              |
 | 5    | [验收与待决事项](prd/04-acceptance-open-questions.md)          | v0/R1/R2-A 验收、R2-B 路由及 R3 Proposed 合同、Deferred 与重开门槛 |
 
-## 二、总体设计（真源，24 篇）
+## 二、总体设计（真源，25 篇）
 
 | 序号 | 文档                                                                     | 作用                                                                                                                            |
 | ---- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
@@ -51,6 +51,7 @@ Microsoft Learn 公开资料搜索由普通对话的现有模型按需使用，�
 | 22   | [用户模型接入与运行绑定](design/22-model-provider-settings.md)           | Proposed：本人模型配置、各接入默认、加密凭据、冻结决议、SDK 受控流式出站与受限 Fake-IP 例外；真实外部验收独立                   |
 | 23   | [R3 跨会话记忆与 compact](design/23-r3-short-term-memory-and-compact.md) | 通用暂停继续、摘要压缩、来源记忆、安全边界及最小 MVP 验收                                                                       |
 | 24   | [原生会话资料处理与交付](design/24-native-office-delivery.md)            | Proposed：浏览器处理与下载、可选纪要摘要、复用站内提醒                                                                          |
+| 25   | [每日新闻订阅与微信投递](design/25-daily-news-briefing.md)               | Proposed：手选地区、当地时间触发、微信主动投递及历史简报                                                                        |
 
 活动列表为空与历史创建事实、批量请求部分完成及标题序号的证据边界见[design/09 §5](design/09-agent-runtime-and-checkpoint.md#5-toolgateway-交互required)。
 
