@@ -92,7 +92,7 @@ function readCctv(html: string): SearchPage {
   for (const row of rows) {
     const end = row.indexOf('</li>');
     const body = row.slice(0, end === -1 ? 6_000 : Math.min(end, 6_000));
-    const anchor = /^\s*href="([^"<>]{1,2_000})"[^>]*>([\s\S]*?)<\/a>/.exec(body);
+    const anchor = /^\s*href="([^"<>]{1,2000})"[^>]*>([\s\S]*?)<\/a>/.exec(body);
     if (!anchor?.[1]?.startsWith('link_p.php?')) continue;
     const link = new URLSearchParams(decodeEntities(anchor[1].slice('link_p.php?'.length))).get('targetpage');
     const url = link && articleUrl(link, 'cctv');
