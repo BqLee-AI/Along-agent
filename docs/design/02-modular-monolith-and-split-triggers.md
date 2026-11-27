@@ -39,6 +39,7 @@ TS 模块化单体（`apps/api` 内按模块分目录，单镜像 `api|worker|al
 - [Required] 本地工具提议是另一项限定原子边界：tools 持有调用引用，经 conversations 公共用例锁定执行资格，同一 client 调用 approvals 创建/取得批准，再接受结果并追加审计；任一步失败全部回滚。此事务不消费批准、不建 task，也不把任意外部副作用纳入 PG 原子性；具体合同见 04 §3、06 §10。
 - [Observed] `conversations/lifecycle/service.ts` 同步调用 `tools/gateway.ts`；`tasks/service.ts#getTaskDetail` 同步调用 `notifications/service.ts#getTaskNotifications` 返回 DTO。这些公共调用不经 outbox，通知读取也不创建副作用。
 - [Proposed · R1] 文档授权、一次 apply 绑定和明确零写冲突前驱归 approvals 的 `document_approvals`/`document_approval_decisions`；调用接受/审计仍归 tools。只读 MCP IO 在 Run 锁事务外进行；文件写入只走既有非事务一次许可，不扩大本地确认事务。详见 [14 §4–§6](14-r1-document-task-loop.md)。
+- [Proposed · #213] `news-briefings` 持有本人微信接收绑定、新闻订阅、每期简报及投递记录。仓颉 Worker 调用 TS 私有能力推进处理。见 [design/25 §1–§5](25-daily-news-briefing.md)。
 
 ## 2. 模块自有 schema / outbox 约定（Required）
 
