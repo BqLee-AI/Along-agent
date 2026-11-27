@@ -126,4 +126,73 @@ withDatabase('news delivery on PostgreSQL', () => {
       delivery: 'skipped',
     });
   });
+
+  it('uses the current account zone and resumes a published edition after its lease expires', async () => {
+    const owner = (await seedAdmittedSession(db.pool)).userId;
+    const binding = randomUUID();
+    const edition = randomUUID();
+    const now = new Date('2026-03-08T12:30:00Z');
+    const newYork = dailySlot(now, 'America/New_York', time)!;
+    await db.pool.query("UPDATE users SET timezone_id='Asia/Shanghai' WHERE id=$1", [owner]);
+    await db.pool.query(
+      `INSERT INTO news_wechat_bindings VALUES ($1,$2,'recovery-recipient','test-credential',NULL)`,
+      [binding, owner],
+    );
+    await db.pool.query(
+      `INSERT INTO news_subscriptions VALUES ($1,$2,ARRAY['科技'],NULL,true,'2026-03-07')`,
+      [owner, binding],
+    );
+    const items = [
+      {
+        section: 'topic',
+        summary: '已保存的新闻摘要',
+        sources: [{ name: '来源', url: 'https://example.org/frozen' }],
+      },
+    ];
+    const delivered: string[] = [];
+    const dependencies = {
+      resolveSlot: (_clock: Date, zone: string) =>
+        dailySlot(now, zone, time)?.cutoff.getTime() === newYork.cutoff.getTime() ? newYork : null,
+      collect: async () => {
+        throw new Error('published edition was collected again');
+      },
+      send: async (
+        _secret: string,
+        _owner: string,
+        _id: string,
+        _recipient: string,
+        text: string,
+      ) => {
+        delivered.push(text);
+        return { status: 'accepted' as const };
+      },
+    };
+    await db.pool.query(
+      `INSERT INTO news_editions
+         (id,owner_id,binding_id,local_date,timezone_id,cutoff_at,topics,claim_id,lease_until,coverage,items)
+       VALUES ($1,$2,$3,$4,'America/New_York',$5,ARRAY['科技'],gen_random_uuid(),
+         '2026-03-08','partial',$6)`,
+      [edition, owner, binding, newYork.date, newYork.cutoff, JSON.stringify(items)],
+    );
+    await runNewsTick(db.pool, time, dependencies);
+    expect(delivered).toEqual([]);
+
+    await db.pool.query("UPDATE users SET timezone_id='America/New_York' WHERE id=$1", [owner]);
+    await db.pool.query(
+      "UPDATE news_editions SET lease_until=clock_timestamp()+interval '5 minutes' WHERE id=$1",
+      [edition],
+    );
+    await runNewsTick(db.pool, time, dependencies);
+    expect(delivered).toEqual([]);
+
+    await db.pool.query("UPDATE news_editions SET lease_until='2026-03-08' WHERE id=$1", [edition]);
+    await runNewsTick(db.pool, time, dependencies);
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0]).toContain(items[0]!.sources[0]!.url);
+    expect(await readEdition(db.pool, owner, edition)).toMatchObject({
+      coverage: 'partial',
+      items,
+      delivery: 'accepted',
+    });
+  });
 });
