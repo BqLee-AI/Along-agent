@@ -78,7 +78,8 @@ export async function startApplication(): Promise<Application> {
       };
       server = serve({ port: Number(process.env.PORT ?? 3000), deps });
     }
-    if (role === 'worker' || role === 'all') worker = startWorkerLoop({ pool });
+    if (role === 'worker' || role === 'all')
+      worker = startWorkerLoop({ pool, timeContext: loadTimeContext(process.env.TZDB_VERSION) });
     return { role, stop };
   } catch (error) {
     await stop();

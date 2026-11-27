@@ -130,26 +130,29 @@ export function createWechatBindings(pool: Pool) {
 
     async poll(owner: string, id: string, pin?: string): Promise<PollResult> {
       const lease = randomUUID();
-      const acquired = await withTransaction<PollResult | { pairing: WechatPairing }>(pool, async (client) => {
-        await lockOwner(client, owner);
-        const { rows } = await client.query<PairRow>(
-          `SELECT secret_ciphertext, COALESCE(poll_lease_expires_at > clock_timestamp(), false) AS polling
+      const acquired = await withTransaction<PollResult | { pairing: WechatPairing }>(
+        pool,
+        async (client) => {
+          await lockOwner(client, owner);
+          const { rows } = await client.query<PairRow>(
+            `SELECT secret_ciphertext, COALESCE(poll_lease_expires_at > clock_timestamp(), false) AS polling
            FROM news_wechat_pairings WHERE owner_id = $1 AND id = $2 AND expires_at > clock_timestamp()`,
-          [owner, id],
-        );
-        const row = rows[0];
-        if (!row) return terminal(client, owner, id);
-        const pairing = decodePairing(owner, id, row.secret_ciphertext);
-        if (row.polling || (pairing.status === 'pin_required' && pin === undefined)) {
-          return { status: pairing.status };
-        }
-        await client.query(
-          `UPDATE news_wechat_pairings SET poll_lease_id = $2,
+            [owner, id],
+          );
+          const row = rows[0];
+          if (!row) return terminal(client, owner, id);
+          const pairing = decodePairing(owner, id, row.secret_ciphertext);
+          if (row.polling || (pairing.status === 'pin_required' && pin === undefined)) {
+            return { status: pairing.status };
+          }
+          await client.query(
+            `UPDATE news_wechat_pairings SET poll_lease_id = $2,
            poll_lease_expires_at = clock_timestamp() + $3 * interval '1 millisecond' WHERE owner_id = $1`,
-          [owner, lease, leaseTtlMs],
-        );
-        return { pairing };
-      });
+            [owner, lease, leaseTtlMs],
+          );
+          return { pairing };
+        },
+      );
       if (!('pairing' in acquired)) return acquired;
       return finish(owner, id, lease, await provider.poll(acquired.pairing, pin));
     },
@@ -165,7 +168,13 @@ export function createWechatBindings(pool: Pool) {
         return rows[0];
       });
       if (!binding) return { status: 'failed' };
-      return sendWechat(binding.credential_ciphertext, owner, binding.id, binding.platform_user_id, testText);
+      return sendWechat(
+        binding.credential_ciphertext,
+        owner,
+        binding.id,
+        binding.platform_user_id,
+        testText,
+      );
     },
 
     async remove(owner: string): Promise<{ binding_id: null }> {

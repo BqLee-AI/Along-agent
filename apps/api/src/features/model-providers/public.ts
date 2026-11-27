@@ -32,3 +32,4 @@ export type { SdkStepConfig, SdkStepNetwork } from './inference/sdk-step.js';
 export { measureSdkContext, serializeSdkRequest } from './inference/sdk-context.js';
 export { testProviderConnection, testProvider } from './outbound/probe.js';
 export { OutboundError } from './outbound/outbound.js';
+export { credentialKey, decryptCredential, encryptCredential } from './configuration/crypto.js';

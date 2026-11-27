@@ -15,6 +15,8 @@ import { runAckPhase } from '../features/tasks/public.js';
 import { runMissedPhase } from '../features/tasks/public.js';
 import { createLocalInAppProvider } from '../features/notifications/public.js';
 import { runIdentityMailTick } from '../features/identity/public.js';
+import { runNewsTick } from '../features/news-briefings/worker.js';
+import type { TimeContext } from '../features/time/public.js';
 
 const schedulerTicks = channel('along.scheduler.tick');
 
@@ -23,6 +25,7 @@ export interface WorkerLoopOptions {
   intervalMs?: number;
   workerId?: string;
   onError?: (phase: string, err: unknown) => void;
+  timeContext?: TimeContext;
 }
 
 export interface WorkerLoopHandle {
@@ -43,6 +46,7 @@ export function startWorkerLoop(options: WorkerLoopOptions = {}): WorkerLoopHand
   const provider = receivePool ? createLocalInAppProvider(receivePool) : null;
   let activeTick: Promise<void> | null = null;
   let activeMailTick: Promise<void> | null = null;
+  let activeNewsTick: Promise<void> | null = null;
   let stopped = false;
   let stopping: Promise<void> | null = null;
 
@@ -89,6 +93,13 @@ export function startWorkerLoop(options: WorkerLoopOptions = {}): WorkerLoopHand
   const timer = setInterval(() => {
     void tick();
     mailTick();
+    if (pool && options.timeContext && !activeNewsTick && !stopped) {
+      activeNewsTick = runNewsTick(pool, options.timeContext)
+        .catch((error: unknown) => onError('news', error))
+        .finally(() => {
+          activeNewsTick = null;
+        });
+    }
   }, intervalMs);
 
   return {
@@ -98,7 +109,7 @@ export function startWorkerLoop(options: WorkerLoopOptions = {}): WorkerLoopHand
         clearInterval(timer);
         stopping = (async () => {
           try {
-            await Promise.all([activeTick, activeMailTick]);
+            await Promise.all([activeTick, activeMailTick, activeNewsTick]);
           } finally {
             await receivePool?.end();
           }

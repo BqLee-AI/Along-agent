@@ -99,7 +99,8 @@ export function workspaceHref(href: string, selection: ConversationLocation): st
     if (selection.conversationId)
       target.searchParams.set('conversation_id', selection.conversationId);
     if (selection.runId) target.searchParams.set('run_id', selection.runId);
-    if (selection.newsEditionId) target.searchParams.set('news_edition_id', selection.newsEditionId);
+    if (selection.newsEditionId)
+      target.searchParams.set('news_edition_id', selection.newsEditionId);
     if (
       selection.initialIntent &&
       selection.initialIntent !== 'chat' &&

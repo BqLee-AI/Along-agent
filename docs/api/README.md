@@ -219,3 +219,10 @@
 - `POST /memories/{id}/actions/correct` 提交 `{content, conversationId, messageIds, expectedRevision, expiresAt?}`；来源必须是本人可访问的用户消息，修订冲突不覆盖。`POST /memories/{id}/actions/stop-recall` 提交 `{expectedRevision}`，停止后不再用于新召回，原始消息和已接受事实保留。
 - `pause-memory/1` 模型召回使用字面匹配；`compact-memory/1` 可在编码器已配置时使用语义候选，并可回查获准召回项的原始来源。索引管理不提供 HTTP 入口。
 - 记忆保存及召回只对各新 profile 冻结的工具开放，旧 `pause/1` 不扩权。保存提示要求模型只处理本人明确要求，但来源校验不证明模型对原话意图或语义的理解正确。记忆是低信任历史，不是授权或当前事实；空结果与降级不证明不存在。召回结果受接受账本大小约束，超出时仅返回完整条目的前缀并标记 `incomplete`。
+
+## 13. 每日新闻简报和微信绑定
+
+- `/channels/wechat` 支持读取和解除本人绑定，`POST /channels/wechat/pair` 启动限时配对，`POST /channels/wechat/poll` 接收配对 ID 和可选验证码，`POST /channels/wechat/test` 向当前绑定试发。配对材料和结果按本人会话读取。
+- `GET` 和 `PUT /news/subscription` 读取和更新主题、可选地区、启用状态及微信绑定。响应含账户时区。发送时刻由 [design/25 §3](../design/25-daily-news-briefing.md#3-订阅与每日触发) 统一定义。
+- `GET /news/editions` 按日期倒序列出本人已发布的简报。`GET /news/editions/{id}` 加载原期内容及来源链接，独立返回采集与投递状态。
+- 首次向空的 Agent 会话发送消息可携带 `news_edition_id`。服务端检查期次归属，再将摘要及原文链接作为引用数据保存。

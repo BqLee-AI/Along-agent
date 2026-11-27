@@ -23,7 +23,12 @@ void test('iLink self binding follows a Tencent region redirect and submits the 
     Response.json({ qrcode: 'opaque+qr', qrcode_img_content: 'https://weixin.qq.com/example' }),
     Response.json({ status: 'scaned_but_redirect', redirect_host: 'ilinkai-hk.weixin.qq.com' }),
     Response.json({ status: 'confirmed_but_need_verifycode' }),
-    Response.json({ status: 'confirmed', bot_token: token, ilink_bot_id: 'bot', ilink_user_id: 'recipient' }),
+    Response.json({
+      status: 'confirmed',
+      bot_token: token,
+      ilink_bot_id: 'bot',
+      ilink_user_id: 'recipient',
+    }),
   );
   const begun = await provider.begin();
   assert.match(begun.qrDataUrl, /^data:image\/png;base64,/);

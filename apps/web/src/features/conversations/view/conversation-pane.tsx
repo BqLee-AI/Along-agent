@@ -244,7 +244,10 @@ export default function ConversationPane({
           {task.pendingNewsEditionId ? (
             <div className="mb-2 px-2 text-sm text-secondary-foreground">
               首条消息将附上
-              <Link href={`/news/editions/${task.pendingNewsEditionId}`} className="mx-1 text-brand-ink underline">
+              <Link
+                href={`/news/editions/${task.pendingNewsEditionId}`}
+                className="mx-1 text-brand-ink underline"
+              >
                 本期新闻简报
               </Link>
               。

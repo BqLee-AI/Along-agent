@@ -2,11 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import QRCode from 'qrcode';
 import { z } from 'zod';
 import { notReady } from '../../platform/errors.js';
-import {
-  credentialKey,
-  decryptCredential,
-  encryptCredential,
-} from '../model-providers/configuration/crypto.js';
+import { credentialKey, decryptCredential, encryptCredential } from '../model-providers/public.js';
 
 const origin = 'https://ilinkai.weixin.qq.com';
 const channelVersion = '3.0.0';
@@ -36,7 +32,10 @@ const pollResponseSchema = z.object({
   ilink_bot_id: z.string().optional(),
   ilink_user_id: z.string().optional(),
 });
-const receiptSchema = z.object({ ret: z.number().int().optional(), errcode: z.number().int().optional() });
+const receiptSchema = z.object({
+  ret: z.number().int().optional(),
+  errcode: z.number().int().optional(),
+});
 
 export type WechatPairing = z.infer<typeof pairingSchema>;
 type Credential = z.infer<typeof credentialSchema>;
@@ -50,10 +49,16 @@ export type WechatSendResult = { status: 'accepted' | 'failed' | 'unknown' };
 function trustedOrigin(value: string): string {
   const url = new URL(value);
   if (
-    url.protocol !== 'https:' || url.port || url.username || url.password ||
-    url.pathname !== '/' || url.search || url.hash ||
+    url.protocol !== 'https:' ||
+    url.port ||
+    url.username ||
+    url.password ||
+    url.pathname !== '/' ||
+    url.search ||
+    url.hash ||
     !/^(?:[a-z0-9-]+\.)+weixin\.qq\.com$/.test(url.hostname)
-  ) throw new Error('Invalid WeChat API origin');
+  )
+    throw new Error('Invalid WeChat API origin');
   return url.origin;
 }
 
@@ -117,7 +122,10 @@ export function createWechatProvider(fetcher: FetchWechat = (input, init) => fet
             const nextOrigin = data.redirect_host
               ? trustedOrigin(`https://${data.redirect_host}`)
               : pairing.origin;
-            return { status: 'scanned', pairing: { ...pairing, origin: nextOrigin, status: 'scanned' } };
+            return {
+              status: 'scanned',
+              pairing: { ...pairing, origin: nextOrigin, status: 'scanned' },
+            };
           }
           case 'expired':
           case 'verify_code_blocked':
@@ -155,17 +163,20 @@ export function createWechatProvider(fetcher: FetchWechat = (input, init) => fet
         const credential = credentialSchema.parse(open('binding', owner, id, ciphertext));
         if (credential.recipient !== recipient) return { status: 'failed' };
         url = new URL('/ilink/bot/sendmessage', trustedOrigin(credential.origin));
-        init = post({
-          msg: {
-            from_user_id: '',
-            to_user_id: recipient,
-            client_id: `along-${randomUUID()}`,
-            message_type: 2,
-            message_state: 2,
-            item_list: [{ type: 1, text_item: { text } }],
+        init = post(
+          {
+            msg: {
+              from_user_id: '',
+              to_user_id: recipient,
+              client_id: `along-${randomUUID()}`,
+              message_type: 2,
+              message_state: 2,
+              item_list: [{ type: 1, text_item: { text } }],
+            },
+            base_info: { channel_version: channelVersion, bot_agent: 'Along/1.0.0' },
           },
-          base_info: { channel_version: channelVersion, bot_agent: 'Along/1.0.0' },
-        }, credential.token);
+          credential.token,
+        );
       } catch {
         return { status: 'failed' };
       }

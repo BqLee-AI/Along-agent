@@ -31,11 +31,21 @@ const edition = z.object({
 });
 const editions = z.object({ items: z.array(edition) });
 const detail = edition.extend({
-  items: z.array(z.object({
-    section: z.enum(['topic', 'local']),
-    summary: z.string(),
-    sources: z.array(z.object({ name: z.string(), url: z.string().url().regex(/^https?:\/\//i) })),
-  })),
+  items: z.array(
+    z.object({
+      section: z.enum(['topic', 'local']),
+      summary: z.string(),
+      sources: z.array(
+        z.object({
+          name: z.string(),
+          url: z
+            .string()
+            .url()
+            .regex(/^https?:\/\//i),
+        }),
+      ),
+    }),
+  ),
 });
 
 export type NewsPreferences = z.infer<typeof preferences>;
@@ -58,13 +68,17 @@ async function write<T>(
   signal: AbortSignal,
   body?: object,
 ) {
-  return schema.parse(await readEnvelope(await fetch(path, {
-    method,
-    signal,
-    cache: 'no-store',
-    headers: { 'x-csrf-token': csrf, ...(body ? { 'content-type': 'application/json' } : {}) },
-    body: body ? JSON.stringify(body) : undefined,
-  })));
+  return schema.parse(
+    await readEnvelope(
+      await fetch(path, {
+        method,
+        signal,
+        cache: 'no-store',
+        headers: { 'x-csrf-token': csrf, ...(body ? { 'content-type': 'application/json' } : {}) },
+        body: body ? JSON.stringify(body) : undefined,
+      }),
+    ),
+  );
 }
 
 export async function readNewsCsrf(signal: AbortSignal) {
@@ -82,7 +96,8 @@ export const testWechat = (csrf: string, signal: AbortSignal) =>
   write(`${wechat}/test`, test, 'POST', csrf, signal);
 export const unbindWechat = (csrf: string, signal: AbortSignal) =>
   write(wechat, binding, 'DELETE', csrf, signal);
-export const readSubscription = (signal: AbortSignal) => read(`${news}/subscription`, subscription, signal);
+export const readSubscription = (signal: AbortSignal) =>
+  read(`${news}/subscription`, subscription, signal);
 export const writeSubscription = (body: NewsPreferences, csrf: string, signal: AbortSignal) =>
   write(`${news}/subscription`, subscription, 'PUT', csrf, signal, body);
 export const readEditions = (signal: AbortSignal) => read(`${news}/editions`, editions, signal);
@@ -90,5 +105,10 @@ export const readEdition = (id: string, signal: AbortSignal) =>
   read(`${news}/editions/${uuid.parse(id)}`, detail, signal);
 
 export function parseNewsTopics(text: string) {
-  return preferences.shape.topics.safeParse(text.split(/[\n,，、]/).map((term) => term.trim()).filter(Boolean));
+  return preferences.shape.topics.safeParse(
+    text
+      .split(/[\n,，、]/)
+      .map((term) => term.trim())
+      .filter(Boolean),
+  );
 }

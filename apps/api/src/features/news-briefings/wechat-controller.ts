@@ -7,10 +7,18 @@ import { forbidden, notReady, validationError } from '../../platform/errors.js';
 import { createWechatBindings } from './wechat-bindings.js';
 
 const base = '/api/v1/channels/wechat';
-const pollBody = z.object({
-  pair_id: z.string().uuid().transform((id) => id.toLowerCase()),
-  pin: z.string().regex(/^\d{1,16}$/).optional(),
-}).strict();
+const pollBody = z
+  .object({
+    pair_id: z
+      .string()
+      .uuid()
+      .transform((id) => id.toLowerCase()),
+    pin: z
+      .string()
+      .regex(/^\d{1,16}$/)
+      .optional(),
+  })
+  .strict();
 
 export function createWechatController(pool: Pool | null, access: HttpAccess) {
   const controller = new Elysia({ name: 'wechat-bindings', strictPath: true });

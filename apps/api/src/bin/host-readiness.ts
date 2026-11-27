@@ -32,7 +32,7 @@ const pool = connectionString
 const time = loadTimeContext(process.env.TZDB_VERSION);
 const role = process.argv[3];
 const workerPool = role === 'all' || role === 'worker' ? createPool() : null;
-const worker = createHostWorker(workerPool);
+const worker = createHostWorker(workerPool, time);
 const apiPool = role === 'all' || role === 'api' ? createPool() : null;
 const driver = apiPool ? createRunDriver(apiPool) : undefined;
 const business = createHostBusinessCapability({

@@ -22,6 +22,7 @@ export const SendMessageBodySchema = z
       .optional(),
     raw_text: z.string().min(1).max(chatMessageLimit),
     files: ChatFilesSchema.optional(),
+    news_edition_id: z.string().uuid().optional(),
     card_ref: z.string().min(1).max(200).optional(),
     confirmed_timezone_id: z.string().min(1).max(100).nullable().optional(),
     confirmed_timezone: z.string().min(1).max(100).nullable().optional(),

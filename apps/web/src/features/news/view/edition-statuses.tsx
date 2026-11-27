@@ -17,8 +17,14 @@ const delivery: Record<Edition['delivery'], string> = {
 export function EditionStatuses({ edition }: { edition: Edition }) {
   return (
     <dl className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-secondary-foreground">
-      <div className="flex flex-wrap gap-x-1"><dt className="font-medium">采集</dt><dd>{coverage[edition.coverage]}</dd></div>
-      <div className="flex flex-wrap gap-x-1"><dt className="font-medium">投递</dt><dd>{delivery[edition.delivery]}</dd></div>
+      <div className="flex flex-wrap gap-x-1">
+        <dt className="font-medium">采集</dt>
+        <dd>{coverage[edition.coverage]}</dd>
+      </div>
+      <div className="flex flex-wrap gap-x-1">
+        <dt className="font-medium">投递</dt>
+        <dd>{delivery[edition.delivery]}</dd>
+      </div>
     </dl>
   );
 }

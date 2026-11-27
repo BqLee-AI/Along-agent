@@ -1,0 +1,67 @@
+{
+  "version": "0043",
+  "tables": [
+    "news_wechat_bindings",
+    "news_wechat_pairings",
+    "news_subscriptions",
+    "news_editions",
+    "news_deliveries"
+  ],
+  "columns": [
+    {
+      "table": "news_wechat_bindings",
+      "name": "credential_ciphertext",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "news_wechat_pairings",
+      "name": "secret_ciphertext",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "news_subscriptions",
+      "name": "enabled_at",
+      "type": "timestamp with time zone",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "news_editions",
+      "name": "local_date",
+      "type": "date",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "news_deliveries",
+      "name": "status",
+      "type": "text",
+      "required": true,
+      "default": ""
+    }
+  ],
+  "constraints": [
+    {
+      "table": "news_subscriptions",
+      "name": "news_subscriptions_pkey",
+      "type": "p",
+      "columns": ["owner_id"]
+    },
+    {
+      "table": "news_editions",
+      "name": "news_editions_owner_id_local_date_key",
+      "type": "u",
+      "columns": ["owner_id", "local_date"]
+    },
+    {
+      "table": "news_deliveries",
+      "name": "news_deliveries_pkey",
+      "type": "p",
+      "columns": ["edition_id"]
+    }
+  ]
+}

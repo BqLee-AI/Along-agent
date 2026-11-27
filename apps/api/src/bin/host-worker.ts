@@ -1,6 +1,8 @@
 import { createPool, type Pool } from '../db/pool.js';
 import { createLocalInAppProvider, type InAppProvider } from '../features/notifications/public.js';
 import { runIdentityMailTick } from '../features/identity/public.js';
+import { runNewsTick } from '../features/news-briefings/worker.js';
+import type { TimeContext } from '../features/time/public.js';
 import {
   runAckPhase,
   runCancelPhase,
@@ -21,7 +23,7 @@ const phases: Partial<Record<string, PhaseRunner>> = {
   missed: (pool) => runMissedPhase(pool),
 };
 
-export function createHostWorker(pool: Pool | null) {
+export function createHostWorker(pool: Pool | null, time: TimeContext) {
   // pg hides explicit passwords from enumeration on Pool.options.
   const receivePool = pool
     ? createPool({ ...pool.options, password: pool.options.password, max: 1 })
@@ -29,9 +31,22 @@ export function createHostWorker(pool: Pool | null) {
   const provider = receivePool ? createLocalInAppProvider(receivePool) : null;
   let activePhase: Promise<unknown> | null = null;
   let activeMail: Promise<unknown> | null = null;
+  let activeNews: Promise<void> | null = null;
   let stopping: Promise<void> | null = null;
 
   async function runPhase(phase: string, workerId: string): Promise<void> {
+    if (phase === 'news') {
+      if (stopping) throw new Error('host worker is stopping');
+      if (!pool) return;
+      if (activeNews) throw new Error('host news phase already active');
+      activeNews = runNewsTick(pool, time);
+      try {
+        await activeNews;
+      } finally {
+        activeNews = null;
+      }
+      return;
+    }
     if (phase === 'identity-mail') {
       if (stopping) throw new Error('host worker is stopping');
       if (!pool) return;
@@ -61,7 +76,7 @@ export function createHostWorker(pool: Pool | null) {
   function stop(): Promise<void> {
     stopping ??= (async () => {
       // A phase failure is reported to its own caller; only pool close can fail shutdown.
-      await Promise.allSettled([activePhase, activeMail]);
+      await Promise.allSettled([activePhase, activeMail, activeNews]);
       await receivePool?.end();
     })();
     return stopping;

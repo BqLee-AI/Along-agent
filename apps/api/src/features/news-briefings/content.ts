@@ -12,18 +12,26 @@ type Article = { title: string; excerpt: string; time: number; source: Source };
 type SearchPage = { articles: Article[]; next: boolean };
 
 const entities: Readonly<Record<string, string>> = {
-  amp: '&', apos: "'", gt: '>', lt: '<', nbsp: ' ', quot: '"',
+  amp: '&',
+  apos: "'",
+  gt: '>',
+  lt: '<',
+  nbsp: ' ',
+  quot: '"',
 };
 
 function decodeEntities(text: string) {
-  return text.replace(/&(#x[0-9a-f]{1,6}|#\d{1,7}|amp|apos|gt|lt|nbsp|quot);/gi, (entity, key: string) => {
-    const lower = key.toLowerCase();
-    if (lower[0] !== '#') return entities[lower] ?? entity;
-    const code = lower[1] === 'x' ? Number.parseInt(lower.slice(2), 16) : Number(lower.slice(1));
-    return code > 0 && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff)
-      ? String.fromCodePoint(code)
-      : '';
-  });
+  return text.replace(
+    /&(#x[0-9a-f]{1,6}|#\d{1,7}|amp|apos|gt|lt|nbsp|quot);/gi,
+    (entity, key: string) => {
+      const lower = key.toLowerCase();
+      if (lower[0] !== '#') return entities[lower] ?? entity;
+      const code = lower[1] === 'x' ? Number.parseInt(lower.slice(2), 16) : Number(lower.slice(1));
+      return code > 0 && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff)
+        ? String.fromCodePoint(code)
+        : '';
+    },
+  );
 }
 
 function plainText(raw: string, limit: number) {
@@ -44,8 +52,15 @@ function articleUrl(raw: string, publisher: 'chinanews' | 'cctv') {
   const url = URL.parse(value);
   if (!url || url.username || url.password || url.port) return;
   if (publisher === 'chinanews') {
-    if (url.hostname !== 'www.chinanews.com.cn' || !/^\/(?:[a-z]+\/)+\d{4}\/\d{2}-\d{2}\/(?:news)?\d+\.shtml$/.test(url.pathname)) return;
-  } else if (!/^[a-z0-9-]+\.cctv\.com$/.test(url.hostname) || !/^\/\d{4}\/\d{2}\/\d{2}\/ARTI[a-zA-Z0-9]+\.shtml$/.test(url.pathname)) {
+    if (
+      url.hostname !== 'www.chinanews.com.cn' ||
+      !/^\/(?:[a-z]+\/)+\d{4}\/\d{2}-\d{2}\/(?:news)?\d+\.shtml$/.test(url.pathname)
+    )
+      return;
+  } else if (
+    !/^[a-z0-9-]+\.cctv\.com$/.test(url.hostname) ||
+    !/^\/\d{4}\/\d{2}\/\d{2}\/ARTI[a-zA-Z0-9]+\.shtml$/.test(url.pathname)
+  ) {
     return;
   }
   // These publishers identify the article in the path. Tracking and fragments do not change it.
@@ -55,7 +70,9 @@ function articleUrl(raw: string, publisher: 'chinanews' | 'cctv') {
 }
 
 function readChinaNews(xml: string): Article[] {
-  const channel = /<rss\b[^>]*>\s*<channel\b[^>]*>([\s\S]*?)<\/channel>\s*<\/rss>\s*$/.exec(xml)?.[1];
+  const channel = /<rss\b[^>]*>\s*<channel\b[^>]*>([\s\S]*?)<\/channel>\s*<\/rss>\s*$/.exec(
+    xml,
+  )?.[1];
   if (channel === undefined || !/<title>中新网即时新闻<\/title>/.test(channel)) {
     throw new Error('Unrecognized China News feed');
   }
@@ -67,7 +84,8 @@ function readChinaNews(xml: string): Article[] {
     const excerpt = plainText(/<description>([\s\S]*?)<\/description>/.exec(item)?.[1] ?? '', 450);
     const time = Date.parse(/<pubDate>([^<]+)<\/pubDate>/.exec(item)?.[1] ?? '');
     const url = articleUrl(/<link>([^<]+)<\/link>/.exec(item)?.[1] ?? '', 'chinanews');
-    if (url && title && Number.isFinite(time)) articles.push({ title, excerpt, time, source: { name: '中国新闻网', url } });
+    if (url && title && Number.isFinite(time))
+      articles.push({ title, excerpt, time, source: { name: '中国新闻网', url } });
   }
   return articles;
 }
@@ -75,7 +93,14 @@ function readChinaNews(xml: string): Article[] {
 function cctvUrl(term: string, page: number) {
   const url = new URL(cctvSearch);
   url.search = new URLSearchParams({
-    qtext: term, page: String(page), type: 'web', sort: 'date', datepid: '1', channel: '', vtime: '-1', is_search: '1',
+    qtext: term,
+    page: String(page),
+    type: 'web',
+    sort: 'date',
+    datepid: '1',
+    channel: '',
+    vtime: '-1',
+    is_search: '1',
   }).toString();
   return url;
 }
@@ -94,20 +119,29 @@ function readCctv(html: string): SearchPage {
     const body = row.slice(0, end === -1 ? 6_000 : Math.min(end, 6_000));
     const anchor = /^\s*href="([^"<>]{1,2000})"[^>]*>([\s\S]*?)<\/a>/.exec(body);
     if (!anchor?.[1]?.startsWith('link_p.php?')) continue;
-    const link = new URLSearchParams(decodeEntities(anchor[1].slice('link_p.php?'.length))).get('targetpage');
+    const link = new URLSearchParams(decodeEntities(anchor[1].slice('link_p.php?'.length))).get(
+      'targetpage',
+    );
     const url = link && articleUrl(link, 'cctv');
     const title = plainText(anchor[2] ?? '', 220);
     const excerpt = plainText(/<p class="bre">([\s\S]*?)<\/p>/.exec(body)?.[1] ?? '', 450);
-    const stamp = /<span class="tim">\s*发布时间[：:]\s*(\d{4}-\d\d-\d\d)\s+(\d\d:\d\d:\d\d)/.exec(body);
+    const stamp = /<span class="tim">\s*发布时间[：:]\s*(\d{4}-\d\d-\d\d)\s+(\d\d:\d\d:\d\d)/.exec(
+      body,
+    );
     const time = stamp ? Date.parse(`${stamp[1]}T${stamp[2]}+08:00`) : NaN;
-    if (url && title && Number.isFinite(time)) articles.push({ title, excerpt, time, source: { name: '央视网', url } });
+    if (url && title && Number.isFinite(time))
+      articles.push({ title, excerpt, time, source: { name: '央视网', url } });
   }
   return { articles, next: rows.length >= 10 };
 }
 
 async function fetchText(fetcher: typeof fetch, url: string | URL, signal: AbortSignal) {
   const response = await fetcher(url, { redirect: 'error', credentials: 'omit', signal });
-  if (!response.ok || !response.body || Number(response.headers.get('content-length')) > maxResponseBytes) {
+  if (
+    !response.ok ||
+    !response.body ||
+    Number(response.headers.get('content-length')) > maxResponseBytes
+  ) {
     await response.body?.cancel();
     throw new Error('News source request failed');
   }
@@ -130,24 +164,41 @@ async function fetchText(fetcher: typeof fetch, url: string | URL, signal: Abort
 }
 
 function preference(value: string) {
-  return value.slice(0, 80).normalize('NFKC').replace(/[\p{Cc}\p{Cf}]/gu, '').trim().slice(0, 80);
+  return value
+    .slice(0, 80)
+    .normalize('NFKC')
+    .replace(/[\p{Cc}\p{Cf}]/gu, '')
+    .trim()
+    .slice(0, 80);
 }
 
 function matchKey(text: string) {
-  return text.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+  return text
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '');
 }
 
 function mentions(text: string, term: string) {
   if (!term) return false;
   // ASCII acronyms such as AI must not match inside ordinary words.
-  if (/^[a-z0-9]+$/i.test(term)) return new RegExp(`(?:^|[^a-z0-9])${term}(?![a-z0-9])`, 'i').test(text);
+  if (/^[a-z0-9]+$/i.test(term))
+    return new RegExp(`(?:^|[^a-z0-9])${term}(?![a-z0-9])`, 'i').test(text);
   return matchKey(text).includes(term);
 }
 
 function headlineKey(title: string) {
-  return matchKey(title
-    .replace(/^(?:(?:【[^】]{1,10}】|（[^）]{1,10}）|(?:央视网|央视新闻|中国新闻网|中新网|新华社|新华网|人民日报|快讯|最新消息|最新)\s*[：:丨|])\s*)+/, '')
-    .replace(/\s*[丨|｜—-]\s*(?:央视网|央视新闻|中国新闻网|中新网|新华社|新华网|人民日报)\s*$/, ''));
+  return matchKey(
+    title
+      .replace(
+        /^(?:(?:【[^】]{1,10}】|（[^）]{1,10}）|(?:央视网|央视新闻|中国新闻网|中新网|新华社|新华网|人民日报|快讯|最新消息|最新)\s*[：:丨|])\s*)+/,
+        '',
+      )
+      .replace(
+        /\s*[丨|｜—-]\s*(?:央视网|央视新闻|中国新闻网|中新网|新华社|新华网|人民日报)\s*$/,
+        '',
+      ),
+  );
 }
 
 function bigrams(text: string) {
@@ -159,7 +210,11 @@ function bigrams(text: string) {
 function sameHeadline(a: string, b: string, aPairs: Set<string>, bPairs: Set<string>) {
   if (a === b) return true;
   if (Math.min(a.length, b.length) < 10) return false;
-  if (Math.min(a.length, b.length) >= 0.72 * Math.max(a.length, b.length) && (a.includes(b) || b.includes(a))) return true;
+  if (
+    Math.min(a.length, b.length) >= 0.72 * Math.max(a.length, b.length) &&
+    (a.includes(b) || b.includes(a))
+  )
+    return true;
   let overlap = 0;
   for (const pair of aPairs) if (bPairs.has(pair)) overlap++;
   return 2 * overlap >= 0.84 * (aPairs.size + bPairs.size);
@@ -167,11 +222,14 @@ function sameHeadline(a: string, b: string, aPairs: Set<string>, bPairs: Set<str
 
 function summarize({ title, excerpt }: Article) {
   const lead = excerpt.split(/(?<=[。！？!?])/u, 1)[0]?.trim();
-  const text = lead && !matchKey(lead).includes(matchKey(title))
-    ? `${title}${/[。！？!?]$/.test(title) ? '' : '。'}${lead}`
-    : lead || title;
+  const text =
+    lead && !matchKey(lead).includes(matchKey(title))
+      ? `${title}${/[。！？!?]$/.test(title) ? '' : '。'}${lead}`
+      : lead || title;
   const characters = Array.from(text);
-  return characters.length > maxSummaryLength ? `${characters.slice(0, maxSummaryLength - 1).join('')}…` : text;
+  return characters.length > maxSummaryLength
+    ? `${characters.slice(0, maxSummaryLength - 1).join('')}…`
+    : text;
 }
 
 export async function collectNews(
@@ -189,7 +247,7 @@ export async function collectNews(
     topicKeys.add('ai');
     topicKeys.add('人工智能');
   }
-  const searchTopics = topics.map((term) => matchKey(term) === 'ai' ? '人工智能' : term);
+  const searchTopics = topics.map((term) => (matchKey(term) === 'ai' ? '人工智能' : term));
   const terms = [...new Set([...searchTopics, ...(regionKey ? [region] : [])])];
   if (!terms.length) return { coverage: 'complete', items: [] };
 
@@ -222,7 +280,12 @@ export async function collectNews(
     await Promise.all(terms.slice(index, index + 4).map(search));
   }
   await rss;
-  const coverage = completed === 0 ? 'failed' : incomplete || completed < terms.length + 1 ? 'partial' : 'complete';
+  const coverage =
+    completed === 0
+      ? 'failed'
+      : incomplete || completed < terms.length + 1
+        ? 'partial'
+        : 'complete';
 
   const groups: { key: string; pairs: Set<string>; item: Item }[] = [];
   const byUrl = new Map<string, Item>();
