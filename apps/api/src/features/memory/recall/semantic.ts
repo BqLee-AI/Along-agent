@@ -10,6 +10,7 @@ import {
   memoryRevisionProjection,
   type MemoryRevisionRow,
 } from '../records/revisions.js';
+import { validateReadSource } from './authorization.js';
 
 /** Explicit deployment configuration; binding is the encoder's verified manifest SHA-256. */
 export interface MemorySemanticConfig {
@@ -41,27 +42,15 @@ export interface MemoryIndexResult {
   nextCursor: string | null;
 }
 export class MemorySourceFailure extends Error {}
-interface AuthorizedRow {
-  id: string;
-  revision: number;
-  conversation_id: string;
-  message_ids: string[];
-  summary_id: string | null;
-}
+type AuthorizedRow = Pick<
+  MemoryRevisionRow,
+  'id' | 'revision' | 'source_kind' | 'conversation_id' | 'message_ids' | 'summary_id'
+>;
 function isInaccessible(error: unknown): boolean {
   return (
     error instanceof ApplicationError &&
     (httpStatusForError(error.code) === 403 || httpStatusForError(error.code) === 404)
   );
-}
-function sourceInput(ownerId: string, row: AuthorizedRow) {
-  return {
-    ownerId,
-    conversationId: row.conversation_id,
-    messageIds: row.message_ids,
-    purpose: 'read' as const,
-    ...(row.summary_id ? { summaryId: row.summary_id } : {}),
-  };
 }
 async function encode(
   config: MemorySemanticConfig,
@@ -119,7 +108,7 @@ export function createMemorySemantic(deps: {
     const embedding = await encode({ ...deps.config, deadlineMs }, item.content, signal);
     return withTransaction(deps.pool, async (client) => {
       const result = await client.query<AuthorizedRow>(
-        `SELECT m.id, r.revision, r.conversation_id, r.message_ids, r.summary_id
+        `SELECT m.id, r.revision, r.source_kind, r.conversation_id, r.message_ids, r.summary_id
         FROM r3_memories m JOIN r3_memory_revisions r ON r.owner_id=m.owner_id AND r.memory_id=m.id AND r.revision=m.current_revision
         WHERE m.owner_id=$1 AND m.id=$2 AND m.current_revision=$3 AND m.status='active'
           AND (r.expires_at IS NULL OR r.expires_at > clock_timestamp()) FOR UPDATE OF m`,
@@ -127,7 +116,7 @@ export function createMemorySemantic(deps: {
       );
       const row = result.rows[0];
       if (!row) return false;
-      await deps.sources.validate(client, sourceInput(ownerId, row));
+      await validateReadSource(client, deps.sources, ownerId, row);
       await client.query(
         `INSERT INTO r3_memory_vectors(owner_id,memory_id,revision,binding_sha256,embedding)
         VALUES ($1,$2,$3,$4,$5::real[]) ON CONFLICT (owner_id,memory_id,revision,binding_sha256)
@@ -171,7 +160,7 @@ export function createMemorySemantic(deps: {
         );
         for (const row of result.rows) {
           try {
-            await deps.sources.validate(client, sourceInput(ownerId, row));
+            await validateReadSource(client, deps.sources, ownerId, row);
             authorized.push(memoryRecord(row));
             if (authorized.length === 20) break;
           } catch (error) {
@@ -254,7 +243,7 @@ export function createMemorySemantic(deps: {
       let after: string | null = null;
       for (;;) {
         const page: { rows: AuthorizedRow[] } = await client.query<AuthorizedRow>(
-          `SELECT m.id,r.revision,r.conversation_id,r.message_ids,r.summary_id
+          `SELECT m.id,r.revision,r.source_kind,r.conversation_id,r.message_ids,r.summary_id
           FROM r3_memories m JOIN r3_memory_revisions r ON r.owner_id=m.owner_id AND r.memory_id=m.id AND r.revision=m.current_revision
           WHERE m.owner_id=$1 AND m.status='active' AND (r.expires_at IS NULL OR r.expires_at > clock_timestamp())
             AND ($2::uuid IS NULL OR m.id > $2::uuid) ORDER BY m.id LIMIT 100`,
@@ -262,7 +251,7 @@ export function createMemorySemantic(deps: {
         );
         for (const row of page.rows) {
           try {
-            await deps.sources.validate(client, sourceInput(ownerId, row));
+            await validateReadSource(client, deps.sources, ownerId, row);
           } catch (error) {
             if (isInaccessible(error)) continue;
             throw new MemorySourceFailure('memory source unavailable', { cause: error });

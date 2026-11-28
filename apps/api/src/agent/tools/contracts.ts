@@ -215,7 +215,7 @@ export interface MemoryRecallPayload {
     memory_id: string;
     content: string;
     match?: 'literal' | 'semantic' | 'unfiltered';
-    conversation_id: string;
+    conversation_id: string | null;
     message_ids: string[];
     created_at: string;
     updated_at: string;

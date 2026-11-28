@@ -216,6 +216,7 @@
 ## 12. 本人短期记忆
 
 - `GET /memories` 支持 `limit` 和 `cursor`，仅列出本人记录；`GET /memories/{id}` 返回本人记忆和来源。原话通过已有本人会话消息接口查看，不凭记忆文本代替原始事实。
+- `POST /memories` 提交 `{category, content, idempotencyKey}`，为本人创建手动记忆。分类为 `project`、`preference` 或 `goal`。`POST /memories/{id}/actions/correct-manual` 提交 `{category, content, expectedRevision}`，保存同一条记忆的新修订。手动来源的 `sourceKind` 为 `manual`，`conversationId` 为 `null`，`messageIds` 为空。聊天来源的 `category` 为 `null`。
 - `POST /memories/{id}/actions/correct` 提交 `{content, conversationId, messageIds, expectedRevision, expiresAt?}`；来源必须是本人可访问的用户消息，修订冲突不覆盖。`POST /memories/{id}/actions/stop-recall` 提交 `{expectedRevision}`，停止后不再用于新召回，原始消息和已接受事实保留。
 - `pause-memory/1` 模型召回使用字面匹配；`compact-memory/1` 可在编码器已配置时使用语义候选，并可回查获准召回项的原始来源。索引管理不提供 HTTP 入口。
 - 记忆保存及召回只对各新 profile 冻结的工具开放，旧 `pause/1` 不扩权。保存提示要求模型只处理本人明确要求，但来源校验不证明模型对原话意图或语义的理解正确。记忆是低信任历史，不是授权或当前事实；空结果与降级不证明不存在。召回结果受接受账本大小约束，超出时仅返回完整条目的前缀并标记 `incomplete`。

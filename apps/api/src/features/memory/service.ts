@@ -16,6 +16,7 @@ import {
   loadMemoryRevision as load,
   memoryRecord as record,
   memoryRevisionProjection as projection,
+  type MemoryRevisionInput,
   type MemoryRevisionRow as Row,
 } from './records/revisions.js';
 import {
@@ -24,8 +25,8 @@ import {
   type MemoryIndexResult,
   type MemorySemanticConfig,
 } from './recall/semantic.js';
-import { validateMemoryRevisions } from './recall/authorization.js';
-import type { MemoryRecord, MemorySources } from './types.js';
+import { validateMemoryRevisions, validateReadSource } from './recall/authorization.js';
+import type { MemoryCategory, MemoryRecord, MemorySources } from './types.js';
 export type { MemorySemanticConfig } from './recall/semantic.js';
 
 export interface RememberInput {
@@ -45,6 +46,16 @@ export interface CorrectionInput {
   expiresAt?: string | null;
   expectedRevision: number;
 }
+interface ManualInput {
+  category: MemoryCategory;
+  content: string;
+}
+export interface ManualCreateInput extends ManualInput {
+  idempotencyKey: string;
+}
+export interface ManualCorrectionInput extends ManualInput {
+  expectedRevision: number;
+}
 export interface MemoryRecallResult {
   items: (MemoryRecord & { match: 'literal' | 'semantic' | 'unfiltered' })[];
   completeness: 'degraded' | 'incomplete';
@@ -53,6 +64,7 @@ export interface MemoryRecallResult {
 export interface MemoryService {
   remember(ownerId: string, input: RememberInput): Promise<MemoryRecord>;
   rememberCompact(ownerId: string, input: CompactInput): Promise<MemoryRecord>;
+  createManual(ownerId: string, input: ManualCreateInput): Promise<MemoryRecord>;
   /** The caller owns BEGIN/COMMIT and must not confirm a save before COMMIT succeeds. */
   rememberInTransaction(
     client: PoolClient,
@@ -85,6 +97,11 @@ export interface MemoryService {
   ): Promise<MemoryIndexResult>;
   get(ownerId: string, memoryId: string): Promise<MemoryRecord | null>;
   correct(ownerId: string, memoryId: string, input: CorrectionInput): Promise<MemoryRecord>;
+  correctManual(
+    ownerId: string,
+    memoryId: string,
+    input: ManualCorrectionInput,
+  ): Promise<MemoryRecord>;
   stopRecall(ownerId: string, memoryId: string, expectedRevision: number): Promise<void>;
 }
 function validateOwner(ownerId: string): void {
@@ -112,6 +129,33 @@ function validateInput(input: {
     throw validationError('invalid memory input');
   }
 }
+function validateManualInput(input: ManualInput): void {
+  if (
+    (input.category !== 'project' &&
+      input.category !== 'preference' &&
+      input.category !== 'goal') ||
+    typeof input.content !== 'string' ||
+    !input.content.trim() ||
+    input.content.length > 12000
+  ) {
+    throw validationError('invalid manual memory input');
+  }
+}
+function manualRevision({ content, category }: ManualInput): MemoryRevisionInput {
+  return {
+    content,
+    category,
+    sourceKind: 'manual',
+    conversationId: null,
+    messageIds: [],
+    summaryId: null,
+    expiresAt: null,
+  };
+}
+function validateIdempotencyKey(key: string): void {
+  if (typeof key !== 'string' || !key.trim() || key.length > 200)
+    throw validationError('invalid memory request');
+}
 function validateRevision(revision: number): void {
   if (!Number.isSafeInteger(revision) || revision < 1) throw validationError('invalid revision');
 }
@@ -131,14 +175,51 @@ export function createMemoryService({
   sources: MemorySources;
   semantic?: MemorySemanticConfig;
 }): MemoryService {
-  async function checkSource(client: PoolClient, ownerId: string, row: Row): Promise<void> {
-    await sources.validate(client, {
-      ownerId,
-      conversationId: row.conversation_id,
-      messageIds: row.message_ids,
-      purpose: 'read',
-      ...(row.summary_id ? { summaryId: row.summary_id } : {}),
-    });
+  const checkSource = (client: PoolClient, ownerId: string, row: Row) =>
+    validateReadSource(client, sources, ownerId, row);
+
+  async function replay(
+    client: PoolClient,
+    ownerId: string,
+    key: string,
+    hash: string,
+  ): Promise<MemoryRecord | null> {
+    // Serialize even when the key does not exist yet; collisions only serialize unrelated requests.
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))', [
+      ownerId.toLowerCase(),
+      key,
+    ]);
+    const { rows } = await client.query<{ request_hash: string; memory_id: string }>(
+      'SELECT request_hash, memory_id FROM r3_memory_requests WHERE owner_id=$1 AND idempotency_key=$2',
+      [ownerId, key],
+    );
+    const existing = rows[0];
+    if (!existing) return null;
+    if (existing.request_hash !== hash) throw stateConflict('memory idempotency key reused');
+    const row = await load(client, ownerId, existing.memory_id);
+    if (!row) throw stateConflict('memory is no longer recallable');
+    if (row.revision !== 1) throw stateConflict('memory has since been corrected');
+    await checkSource(client, ownerId, row);
+    return record(row);
+  }
+
+  async function insertMemory(
+    client: PoolClient,
+    ownerId: string,
+    input: MemoryRevisionInput,
+    request: { key: string; hash: string },
+  ): Promise<MemoryRecord> {
+    const id = randomUUID();
+    await client.query(
+      `INSERT INTO r3_memories(id,owner_id,current_revision,status) VALUES ($1,$2,1,'active')`,
+      [id, ownerId],
+    );
+    await insertMemoryRevision(client, ownerId, id, 1, input);
+    await client.query(
+      'INSERT INTO r3_memory_requests(owner_id,idempotency_key,request_hash,memory_id) VALUES ($1,$2,$3,$4)',
+      [ownerId, request.key, request.hash, id],
+    );
+    return record((await load(client, ownerId, id, 'stored'))!);
   }
   async function save(
     client: PoolClient,
@@ -148,12 +229,8 @@ export function createMemoryService({
   ): Promise<MemoryRecord> {
     validateOwner(ownerId);
     validateInput(input);
-    if (
-      typeof input.idempotencyKey !== 'string' ||
-      !input.idempotencyKey.trim() ||
-      input.idempotencyKey.length > 200 ||
-      (kind === 'compact' && (!('summaryId' in input) || !isUuid(input.summaryId)))
-    )
+    validateIdempotencyKey(input.idempotencyKey);
+    if (kind === 'compact' && (!('summaryId' in input) || !isUuid(input.summaryId)))
       throw validationError('invalid memory request');
     const summaryId = kind === 'compact' ? (input as CompactInput).summaryId : null;
     const hash = createHash('sha256')
@@ -168,24 +245,8 @@ export function createMemoryService({
         ]),
       )
       .digest('hex');
-    // Serialize even when the key does not exist yet; hash collisions only serialize unrelated requests.
-    await client.query('SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))', [
-      ownerId.toLowerCase(),
-      input.idempotencyKey,
-    ]);
-    const existing = await client.query<{ request_hash: string; memory_id: string }>(
-      'SELECT request_hash, memory_id FROM r3_memory_requests WHERE owner_id=$1 AND idempotency_key=$2',
-      [ownerId, input.idempotencyKey],
-    );
-    if (existing.rows[0]) {
-      if (existing.rows[0].request_hash !== hash)
-        throw stateConflict('memory idempotency key reused');
-      const row = await load(client, ownerId, existing.rows[0].memory_id);
-      if (!row) throw stateConflict('memory is no longer recallable');
-      if (row.revision !== 1) throw stateConflict('memory has since been corrected');
-      await checkSource(client, ownerId, row);
-      return record(row);
-    }
+    const existing = await replay(client, ownerId, input.idempotencyKey, hash);
+    if (existing) return existing;
     await sources.validate(client, {
       ownerId,
       conversationId: input.conversationId,
@@ -193,26 +254,28 @@ export function createMemoryService({
       purpose: kind,
       ...(summaryId ? { summaryId } : {}),
     });
-    const id = randomUUID();
-    await client.query(
-      `INSERT INTO r3_memories(id,owner_id,current_revision,status) VALUES ($1,$2,1,'active')`,
-      [id, ownerId],
-    );
-    await insertMemoryRevision(
+    return insertMemory(
       client,
       ownerId,
-      id,
-      1,
-      input,
-      kind,
-      summaryId,
-      input.expiresAt ?? null,
+      { ...input, sourceKind: kind, summaryId, expiresAt: input.expiresAt ?? null, category: null },
+      { key: input.idempotencyKey, hash },
     );
-    await client.query(
-      'INSERT INTO r3_memory_requests(owner_id,idempotency_key,request_hash,memory_id) VALUES ($1,$2,$3,$4)',
-      [ownerId, input.idempotencyKey, hash, id],
-    );
-    return record((await load(client, ownerId, id, 'stored'))!);
+  }
+  async function createManual(ownerId: string, input: ManualCreateInput): Promise<MemoryRecord> {
+    validateOwner(ownerId);
+    validateManualInput(input);
+    validateIdempotencyKey(input.idempotencyKey);
+    const hash = createHash('sha256')
+      .update(JSON.stringify(['manual', input.category, input.content]))
+      .digest('hex');
+    return withTransaction(pool, async (client) => {
+      const existing = await replay(client, ownerId, input.idempotencyKey, hash);
+      if (existing) return existing;
+      return insertMemory(client, ownerId, manualRevision(input), {
+        key: input.idempotencyKey,
+        hash,
+      });
+    });
   }
   async function rememberInTransaction(
     client: PoolClient,
@@ -424,6 +487,8 @@ export function createMemoryService({
     return withTransaction(pool, async (client) => {
       const old = await load(client, ownerId, memoryId);
       if (!old) throw notFound('memory not found');
+      if (old.source_kind === 'manual')
+        throw stateConflict('manual memory requires manual correction');
       await checkSource(client, ownerId, old);
       if (old.revision !== input.expectedRevision) throw stateConflict('memory revision changed');
       await sources.validate(client, {
@@ -432,23 +497,48 @@ export function createMemoryService({
         messageIds: input.messageIds,
         purpose: 'correction',
       });
-      const revision = old.revision + 1;
-      await insertMemoryRevision(
-        client,
-        ownerId,
-        memoryId,
-        revision,
-        input,
-        'explicit',
-        null,
-        input.expiresAt === undefined ? old.expires_at : input.expiresAt,
-      );
-      await client.query(
-        'UPDATE r3_memories SET current_revision=$3, updated_at=now() WHERE owner_id=$1 AND id=$2',
-        [ownerId, memoryId, revision],
-      );
-      return record((await load(client, ownerId, memoryId, 'stored'))!);
+      return reviseMemory(client, ownerId, memoryId, old.revision + 1, {
+        ...input,
+        sourceKind: 'explicit',
+        summaryId: null,
+        expiresAt: input.expiresAt === undefined ? old.expires_at : input.expiresAt,
+        category: null,
+      });
     });
+  }
+  async function correctManual(
+    ownerId: string,
+    memoryId: string,
+    input: ManualCorrectionInput,
+  ): Promise<MemoryRecord> {
+    validateOwner(ownerId);
+    validateManualInput(input);
+    validateRevision(input.expectedRevision);
+    if (!isUuid(memoryId)) throw validationError('invalid memory id');
+    return withTransaction(pool, async (client) => {
+      const old = await load(client, ownerId, memoryId);
+      if (!old) throw notFound('memory not found');
+      if (old.source_kind !== 'manual') {
+        await checkSource(client, ownerId, old);
+        throw stateConflict('sourced memory requires source-backed correction');
+      }
+      if (old.revision !== input.expectedRevision) throw stateConflict('memory revision changed');
+      return reviseMemory(client, ownerId, memoryId, old.revision + 1, manualRevision(input));
+    });
+  }
+  async function reviseMemory(
+    client: PoolClient,
+    ownerId: string,
+    memoryId: string,
+    revision: number,
+    input: MemoryRevisionInput,
+  ): Promise<MemoryRecord> {
+    await insertMemoryRevision(client, ownerId, memoryId, revision, input);
+    await client.query(
+      'UPDATE r3_memories SET current_revision=$3, updated_at=now() WHERE owner_id=$1 AND id=$2',
+      [ownerId, memoryId, revision],
+    );
+    return record((await load(client, ownerId, memoryId, 'stored'))!);
   }
   async function stopRecall(
     ownerId: string,
@@ -473,6 +563,7 @@ export function createMemoryService({
       withTransaction(pool, (client) => rememberInTransaction(client, ownerId, input)),
     rememberCompact: (ownerId: string, input: CompactInput) =>
       withTransaction(pool, (client) => rememberCompactInTransaction(client, ownerId, input)),
+    createManual,
     rememberInTransaction,
     rememberCompactInTransaction,
     list,
@@ -481,6 +572,7 @@ export function createMemoryService({
     rebuildIndex,
     get,
     correct,
+    correctManual,
     stopRecall,
   };
 }

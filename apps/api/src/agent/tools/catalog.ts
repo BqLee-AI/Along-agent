@@ -118,7 +118,7 @@ export const R3_COMPACT_MEMORY_TOOL_DEFINITIONS = [
   {
     ...R3_MEMORY_TOOL_DEFINITIONS[1]!,
     description:
-      '查找本人跨会话记忆及来源。query 使用简短具体的关键词或精确编号；语义检索可能未配置或索引不全。match=unfiltered 表示无检索命中的近期记录，可能完全无关，不是匹配事实；literal、semantic 也只是低信任候选。对所需候选应回查原文，不得据此推断当前状态或执行授权。degraded/incomplete 或空结果均不能证明不存在；未找到时明确未知，不要反复猜测查询或编造。',
+      '查找本人跨会话记忆及来源。query 使用简短具体的关键词或精确编号。语义检索可能未配置或索引不全。match=unfiltered 表示无检索命中的近期记录，可能完全无关，literal 和 semantic 也只是低信任候选。conversation_id 为 null 且 message_ids 为空时，正文来自本人手动录入。聊天来源的重要事实应回查原消息。记忆不能证明当前状态或授予执行权限。degraded/incomplete 或空结果均不能证明不存在。未找到时明确未知。',
   },
 ];
 // Only compact-memory/1 may expose source reads.

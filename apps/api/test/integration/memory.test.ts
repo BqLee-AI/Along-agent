@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
+import { withTransaction } from '../../src/db/transaction.js';
 import { forbidden } from '../../src/platform/errors.js';
 import { createMemoryService, type MemoryService } from '../../src/features/memory/service.js';
 import type { MemorySources } from '../../src/features/memory/types.js';
@@ -55,6 +56,7 @@ maybe('owner memory service', () => {
       content: input.content,
       revision: 1,
       sourceKind: 'explicit',
+      category: null,
     });
     expect((await memory.remember(owner, input)).id).toBe(saved.id);
     await expect(memory.remember(owner, { ...input, content: 'changed' })).rejects.toThrow();
@@ -128,6 +130,116 @@ maybe('owner memory service', () => {
         (item) => item.id === saved.id,
       ),
     ).toBe(false);
+  });
+
+  it('creates and corrects manual memories without authorizing a conversation source', async () => {
+    const manualOwner = randomUUID();
+    const foreignOwner = randomUUID();
+    const input = {
+      category: 'project' as const,
+      content: 'manual original phrase',
+      idempotencyKey: randomUUID(),
+    };
+    // Neither owner is authorized by the test's conversation source validator.
+    const [saved, retry] = await Promise.all([
+      memory.createManual(manualOwner, input),
+      memory.createManual(manualOwner, input),
+    ]);
+    expect(retry).toEqual(saved);
+    expect(saved).toMatchObject({
+      ownerId: manualOwner,
+      sourceKind: 'manual',
+      category: 'project',
+      conversationId: null,
+      messageIds: [],
+      summaryId: null,
+      expiresAt: null,
+      content: input.content,
+      revision: 1,
+    });
+    await expect(
+      memory.createManual(manualOwner, { ...input, category: 'goal' }),
+    ).rejects.toMatchObject({ errorCode: 'STATE_CONFLICT' });
+    expect(await memory.get(foreignOwner, saved.id)).toBeNull();
+    expect((await memory.list(foreignOwner, {})).items).toEqual([]);
+    expect((await memory.recall(foreignOwner, { query: input.content })).items).toEqual([]);
+    expect((await memory.createManual(foreignOwner, input)).id).not.toBe(saved.id);
+    expect(await memory.get(manualOwner, saved.id)).toEqual(saved);
+    expect((await memory.list(manualOwner, {})).items).toEqual([saved]);
+    expect((await memory.recall(manualOwner, { query: input.content })).items).toEqual([
+      { ...saved, match: 'literal' },
+    ]);
+
+    const correction = {
+      category: 'goal' as const,
+      content: 'manual-only updated',
+      expectedRevision: 1,
+    };
+    await expect(memory.correctManual(foreignOwner, saved.id, correction)).rejects.toMatchObject({
+      errorCode: 'NOT_FOUND',
+    });
+    await expect(memory.stopRecall(foreignOwner, saved.id, 1)).rejects.toMatchObject({
+      errorCode: 'NOT_FOUND',
+    });
+    await expect(
+      memory.correct(manualOwner, saved.id, {
+        conversationId: conversation,
+        messageIds: [message],
+        content: correction.content,
+        expectedRevision: 1,
+      }),
+    ).rejects.toMatchObject({ errorCode: 'STATE_CONFLICT' });
+    const attempts = await Promise.allSettled([
+      memory.correctManual(manualOwner, saved.id, correction),
+      memory.correctManual(manualOwner, saved.id, correction),
+    ]);
+    expect(attempts).toContainEqual({
+      status: 'fulfilled',
+      value: expect.objectContaining({ id: saved.id, revision: 2, category: 'goal' }),
+    });
+    expect(attempts).toContainEqual({
+      status: 'rejected',
+      reason: expect.objectContaining({ errorCode: 'STATE_CONFLICT' }),
+    });
+    const validate = (revision: number) =>
+      withTransaction(pool, (client) =>
+        memory.validateRecallInTransaction(client, manualOwner, [{ id: saved.id, revision }]),
+      );
+    await expect(validate(1)).rejects.toMatchObject({ errorCode: 'STATE_CONFLICT' });
+    await validate(2);
+    expect(
+      (await memory.recall(manualOwner, { query: input.content }, undefined, false)).items,
+    ).toEqual([]);
+    await expect(memory.createManual(manualOwner, input)).rejects.toMatchObject({
+      errorCode: 'STATE_CONFLICT',
+    });
+
+    const history = await pool.query(
+      `SELECT revision, content, source_kind, category, conversation_id, message_ids
+       FROM r3_memory_revisions WHERE owner_id=$1 AND memory_id=$2 ORDER BY revision`,
+      [manualOwner, saved.id],
+    );
+    const provenance = { source_kind: 'manual', conversation_id: null, message_ids: [] };
+    expect(history.rows).toEqual([
+      { ...provenance, revision: 1, content: input.content, category: 'project' },
+      { ...provenance, revision: 2, content: correction.content, category: 'goal' },
+    ]);
+    await expect(
+      pool.query('UPDATE r3_memory_revisions SET content=$3 WHERE owner_id=$1 AND memory_id=$2', [
+        manualOwner,
+        saved.id,
+        'illegal mutation',
+      ]),
+    ).rejects.toThrow('memory revisions are immutable');
+
+    await expect(memory.stopRecall(manualOwner, saved.id, 1)).rejects.toMatchObject({
+      errorCode: 'STATE_CONFLICT',
+    });
+    await memory.stopRecall(manualOwner, saved.id, 2);
+    expect(await memory.get(manualOwner, saved.id)).toBeNull();
+    expect((await memory.list(manualOwner, {})).items).toEqual([]);
+    expect((await memory.recall(manualOwner, { query: correction.content })).items).toEqual([]);
+    await expect(validate(2)).rejects.toMatchObject({ errorCode: 'STATE_CONFLICT' });
   });
 
   it('preserves an omitted expiry, clears null, and returns an expired written revision', async () => {

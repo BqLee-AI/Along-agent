@@ -315,7 +315,12 @@ extend Harness {
                         keys(item, ["memory_id", "content", "conversation_id", "message_ids", "created_at", "updated_at"])
                     }
                     uuid(field(item, "memory_id")); nonempty(field(item, "content"), 12000)
-                    uuid(field(item, "conversation_id")); boundedRefsCheck(field(item, "message_ids"), 1, 128)
+                    let conversation = field(item, "conversation_id")
+                    if (isNull(conversation)) {
+                        require(field(item, "message_ids").asArray().size() == 0)
+                    } else {
+                        uuid(conversation); boundedRefsCheck(field(item, "message_ids"), 1, 128)
+                    }
                     nonempty(field(item, "created_at"), 64); nonempty(field(item, "updated_at"), 64)
                 }
             }

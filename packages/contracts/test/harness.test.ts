@@ -417,6 +417,21 @@ describe('literal memory harness contract', () => {
   };
   const tool = { name: 'recall_memories', description: 'recall', parameters: {}, risk: 'low' };
 
+  it('accepts a manual memory without a conversation and rejects mixed provenance', () => {
+    const manual = { ...item, conversation_id: null, message_ids: [] };
+    expect(HarnessToolPayloadSchema.safeParse({ ...payload, items: [manual] }).success).toBe(true);
+    expect(
+      HarnessToolPayloadSchema.safeParse({
+        ...payload,
+        items: [{ ...manual, message_ids: [messageId] }],
+      }).success,
+    ).toBe(false);
+    expect(
+      HarnessToolPayloadSchema.safeParse({ ...payload, items: [{ ...item, message_ids: [] }] })
+        .success,
+    ).toBe(false);
+  });
+
   it('accepts v7 memory results and rejects them on v6', () => {
     expect(HarnessToolPayloadSchema.safeParse(payload).success).toBe(true);
     expect(

@@ -71,7 +71,7 @@ export async function readMemorySourceForRecall(
     accepted.result.items.map((item) => item.memory_id),
   );
   const item = accepted.result.items.find((candidate) => candidate.memory_id === input.memory_id);
-  if (!item || !item.message_ids.includes(input.message_id))
+  if (!item || item.conversation_id === null || !item.message_ids.includes(input.message_id))
     throw forbidden('memory source unavailable');
   const source = await readMemorySource(client, {
     ownerId: ctx.ownerId,

@@ -1130,8 +1130,16 @@ test('v8 passes bounded recalled source observations to the model as untrusted d
   );
   const models = requests.filter((r) => r.type === 'model');
   expect(models).toHaveLength(2);
-  expect(JSON.stringify(models[0].messages)).toContain('unverified derived candidates');
-  expect(JSON.stringify(models[1].messages)).toContain('A😀');
+  const source = models[1].messages.find((message) => message.role === 'tool');
+  expect(source).toMatchObject({
+    tool_call_id: 'source-call',
+    content: expect.stringContaining('A😀'),
+  });
+  expect(
+    models[1].messages.some(
+      (message) => message.role === 'system' && message.content.includes('A😀'),
+    ),
+  ).toBe(false);
 }, 30000);
 
 for (const protocol of ['harness/v7', 'harness/v8'] as const) {

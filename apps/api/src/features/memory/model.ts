@@ -1,4 +1,16 @@
 import { z } from 'zod';
+
+const manualFields = {
+  category: z.enum(['project', 'preference', 'goal']),
+  content: z.string().min(1).max(12000),
+};
+export const ManualCreateSchema = z
+  .object({ ...manualFields, idempotencyKey: z.string().min(1).max(200) })
+  .strict();
+export const ManualCorrectionSchema = z
+  .object({ ...manualFields, expectedRevision: z.number().int().positive().safe() })
+  .strict();
+
 export const CorrectionSchema = z
   .object({
     content: z.string().min(1).max(12000),
@@ -14,10 +26,11 @@ export const StopSchema = z
 export const MemorySchema = z.object({
   id: z.string(),
   ownerId: z.string(),
-  conversationId: z.string(),
+  conversationId: z.string().nullable(),
   messageIds: z.array(z.string()),
   content: z.string(),
-  sourceKind: z.enum(['explicit', 'compact']),
+  sourceKind: z.enum(['explicit', 'compact', 'manual']),
+  category: manualFields.category.nullable(),
   summaryId: z.string().nullable(),
   revision: z.number(),
   status: z.enum(['active', 'stopped']),
