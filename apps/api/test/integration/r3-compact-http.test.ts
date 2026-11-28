@@ -89,6 +89,7 @@ suite('native server-owned compact over HTTP', () => {
       compactReady = false;
     let modelError: unknown;
     const requests: unknown[] = [];
+    const measuredPrompts: string[] = [];
     const modelServer = createServer((req, res) => {
       void (async () => {
         const body = (await jsonBody(req)) as {
@@ -257,6 +258,7 @@ suite('native server-owned compact over HTTP', () => {
             }),
         model,
         measure: async (...args: Parameters<typeof measureSdkContext>) => {
+          if (mode === 'active') measuredPrompts.push(JSON.stringify(args[0].messages));
           if (mode === 'active' && ++measureCalls === 1) {
             measureEntered.resolve();
             await releaseMeasure.promise;
@@ -290,9 +292,9 @@ suite('native server-owned compact over HTTP', () => {
       cookie: `better-auth.session_token=${foreign.token}`,
       'x-csrf-token': foreign.csrfToken,
     };
-    const post = (path: string, body: unknown, key: string, auth = headers) =>
+    const post = (path: string, body: unknown, key: string, auth = headers, method = 'POST') =>
       fetch(`${base}${path}`, {
-        method: 'POST',
+        method,
         headers: { ...auth, 'content-type': 'application/json', 'idempotency-key': key },
         body: JSON.stringify(body),
       });
@@ -376,6 +378,7 @@ suite('native server-owned compact over HTTP', () => {
       continuationEntered,
       releaseContinuation,
       requests,
+      measuredPrompts,
       counts: () => ({ compact: compactCalls, task: taskCalls }),
     };
   }
@@ -517,6 +520,21 @@ suite('native server-owned compact over HTTP', () => {
   it('continues the same active Run once, retaining sources and reporting candidate failure', async () => {
     const f = await fixture('active');
     try {
+      const skillInput = {
+        name: 'compact-format',
+        description: 'Format a resumed response',
+        body: 'compact-original-format-marker',
+      };
+      const skillResponse = await f.post('/api/v1/skills', skillInput, randomUUID());
+      expect(skillResponse.status).toBe(200);
+      const { data: skill } = z
+        .object({ data: z.object({ id: z.string(), revision: z.number() }) })
+        .parse(await skillResponse.json());
+      await db.pool.query(
+        `UPDATE personal_bots SET config = jsonb_set(config, '{skill_ids}', jsonb_build_array($2::text))
+         WHERE id = (SELECT bot_id FROM conversations WHERE id = $1)`,
+        [f.conversationId, skill.id],
+      );
       const started = await f.post(
         '/api/v1/conversations/messages',
         {
@@ -524,6 +542,7 @@ suite('native server-owned compact over HTTP', () => {
           execution: 'harness',
           authorization_revision: 'delegation/1',
           raw_text: 'Please read my preferences and answer.',
+          skill,
         },
         randomUUID(),
       );
@@ -531,6 +550,16 @@ suite('native server-owned compact over HTTP', () => {
       const runId = started.headers.get('x-run-id')!;
       expect(runId).toMatch(/^[0-9a-f-]{36}$/i);
       await f.measureEntered.promise;
+      const updatedBody = 'compact-updated-format-marker';
+      const updated = await f.post(
+        `/api/v1/skills/${skill.id}`,
+        { ...skillInput, body: updatedBody, expected_revision: skill.revision },
+        randomUUID(),
+        undefined,
+        'PATCH',
+      );
+      expect(updated.status).toBe(200);
+      const measuredBeforeCompact = f.measuredPrompts.length;
       const path = `/api/v1/conversations/${f.conversationId}/runs/${runId}`;
       const key = randomUUID();
       expect((await f.post(`${path}/actions/compact`, {}, key, f.foreignHeaders)).status).toBe(404);
@@ -577,6 +606,16 @@ suite('native server-owned compact over HTTP', () => {
       expect(events.at(-1)?.type).toBe('thread.completed');
       expect(await f.receipt(await f.post(`${path}/actions/compact`, {}, key))).toEqual(final);
       expect(f.counts()).toEqual({ compact: 1, task: 2 });
+      const [summaryRequest, ...continuedRequests] = f.requests;
+      expect(JSON.stringify(summaryRequest)).not.toContain(skillInput.body);
+      expect(continuedRequests).toHaveLength(2);
+      for (const request of continuedRequests) {
+        expect(JSON.stringify(request)).toContain(skillInput.body);
+        expect(JSON.stringify(request)).not.toContain(updatedBody);
+      }
+      const continuedMeasurements = f.measuredPrompts.slice(measuredBeforeCompact);
+      expect(continuedMeasurements.some((prompt) => prompt.includes(skillInput.body))).toBe(true);
+      expect(continuedMeasurements.some((prompt) => prompt.includes(updatedBody))).toBe(false);
       const attempts = await db.pool.query('SELECT id FROM run_attempts WHERE run_id=$1', [runId]);
       expect(attempts.rowCount).toBe(2);
       const tools = await db.pool.query(
