@@ -177,6 +177,7 @@ export async function getConversationMessages(
     content: row.content,
     created_at: row.created_at,
     ...(row.source_run_id ? { source_run_id: row.source_run_id } : {}),
+    ...(row.skill ? { skill: row.skill } : {}),
   }));
   const last = items.at(-1);
   return {

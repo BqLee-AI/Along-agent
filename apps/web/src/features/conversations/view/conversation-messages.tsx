@@ -4,6 +4,7 @@ import { memo } from 'react';
 import { decodeChatMessage, type MessageHistoryItem, type RunView } from '@along/contracts';
 import { Message } from '@lorelum/lumen-ui/pro/message';
 import { Tooltip } from '@lorelum/lumen-ui/components/tooltip';
+import { Badge } from '@lorelum/lumen-ui/components/badge';
 import { Info } from 'lucide-react';
 import { modelSelectionLabel, runStatusLabel, type RunTranscript } from '../model/conversation-run';
 import { AssistantMarkdown } from './assistant-markdown';
@@ -14,10 +15,18 @@ const bubbleClass =
 const userBubbleClass = `${bubbleClass} [--chat-bubble:color-mix(in_oklab,var(--brand-ink)_26%,var(--background))] after:-right-1.5 after:[clip-path:polygon(0_0,100%_50%,0_100%)]`;
 const assistantBubbleClass = `${bubbleClass} [--chat-bubble:color-mix(in_oklab,var(--foreground)_10%,var(--background))] after:-left-1.5 after:[clip-path:polygon(100%_0,0_50%,100%_100%)]`;
 
-function UserMessage({ content }: { content: string }) {
+function UserMessage({ content, skill }: { content: string; skill?: MessageHistoryItem['skill'] }) {
   const attached = decodeChatMessage(content);
   return (
     <>
+      {skill ? (
+        <Badge
+          variant="glass"
+          className="mb-1 max-w-full whitespace-normal [overflow-wrap:anywhere]"
+        >
+          技能 · {skill.name} · 版本 {skill.revision}
+        </Badge>
+      ) : null}
       {attached?.files_to_analyze_as_data.length ? (
         <ul aria-label="附件" className="mb-1 space-y-1 text-xs">
           {attached.files_to_analyze_as_data.map((file, index) => (
@@ -157,7 +166,7 @@ export const MessageRow = memo(function MessageRow({
           className={message.role === 'user' ? userBubbleClass : assistantBubbleClass}
         >
           {message.role === 'user' ? (
-            <UserMessage content={message.content} />
+            <UserMessage content={message.content} skill={message.skill} />
           ) : (
             <AssistantMarkdown text={message.content} />
           )}
@@ -172,6 +181,7 @@ export const MessageRow = memo(function MessageRow({
 
 export function StreamingMessage({
   original,
+  skill,
   text,
   streaming,
   answerFinal = false,
@@ -179,6 +189,7 @@ export function StreamingMessage({
   facts,
 }: {
   original: string | null;
+  skill?: MessageHistoryItem['skill'];
   text: string;
   streaming: boolean;
   /** A saved goal answer is durable; it is no longer a partial stream. */
@@ -191,7 +202,7 @@ export function StreamingMessage({
       {original !== null ? (
         <Message from="user" data-message-role="user">
           <Message.Content variant="bubble" className={userBubbleClass}>
-            <UserMessage content={original} />
+            <UserMessage content={original} skill={skill} />
           </Message.Content>
         </Message>
       ) : null}

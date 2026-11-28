@@ -5,6 +5,7 @@ import {
   chatMessageLimit,
   encodeChatMessage,
   ModelSelectionSchema,
+  SkillSelectionSchema,
   workspaceSummarySchema,
 } from '@along/contracts';
 
@@ -23,6 +24,10 @@ export const SendMessageBodySchema = z
     raw_text: z.string().min(1).max(chatMessageLimit),
     files: ChatFilesSchema.optional(),
     news_edition_id: z.string().uuid().optional(),
+    skill: SkillSelectionSchema.transform(({ id, revision }) => ({
+      id: id.toLowerCase(),
+      revision,
+    })).optional(),
     card_ref: z.string().min(1).max(200).optional(),
     confirmed_timezone_id: z.string().min(1).max(100).nullable().optional(),
     confirmed_timezone: z.string().min(1).max(100).nullable().optional(),
@@ -32,6 +37,10 @@ export const SendMessageBodySchema = z
     client_sent_at: z.string().max(100).optional(),
   })
   .strict()
+  .refine((input) => !input.skill || input.execution === 'harness', {
+    message: 'skill requires harness execution',
+    path: ['skill'],
+  })
   .refine(
     (input) =>
       !input.files ||

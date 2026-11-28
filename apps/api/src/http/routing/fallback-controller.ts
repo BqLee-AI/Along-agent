@@ -54,7 +54,7 @@ export async function unmatchedError(
       if (error instanceof ApplicationError) return error;
       return new ApplicationError(500, 'INTERNAL_ERROR', 'internal error');
     }
-  } else if (inScope('/api/v1/tasks') || inScope('/api/v1/bots')) {
+  } else if (inScope('/api/v1/tasks') || inScope('/api/v1/bots') || inScope('/api/v1/skills')) {
     if (readOrWrite && !(await access.actor(request))) return unauthorized();
   }
   return notFound();

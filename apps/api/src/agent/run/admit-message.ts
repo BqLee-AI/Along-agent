@@ -10,6 +10,7 @@ import {
   encodeChatMessage,
   TrustedExecutionContextSchema,
   type ExecutionKind,
+  type SkillSelection,
 } from '@along/contracts';
 import type { ConversationDeps, RunContext, StartResult } from '../execution/contracts.js';
 import { AGENT_REVISION, buildHarnessStart } from '../execution/attempt/context.js';
@@ -83,6 +84,7 @@ import {
 } from '../../features/office-connectors/public.js';
 import { lockPersonalBot } from '../../features/bots/public.js';
 import { readEdition } from '../../features/news-briefings/public.js';
+import { lockAdmittedSkill } from '../../features/skills/public.js';
 
 const BUSINESS_MAX_ITERATIONS = 10;
 const BUSINESS_MAX_TOKENS = 8000;
@@ -110,6 +112,7 @@ function requestHashOf(input: {
   authorizationRevision?: 'delegation/1';
   modelSelection?: { provider_id: string; model_id: string };
   newsEditionId?: string;
+  skill?: SkillSelection;
 }): string {
   const material: unknown[] = [
     input.conversationId ?? null,
@@ -122,6 +125,7 @@ function requestHashOf(input: {
   if (input.workspaceIds !== undefined) material.push([...input.workspaceIds].sort());
   if (input.clarificationOfRunId !== undefined) material.push(input.clarificationOfRunId);
   if (input.newsEditionId) material.push({ news_edition_id: input.newsEditionId });
+  if (input.skill) material.push({ skill: [input.skill.id, input.skill.revision] });
   if (input.authorizationRevision) material.push(input.authorizationRevision);
   if (input.modelSelection !== undefined)
     material.push({
@@ -179,6 +183,7 @@ export async function startConversationRun(
     ...(input.workspace_id !== undefined ? { workspaceId: input.workspace_id } : {}),
     ...(input.workspace_ids !== undefined ? { workspaceIds: input.workspace_ids } : {}),
     ...(input.news_edition_id ? { newsEditionId: input.news_edition_id } : {}),
+    ...(input.skill ? { skill: input.skill } : {}),
     ...(input.clarification_of_run_id
       ? { clarificationOfRunId: input.clarification_of_run_id }
       : {}),
@@ -227,6 +232,9 @@ export async function startConversationRun(
       if (conversation.owner_id !== ownerId) throw forbidden('conversation not found');
       const bot = await lockPersonalBot(client, ownerId, conversation.bot_id);
       if (!bot) throw notFound('Bot not found');
+      if (input.skill && !bot.config.skill_ids?.includes(input.skill.id))
+        throw stateConflict('所选技能已取消分配，请重新选择。', { reason: 'SKILL_NOT_ASSIGNED' });
+      const skill = input.skill ? await lockAdmittedSkill(client, ownerId, input.skill) : undefined;
       const allowedWorkspaces = new Set(bot.config.workspace_ids);
       const allowedTools = new Set(bot.config.tool_ids);
       const requestedWorkspaces = input.workspace_ids ?? [];
@@ -327,6 +335,7 @@ export async function startConversationRun(
         role: 'user',
         content,
         requestId,
+        ...(skill ? { skill: { id: skill.id, revision: skill.revision, name: skill.name } } : {}),
       });
       let targetContinuation =
         delegation &&
@@ -589,6 +598,7 @@ export async function startConversationRun(
           revision: bot.revision,
           role: bot.config.role,
           instructions: bot.config.instructions,
+          ...(skill ? { skill } : {}),
         },
         ...(execution === 'harness'
           ? {
@@ -676,7 +686,7 @@ export async function startConversationRun(
         ...(ownership ? { leaseToken: ownership.token } : {}),
       });
       const routingPolicy =
-        execution === 'harness' && !feishuDocx ? routingRuntimeOf(deps).policy() : null;
+        execution === 'harness' && !feishuDocx && !skill ? routingRuntimeOf(deps).policy() : null;
       if (routingPolicy)
         await insertRoutingPolicy(
           client,

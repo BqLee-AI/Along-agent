@@ -7,6 +7,7 @@ export class ApiReadError extends Error {
     readonly code: string | null,
     readonly requestId: string | null,
     message: string,
+    readonly details?: unknown,
   ) {
     super(
       `HTTP ${status}${code ? ` · ${code}` : ''}: ${message}${requestId ? `（request_id: ${requestId}）` : ''}`,
@@ -45,6 +46,7 @@ export async function readEnvelope<T>(result: JsonResult<T> | Response): Promise
       detail?.code ?? null,
       payload.request_id,
       detail?.message ?? `请求失败（${response.status}）`,
+      detail?.details,
     );
   }
   if (result instanceof Response) return payload.data;

@@ -44,6 +44,7 @@ export default function ConversationPane({
     newsEditionId,
     toolIds: bot.config.tool_ids,
     workspaceIds: bot.config.workspace_ids,
+    skillIds: bot.config.skill_ids,
   });
   const { entries, blockedRuns, needsAction, showReminderResult } =
     useConversationPresentation(task);
@@ -187,6 +188,7 @@ export default function ConversationPane({
                   run={currentRun ?? (selected ? runsById.get(selected.runId) : undefined)}
                   facts={transcript ?? undefined}
                   original={task.liveOriginal}
+                  skill={task.liveSkill ?? undefined}
                   text={replyText ?? ''}
                   streaming={task.streaming}
                   answerFinal={Boolean(goalResult)}

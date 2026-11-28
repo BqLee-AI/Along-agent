@@ -9,6 +9,7 @@ import {
   ConversationRunPageSchema,
   DocumentApprovalDetailSchema,
   RunViewSchema,
+  SkillSelectionSchema,
 } from '@along/contracts';
 import type {
   ApprovalDetail,
@@ -17,6 +18,7 @@ import type {
   ConversationRunHistoryItem,
   MessageHistoryItem,
   RunView,
+  SkillMetadata,
   WorkspaceSummary,
 } from '@along/contracts';
 import { AmbiguousTimeDetailsSchema } from '@along/stream-protocol';
@@ -27,6 +29,12 @@ import type { Me } from '@/shared/session/identity';
 import { ApiReadError, readEnvelope } from '@/shared/http/client';
 import { api, writeOptions } from '@/shared/http/eden';
 import { readHistoryCollectionPage } from '@/shared/http/page';
+import { useHistoryPage } from '@/shared/http/use-page';
+import {
+  readBotSkills,
+  skillAdmissionConflict,
+  skillCatalogChanged,
+} from '@/features/skills/model/skill';
 import {
   collectRunTranscripts,
   consumeThreadStream,
@@ -79,7 +87,14 @@ type AmbiguousProposal = z.infer<typeof AmbiguousTimeDetailsSchema> & {
   source_run_id: string;
 };
 type Identity = { conversationId: string; runId: string };
-const PendingSendSchema = z.object({ text: z.string(), body: z.record(z.unknown()) }).strict();
+const PendingSendSchema = z
+  .object({ text: z.string(), body: z.record(z.unknown()), skillName: z.string().optional() })
+  .strict();
+type ChosenSkill = NonNullable<MessageHistoryItem['skill']>;
+
+async function readAvailableSkills(botId: string, signal: AbortSignal) {
+  return { items: botId ? await readBotSkills(botId, signal) : [], nextCursor: null };
+}
 
 export interface ConversationTask {
   input: string;
@@ -95,6 +110,13 @@ export interface ConversationTask {
   workspaces: WorkspaceSummary[];
   workspaceId: string;
   setWorkspaceId: (value: string) => void;
+  skill: ChosenSkill | null;
+  setSkill: (value: ChosenSkill | null) => void;
+  availableSkills: SkillMetadata[];
+  readingSkills: boolean;
+  skillReadError: string | null;
+  refreshSkills: () => Promise<void>;
+  hasAssignedSkills: boolean;
   workspaceState: 'loading' | 'ready' | 'error';
   workspaceError: string | null;
   readWorkspaces: () => Promise<void>;
@@ -105,6 +127,7 @@ export interface ConversationTask {
   runs: ConversationRunHistoryItem[];
   liveReply: boolean;
   liveOriginal: string | null;
+  liveSkill: ChosenSkill | null;
   run: RunView | null;
   selected: Identity | null;
   error: string | null;
@@ -163,6 +186,7 @@ export function useConversationTask({
   newsEditionId,
   toolIds,
   workspaceIds,
+  skillIds,
 }: {
   botId: string;
   conversationId: string;
@@ -171,9 +195,28 @@ export function useConversationTask({
   newsEditionId?: string;
   toolIds: readonly string[];
   workspaceIds: readonly string[];
+  skillIds?: readonly string[];
 }): ConversationTask {
   const { input, setInput, intent, setIntent, workspaceId, setWorkspaceId } =
     useConversationComposer(initialIntent);
+  const [skill, setSkill] = useState<ChosenSkill | null>(null);
+  const availableSkillTarget = skillIds?.length ? JSON.stringify([botId, ...skillIds]) : '';
+  const skillChoices = useCallback(
+    (_cursor: string | null, signal: AbortSignal) =>
+      readAvailableSkills(availableSkillTarget ? botId : '', signal),
+    [availableSkillTarget, botId],
+  );
+  const skillPage = useHistoryPage(availableSkillTarget, skillChoices);
+  const currentSkillPage = skillPage.state.target === availableSkillTarget ? skillPage.state : null;
+  const readSkillChoices = skillPage.read;
+  useEffect(() => {
+    if (!availableSkillTarget) return;
+    const refresh = () => {
+      void readSkillChoices(true);
+    };
+    window.addEventListener(skillCatalogChanged, refresh);
+    return () => window.removeEventListener(skillCatalogChanged, refresh);
+  }, [availableSkillTarget, readSkillChoices]);
   const reminderAllowed = toolIds.includes('propose_task');
   const documentAllowed =
     workspaceIds.length > 0 && toolIds.some((tool) => tool.startsWith('workspace_'));
@@ -243,6 +286,7 @@ export function useConversationTask({
   const [newsAdmitted, setNewsAdmitted] = useState(false);
   const [liveReply, setLiveReply] = useState(false);
   const [liveOriginal, setLiveOriginal] = useState<string | null>(null);
+  const [liveSkill, setLiveSkill] = useState<ChosenSkill | null>(null);
   const [run, setRun] = useState<RunView | null>(null);
   const [selected, setSelected] = useState<Identity | null>(
     runId ? { conversationId, runId } : null,
@@ -538,6 +582,7 @@ export function useConversationTask({
           ),
         );
         setLiveOriginal(null);
+        setLiveSkill(null);
       }
       setRuns(history);
       setHistoryReady(true);
@@ -565,6 +610,7 @@ export function useConversationTask({
     setStreaming(true);
     setLiveReply(true);
     setLiveOriginal(text ?? null);
+    setLiveSkill(null);
     let expectedEof = false;
     leaveAllowed.current = false;
     try {
@@ -626,10 +672,12 @@ export function useConversationTask({
       }
     } catch (failure) {
       if (mounted.current && !request.signal.aborted && version === selectionVersion.current) {
+        const skillConflict = text !== undefined && skillAdmissionConflict(failure);
         const rejected =
-          failure instanceof ApiReadError && [400, 401, 403, 404, 422].includes(failure.status);
+          skillConflict ||
+          (failure instanceof ApiReadError && [400, 401, 403, 404, 422].includes(failure.status));
         setError(
-          `${failure instanceof Error ? failure.message : '连接中断。'}${rejected ? ' 原请求未被接受；请核对输入、权限或资源后明确提交。' : ' 请读取原运行事实；连接中断不等于完成或取消。'}`,
+          `${failure instanceof Error ? failure.message : '连接中断。'}${skillConflict ? ' 原请求未被接受；请刷新技能、改选版本，或选择不使用技能后再发送。' : rejected ? ' 原请求未被接受；请核对输入、权限或资源后明确提交。' : ' 请读取原运行事实；连接中断不等于完成或取消。'}`,
         );
         if (text !== undefined && !selectedRef.current) {
           setSendUncertain(!rejected);
@@ -688,6 +736,7 @@ export function useConversationTask({
   const blockedBeforeAdmission =
     fileBlockedReason ??
     scopeBlockedReason ??
+    (skill && intent === 'reminder' ? '请先移除技能，或切换到普通对话。' : null) ??
     (pendingNewsEditionId && (intent !== 'chat' || files.length)
       ? '附上新闻简报的首条消息需要使用普通对话，且不能添加本地文件。'
       : null);
@@ -842,9 +891,11 @@ export function useConversationTask({
         const text = proposal?.raw_text ?? input;
         pending = {
           text,
+          ...(skill ? { skillName: skill.name } : {}),
           body: {
             raw_text: text,
             ...(files.length ? { files } : {}),
+            ...(skill ? { skill: { id: skill.id, revision: skill.revision } } : {}),
             conversation_id: cid,
             ...(pendingNewsEditionId ? { news_edition_id: pendingNewsEditionId } : {}),
             confirmed_timezone:
@@ -881,6 +932,8 @@ export function useConversationTask({
       const submittedFiles = ChatFilesSchema.safeParse(pending.body.files);
       const sentFiles = submittedFiles.success ? submittedFiles.data : [];
       const submittedMessage = encodeChatMessage(submittedText, sentFiles);
+      const submittedSkill = SkillSelectionSchema.safeParse(pending.body.skill).data;
+      const submittedSkillName = pending.skillName;
       const sameDraft =
         input === submittedText &&
         files.length === sentFiles.length &&
@@ -895,6 +948,14 @@ export function useConversationTask({
         undefined,
         () => {
           if (submittedNews) setNewsAdmitted(true);
+          if (submittedSkill && submittedSkillName) {
+            setLiveSkill({ ...submittedSkill, name: submittedSkillName });
+            setSkill((current) =>
+              current?.id === submittedSkill.id && current.revision === submittedSkill.revision
+                ? null
+                : current,
+            );
+          }
           if (sameDraft) {
             setInput('');
             clearFiles();
@@ -1289,6 +1350,9 @@ export function useConversationTask({
       setInput(pending.text);
       const restoredFiles = ChatFilesSchema.safeParse(pending.body.files);
       if (restoredFiles.success) setFiles(restoredFiles.data);
+      const restoredSkill = SkillSelectionSchema.safeParse(pending.body.skill).data;
+      if (restoredSkill && pending.skillName)
+        setSkill({ ...restoredSkill, name: pending.skillName });
     } catch (failure) {
       setError(
         `原发送结果未知，不能创建另一条消息。${failure instanceof Error ? failure.message : '原请求记录无法读取。'}`,
@@ -1346,6 +1410,7 @@ export function useConversationTask({
     setRuns([]);
     setRun(null);
     setInput('');
+    setSkill(null);
     clearFiles();
     setIntent(initialIntent ?? 'chat');
     setHistoryReady(false);
@@ -1358,6 +1423,7 @@ export function useConversationTask({
     setStopping(false);
     setLiveReply(false);
     setLiveOriginal(null);
+    setLiveSkill(null);
     setError(null);
     setReadError(null);
     setRetryResume(null);
@@ -1596,6 +1662,16 @@ export function useConversationTask({
       setAmbiguousProposal(null);
       setFoldChoice('');
     },
+    skill,
+    setSkill: (value) => {
+      if (busyRef.current || sendUncertain) return;
+      setSkill(value);
+    },
+    availableSkills: currentSkillPage?.items ?? [],
+    readingSkills: Boolean(availableSkillTarget && (!currentSkillPage || currentSkillPage.reading)),
+    skillReadError: currentSkillPage?.error ?? null,
+    refreshSkills: () => readSkillChoices(true),
+    hasAssignedSkills: Boolean(availableSkillTarget),
     workspaces,
     workspaceId,
     setWorkspaceId,
@@ -1609,6 +1685,7 @@ export function useConversationTask({
     runs,
     liveReply,
     liveOriginal,
+    liveSkill,
     run,
     selected,
     error,

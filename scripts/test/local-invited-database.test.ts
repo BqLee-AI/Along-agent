@@ -288,7 +288,7 @@ databaseTests('invited account schema explicit local upgrade against isolated PG
         await client.query('DROP EVENT TRIGGER identity_upgrade_failure');
       });
       await deployment(url, async (database) => {
-        expect((await database.upgrade()).version).toBe('0044');
+        expect((await database.upgrade()).version).toBe('0045');
       });
     });
   }, 30000);

@@ -2,7 +2,7 @@
 
 import { useRef } from 'react';
 import Link from '@/shell/view/workspace-link';
-import { ArrowUp, Bell, Files, MessageSquare, Plus, Square, X } from 'lucide-react';
+import { ArrowUp, Bell, Files, MessageSquare, Plus, RefreshCw, Square, X } from 'lucide-react';
 import type { GoalResult } from '@along/contracts';
 import { Dropdown } from '@lorelum/lumen-ui/components/dropdown';
 import { Button } from '@lorelum/lumen-ui/components/button';
@@ -487,6 +487,11 @@ export function TaskComposer({ task, botName }: { task: ConversationTask; botNam
   const textarea = useComposerDisplay(task.input);
   const composing = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const skillValue = task.skill ? `${task.skill.id}:${task.skill.revision}` : '';
+  const selectableSkills = task.readingSkills || task.skillReadError ? [] : task.availableSkills;
+  const showPreviousSkill =
+    skillValue !== '' &&
+    !selectableSkills.some(({ id, revision }) => `${id}:${revision}` === skillValue);
   const reduceMotion = useReducedMotion();
   const command = compactCommand(task.input);
   const allowed = command
@@ -659,6 +664,76 @@ export function TaskComposer({ task, botName }: { task: ConversationTask; botNam
           </ul>
         ) : null}
         <div className="max-h-[32dvh] min-h-0 space-y-3 overflow-y-auto overscroll-contain">
+          {task.hasAssignedSkills || task.skill ? (
+            <div className="space-y-1 px-1 pb-1">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <Label htmlFor="task-skill" className="shrink-0 text-sm">
+                  本条消息的技能
+                </Label>
+                <select
+                  id="task-skill"
+                  className="min-h-8 min-w-0 max-w-full rounded-control border border-separator bg-background px-2 text-sm focus-visible:outline-2 focus-visible:outline-ring max-lg:min-h-11"
+                  value={skillValue}
+                  disabled={task.busy || task.sendUncertain}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
+                    if (!value) {
+                      task.setSkill(null);
+                    } else {
+                      const item = selectableSkills.find(
+                        ({ id, revision }) => `${id}:${revision}` === value,
+                      );
+                      if (item) {
+                        task.setSkill({ id: item.id, revision: item.revision, name: item.name });
+                      }
+                    }
+                  }}
+                >
+                  <option value="">不使用技能</option>
+                  {showPreviousSkill && task.skill ? (
+                    <option value={skillValue} disabled>
+                      {task.skill.name} · 版本 {task.skill.revision}（待重新选择）
+                    </option>
+                  ) : null}
+                  {selectableSkills.map((item) => (
+                    <option
+                      key={item.id}
+                      value={`${item.id}:${item.revision}`}
+                      title={item.description}
+                    >
+                      {item.name} · 版本 {item.revision}
+                      {selectableSkills.some(
+                        (other) => other.id !== item.id && other.name === item.name,
+                      )
+                        ? ` · ${item.description} (${item.id.slice(0, 8)})`
+                        : ''}
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  type="button"
+                  variant="glass"
+                  color="default"
+                  size="icon"
+                  title="刷新可用技能"
+                  aria-label="刷新可用技能"
+                  disabled={task.readingSkills}
+                  onClick={() => void task.refreshSkills()}
+                >
+                  <RefreshCw className="size-4" aria-hidden="true" />
+                </Button>
+              </div>
+              {task.readingSkills ? (
+                <p role="status" className="text-sm text-muted-foreground">
+                  正在读取可用技能…
+                </p>
+              ) : task.skillReadError ? (
+                <ErrorNotice message={task.skillReadError} />
+              ) : !task.availableSkills.length ? (
+                <p className="text-sm text-muted-foreground">此 Bot 当前没有可用技能。</p>
+              ) : null}
+            </div>
+          ) : null}
           {task.intent !== 'chat' ? (
             <div className="flex flex-wrap items-center gap-2">
               <span

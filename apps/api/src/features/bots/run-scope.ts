@@ -2,7 +2,7 @@ import type { PoolClient } from 'pg';
 import { forbidden } from '../../platform/errors.js';
 
 type Binding = { ownerId: string; conversationId: string; runId: string };
-export type BotScope = { tool_ids: string[]; workspace_ids: string[] };
+export type BotScope = { tool_ids: string[]; workspace_ids: string[]; skill_ids?: string[] };
 
 /** Keep the current range stable through the caller's local effect or disclosure decision. */
 export async function lockRunBotScope(

@@ -47,11 +47,12 @@ export async function insertMessage(
     content: string;
     requestId: string | null;
     sourceRunId?: string | null;
+    skill?: { id: string; revision: number; name: string };
   },
 ): Promise<string> {
   const { rows } = await client.query<{ id: string }>(
-    `INSERT INTO messages (id, owner_id, conversation_id, role, content, request_id, created_at, source_run_id)
-     VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, clock_timestamp(), $6) RETURNING id`,
+    `INSERT INTO messages (id, owner_id, conversation_id, role, content, request_id, created_at, source_run_id, skill)
+     VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, clock_timestamp(), $6, $7) RETURNING id`,
     [
       args.ownerId,
       args.conversationId,
@@ -59,6 +60,7 @@ export async function insertMessage(
       args.content,
       args.requestId,
       args.sourceRunId ?? null,
+      args.skill ?? null,
     ],
   );
   const id = rows[0]?.id;

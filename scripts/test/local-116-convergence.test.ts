@@ -197,8 +197,8 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
   it('initializes an empty database at the converged version', async () => {
     await isolated(async (url) => {
       await deployment(url, async (db) => {
-        expect((await db.initialize()).version).toBe('0044');
-        expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0044' });
+        expect((await db.initialize()).version).toBe('0045');
+        expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0045' });
       });
       await sql(url, async (client) => {
         expect(
@@ -232,6 +232,7 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
           '0042',
           '0043',
           '0044',
+          '0045',
         ]);
       });
     });
@@ -255,8 +256,8 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
         );
         await deployment(url, async (db) => {
           expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0028' });
-          expect((await db.upgrade()).version).toBe('0044');
-          expect((await db.initialize()).version).toBe('0044');
+          expect((await db.upgrade()).version).toBe('0045');
+          expect((await db.initialize()).version).toBe('0045');
         });
         await sql(url, async (client) => {
           await client.query(
@@ -319,8 +320,8 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
         });
         await deployment(url, async (db) => {
           expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0037' });
-          expect((await db.upgrade()).version).toBe('0044');
-          expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0044' });
+          expect((await db.upgrade()).version).toBe('0045');
+          expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0045' });
         });
         await sql(url, async (client) => {
           expect((await client.query('SELECT * FROM model_provider_defaults')).rows).toEqual(
@@ -437,8 +438,8 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
         });
         await deployment(url, async (db) => {
           expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0043' });
-          expect((await db.upgrade()).version).toBe('0044');
-          expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0044' });
+          expect((await db.upgrade()).version).toBe('0045');
+          expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0045' });
         });
         await sql(url, async (client) => {
           expect((await client.query(query, [owner, id])).rows).toEqual(before);
@@ -476,8 +477,85 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
     }
   }, 30000);
 
+  it('upgrades 0044 without rewriting Bot configs or backfilling skills on old messages', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'personal-skills-0044-'));
+    try {
+      await copyMigrationsThrough(directory, '0044');
+      await isolated(async (url) => {
+        await deployment(
+          url,
+          async (db) => expect((await db.initialize()).version).toBe('0044'),
+          directory,
+        );
+        const owner = randomUUID();
+        const bot = randomUUID();
+        const conversation = randomUUID();
+        const config = {
+          name: 'Existing Bot',
+          introduction: '',
+          role: '',
+          instructions: '',
+          model_selection: null,
+          tool_ids: [],
+          workspace_ids: [],
+        };
+        await sql(url, async (client) => {
+          await client.query(
+            "INSERT INTO users(id,auth_email,display_name,status) VALUES($1,$2,'owner','active')",
+            [owner, `${owner}@local.invalid`],
+          );
+          await client.query('INSERT INTO personal_bots(id,owner_id,config) VALUES($1,$2,$3)', [
+            bot,
+            owner,
+            config,
+          ]);
+          await client.query('INSERT INTO conversations(id,owner_id,bot_id) VALUES($1,$2,$3)', [
+            conversation,
+            owner,
+            bot,
+          ]);
+          await client.query(
+            "INSERT INTO messages(id,conversation_id,owner_id,role,content) VALUES(gen_random_uuid(),$1,$2,'user','old message')",
+            [conversation, owner],
+          );
+        });
+        await deployment(url, async (db) => {
+          expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0044' });
+          expect((await db.upgrade()).version).toBe('0045');
+          expect((await db.initialize()).version).toBe('0045');
+        });
+        await sql(url, async (client) => {
+          expect(
+            (await client.query('SELECT config FROM personal_bots WHERE id=$1', [bot])).rows,
+          ).toEqual([{ config }]);
+          expect((await client.query('SELECT content,skill FROM messages')).rows).toEqual([
+            { content: 'old message', skill: null },
+          ]);
+          expect(
+            (await client.query('SELECT count(*)::int AS count FROM personal_skills')).rows,
+          ).toEqual([{ count: 0 }]);
+          const update = 'UPDATE personal_bots SET config=$2 WHERE id=$1';
+          await client.query(update, [bot, { ...config, skill_ids: [randomUUID()] }]);
+          await expect(
+            client.query(update, [bot, { ...config, skill_ids: [42] }]),
+          ).rejects.toMatchObject({ code: '23514' });
+          await client.query('DROP TRIGGER personal_skill_state_guard ON personal_skills');
+        });
+        await deployment(url, async (db) => {
+          expect(await db.classify()).toMatchObject({
+            kind: 'unknown',
+            version: '0045',
+            reason: 'baseline_additional_triggers_mismatch',
+          });
+        });
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 30000);
+
   for (const history of ['main', 'legacy'] as const) {
-    const target = history === 'legacy' ? '0041' : '0044';
+    const target = history === 'legacy' ? '0041' : '0045';
     it(`upgrades the actual ${history} migration history without rewriting facts or granting ordinary accounts admission`, async () => {
       await isolated(async (url) => {
         const ids = await historical(url, history);
@@ -537,7 +615,7 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
             '0039',
             '0040',
             '0041',
-            ...(history === 'legacy' ? [] : ['0042', '0043', '0044']),
+            ...(history === 'legacy' ? [] : ['0042', '0043', '0044', '0045']),
           ]);
         });
         await deployment(

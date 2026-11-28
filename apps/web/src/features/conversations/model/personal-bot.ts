@@ -20,6 +20,7 @@ const BotConfigSchema = z
     model_selection: ModelSelectionSchema.nullable(),
     tool_ids: z.array(z.string()),
     workspace_ids: z.array(workspaceSummarySchema.shape.workspace_id),
+    skill_ids: z.array(id).optional(),
   })
   .strict();
 const BotSchema = z

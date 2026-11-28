@@ -16,6 +16,7 @@ import {
   type ConversationTask,
 } from '../src/features/conversations/viewmodel/use-conversation-task';
 import { createBrowserApi } from '../src/shared/http/eden';
+import { skillCatalogChanged } from '../src/features/skills/model/skill';
 
 const a = '11111111-1111-4111-8111-111111111111';
 const b = '22222222-2222-4222-8222-222222222222';
@@ -38,13 +39,13 @@ const base = 'http://bots.test';
 const signal = () => new AbortController().signal;
 const ok = (data: unknown) =>
   Response.json({ code: 0, data, msg: 'ok', error: null, request_id: 'web-bots' });
-const rejected = (status: number, code: string) =>
+const rejected = (status: number, code: string, details?: unknown) =>
   Response.json(
     {
       code: status,
       data: null,
       msg: 'failed',
-      error: { code, message: 'rejected', request_id: 'web-bots' },
+      error: { code, message: 'rejected', request_id: 'web-bots', details },
       request_id: 'web-bots',
     },
     { status },
@@ -165,6 +166,7 @@ describe('Bot navigation and settings over the Web proxy', () => {
       model_selection: { provider_id: b, model_id: 'chosen' },
       tool_ids: ['workspace_read'],
       workspace_ids: [key],
+      skill_ids: [secondCid],
     };
     await expect(saveBot(botA, config, signal(), client)).resolves.toEqual({
       id: a,
@@ -179,9 +181,13 @@ describe('Bot navigation and settings over the Web proxy', () => {
   });
 });
 
-it.each([undefined, secondCid])(
-  'loads an empty conversation and sends its first message only on explicit submit (edition %s)',
-  async (newsEditionId) => {
+it.each([
+  { newsEditionId: undefined, withSkill: false },
+  { newsEditionId: secondCid, withSkill: false },
+  { newsEditionId: undefined, withSkill: true },
+])(
+  'preserves explicit sends and checks skill admission (edition $newsEditionId, skill $withSkill)',
+  async ({ newsEditionId, withSkill }) => {
     const browser = new Window({ url: `${base}${botHref(a, cid)}` });
     const globals = {
       window: browser,
@@ -198,18 +204,71 @@ it.each([undefined, secondCid])(
       Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
     const oldFetch = globalThis.fetch;
     const submitted: Record<string, unknown>[] = [];
+    let available = {
+      id: key,
+      name: 'weekly-report',
+      description: 'Organize notes',
+      revision: 1,
+      disabled_at: null,
+    };
+    let archived: Record<string, unknown> | undefined;
     globalThis.fetch = (async (input, init) => {
       const url = new URL(String(input), base);
       if (init?.method === 'POST' && url.pathname === '/api/v1/conversations/messages') {
         submitted.push(JSON.parse(String(init.body)));
-        return rejected(403, 'FORBIDDEN');
+        if (!withSkill) return rejected(403, 'FORBIDDEN');
+        if (submitted.length === 1) {
+          available = { ...available, revision: 2 };
+          return rejected(409, 'STATE_CONFLICT', { reason: 'SKILL_REVISION_CHANGED' });
+        }
+        archived = {
+          message_id: b,
+          role: 'user',
+          content: '第一条消息',
+          created_at: '2026-11-26T12:00:00.000000Z',
+          skill: { id: key, name: available.name, revision: available.revision },
+        };
+        const sse = [
+          {
+            type: 'thread.started',
+            payload: {
+              stream_protocol_version: 'v1',
+              ruleset_id: 'rules-v1',
+              tzdb_version: '2026a',
+            },
+          },
+          { type: 'thread.completed', payload: { approval_id: null } },
+        ]
+          .map(
+            ({ type, payload }, index) =>
+              `data: ${JSON.stringify({
+                protocol_version: 'v1',
+                seq: index + 1,
+                type,
+                payload: { conversation_id: cid, run_id: secondCid, ...payload },
+                request_id: 'web-bots',
+              })}\n\n`,
+          )
+          .join('');
+        return new Response(sse, { headers: { 'content-type': 'text/event-stream' } });
       }
       if (url.pathname === '/api/v1/me') return ok(me);
-      if (
-        url.pathname === `/api/v1/conversations/${cid}/runs` ||
-        url.pathname === `/api/v1/conversations/${cid}/messages`
-      )
-        return ok(empty);
+      if (url.pathname === `/api/v1/bots/${a}/skills`) return ok({ items: [available] });
+      if (url.pathname === `/api/v1/conversations/${cid}/runs`) return ok(empty);
+      if (url.pathname === `/api/v1/conversations/${cid}/messages`)
+        return ok({ ...empty, items: archived ? [archived] : [] });
+      if (url.pathname === `/api/v1/conversations/${cid}/runs/${secondCid}`)
+        return ok({
+          run_id: secondCid,
+          conversation_id: cid,
+          execution: 'harness',
+          model_selection: { state: 'legacy_unavailable' },
+          status: 'done',
+          attempt_id: b,
+          attempt_no: 1,
+          waiting: null,
+          can_resume: false,
+        });
       throw new Error(`unexpected request: ${url}`);
     }) as typeof fetch;
     const root = createRoot(document.createElement('div'));
@@ -221,6 +280,7 @@ it.each([undefined, secondCid])(
         newsEditionId,
         workspaceIds: [],
         toolIds: [],
+        skillIds: withSkill ? [key] : [],
       });
       return null;
     }
@@ -234,6 +294,10 @@ it.each([undefined, secondCid])(
       expect(task.pendingNewsEditionId).toBe(newsEditionId ?? null);
       await act(async () => {
         task.setInput('第一条消息');
+        if (withSkill) {
+          const { id, name, revision } = task.availableSkills[0]!;
+          task.setSkill({ id, name, revision });
+        }
       });
       expect(submitted).toEqual([]);
       await act(async () => {
@@ -247,6 +311,30 @@ it.each([undefined, secondCid])(
       expect(task.messages).toEqual([]);
       expect(task.sendUncertain).toBe(false);
       expect(task.eligibility.allowed).toBe(true);
+      expect(task.input).toBe('第一条消息');
+      if (!withSkill) {
+        expect(submitted[0]).not.toHaveProperty('skill');
+        return;
+      }
+      expect(submitted[0]?.skill).toEqual({ id: key, revision: 1 });
+      expect(task.skill).toEqual({ id: key, name: 'weekly-report', revision: 1 });
+      expect(task.error).toContain('请刷新技能');
+      await act(async () => {
+        browser.dispatchEvent(new browser.Event(skillCatalogChanged));
+      });
+      expect(task.skill?.revision).toBe(1);
+      expect(task.availableSkills[0]?.revision).toBe(2);
+      await act(async () => {
+        const { id, name, revision } = task.availableSkills[0]!;
+        task.setSkill({ id, name, revision });
+      });
+      await act(async () => {
+        await task.send();
+      });
+      expect(submitted[1]?.skill).toEqual({ id: key, revision: 2 });
+      expect(task.input).toBe('');
+      expect(task.skill).toBeNull();
+      expect(task.messages[0]?.skill).toEqual({ id: key, name: 'weekly-report', revision: 2 });
     } finally {
       await act(async () => {
         root.unmount();

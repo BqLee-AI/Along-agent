@@ -151,7 +151,7 @@ databaseTests('direct reminder source schema admission against PG16', () => {
           await expect(database.initialize()).rejects.toMatchObject({
             code: 'explicit_upgrade_required',
           });
-          expect((await database.upgrade()).version).toBe('0044');
+          expect((await database.upgrade()).version).toBe('0045');
         });
         await sql(url, async (client) => {
           expect(
@@ -211,8 +211,8 @@ databaseTests('direct reminder source schema admission against PG16', () => {
           }
         });
         await deployment(url, async (database) => {
-          expect(await database.classify()).toMatchObject({ kind: 'supported', version: '0044' });
-          expect((await database.initialize()).version).toBe('0044');
+          expect(await database.classify()).toMatchObject({ kind: 'supported', version: '0045' });
+          expect((await database.initialize()).version).toBe('0045');
         });
       });
     } finally {
@@ -253,7 +253,7 @@ databaseTests('direct reminder source schema admission against PG16', () => {
             version: '0023',
             reason: 'explicit_upgrade_required',
           });
-          expect((await database.upgrade()).version).toBe('0044');
+          expect((await database.upgrade()).version).toBe('0045');
         });
         await sql(url, async (client) => {
           expect(
@@ -520,7 +520,7 @@ databaseTests('direct reminder source schema admission against PG16', () => {
   it('enforces source cardinality, real invocation references and uniqueness on inserts and source updates', async () => {
     await isolated(async (url) => {
       await deployment(url, async (database) => {
-        expect((await database.initialize()).version).toBe('0044');
+        expect((await database.initialize()).version).toBe('0045');
       });
       await sql(url, async (client) => {
         const ownerId = randomUUID();
@@ -683,7 +683,7 @@ databaseTests('direct reminder source schema admission against PG16', () => {
     async (_name, mutation) => {
       await isolated(async (url) => {
         await deployment(url, async (database) => {
-          expect((await database.initialize()).version).toBe('0044');
+          expect((await database.initialize()).version).toBe('0045');
         });
         const snapshot = `SELECT jsonb_build_object(
         'ledger',(SELECT jsonb_agg(to_jsonb(m) ORDER BY version) FROM schema_migrations m),
