@@ -5,6 +5,7 @@ import { Pencil, Plus, RefreshCw, X } from 'lucide-react';
 import type { MessageHistoryItem } from '@along/contracts';
 import { Button } from '@lorelum/lumen-ui/components/button';
 import Link from '@/shell/view/workspace-link';
+import { ApiReadError } from '@/shared/http/client';
 import { useHistoryPage } from '@/shared/http/use-page';
 import { ErrorNotice, PageHeading } from '@/shared/ui/page';
 import { ReadControls } from '@/shared/ui/read-controls';
@@ -493,9 +494,14 @@ export default function MemoriesScreen() {
       }
     } catch (failure) {
       if (!controller.signal.aborted) {
-        setError(
-          `${failure instanceof Error ? failure.message : '未能确认保存结果。'} 草稿已保留，可按原内容重试。`,
-        );
+        if (failure instanceof ApiReadError && failure.status === 409) {
+          setError('这次提交与已保存的记忆冲突。草稿已保留，请先核对记忆列表。');
+          void read(true);
+        } else {
+          setError(
+            `${failure instanceof Error ? failure.message : '未能确认保存结果。'} 草稿已保留，可按原内容重试。`,
+          );
+        }
       }
     } finally {
       request.current = null;
