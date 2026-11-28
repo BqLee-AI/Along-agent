@@ -6,7 +6,9 @@ import { literalUuidAt } from '../../http/request/path.js';
 import { notFound, notReady, validationError } from '../../platform/errors.js';
 import type { MemoryService } from './public.js';
 import * as model from './model.js';
-export const memoryWriteScopes = ['/api/v1/memories/'] as const;
+
+// Root write plus descendants, using the router's exact-or-slash scope matcher.
+export const memoryWriteScopes = ['/api/v1/memories'] as const;
 function validateMemoryPath({ path, params }: { path: string; params: { id: string } }) {
   params.id = literalUuidAt(path, 3, 'memory not found');
 }
@@ -49,6 +51,35 @@ export function createMemoryController(service: MemoryService | undefined, acces
         return okEnvelope(memory, requestId);
       },
       { response: responses(model.MemorySchema) },
+    )
+    .post(
+      '/api/v1/memories',
+      async ({ service, actor, body, requestId }) =>
+        okEnvelope(await service.createManual(actor.ownerId, body), requestId),
+      {
+        parse: access.parser({
+          ready: () => {
+            if (!service) throw notReady('memory unavailable');
+          },
+        }),
+        body: model.ManualCreateSchema,
+        response: responses(model.MemorySchema),
+      },
+    )
+    .post(
+      '/api/v1/memories/:id/actions/correct-manual',
+      async ({ service, actor, params, body, requestId }) =>
+        okEnvelope(await service.correctManual(actor.ownerId, params.id, body), requestId),
+      {
+        parse: access.parser({
+          ready: () => {
+            if (!service) throw notReady('memory unavailable');
+          },
+        }),
+        transform: validateMemoryPath,
+        body: model.ManualCorrectionSchema,
+        response: responses(model.MemorySchema),
+      },
     )
     .post(
       '/api/v1/memories/:id/actions/correct',

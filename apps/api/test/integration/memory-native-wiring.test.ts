@@ -158,4 +158,50 @@ maybe('cross-session memory through native harness', () => {
     );
     expect(rows.rows[0].count).toBe(1);
   }, 30000);
+
+  it('recalls a manually saved memory in a new native conversation', async () => {
+    const owner = await seedAdmittedSession(database.pool);
+    await configureTestModel(database.pool, owner.userId, 'fixture-transport-only');
+    const headers = {
+      'content-type': 'application/json',
+      cookie: `better-auth.session_token=${owner.token}`,
+      'x-csrf-token': owner.csrfToken,
+    };
+    const saved = await fetch(`${base}/api/v1/memories`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        category: 'project',
+        content: '手动记录的项目编号 XQ-4792',
+        idempotencyKey: randomUUID(),
+      }),
+    });
+    expect(saved.ok).toBe(true);
+    const before = seen.length;
+    const response = await fetch(`${base}/api/v1/conversations/messages`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        conversation_id: await createFixtureConversation(database.pool, owner.userId),
+        execution: 'harness',
+        authorization_revision: 'delegation/1',
+        raw_text: 'memory-case:recall 我的项目编号是什么？',
+        idempotency_key: randomUUID(),
+      }),
+    });
+    expect(response.status).toBe(200);
+    expect(
+      frames(await response.text()).find((event) => event.type === 'thread.failed'),
+    ).toBeUndefined();
+    expect(seen[before]).toMatchObject({
+      kind: 'memory_recall',
+      items: [
+        {
+          content: '手动记录的项目编号 XQ-4792',
+          conversation_id: null,
+          message_ids: [],
+        },
+      ],
+    });
+  }, 30000);
 });

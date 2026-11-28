@@ -31,6 +31,7 @@ maybe('memory semantic retrieval', () => {
   const conversation = randomUUID();
   const message = randomUUID();
   let vectorAvailable = false;
+  let unavailableText: string | undefined;
   beforeAll(async () => {
     database = await createIntegrationDatabase();
     const extension = await database.pool.query(
@@ -51,6 +52,7 @@ maybe('memory semantic retrieval', () => {
         deadlineMs: 1000,
         fetch: async (_url, init) => {
           const body = JSON.parse(String(init.body));
+          if (body.text === unavailableText) throw new Error('fixture encoder unavailable');
           const vector = Array.from({ length: 512 }, (_, i) =>
             i === (String(body.text).includes('alternate') ? 1 : 0) ? 1 : 0,
           );
@@ -95,6 +97,43 @@ maybe('memory semantic retrieval', () => {
     expect(next.items.some((item) => item.id === saved.id && item.revision === 1)).toBe(false);
     await service.stopRecall(isolatedOwner, saved.id, corrected.revision);
     expect((await service.recall(isolatedOwner, { query: '饮品偏好' })).items).toEqual([]);
+  });
+
+  it('indexes source-free manual revisions but never serves corrected or stopped vectors', async () => {
+    if (!vectorAvailable) return;
+    const manualOwner = randomUUID();
+    const saved = await service.createManual(manualOwner, {
+      content: '无糖茉莉花茶',
+      category: 'preference',
+      idempotencyKey: randomUUID(),
+    });
+    const query = { query: '饮品偏好' };
+    expect((await service.recall(manualOwner, query)).items).toEqual([
+      { ...saved, match: 'semantic' },
+    ]);
+    expect((await service.recall(other, query)).items).toEqual([]);
+    const updated = await service.correctManual(manualOwner, saved.id, {
+      expectedRevision: 1,
+      content: '无糖桂花茶',
+      category: 'preference',
+    });
+    unavailableText = updated.content;
+    try {
+      const duringFailure = await service.recall(manualOwner, query, undefined, false);
+      expect(duringFailure).toMatchObject({ completeness: 'degraded', items: [] });
+    } finally {
+      unavailableText = undefined;
+    }
+    expect((await service.recall(manualOwner, query)).items).toEqual([
+      { ...updated, match: 'semantic' },
+    ]);
+    await service.stopRecall(manualOwner, saved.id, 2);
+    const vectorRevisions = await database.pool.query(
+      'SELECT revision FROM r3_memory_vectors WHERE owner_id=$1 AND memory_id=$2 ORDER BY revision',
+      [manualOwner, saved.id],
+    );
+    expect(vectorRevisions.rows).toEqual([{ revision: 1 }, { revision: 2 }]);
+    expect((await service.recall(manualOwner, query)).items).toEqual([]);
   });
   it('bounds a stalled indexing attempt and still returns literal results as degraded', async () => {
     let calls = 0;

@@ -380,16 +380,16 @@ export const HarnessToolPayloadSchema = z.union([
               memory_id: uuid,
               content: z.string().min(1).max(12000),
               match: z.enum(['literal', 'semantic', 'unfiltered']).optional(),
-              conversation_id: uuid,
+              conversation_id: uuid.nullable(),
               message_ids: z
                 .array(uuid)
-                .min(1)
                 .max(128)
                 .refine((ids) => new Set(ids).size === ids.length),
               created_at: z.string().datetime({ offset: true }),
               updated_at: z.string().datetime({ offset: true }),
             })
-            .strict(),
+            .strict()
+            .refine((item) => (item.conversation_id === null) === (item.message_ids.length === 0)),
         )
         .max(50),
       completeness: z.enum(['degraded', 'incomplete']),

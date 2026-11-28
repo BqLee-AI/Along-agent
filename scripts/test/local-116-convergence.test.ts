@@ -197,8 +197,8 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
   it('initializes an empty database at the converged version', async () => {
     await isolated(async (url) => {
       await deployment(url, async (db) => {
-        expect((await db.initialize()).version).toBe('0043');
-        expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0043' });
+        expect((await db.initialize()).version).toBe('0044');
+        expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0044' });
       });
       await sql(url, async (client) => {
         expect(
@@ -231,6 +231,7 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
           '0041',
           '0042',
           '0043',
+          '0044',
         ]);
       });
     });
@@ -254,8 +255,8 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
         );
         await deployment(url, async (db) => {
           expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0028' });
-          expect((await db.upgrade()).version).toBe('0043');
-          expect((await db.initialize()).version).toBe('0043');
+          expect((await db.upgrade()).version).toBe('0044');
+          expect((await db.initialize()).version).toBe('0044');
         });
         await sql(url, async (client) => {
           await client.query(
@@ -318,8 +319,8 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
         });
         await deployment(url, async (db) => {
           expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0037' });
-          expect((await db.upgrade()).version).toBe('0043');
-          expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0043' });
+          expect((await db.upgrade()).version).toBe('0044');
+          expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0044' });
         });
         await sql(url, async (client) => {
           expect((await client.query('SELECT * FROM model_provider_defaults')).rows).toEqual(
@@ -395,8 +396,88 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
     }
   }, 30000);
 
+  it('upgrades 0043 memories without rewriting their sources and verifies manual provenance', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'manual-memory-0043-'));
+    try {
+      for (const name of (await readdir(migrations)).filter(
+        (name) => name.endsWith('.sql') && name.slice(0, 4) <= '0043',
+      )) {
+        await copyFile(new URL(name, migrations), join(directory, name));
+      }
+      await isolated(async (url) => {
+        await deployment(
+          url,
+          async (db) => {
+            expect((await db.initialize()).version).toBe('0043');
+          },
+          directory,
+        );
+        const owner = randomUUID();
+        const id = randomUUID();
+        const conversation = randomUUID();
+        const messages = [randomUUID()];
+        const summary = randomUUID();
+        const query = `SELECT conversation_id, message_ids, source_kind, summary_id, content, revision
+          FROM r3_memory_revisions WHERE owner_id=$1 AND memory_id=$2 ORDER BY revision`;
+        const before = await sql(url, async (client) => {
+          await client.query('BEGIN');
+          await client.query(
+            "INSERT INTO r3_memories (owner_id, id, current_revision, status) VALUES ($1, $2, 2, 'active')",
+            [owner, id],
+          );
+          await client.query(
+            `INSERT INTO r3_memory_revisions
+              (owner_id, memory_id, revision, conversation_id, message_ids, source_kind, summary_id, content)
+             VALUES ($1, $2, 1, $3, $4, 'explicit', NULL, 'explicit'),
+                    ($1, $2, 2, $3, $4, 'compact', $5, 'compact')`,
+            [owner, id, conversation, messages, summary],
+          );
+          await client.query('COMMIT');
+          return (await client.query(query, [owner, id])).rows;
+        });
+        await deployment(url, async (db) => {
+          expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0043' });
+          expect((await db.upgrade()).version).toBe('0044');
+          expect(await db.classify()).toMatchObject({ kind: 'supported', version: '0044' });
+        });
+        await sql(url, async (client) => {
+          expect((await client.query(query, [owner, id])).rows).toEqual(before);
+          expect(
+            (await client.query('SELECT DISTINCT category FROM r3_memory_revisions')).rows,
+          ).toEqual([{ category: null }]);
+          const insert = `INSERT INTO r3_memory_revisions
+            (owner_id, memory_id, revision, source_kind, category, conversation_id, message_ids, summary_id, expires_at, content)
+            VALUES ($1, $2, 3, $3, $4, $5, $6, $7, $8, 'invalid provenance')`;
+          for (const fields of [
+            ['manual', null, null, [], null, null],
+            ['manual', 'other', null, [], null, null],
+            ['manual', 'project', conversation, [], null, null],
+            ['manual', 'project', null, messages, null, null],
+            ['manual', 'project', null, [], summary, null],
+            ['manual', 'project', null, [], null, new Date()],
+            ['explicit', 'project', conversation, messages, null, null],
+            ['compact', null, null, messages, summary, null],
+            ['explicit', null, conversation, [], null, null],
+          ]) {
+            await expect(client.query(insert, [owner, id, ...fields])).rejects.toMatchObject({
+              code: '23514',
+            });
+          }
+          await client.query(
+            'ALTER TABLE r3_memory_revisions DROP CONSTRAINT r3_memory_revisions_provenance_check',
+          );
+        });
+        await deployment(url, async (db) => {
+          expect(await db.classify()).toMatchObject({ kind: 'unknown' });
+        });
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 30000);
+
   for (const history of ['main', 'legacy'] as const) {
-    const target = history === 'legacy' ? '0041' : '0043';
+    const target = history === 'legacy' ? '0041' : '0044';
     it(`upgrades the actual ${history} migration history without rewriting facts or granting ordinary accounts admission`, async () => {
       await isolated(async (url) => {
         const ids = await historical(url, history);
@@ -456,7 +537,7 @@ databaseTests('0024 history convergence against isolated PostgreSQL 16', () => {
             '0039',
             '0040',
             '0041',
-            ...(history === 'legacy' ? [] : ['0042', '0043']),
+            ...(history === 'legacy' ? [] : ['0042', '0043', '0044']),
           ]);
         });
         await deployment(

@@ -1,0 +1,54 @@
+{
+  "version": "0044",
+  "tables": [],
+  "columns": [
+    {
+      "table": "r3_memory_revisions",
+      "name": "category",
+      "type": "text",
+      "required": false,
+      "default": ""
+    }
+  ],
+  "constraints": [
+    {
+      "table": "r3_memory_revisions",
+      "name": "r3_memory_revisions_category_check",
+      "type": "c",
+      "columns": ["category"],
+      "expression": "(category = ANY (ARRAY['project'::text, 'preference'::text, 'goal'::text]))"
+    },
+    {
+      "table": "r3_memory_revisions",
+      "name": "r3_memory_revisions_provenance_check",
+      "type": "c",
+      "columns": ["source_kind", "conversation_id", "category", "expires_at"],
+      "expression": "(((source_kind = 'manual'::text) = (conversation_id IS NULL)) AND ((source_kind = 'manual'::text) = (category IS NOT NULL)) AND ((source_kind <> 'manual'::text) OR (expires_at IS NULL)))"
+    }
+  ],
+  "alter_columns": [
+    {
+      "table": "r3_memory_revisions",
+      "name": "conversation_id",
+      "type": "uuid",
+      "required": false,
+      "default": ""
+    }
+  ],
+  "alter_constraints": [
+    {
+      "table": "r3_memory_revisions",
+      "name": "r3_memory_revisions_message_ids_check",
+      "type": "c",
+      "columns": ["message_ids", "source_kind"],
+      "expression": "(((cardinality(message_ids) = 0) = (source_kind = 'manual'::text)) AND (array_position(message_ids, NULL::uuid) IS NULL))"
+    },
+    {
+      "table": "r3_memory_revisions",
+      "name": "r3_memory_revisions_source_kind_check",
+      "type": "c",
+      "columns": ["source_kind"],
+      "expression": "(source_kind = ANY (ARRAY['explicit'::text, 'compact'::text, 'manual'::text]))"
+    }
+  ]
+}

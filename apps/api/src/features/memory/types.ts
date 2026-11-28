@@ -15,13 +15,16 @@ export interface MemorySources {
   ): Promise<void>;
 }
 
+export type MemoryCategory = 'project' | 'preference' | 'goal';
+
 export interface MemoryRecord {
   id: string;
   ownerId: string;
-  conversationId: string;
+  conversationId: string | null;
   messageIds: string[];
   content: string;
-  sourceKind: 'explicit' | 'compact';
+  sourceKind: 'explicit' | 'compact' | 'manual';
+  category: MemoryCategory | null;
   summaryId: string | null;
   revision: number;
   status: 'active' | 'stopped';
