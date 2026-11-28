@@ -1,0 +1,215 @@
+{
+  "version": "0045",
+  "tables": ["personal_skills", "personal_skill_revisions", "personal_skill_requests"],
+  "columns": [
+    { "table": "personal_skills", "name": "id", "type": "uuid", "required": true, "default": "" },
+    {
+      "table": "personal_skills",
+      "name": "owner_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "personal_skills",
+      "name": "current_revision",
+      "type": "int4",
+      "required": true,
+      "default": "1"
+    },
+    {
+      "table": "personal_skills",
+      "name": "disabled_at",
+      "type": "timestamptz",
+      "required": false,
+      "default": ""
+    },
+    {
+      "table": "personal_skill_revisions",
+      "name": "skill_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "personal_skill_revisions",
+      "name": "revision",
+      "type": "int4",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "personal_skill_revisions",
+      "name": "name",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "personal_skill_revisions",
+      "name": "description",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "personal_skill_revisions",
+      "name": "body",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "personal_skill_requests",
+      "name": "owner_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "personal_skill_requests",
+      "name": "idempotency_key",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "personal_skill_requests",
+      "name": "request_hash",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "table": "personal_skill_requests",
+      "name": "skill_id",
+      "type": "uuid",
+      "required": true,
+      "default": ""
+    },
+    { "table": "messages", "name": "skill", "type": "jsonb", "required": false, "default": "" }
+  ],
+  "constraints": [
+    { "table": "personal_skills", "name": "personal_skills_pkey", "type": "p", "columns": ["id"] },
+    {
+      "table": "personal_skills",
+      "name": "personal_skills_owner_id_id_key",
+      "type": "u",
+      "columns": ["owner_id", "id"]
+    },
+    {
+      "table": "personal_skills",
+      "name": "personal_skills_current_revision_check",
+      "type": "c",
+      "columns": ["current_revision"],
+      "expression": "(current_revision > 0)"
+    },
+    {
+      "table": "personal_skills",
+      "name": "personal_skills_current_revision_fk",
+      "type": "f",
+      "columns": ["id", "current_revision"],
+      "target": "personal_skill_revisions",
+      "target_columns": ["skill_id", "revision"],
+      "delete_action": "a",
+      "deferred": true
+    },
+    {
+      "table": "personal_skill_revisions",
+      "name": "personal_skill_revisions_pkey",
+      "type": "p",
+      "columns": ["skill_id", "revision"]
+    },
+    {
+      "table": "personal_skill_revisions",
+      "name": "personal_skill_revisions_skill_id_fkey",
+      "type": "f",
+      "columns": ["skill_id"],
+      "target": "personal_skills",
+      "target_columns": ["id"],
+      "delete_action": "a"
+    },
+    {
+      "table": "personal_skill_revisions",
+      "name": "personal_skill_revisions_revision_check",
+      "type": "c",
+      "columns": ["revision"],
+      "expression": "(revision > 0)"
+    },
+    {
+      "table": "personal_skill_revisions",
+      "name": "personal_skill_revisions_body_check",
+      "type": "c",
+      "columns": ["body"],
+      "expression": "((octet_length(body) >= 1) AND (octet_length(body) <= 16384))"
+    },
+    {
+      "table": "personal_skill_requests",
+      "name": "personal_skill_requests_pkey",
+      "type": "p",
+      "columns": ["owner_id", "idempotency_key"]
+    },
+    {
+      "table": "personal_skill_requests",
+      "name": "personal_skill_requests_owner_id_skill_id_fkey",
+      "type": "f",
+      "columns": ["owner_id", "skill_id"],
+      "target": "personal_skills",
+      "target_columns": ["owner_id", "id"],
+      "delete_action": "a"
+    },
+    {
+      "table": "personal_skill_requests",
+      "name": "personal_skill_requests_idempotency_key_check",
+      "type": "c",
+      "columns": ["idempotency_key"],
+      "expression": "((length(idempotency_key) >= 1) AND (length(idempotency_key) <= 200))"
+    }
+  ],
+  "alter_constraints": [
+    {
+      "table": "personal_bots",
+      "name": "personal_bot_config_shape",
+      "type": "c",
+      "columns": ["config"],
+      "expression": "personal_bot_skill_config_valid(config)"
+    }
+  ],
+  "functions": [
+    {
+      "name": "personal_skill_revision_immutable",
+      "arguments": "",
+      "result": "trigger",
+      "volatility": "v",
+      "strict": false
+    },
+    {
+      "name": "personal_skill_guard_state",
+      "arguments": "",
+      "result": "trigger",
+      "volatility": "v",
+      "strict": false
+    },
+    {
+      "name": "personal_bot_skill_config_valid",
+      "arguments": "jsonb",
+      "result": "boolean",
+      "volatility": "i",
+      "strict": true
+    }
+  ],
+  "triggers": [
+    {
+      "table": "personal_skill_revisions",
+      "name": "personal_skill_revision_no_mutation",
+      "function": "personal_skill_revision_immutable",
+      "type": 27
+    },
+    {
+      "table": "personal_skills",
+      "name": "personal_skill_state_guard",
+      "function": "personal_skill_guard_state",
+      "type": 19
+    }
+  ]
+}

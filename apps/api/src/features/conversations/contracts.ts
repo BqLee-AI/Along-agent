@@ -43,7 +43,13 @@ export interface RunContext {
   userMessageId: string | null;
   compactControl?: true;
   allowlist: readonly string[];
-  personalBot?: { id: string; revision: number; role: string; instructions: string };
+  personalBot?: {
+    id: string;
+    revision: number;
+    role: string;
+    instructions: string;
+    skill?: { id: string; revision: number; name: string; body: string };
+  };
   autoCompactPolicy?: AutoCompactPolicy;
   workspaceGrant?: WorkspaceGrant | null;
   workspaceGrants?: WorkspaceGrant[];

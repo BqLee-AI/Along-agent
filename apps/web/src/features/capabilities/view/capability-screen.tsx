@@ -1,12 +1,4 @@
-import {
-  ArrowUpRight,
-  BookOpen,
-  Cable,
-  ListChecks,
-  Monitor,
-  Sparkles,
-  UserRound,
-} from 'lucide-react';
+import { ArrowUpRight, BookOpen, Cable, ListChecks, Monitor, UserRound } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import WorkspaceLink from '@/shell/view/workspace-link';
 import { PageHeading } from '@/shared/ui/page';
@@ -16,7 +8,6 @@ import type { Capability } from '../model/capabilities';
 const icons: Record<Capability, LucideIcon> = {
   journal: BookOpen,
   profile: UserRound,
-  skills: Sparkles,
   connectors: Cable,
   devices: Monitor,
   todos: ListChecks,

@@ -9,7 +9,7 @@ func isProductPath(path: String): Bool {
         case _ =>
             for (base in ["/api/v1/approvals", "/api/v1/document-approvals", "/api/v1/tasks",
                          "/api/v1/memories", "/api/v1/office/feishu/bot", "/api/v1/bots",
-                         "/api/v1/news", "/api/v1/channels/wechat"]) {
+                         "/api/v1/skills", "/api/v1/news", "/api/v1/channels/wechat"]) {
                 if (path == base || path.startsWith(base + "/")) { return true }
             }
             false

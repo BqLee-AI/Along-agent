@@ -4,6 +4,7 @@ apps/api/test/integration/harness-native.test.ts
 apps/api/test/integration/harness-stream-revocation.test.ts
 apps/api/test/integration/memory-native-wiring.test.ts
 apps/api/test/integration/pause-http.test.ts
+apps/api/test/integration/personal-skills-native-wiring.test.ts
 apps/api/test/integration/r3-compact-http.test.ts
 apps/api/test/integration/server-owned-driver-effect-race.test.ts
 apps/api/test/integration/server-owned-native.test.ts

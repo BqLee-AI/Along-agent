@@ -3,6 +3,7 @@ import { withClient, withTransaction } from '../../db/transaction.js';
 import { forbidden, notFound, stateConflict } from '../../platform/errors.js';
 import { isActiveOwner, lockViewerAccess, type Actor } from '../identity/public.js';
 import { lockOwner, resolveSelection } from '../model-providers/public.js';
+import { listAssignedSkills, validateAssignedSkills } from '../skills/public.js';
 import { getWorkspaceGrant, WorkspaceDeniedError } from '../workspaces/public.js';
 import type { PersonalBot, PersonalBotConfig } from './schemas.js';
 
@@ -48,6 +49,15 @@ export async function getPersonalBot(
   });
 }
 
+export async function getPersonalBotSkills(pool: Pool, ownerId: string, botId: string) {
+  return withTransaction(pool, async (client) => {
+    if (!(await isActiveOwner(client, ownerId))) throw forbidden('owner authorization revoked');
+    const bot = await lockPersonalBot(client, ownerId, botId);
+    if (!bot) throw notFound('Bot not found');
+    return listAssignedSkills(client, ownerId, bot.config.skill_ids ?? []);
+  });
+}
+
 export async function requirePersonalBot(
   db: Pick<PoolClient, 'query'>,
   ownerId: string,
@@ -79,6 +89,7 @@ export async function createPersonalBot(pool: Pool, actor: Actor, config: Person
     if (!(await lockViewerAccess(client, actor.ownerId, actor.sessionId)))
       throw forbidden('owner authorization revoked');
     await validateConfigGrants(client, actor.ownerId, config);
+    await validateAssignedSkills(client, actor.ownerId, config.skill_ids ?? []);
     const { rows } = await client.query<PersonalBot>(
       'INSERT INTO personal_bots (owner_id, config) VALUES ($1,$2) RETURNING id, revision, config',
       [actor.ownerId, config],
@@ -99,13 +110,19 @@ export async function updatePersonalBot(
       throw forbidden('owner authorization revoked');
     // Match message admission: identity, model owner, then Bot.
     await lockOwner(client, actor.ownerId);
-    const current = await client.query<{ revision: number }>(
-      'SELECT revision FROM personal_bots WHERE owner_id=$1 AND id=$2 FOR UPDATE',
+    const current = await client.query<Pick<PersonalBot, 'revision' | 'config'>>(
+      'SELECT revision, config FROM personal_bots WHERE owner_id=$1 AND id=$2 FOR UPDATE',
       [actor.ownerId, botId],
     );
     if (!current.rows[0]) throw notFound('Bot not found');
     if (current.rows[0].revision !== revision) throw stateConflict('Bot revision is stale');
     await validateConfigGrants(client, actor.ownerId, config);
+    await validateAssignedSkills(
+      client,
+      actor.ownerId,
+      config.skill_ids ?? [],
+      current.rows[0].config.skill_ids ?? [],
+    );
     const { rows } = await client.query<PersonalBot>(
       `UPDATE personal_bots SET revision=revision+1, config=$3 WHERE owner_id=$1 AND id=$2
        RETURNING id, revision, config`,

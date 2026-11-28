@@ -29,6 +29,13 @@ function composerTask(overrides: Partial<ConversationTask> = {}): ConversationTa
     workspaces: [],
     workspaceId: '',
     setWorkspaceId() {},
+    skill: null,
+    setSkill() {},
+    availableSkills: [],
+    readingSkills: false,
+    skillReadError: null,
+    async refreshSkills() {},
+    hasAssignedSkills: false,
     workspaceState: 'ready',
     workspaceError: null,
     async readWorkspaces() {},
@@ -39,6 +46,7 @@ function composerTask(overrides: Partial<ConversationTask> = {}): ConversationTa
     runs: [],
     liveReply: false,
     liveOriginal: null,
+    liveSkill: null,
     run: null,
     selected: null,
     error: null,
@@ -151,6 +159,41 @@ it('renders assistant Markdown in both streaming and saved messages', () => {
   for (const markup of [saved, streaming]) {
     expect(markup).toContain('<strong>An answer</strong>');
   }
+});
+
+it('uses the frozen skill in history and shows a previous choice separately from current options', () => {
+  const selected = {
+    id: '11111111-1111-4111-8111-111111111111',
+    name: 'weekly-report',
+    revision: 1,
+  };
+  const saved = renderToStaticMarkup(
+    createElement(MessageRow, {
+      message: {
+        message_id: 'original',
+        role: 'user',
+        content: 'source notes',
+        created_at: '2026-11-11T00:00:00.000000Z',
+        skill: selected,
+      },
+    }),
+  );
+  expect(saved).toContain('技能 · weekly-report · 版本 1');
+  const composer = renderToStaticMarkup(
+    createElement(TaskComposer, {
+      botName,
+      task: composerTask({
+        skill: selected,
+        hasAssignedSkills: true,
+        availableSkills: [
+          { ...selected, revision: 2, description: 'Organize source notes', disabled_at: null },
+        ],
+      }),
+    }),
+  );
+  expect(composer).toContain('不使用技能');
+  expect(composer).toContain('版本 1（待重新选择）');
+  expect(composer).toContain('版本 2');
 });
 
 it('associates a saved reply with its own run and leaves ambiguous legacy replies unlabelled', () => {

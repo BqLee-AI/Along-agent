@@ -42,7 +42,8 @@ class FiniteUpload <: InputStream {
 
 // The capability reads the upload only after the existing TS admission checks.
 func forwardUpload(incoming: HttpRequest, outgoing: HttpRequestBuilder): (?FiniteUpload, Bool) {
-    if (incoming.method != "POST" && incoming.method != "PUT") {
+    let skillPatch = incoming.method == "PATCH" && incoming.url.rawPath.startsWith("/api/v1/skills/")
+    if (incoming.method != "POST" && incoming.method != "PUT" && !skillPatch) {
         return (None, incoming.headers.getFirst("transfer-encoding") != None ||
             (incoming.headers.getFirst("content-length") ?? "0") != "0")
     }

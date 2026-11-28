@@ -11,12 +11,6 @@ export const capabilities = {
     boundary: '',
     related: [],
   },
-  skills: {
-    title: '技能',
-    description: '让 Along 学会做更多事，比如整理文件、查资料。',
-    boundary: '这个功能还在准备中，现在没有可以安装或开启的技能。',
-    related: [],
-  },
   connectors: {
     title: '连接应用',
     description: '把日历、邮箱等应用连给 Along，让它帮你处理。',

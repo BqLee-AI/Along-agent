@@ -1,4 +1,4 @@
-import { ConversationListPageSchema } from '@along/contracts';
+import { ConversationListPageSchema, SkillMetadataSchema } from '@along/contracts';
 import { Elysia } from 'elysia';
 import type { Pool } from 'pg';
 import { z } from 'zod';
@@ -15,6 +15,7 @@ import {
 import {
   createPersonalBot,
   getPersonalBot,
+  getPersonalBotSkills,
   listPersonalBots,
   updatePersonalBot,
 } from './public.js';
@@ -66,6 +67,15 @@ export function createBotController(pool: Pool | null, access: HttpAccess) {
         return okEnvelope(await getPersonalBot(db(), actor.ownerId, botId), requestId);
       },
       { response: responses(PersonalBotSchema) },
+    )
+    .get(
+      '/api/v1/bots/:botId/skills',
+      async ({ actor, path, requestId }) =>
+        okEnvelope(
+          { items: await getPersonalBotSkills(db(), actor.ownerId, botIdOf(path)) },
+          requestId,
+        ),
+      { response: responses(z.object({ items: z.array(SkillMetadataSchema) }).strict()) },
     )
     .post(
       '/api/v1/bots/:botId',

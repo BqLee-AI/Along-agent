@@ -242,7 +242,7 @@ databaseTests('trusted goal schema lifecycle admission against PG16', () => {
   it('requires true delegated terminal facts rather than SQL NULL from missing legacy or goal keys', async () => {
     await isolated(async (url) => {
       await deployment(url, async (database) => {
-        expect((await database.initialize()).version).toBe('0044');
+        expect((await database.initialize()).version).toBe('0045');
       });
       await sql(url, async (client) => {
         const ownerId = randomUUID();
@@ -404,7 +404,7 @@ databaseTests('trusted goal schema lifecycle admission against PG16', () => {
     async (_name, mutation) => {
       await isolated(async (url) => {
         await deployment(url, async (database) => {
-          expect((await database.initialize()).version).toBe('0044');
+          expect((await database.initialize()).version).toBe('0045');
         });
         await sql(url, async (client) => {
           await client.query(mutation);
@@ -453,7 +453,7 @@ databaseTests('trusted goal schema lifecycle admission against PG16', () => {
     async (_name, mutation) => {
       await isolated(async (url) => {
         await deployment(url, async (database) => {
-          expect((await database.initialize()).version).toBe('0044');
+          expect((await database.initialize()).version).toBe('0045');
         });
         let before: unknown;
         const snapshot = `SELECT jsonb_build_object(

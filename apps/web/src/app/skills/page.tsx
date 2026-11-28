@@ -1,4 +1,5 @@
-import { CapabilityScreen } from '@/features/capabilities/view/capability-screen';
+import SkillsScreen from '@/features/skills/view/skills-screen';
+
 export default function SkillsPage() {
-  return <CapabilityScreen capability="skills" />;
+  return <SkillsScreen />;
 }

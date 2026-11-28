@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ExecutionKindSchema, RunModelSelectionSchema, RunStatusSchema } from './harness.js';
+import { SkillMetadataSchema, SkillSelectionSchema } from './skills.js';
 
 // PostgreSQL timestamps are rendered in UTC at their stored microsecond
 // precision. Keep them as strings: Date would discard the keyset's last digits.
@@ -43,6 +44,7 @@ export const MessageHistoryItemSchema = z
     content: z.string(),
     created_at: utcMicrosecond,
     source_run_id: uuid.optional(),
+    skill: SkillSelectionSchema.extend({ name: SkillMetadataSchema.shape.name }).optional(),
   })
   .strict();
 const originalMessage = z

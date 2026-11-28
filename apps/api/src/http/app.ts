@@ -23,6 +23,11 @@ import { createNewsController } from '../features/news-briefings/controller.js';
 import { createWechatController } from '../features/news-briefings/wechat-controller.js';
 import { createFeishuController } from '../features/office-connectors/controller.js';
 import {
+  createSkillController,
+  isSkillPatch,
+  skillWriteScopes,
+} from '../features/skills/controller.js';
+import {
   createConversationController,
   conversationWriteScopes,
 } from '../features/conversations/controller.js';
@@ -48,6 +53,7 @@ export function createApp(deps: AppDeps) {
     ...memoryWriteScopes,
     ...conversationWriteScopes,
     ...botWriteScopes,
+    ...skillWriteScopes,
   ];
   return (
     new Elysia({ name: 'along-api', strictPath: true, normalize: false })
@@ -59,10 +65,12 @@ export function createApp(deps: AppDeps) {
         const newsWrite =
           (request.method === 'PUT' && pathname === '/api/v1/news/subscription') ||
           (request.method === 'DELETE' && pathname === '/api/v1/channels/wechat');
-        if (!newsWrite && request.method !== 'GET' && request.method !== 'POST')
+        const skillPatch = isSkillPatch(request.method, pathname);
+        if (!newsWrite && !skillPatch && request.method !== 'GET' && request.method !== 'POST')
           return unsupportedMethod(request, !!deps.pool, access);
         if (
           newsWrite ||
+          skillPatch ||
           (request.method === 'POST' &&
             (pathname === modelSelectionWritePath ||
               writeScopes.some((scope) =>
@@ -102,6 +110,7 @@ export function createApp(deps: AppDeps) {
       )
       .use(createApprovalController({ pool: deps.pool, timeContext }, access))
       .use(createBotController(deps.pool, access))
+      .use(createSkillController(deps.pool, access))
       .use(createTaskController({ pool: deps.pool }, access))
       .use(createMemoryController(deps.memoryService, access))
       .use(createFeishuController(deps.pool, access))

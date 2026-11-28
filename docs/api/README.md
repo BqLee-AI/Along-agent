@@ -227,3 +227,10 @@
 - `GET` 和 `PUT /news/subscription` 读取和更新主题、可选地区、启用状态及微信绑定。响应含账户时区。发送时刻由 [design/25 §3](../design/25-daily-news-briefing.md#3-订阅与每日触发) 统一定义。
 - `GET /news/editions` 按日期倒序列出本人已发布的简报。`GET /news/editions/{id}` 加载原期内容及来源链接，独立返回采集与投递状态。
 - 首次向空的 Agent 会话发送消息可携带 `news_edition_id`。服务端检查期次归属，再将摘要及原文链接作为引用数据保存。
+
+## 14. 本人技能
+
+- `GET /skills` 通过 `limit` 和 `cursor` 列出本人技能的当前版本。`GET /skills/{id}` 返回详情及正文。
+- `POST /skills/actions/preview-import` 接收 `text/markdown` 单文件并返回校验后的预览。`POST /skills` 使用 `Idempotency-Key` 创建技能，可提交 `{name, description, body}` 或单文件正文。
+- `PATCH /skills/{id}` 带 `expected_revision` 保存新内容版本。`POST /skills/{id}/actions/disable` 带同一版本字段停用技能，保留已经接纳的历史。
+- 个人 Bot 配置包含可选的 `skill_ids`，`GET /bots/{botId}/skills` 返回仍可用于该 Bot 的技能元数据。`POST /conversations/messages` 的可选 `skill: {id, revision}` 绑定到一次 Harness Run。消息历史用 `skill: {id, revision, name}` 展示该选择。

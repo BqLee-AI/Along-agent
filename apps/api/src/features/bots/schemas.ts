@@ -21,6 +21,15 @@ export const PersonalBotConfigSchema = z
     workspace_ids: z
       .array(workspaceSummarySchema.shape.workspace_id)
       .refine((ids) => new Set(ids).size === ids.length),
+    skill_ids: z
+      .array(
+        z
+          .string()
+          .uuid()
+          .transform((id) => id.toLowerCase()),
+      )
+      .refine((ids) => new Set(ids).size === ids.length)
+      .optional(),
   })
   .strict();
 export const UpdatePersonalBotSchema = PersonalBotConfigSchema.extend({ revision });

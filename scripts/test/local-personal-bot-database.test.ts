@@ -191,8 +191,8 @@ databaseTests('0042 personal Bot cutover against isolated PG16', () => {
       }
 
       await deployment(url, async (database) => {
-        expect((await database.upgrade()).version).toBe('0044');
-        expect((await database.initialize()).version).toBe('0044');
+        expect((await database.upgrade()).version).toBe('0045');
+        expect((await database.initialize()).version).toBe('0045');
       });
       const drift = new pg.Client({ connectionString: url });
       await drift.connect();

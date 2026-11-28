@@ -12,6 +12,11 @@ import { createModelProviderController } from '../features/model-providers/http/
 import { createNewsController } from '../features/news-briefings/controller.js';
 import { createWechatController } from '../features/news-briefings/wechat-controller.js';
 import { createFeishuController } from '../features/office-connectors/controller.js';
+import {
+  createSkillController,
+  isSkillPatch,
+  skillWriteScopes,
+} from '../features/skills/controller.js';
 import { createTaskController, taskWriteScopes } from '../features/tasks/controller.js';
 import { loadTimeContext } from '../features/time/public.js';
 import { createWorkspaceController } from '../features/workspaces/http/controller.js';
@@ -21,6 +26,7 @@ const productScopes = [
   '/api/v1/approvals',
   '/api/v1/document-approvals',
   '/api/v1/bots',
+  ...skillWriteScopes,
   '/api/v1/tasks',
   '/api/v1/memories',
   '/api/v1/office/feishu/bot',
@@ -34,6 +40,7 @@ const writeScopes = [
   ...taskWriteScopes,
   ...memoryWriteScopes,
   ...botWriteScopes,
+  ...skillWriteScopes,
 ];
 
 function withinScope(path: string, scope: string) {
@@ -54,12 +61,14 @@ export function createHostProductRoutes(deps: AppDeps) {
       const newsWrite =
         (request.method === 'PUT' && pathname === '/api/v1/news/subscription') ||
         (request.method === 'DELETE' && pathname === '/api/v1/channels/wechat');
-      if (!newsWrite && request.method !== 'GET' && request.method !== 'POST') {
+      const skillPatch = isSkillPatch(request.method, pathname);
+      if (!newsWrite && !skillPatch && request.method !== 'GET' && request.method !== 'POST') {
         const error = await unmatchedError(request, !!deps.pool, access);
         return jsonResponse(httpStatusForError(error.code), failEnvelope(error, id), id);
       }
       if (
         newsWrite ||
+        skillPatch ||
         (request.method === 'POST' &&
           (pathname === summaryPath || writeScopes.some((scope) => withinScope(pathname, scope))))
       )
@@ -68,6 +77,7 @@ export function createHostProductRoutes(deps: AppDeps) {
     .onError({ as: 'global' }, createErrorHandler(!!deps.pool, access))
     .use(createApprovalController({ pool: deps.pool, timeContext }, access))
     .use(createBotController(deps.pool, access))
+    .use(createSkillController(deps.pool, access))
     .use(
       createBriefController(
         { pool: deps.pool, tzdbVersion: deps.tzdbVersion, timeContext },

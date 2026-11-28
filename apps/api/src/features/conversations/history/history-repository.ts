@@ -29,8 +29,9 @@ export interface ConversationHistoryRow extends HistoryBoundary {
   title_content: string | null;
 }
 export interface MessageHistoryRow
-  extends Omit<MessageHistoryItem, 'source_run_id'>, HistoryBoundary {
+  extends Omit<MessageHistoryItem, 'source_run_id' | 'skill'>, HistoryBoundary {
   source_run_id: string | null;
+  skill: MessageHistoryItem['skill'] | null;
 }
 export interface RunHistoryRow
   extends Omit<ConversationRunHistoryItem, 'model_selection'>, HistoryBoundary {}
@@ -120,7 +121,7 @@ export async function listMessageHistory(
 ): Promise<MessageHistoryRow[]> {
   const result = await db.query<MessageHistoryRow>(
     `${pageSql('messages')}
-    SELECT p.id AS message_id,p.role,p.content,p.source_run_id,${utc('p.created_at')} AS created_at,${boundaryColumns}
+    SELECT p.id AS message_id,p.role,p.content,p.source_run_id,p.skill,${utc('p.created_at')} AS created_at,${boundaryColumns}
     FROM page p CROSS JOIN boundary b ORDER BY p.created_at ASC,p.id ASC`,
     values(args),
   );

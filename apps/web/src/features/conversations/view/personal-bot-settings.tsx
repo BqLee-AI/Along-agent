@@ -6,8 +6,10 @@ import { Button } from '@lorelum/lumen-ui/components/button';
 import { Dialog } from '@lorelum/lumen-ui/components/dialog';
 import { Input } from '@lorelum/lumen-ui/components/input';
 import { useModelCatalog } from '@/features/model-settings/viewmodel/model-catalog-context';
+import { readSkills } from '@/features/skills/model/skill';
 import { useHistoryPage } from '@/shared/http/use-page';
 import { ErrorNotice } from '@/shared/ui/page';
+import { ReadControls } from '@/shared/ui/read-controls';
 import {
   readSelectedBot,
   saveBot,
@@ -114,6 +116,7 @@ export function PersonalBotSettings({
   const request = useRef<AbortController | null>(null);
   const catalog = useModelCatalog();
   const workspaces = useHistoryPage('bot-workspace-choices', readWorkspaceChoices);
+  const skills = useHistoryPage('bot-skill-choices', readSkills);
   useEffect(() => () => request.current?.abort(), []);
   const refreshModels = catalog.refresh;
   useEffect(() => {
@@ -192,6 +195,11 @@ export function PersonalBotSettings({
     (id) => !workspaceOptions.some((item) => item.id === id),
   );
   const unknownTools = draft.tool_ids.filter((id) => !Object.hasOwn(tools, id));
+  const assignedSkills = draft.skill_ids ?? [];
+  const skillOptions = skills.state.items.filter(
+    (item) => !item.disabled_at || assignedSkills.includes(item.id),
+  );
+  const missingSkills = assignedSkills.filter((id) => !skillOptions.some((item) => item.id === id));
   return (
     <Dialog
       open
@@ -352,6 +360,38 @@ export function PersonalBotSettings({
               {workspaces.state.loaded && !workspaceOptions.length ? (
                 <p className="text-sm text-muted-foreground">账户目前没有可选的资料登记。</p>
               ) : null}
+            </details>
+            <details>
+              <summary className="min-h-11 cursor-pointer content-center font-medium">
+                技能{assignedSkills.length ? ` · ${assignedSkills.length} 项已分配` : ''}
+              </summary>
+              <p className="mb-4 text-sm text-muted-foreground">
+                分配后，可在对话中为单条消息选用。技能是文本指令，不授予工具或资料权限。
+              </p>
+              <ScopeChoices
+                title="分配给此 Bot 的技能"
+                options={[
+                  ...skillOptions.map((item) => ({
+                    id: item.id,
+                    label: `${item.name} · 版本 ${item.revision}${item.disabled_at ? '（已停用，可移除）' : ''} · ${item.description}`,
+                  })),
+                  ...missingSkills.map((id) => ({
+                    id,
+                    label: `已分配技能 ${id}（列表中未显示，可移除）`,
+                  })),
+                ]}
+                selected={assignedSkills}
+                onChange={(values) => setValue('skill_ids', values)}
+              />
+              {skills.state.loaded &&
+              !skills.state.nextCursor &&
+              !skillOptions.length &&
+              !missingSkills.length ? (
+                <p className="text-sm text-muted-foreground">
+                  还没有可分配的技能。请先在「设置 → 技能」创建。
+                </p>
+              ) : null}
+              <ReadControls state={skills.state} read={skills.read} label="技能" compact />
             </details>
           </fieldset>
           {error ? (
